@@ -69,7 +69,7 @@ class Moderation(commands.Cog, name="Moderation"):
     async def _get_settings(self, guild: discord.Guild):
         """Fetch channel_id and name template from DB (fallbacks included)."""
         channel_id = await self.bot.database.get_member_count_channel(guild.id)
-        # template could be None in DB; use default if so
+
         template = "Members: {count:,}"
         return channel_id, template
 
@@ -92,7 +92,7 @@ class Moderation(commands.Cog, name="Moderation"):
             return
         vc = guild.get_channel(channel_id)
         if not isinstance(vc, discord.VoiceChannel):
-            # maybe deleted or changed type
+
             vc = await self._ensure_channel(guild, template)
         new_name = template.format(count=guild.member_count)
         if vc.name != new_name:
@@ -174,11 +174,10 @@ class Moderation(commands.Cog, name="Moderation"):
         """Send a message via the bot to a member or text channel in the current server.
         NOTE: cannot contact users or channels outside the server, and cannot be run from DMs.
         """
-        # Ensure command executed in a guild (guild_only enforces this, kept as a safety net)
+
         if ctx.guild is None:
             return await ctx.reply("🚫 This command cannot be used in DMs.", mention_author=False)
 
-        # Disallow targeting users/channels outside of this guild
         if isinstance(target, discord.TextChannel):
             if target.guild != ctx.guild:
                 return await ctx.reply("🚫 You may only send messages to channels in this server.", mention_author=False)
@@ -190,8 +189,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
             return await ctx.reply(f"📢 Message successfully sent in {target.mention}.", mention_author=False)
 
-        # If it's a Member (preferred) ensure they're in the same guild
-        # If converter returned a User (not Member), reject to prevent cross-server DMs
         if isinstance(target, discord.Member):
             try:
                 await target.send(message)
@@ -200,7 +197,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
             return await ctx.reply(f"📩 Message successfully sent to {target.mention}.", mention_author=False)
 
-        # Fallback: reject any other user-like object (prevents contacting users outside guild)
         return await ctx.reply("🚫 You may only target members or channels within this server.", mention_author=False)
 
     @commands.command(name='mcc', description='Create a member count channel')
@@ -511,35 +507,30 @@ class Moderation(commands.Cog, name="Moderation"):
         """Clear all bot messages and any invocation of your bot's commands."""
         try:
             async with ctx.typing():
-                # 1. figure out your prefixes
-                prefix = await self.bot.database.get_prefix(ctx.guild.id)
-                prefixes = [prefix, ',']  # add more if you support more
 
-                # 2. gather every command name + alias
+                prefix = await self.bot.database.get_prefix(ctx.guild.id)
+                prefixes = [prefix, ',']  
+
                 triggers = []
                 for cmd in self.bot.commands:
                     triggers.append(cmd.name)
                     triggers.extend(cmd.aliases)
 
-                # 3. prepare full list of <prefix><trigger>
                 full_triggers = {f"{p}{t}" for p in prefixes for t in triggers}
 
-                # 4. scan recent history and pick messages to delete
                 to_delete = []
                 async for msg in ctx.channel.history(limit=500):
                     if msg.author.bot or any(msg.content.startswith(ft) for ft in full_triggers):
                         to_delete.append(msg)
 
-                # 5. bulk-delete in chunks of 100
                 for chunk in (to_delete[i:i+100] for i in range(0, len(to_delete), 100)):
                     await ctx.channel.delete_messages(chunk)
 
-                # finally, remove the invoking command
                 await ctx.message.delete()
         except discord.Forbidden:
             await ctx.send("I don't have permission to delete messages.", delete_after=5)
         except discord.HTTPException:
-            # maybe messages are too old or nothing to delete
+
             pass
         except discord.NotFound:
             pass
@@ -1122,7 +1113,7 @@ class Moderation(commands.Cog, name="Moderation"):
         reason: str = "No reason provided"
     ):
         """Times out a member with Discord's built-in timeout feature."""
-        # 1) Resolve member
+
         member = None
         if identifier.isdigit():
             member = ctx.guild.get_member(int(identifier)) or await self.bot.fetch_user(int(identifier))
@@ -1140,7 +1131,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.red()
             ))
 
-        # 2) Basic role/self checks
         if member.id == ctx.author.id:
             return await ctx.send(embed=discord.Embed(
                 description="🚫 You cannot timeout yourself.",
@@ -1162,7 +1152,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.red()
             ))
 
-        # 3) Parse the duration
         try:
             seconds = humanfriendly.parse_timespan(time)
         except humanfriendly.InvalidTimespan:
@@ -1187,12 +1176,10 @@ class Moderation(commands.Cog, name="Moderation"):
         duration = timedelta(seconds=seconds)
         timeout_until = discord.utils.utcnow() + duration
 
-        # 4) Format the duration human-readably
         formatted = humanfriendly.format_timespan(seconds)
 
-        # 5) Apply timeout & log
         try:
-            # record in DB
+
             await self.bot.database.count_punishment_usage(
                 moderator_id=ctx.author.id,
                 guild_id=ctx.guild.id,
@@ -1207,10 +1194,8 @@ class Moderation(commands.Cog, name="Moderation"):
                 duration=int(seconds)
             )
 
-            # timeout on Discord
             await member.edit(timed_out_until=timeout_until)
 
-            # confirmation embed
             embed = discord.Embed(
                 description=f"{member.mention} has been timed out for **{formatted}**.\n**Reason:** {reason}",
                 color=discord.Color.blurple()
@@ -1221,7 +1206,6 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.send(embed=embed)
 
-            # DM the user
             now = discord.utils.utcnow()
             timestamp = now.strftime("%Y/%m/%d %I:%M:%S %p")
             dm = discord.Embed(
@@ -1251,7 +1235,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(moderate_members=True)
     async def untimeout(self, ctx: commands.Context, identifier: str):
         """Untimeout a user"""
-        # 1) Resolve member
+
         member = None
         if identifier.isdigit():
             try:
@@ -1274,7 +1258,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.red(),
             ))
 
-        # 2) Check current timeout status
         now = discord.utils.utcnow()
         if not member.timed_out_until or member.timed_out_until <= now:
             return await ctx.send(embed=discord.Embed(
@@ -1282,7 +1265,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.red(),
             ))
 
-        # 3) Lift timeout
         try:
             await member.edit(timed_out_until=None)
             await ctx.send(embed=discord.Embed(
@@ -1290,7 +1272,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.blurple(),
             ))
 
-            # 4) DM the user with a humanfriendly-formatted timestamp
             lifted_at = discord.utils.utcnow()
             time_str = humanfriendly.format_date(lifted_at)
 
@@ -2342,7 +2323,7 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.send(embed=embed)
             return
-        
+
         duration_seconds: Optional[int] = None
         reason = "No reason provided"
         if args:
@@ -2607,7 +2588,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
-            
+
         except Exception as e:
             logger.exception("Failed to set nuke message")
             embed = discord.Embed(
@@ -2636,16 +2617,14 @@ class Moderation(commands.Cog, name="Moderation"):
             embed.set_author(name=ctx.author.name, icon_url=self.utils.get_avatar_url(ctx.author))
             auth_message = await ctx.reply(embed=embed)
 
-            # Define the actual nuke procedure here so the view can start/cancel it immediately
             async def _do_nuke(cancel_event: asyncio.Event):
                 try:
-                    # record cooldown
+
                     try:
                         await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 900)
                     except Exception:
                         logger.exception("Failed to set nuke cooldown")
 
-                    # perform the dramatic countdown in the channel, but abort if cancel_event is set
                     try:
                         countdown_message = await ctx.send("# 🔥 Nuke Incoming! 🔥")
                         await asyncio.sleep(1)
@@ -2667,7 +2646,7 @@ class Moderation(commands.Cog, name="Moderation"):
                         await countdown_message.edit(content="https://tenor.com/view/nuke-gif-8044239")
                         await asyncio.sleep(3)
                     except (discord.HTTPException, discord.Forbidden):
-                        # can't send messages but continue to attempt the channel replacement
+
                         pass
 
                     if cancel_event.is_set():
@@ -2677,17 +2656,16 @@ class Moderation(commands.Cog, name="Moderation"):
                     channel_name = channel.name
                     channel_position = channel.position
                     channel_category = channel.category
-                    # copy overwrites mapping
+
                     try:
                         channel_overwrites = channel.overwrites
                     except Exception:
-                        # fallback: build overwrites dict manually
+
                         try:
                             channel_overwrites = {o[0]: o[1] for o in getattr(channel, "overwrites", {}).items()}
                         except Exception:
                             channel_overwrites = None
 
-                    # check lockdown table and remove if necessary
                     try:
                         is_lockdown = await self.bot.database.is_lockdown_channel(ctx.guild.id, channel.id)
                         if is_lockdown:
@@ -2695,14 +2673,12 @@ class Moderation(commands.Cog, name="Moderation"):
                     except Exception:
                         is_lockdown = False
 
-                    # delete the channel
                     try:
                         await channel.delete()
                     except Exception as e:
                         logger.exception("Failed to delete channel during nuke")
                         return
 
-                    # recreate in same category (or at guild root if None)
                     try:
                         if channel_category:
                             new_channel = await channel_category.create_text_channel(
@@ -2710,7 +2686,7 @@ class Moderation(commands.Cog, name="Moderation"):
                                 overwrites=channel_overwrites
                             )
                         else:
-                            # create at guild level
+
                             new_channel = await ctx.guild.create_text_channel(
                                 name=channel_name,
                                 overwrites=channel_overwrites
@@ -2719,7 +2695,6 @@ class Moderation(commands.Cog, name="Moderation"):
                         logger.exception("Failed to create replacement channel")
                         return
 
-                    # re-add lockdown flag if needed
                     try:
                         if is_lockdown:
                             await self.bot.database.add_lockdown_channel(ctx.guild.id, new_channel.id)
@@ -2743,12 +2718,12 @@ class Moderation(commands.Cog, name="Moderation"):
             class NukeConfirmView(discord.ui.View):
                 def __init__(self, *, timeout=60):
                     super().__init__(timeout=timeout)
-                    self.result = None  # "confirm" | "cancel" | None
+                    self.result = None  
                     self._nuke_task: Optional[asyncio.Task] = None
                     self._cancel_event = asyncio.Event()
 
                 async def interaction_check(self, interaction: discord.Interaction) -> bool:
-                    # Only the command invoker may confirm/cancel
+
                     if interaction.user.id != ctx.author.id:
                         await interaction.response.send_message("Only the command invoker can use these buttons.", ephemeral=True)
                         return False
@@ -2756,7 +2731,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
                 @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
                 async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    # Disable buttons and acknowledge
+
                     for child in self.children:
                         child.disabled = True
                     self.result = "confirm"
@@ -2767,14 +2742,12 @@ class Moderation(commands.Cog, name="Moderation"):
                             color=discord.Color.red()
                         ), view=self)
                     except Exception:
-                        # If editing fails, at least respond
+
                         await interaction.response.send_message("Confirmed. Starting countdown...", ephemeral=True)
 
-                    # Start the nuke task immediately
                     if not self._nuke_task:
                         self._nuke_task = asyncio.create_task(_do_nuke(self._cancel_event))
 
-                    # stop the view.wait() as we've handled the action
                     self.stop()
 
                 @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
@@ -2782,14 +2755,13 @@ class Moderation(commands.Cog, name="Moderation"):
                     for child in self.children:
                         child.disabled = True
                     self.result = "cancel"
-                    # Signal cancellation
+
                     self._cancel_event.set()
 
-                    # If a nuke task started, attempt to cancel it
                     if self._nuke_task and not self._nuke_task.done():
                         try:
                             self._nuke_task.cancel()
-                            # optionally await to let it cleanup; do not block long
+
                             try:
                                 await asyncio.wait_for(self._nuke_task, timeout=2)
                             except (asyncio.TimeoutError, asyncio.CancelledError):
@@ -2806,11 +2778,10 @@ class Moderation(commands.Cog, name="Moderation"):
                     except Exception:
                         await interaction.response.send_message("Nuke aborted.", ephemeral=True)
 
-                    # stop the view.wait()
                     self.stop()
 
                 async def on_timeout(self):
-                    # on timeout, try to edit the message to show timed out
+
                     try:
                         for child in self.children:
                             child.disabled = True
@@ -2821,7 +2792,7 @@ class Moderation(commands.Cog, name="Moderation"):
                         ), view=self)
                     except Exception:
                         pass
-                    # ensure any started nuke is cancelled
+
                     self._cancel_event.set()
                     if self._nuke_task and not self._nuke_task.done():
                         try:
@@ -2833,16 +2804,11 @@ class Moderation(commands.Cog, name="Moderation"):
             view = NukeConfirmView()
             await auth_message.edit(view=view)
 
-            # Wait until view finishes (confirm, cancel or timeout)
             await view.wait()
 
-            # After the view ends, if result is not confirm we do nothing.
-            # If result was confirm, the _do_nuke task was already started by the view.
             if view.result != "confirm":
                 logger.info("NUKE ABORTED OR TIMED OUT.")
                 return
-
-            # nothing more to do here; the background task is running
 
         except discord.HTTPException:
             await ctx.send("I do not have permission to nuke this channel.")
@@ -2922,19 +2888,19 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.send(f"🔓 Unlocked {channel.mention}.")
 
     @commands.group(
-        name="lockchannel", aliases=["lockchan", "lockchanlist", "lockchannels", 'lch'],
+        name="lockdownset", aliases=["ldset", "ldch"],
         invoke_without_command=True,
         help="Manage which channels are affected by lockdown."
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
-    async def lockchan(self, ctx: Context):
+    async def lockdown_channels(self, ctx: Context):
         embed = discord.Embed(title="Lockdown Channel Management",
                               description="Subcommands: `add`, `remove`, `list`")
         await ctx.send(embed=embed)
 
-    @lockchan.command(name="add", help="Add a channel to the lockdown list.")
-    async def lockchan_add(self, ctx: Context,
+    @lockdown_channels.command(name="add", help="Add a channel to the lockdown list.")
+    async def lockdown_channels_add(self, ctx: Context,
                            channel: discord.TextChannel = None):
         channel = channel or ctx.channel
         await self.bot.database.add_lockdown_channel(ctx.guild.id, channel.id)
@@ -2945,8 +2911,8 @@ class Moderation(commands.Cog, name="Moderation"):
                               description=f"✅ Added {channel.mention} to the lockdown list.")
         await ctx.send(embed=embed)
 
-    @lockchan.command(name="remove", help="Remove a channel from the lockdown list.")
-    async def lockchan_remove(self, ctx: Context,
+    @lockdown_channels.command(name="remove", help="Remove a channel from the lockdown list.")
+    async def lockdown_channels_remove(self, ctx: Context,
                               channel: discord.TextChannel = None):
         channel = channel or ctx.channel
         ok = await self.bot.database.remove_lockdown_channel(ctx.guild.id, channel.id)
@@ -2959,8 +2925,8 @@ class Moderation(commands.Cog, name="Moderation"):
                                   description=f"🚫 {channel.mention} was not in the lockdown list.")
             await ctx.send(embed=embed)
 
-    @lockchan.command(name="list", help="List all channels in the lockdown list.")
-    async def lockchan_list(self, ctx: Context):
+    @lockdown_channels.command(name="list", help="List all channels in the lockdown list.")
+    async def lockdown_channels_list(self, ctx: Context):
         ids = await self.bot.database.get_lockdown_channels(ctx.guild.id)
         if not ids:
             embed = discord.Embed(title="Lockdown Channel Management",
@@ -3061,13 +3027,13 @@ class Moderation(commands.Cog, name="Moderation"):
                 else:
                     tasks.append(self.bot.database.count_punishment_usage(member.id, guild_id, ptype, days))
             results = await asyncio.gather(*tasks)
-            # Ensure integer, non-negative values only
+
             cleaned = []
             for r in results:
                 try:
-                    # disallow non-whole values by coercing safely to int
+
                     if isinstance(r, float) and not r.is_integer():
-                        # round to nearest whole number (or you can choose floor/ceil)
+
                         r = int(round(r))
                     else:
                         r = int(r)
@@ -3079,12 +3045,11 @@ class Moderation(commands.Cog, name="Moderation"):
             return cleaned
 
         def make_chart_bytes(counts, window_label):
-            # ensure counts are ints
+
             counts = [int(c) for c in counts]
             labels = [t[0] for t in types]
             x = range(len(labels))
 
-            # create chart
             fig, ax = plt.subplots()
             ax.bar(x, counts, width=0.6)
             ax.set_xticks(x)
@@ -3092,7 +3057,6 @@ class Moderation(commands.Cog, name="Moderation"):
             ax.set_ylabel("Count")
             ax.set_title(f"{member.display_name} – {window_label}")
 
-            # force integer y-ticks
             try:
                 ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             except Exception:
@@ -3107,7 +3071,6 @@ class Moderation(commands.Cog, name="Moderation"):
             plt.close(fig)
             return data
 
-        # simple in-memory cache for this command invocation to speed button presses
         cache: dict[str, bytes] = {}
 
         class StatsView(discord.ui.View):
@@ -3116,7 +3079,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 self.current = windows[0][0]
 
             async def update_message(self, interaction, window_label, days):
-                # if cached, reuse bytes, otherwise generate and cache
+
                 if window_label in cache:
                     img_bytes = cache[window_label]
                 else:
@@ -3129,7 +3092,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 try:
                     await interaction.response.edit_message(content=None, attachments=[file], view=self)
                 except Exception:
-                    # fallback: send a new message if edit fails
+
                     await interaction.channel.send(file=file, view=self)
 
             @discord.ui.button(label="7 Days", style=discord.ButtonStyle.primary)
@@ -3144,7 +3107,6 @@ class Moderation(commands.Cog, name="Moderation"):
             async def all_time(self, interaction: discord.Interaction, button: discord.ui.Button):
                 await self.update_message(interaction, "All Time", None)
 
-        # generate initial chart and cache it
         initial_counts = await fetch_counts(windows[0][1])
         initial_bytes = make_chart_bytes(initial_counts, windows[0][0])
         cache[windows[0][0]] = initial_bytes
@@ -3156,7 +3118,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(manage_guild=True)
     async def alts(self, ctx: commands.Context, *, identifier: str):
         """List all accounts linked to a user."""
-        # Resolve the user
+
         member = None
         if re.match(r'^\d+$', identifier):
             try:
@@ -3176,7 +3138,6 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             return await ctx.send(embed=embed)
 
-        # Use recursive lookup for all linked accounts
         linked_ids = await self.bot.database.get_all_linked_user_ids(member.id, ctx.guild.id)
         if not linked_ids:
             embed = discord.Embed(
@@ -3185,7 +3146,6 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             return await ctx.send(embed=embed)
 
-        # Fetch user objects for display
         linked_members = []
         for uid in linked_ids:
             user = ctx.guild.get_member(uid) or await self.bot.fetch_user(uid)
@@ -3219,7 +3179,7 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.send("Both main and alt users must be valid members.")
         if main_id.id == alt_id.id:
             return await ctx.send("You cannot add a user as their own alt.")
-        
+
         await self.bot.database.add_user_alt(main_id.id, ctx.guild.id, alt_id.id)
         await ctx.send(f"Added {alt_id.display_name} as an alt for {main_id.display_name}.")
 
@@ -3282,7 +3242,7 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.send(embed=embed)
 
         await self.bot.database.add_command_role_restriction(ctx.guild.id, command_name.lower(), role.id)
-        
+
         embed = discord.Embed(
             title="",
             description=f"{ctx.author.mention}: Now allowing users with {role.mention} to use **{command_name}**.",
@@ -3296,7 +3256,7 @@ class Moderation(commands.Cog, name="Moderation"):
     async def restrictcommand_remove(self, ctx: Context, command_name: str, role: discord.Role):
 
         success = await self.bot.database.remove_command_role_restriction(ctx.guild.id, command_name.lower(), role.id)
-        
+
         if success:
             embed = discord.Embed(
                 title="",
@@ -3316,7 +3276,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(manage_guild=True)
     async def restrictcommand_reset(self, ctx: Context):
         count = await self.bot.database.clear_all_command_restrictions(ctx.guild.id)
-        
+
         embed = discord.Embed(
             title="",
             description=f"Removed {count} command restriction(s) from this server.",
@@ -3329,7 +3289,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(manage_guild=True)
     async def restrictcommand_list(self, ctx: Context, filter_arg: str = None):
         restrictions = await self.bot.database.get_command_restrictions(ctx.guild.id)
-        
+
         if not restrictions:
             embed = discord.Embed(
                 title="No Restrictions",
@@ -3356,7 +3316,7 @@ class Moderation(commands.Cog, name="Moderation"):
             else:
                 filtered_restrictions = [r for r in restrictions if filter_arg.lower() in r.command_name.lower()]
                 filter_type = f"command `{filter_arg}`"
-                
+
             restrictions = filtered_restrictions
 
         if not restrictions:
@@ -3371,14 +3331,14 @@ class Moderation(commands.Cog, name="Moderation"):
         for restriction in restrictions:
             if restriction.command_name not in command_restrictions:
                 command_restrictions[restriction.command_name] = []
-            
+
             role = ctx.guild.get_role(restriction.role_id)
             if role:
                 command_restrictions[restriction.command_name].append(role.mention)
 
         commands_list = list(command_restrictions.items())
         total_entries = sum(len(roles) for roles in command_restrictions.values())
-        
+
         entries_list = []
         entry_number = 1
         for command_name, roles in commands_list:
@@ -3405,7 +3365,7 @@ class Moderation(commands.Cog, name="Moderation"):
                     description="\n".join(page_entries),
                     color=discord.Color.blurple()
                 )
-                
+
                 embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_pages} ({self.total_entries} entries)")
                 return embed
 
@@ -3415,7 +3375,7 @@ class Moderation(commands.Cog, name="Moderation"):
                     self.current_page = self.max_pages - 1
                 else:
                     self.current_page -= 1
-                
+
                 embed = self.create_embed()
                 await interaction.response.edit_message(embed=embed, view=self)
 
@@ -3425,7 +3385,7 @@ class Moderation(commands.Cog, name="Moderation"):
                     self.current_page = 0
                 else:
                     self.current_page += 1
-                
+
                 embed = self.create_embed()
                 await interaction.response.edit_message(embed=embed, view=self)
 
@@ -3436,4 +3396,3 @@ class Moderation(commands.Cog, name="Moderation"):
 async def setup(bot) -> None:
     await bot.add_cog(Moderation(bot))
     logger.debug('Moderation cog initialized successfully')
-

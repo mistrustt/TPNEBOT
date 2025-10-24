@@ -92,11 +92,10 @@ class DropView(discord.ui.View):
         if self.message is not None and self.message.embeds:
             await self.message.edit(embed=self.message.embeds[0], view=self)
 
-        # first response:
         if not interaction.response.is_done():
             await interaction.response.send_message(embed=embed)
         else:
-            # (unlikely) fallback to followup if you’ve already responded
+
             await interaction.followup.send(embed=embed)
 
         if self.message and self.message.id in self.cog.active_drops:
@@ -145,7 +144,6 @@ class AirDropView(discord.ui.View):
 
         economy = self.bot.get_cog("Economy")
 
-        # Disable all buttons
         for child in self.children:
             child.disabled = True
         if self.message:
@@ -156,7 +154,7 @@ class AirDropView(discord.ui.View):
         self.stop()
 
         if not self.joiners:
-            # Refund the initiator
+
             async with self.bot.database.get_session() as session:
                 async with session.begin():
                     await self.bot.database.process_treasury_transaction(
@@ -174,7 +172,7 @@ class AirDropView(discord.ui.View):
                 pass
 
         else:
-            # Split the pot
+
             share = self.amount / Decimal(len(self.joiners))
             for user_id in self.joiners:
                 recipient_wallet = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -186,7 +184,6 @@ class AirDropView(discord.ui.View):
                             description=f"Airdrop from {self.initiator.display_name}"
                         )
 
-            # Build a mention list of winners
             winners = [f"<@{uid}>" for uid in self.joiners]
             winners_str = ", ".join(winners)
 
@@ -220,7 +217,6 @@ class AirDropView(discord.ui.View):
         self.joiners.add(interaction.user.id)
         await interaction.response.send_message("You joined the airdrop!", ephemeral=True)
 
-        # now update the embed in the original message
         share = (self.amount / Decimal(len(self.joiners))).quantize(Decimal("0.01"))
         economy = self.bot.get_cog("Economy")
 
@@ -245,7 +241,6 @@ class AirDropView(discord.ui.View):
             inline=False
         )
 
-        # re-edit the original message
         await self.message.edit(embed=embed, view=self)
 
 class ShopView(View):
@@ -551,20 +546,17 @@ class UseItemPaginator(View):
         self.current_page = 0
         self.max_page = (len(entries) - 1) // items_per_page
 
-        # Prev / Next / Refresh
         self.prev_button = Button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
         self.next_button = Button(label="Next ➡",     style=discord.ButtonStyle.secondary)
         self.refresh_button = Button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
-        # New “Use Item” button
+
         self.use_button = Button(label="✅ Use Item", style=discord.ButtonStyle.success)
 
-        # wire callbacks
         self.prev_button.callback    = self.prev_button_callback
         self.next_button.callback    = self.next_button_callback
         self.refresh_button.callback = self.refresh_callback
         self.use_button.callback     = self.use_callback
 
-        # add to view
         self.add_item(self.prev_button)
         self.add_item(self.refresh_button)
         self.add_item(self.next_button)
@@ -575,7 +567,7 @@ class UseItemPaginator(View):
     def update_buttons(self):
         self.prev_button.disabled = (self.current_page <= 0)
         self.next_button.disabled = (self.current_page >= self.max_page)
-        # disable Use if quantity is 0 or no entries
+
         if not self.entries:
             self.use_button.disabled = True
         else:
@@ -603,7 +595,7 @@ class UseItemPaginator(View):
         embed = await self.build_embed()
 
         if interaction:
-            # followup vs direct response depending on state
+
             if interaction.response.is_done():
                 await interaction.followup.edit_message(
                     message_id=interaction.message.id,
@@ -631,22 +623,19 @@ class UseItemPaginator(View):
 
     async def use_callback(self, interaction: discord.Interaction):
         entry   = self.entries[self.current_page]
-        item_id = entry.get("id")  # or adjust key if your dict uses another field
+        item_id = entry.get("id")  
         try:
-            # perform the “use”
+
             message = await self.bot.database.use_inventory_item(self.user_id, item_id)
 
-            # reload the entries so quantities/update properly
             self.entries = await self.bot.database.get_user_inventory_grouped(self.user_id)
             self.max_page = (len(self.entries) - 1) // self.items_per_page
             self.current_page = min(self.current_page, self.max_page)
             self.update_buttons()
 
-            # update embed
             embed = await self.build_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
-            # send a confirmation
             await interaction.followup.send(message, ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(str(e), ephemeral=True)
@@ -802,8 +791,6 @@ class PortfolioView(ui.View):
 
 U64_RANGE = 1 << 64
 
-# --- Internal helpers (pure, deterministic) ---
-
 def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> int:
     """
     Produce a 64-bit unsigned int via HMAC(server_seed, f"{client_seed}:{nonce}:{tag}").
@@ -811,7 +798,7 @@ def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> 
     """
     msg = f"{client_seed}:{nonce}:{tag}".encode()
     digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
-    return int.from_bytes(digest[:8], "big")  # 64-bit value in [0, 2^64)
+    return int.from_bytes(digest[:8], "big")  
 
 def _rehash_u64(u64: int) -> int:
     """Deterministically 'stretch' to a fresh 64-bit value for rejection sampling."""
@@ -846,7 +833,7 @@ class Economy(commands.Cog):
         ]
         self.roll_history = defaultdict(list)
         self.games = ["gamble", "supergamble", "dice", "slots", "blackjack", "roulette", "mines", "double", "drop", "ladder", "poker", "crash", "hilo", "ridebus"]
-        self.exchange_rate = Decimal("1000000000000")  # 1 USD = 1,000,000,000 bot currency units
+        self.exchange_rate = Decimal("1000000000000")  
         self.validate_economy_task.start()
 
     @commands.Cog.listener()
@@ -862,10 +849,8 @@ class Economy(commands.Cog):
     def from_usd(self, usd_amount: Decimal) -> Decimal:
         return (usd_amount * self.exchange_rate).quantize(Decimal("1"))
 
-    # --- Public API (async, with DB persistence) ---
-
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
-        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  # <-- new DB method
+        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  
         msg = f"{client_seed}:{nonce}:{tag}".encode()
         digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
         u64 = int.from_bytes(digest[:8], "big")
@@ -882,14 +867,14 @@ class Economy(commands.Cog):
         if upper <= 0:
             raise ValueError("upper must be > 0")
         u64, _ = await self._next_u64(user_id, tag=tag)
-        # unbiased rejection sampling (unchanged)
+
         limit = U64_RANGE - (U64_RANGE % upper)
         while u64 >= limit:
             u64 = int.from_bytes(hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big")
         return u64 % upper
     async def fair_random(self, user_id: int) -> float:
         u64, _ = await self._next_u64(user_id, tag="random")
-        return u64 / float(U64_RANGE)  # [0, 1)
+        return u64 / float(U64_RANGE)  
 
     async def fair_sample(self, user_id: int, seq: Sequence[Any], k: int) -> List[Any]:
         """
@@ -902,15 +887,14 @@ class Economy(commands.Cog):
         await self.fair_shuffle(user_id, clone)
         return clone[:k]
 
-
     async def fair_choice(self, user_id: int, seq: Sequence[Any], *, tag: str = "choice"):
         if not seq:
             raise ValueError("sequence must be non-empty")
         idx = await self.fair_randbelow(user_id, len(seq), tag=tag)
         return seq[idx]
-    
+
     async def fair_shuffle(self, user_id: int, deck: List[Any]) -> None:
-        # Give each swap a specific tag to make replays trivial
+
         for i in range(len(deck) - 1, 0, -1):
             j = await self.fair_randbelow(user_id, i + 1, tag=f"shuffle:{i}")
             deck[i], deck[j] = deck[j], deck[i]
@@ -979,7 +963,6 @@ class Economy(commands.Cog):
                 out = f"{num}{suffix}"
                 return f"-{out}" if negative else out
 
-        # < 1k
         num = self._fmt_no_sci(value, max_frac=2)
         return f"-{num}" if negative else num
 
@@ -1010,7 +993,7 @@ class Economy(commands.Cog):
 
         num = self._fmt_no_sci(value, max_frac=2)
         return f"-{num}" if negative else num
-    
+
     async def amount_handler(self, amount_input: str, user_balance: Decimal) -> Decimal:
         """
         Process the bet input and return the corresponding bet amount.
@@ -1167,7 +1150,7 @@ class Economy(commands.Cog):
             )
 
         embed.set_author(name="Economy Leaderboard", icon_url=self.utils.get_avatar_url(ctx.author))
-        #embed.set_footer(text=f"Your position: {await self.bot.database.get_balance_user_rank(ctx.author.id)}")
+
         await ctx.reply(embed=embed)
 
     @commands.command(name="economy", aliases=["eco","econ"], description="View economy statistics.")
@@ -1190,7 +1173,7 @@ class Economy(commands.Cog):
             )
             embed.add_field(name="Total Supply", value=f"{self.currency_name} **{await self.formatter(supply.total_supply)}**", inline=False)
             embed.add_field(name="Circulating Supply", value=f"{self.currency_name} **{await self.formatter(supply.circulating)}**", inline=False)
-            #embed.add_field(name="Treasury Balance", value=f"💰 **{await self.short_formatter(treasury_balance)}**", inline=False)
+
             total_supply = supply.total_supply
             percentage = ((balance + bank_balance) / total_supply) * 100 if total_supply > 0 else 0
             health_percentage = (treasury_balance / total_supply * 100) if total_supply > 0 else 0
@@ -1227,7 +1210,7 @@ class Economy(commands.Cog):
                 color = discord.Color.blurple()
             else:
                 color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
-            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 86400)  # 24 hours cooldown
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 86400)  
             embed = discord.Embed(description=f"You received your daily reward of {self.currency_name} **{await self.formatter(daily_amount)}**!", color=color)
             embed.set_author(name='Daily', icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
@@ -1259,7 +1242,7 @@ class Economy(commands.Cog):
                 color = discord.Color.blurple()
             else:
                 color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
-            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 604800)  # 7 days cooldown
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 604800)  
             embed = discord.Embed(description=f"You received your weekly reward of {self.currency_name} **{await self.formatter(weekly_amount)}**!", color=color)
             embed.set_author(name='Weekly', icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
@@ -1290,7 +1273,7 @@ class Economy(commands.Cog):
                 color = discord.Color.blurple()
             else:
                 color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
-            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 2592000)  # 30 days cooldown
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 2592000)  
             embed = discord.Embed(
                 description=f"Your monthly reward is **{self.currency_name} {await self.formatter(monthly_amount)}**.",
                 color=color,
@@ -1612,7 +1595,7 @@ class Economy(commands.Cog):
             "success": 40,            
             "partial_failure": 25,    
             "failure": 23,            
-            #"bank_robbery": 2         
+
         }
         total_weight = sum(outcomes.values())
         roll = secrets.randbelow(total_weight)
@@ -2092,13 +2075,12 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-        
+
         symbol = currency.upper()
         price = await self.bot.database.get_crypto_price(symbol)
         if not price or price <= Decimal('0.00000001'):
             return await ctx.reply(f"Price data for '{symbol}' is invalid or unavailable.", delete_after=5)
 
-        # Handle USD or bot currency input
         if amount.upper().endswith("USD"):
             usd_amt = Decimal(amount[:-3])
             spend = self.from_usd(usd_amt)
@@ -2111,7 +2093,6 @@ class Economy(commands.Cog):
         if spend > balance:
             return await ctx.reply(f"Insufficient balance. You only have {await self.short_formatter(balance)}.", delete_after=5)
 
-        # Deduct cost and record asset
         await self.bot.database.process_treasury_transaction(wallet_id, -spend, f"Buy {symbol}")
         coins = (spend / price).quantize(Decimal('0.00000001'))
         await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
@@ -2297,7 +2278,6 @@ class Economy(commands.Cog):
             import uuid
             from datetime import datetime, timezone
 
-            # Validate UUID
             try:
                 uuid_obj = uuid.UUID(txid)
                 txid = str(uuid_obj)
@@ -2310,11 +2290,10 @@ class Economy(commands.Cog):
                 await ctx.reply("🔍 No transaction found with that ID.", delete_after=5)
                 return
 
-            # Resolve users for nicer display
             async def resolve_user(uid):
                 if not uid:
                     return None
-                # Try guild member first (if applicable), then cached user, then fetch
+
                 try:
                     if ctx.guild:
                         member = ctx.guild.get_member(uid)
@@ -2328,7 +2307,6 @@ class Economy(commands.Cog):
             from_user = await resolve_user(getattr(transaction, "from_user_id", None))
             to_user = await resolve_user(getattr(transaction, "to_user_id", None))
 
-            # Determine amount and color
             amt = getattr(transaction, "amount", None)
             try:
                 amt_decimal = Decimal(str(amt)) if amt is not None else Decimal("0")
@@ -2348,11 +2326,9 @@ class Economy(commands.Cog):
             formatted_amount = await self.formatter(abs(amt_decimal)) if hasattr(self, "formatter") else str(abs(amt_decimal))
             amount_field = f"{self.currency_name} {sign}**{formatted_amount}**"
 
-            # Build embed
             embed = discord.Embed(title="📄 Transaction Details", color=color)
             embed.add_field(name="Transaction ID", value=f"`{transaction.id}`", inline=False)
 
-            # From / To fields
             if from_user:
                 from_display = f"{getattr(from_user, 'mention', getattr(from_user, 'display_name', str(from_user)))}"
             else:
@@ -2366,7 +2342,6 @@ class Economy(commands.Cog):
             embed.add_field(name="From", value=from_display, inline=True)
             embed.add_field(name="To", value=to_display, inline=True)
 
-            # Amount / Type / Wallets
             embed.add_field(name="Amount", value=amount_field, inline=False)
             tx_type = "P2P" if getattr(transaction, "from_user_id", None) and getattr(transaction, "to_user_id", None) else "Treasury / System"
             embed.add_field(name="Type", value=tx_type, inline=True)
@@ -2378,17 +2353,15 @@ class Economy(commands.Cog):
             if receiver_wallet:
                 embed.add_field(name="Receiver Wallet", value=f"`{receiver_wallet}`", inline=True)
 
-            # Description (trim if very long)
             desc = getattr(transaction, "description", "") or ""
             if desc:
                 if len(desc) > 1024:
                     desc = desc[:1016] + "…"
                 embed.add_field(name="Description", value=desc, inline=False)
 
-            # Timestamp
             ts = getattr(transaction, "timestamp", None)
             if ts:
-                # Ensure timezone-aware UTC for embed.timestamp if possible
+
                 try:
                     if ts.tzinfo is None:
                         ts = ts.replace(tzinfo=timezone.utc)
@@ -2399,8 +2372,6 @@ class Economy(commands.Cog):
             else:
                 embed.set_footer(text="Transaction time: Unknown")
 
-            # Small author / thumbnail for context
-            # Prefer 'from' avatar if available, else bot avatar
             try:
                 author_icon = None
                 if from_user and getattr(from_user, "avatar", None):
@@ -2425,12 +2396,10 @@ class Economy(commands.Cog):
         if isinstance(prefix, list):
             prefix = prefix[0]
 
-        # If invoked as a group, ctx.command refers to the Group object;
-        # its .commands attribute holds the subcommand Command objects.
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
         for cmd in sorted(subcmds, key=lambda c: c.name):
-            # show primary usage, aliases and short help/description
+
             name = cmd.name
             aliases = f" (or: {', '.join(cmd.aliases)})" if getattr(cmd, "aliases", None) else ""
             desc = (cmd.help or cmd.description or "").strip()
@@ -2467,16 +2436,14 @@ class Economy(commands.Cog):
         if member == ctx.guild.me:
             return await ctx.reply("I appreciate the trust, but no self-bounties on me!", delete_after=5)
 
-        # Fetch balances
         wallet_id = await self.bot.database.get_wallet_id_for_user(user.id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-        # Parse amount
+
         try:
             amt = await self.amount_handler(amount, balance)
         except ValueError as e:
             return await ctx.reply(f"🚫 {e}", delete_after=5)
 
-        # Place bounty
         bounty = await self.bot.database.place_bounty(user.id, member.id, amt)
         if bounty is None:
             return await ctx.reply(
@@ -2500,7 +2467,7 @@ class Economy(commands.Cog):
 
         embed = discord.Embed(title="🎯 Top Bounties", color=discord.Color.blurple())
         for user_id, total in top_bounties:
-            # Resolve username
+
             member = ctx.guild.get_member(user_id)
             if member:
                 name = member.display_name
@@ -2553,7 +2520,7 @@ class Economy(commands.Cog):
                 inline=True
             )
             embed.set_footer(text=f"Item 1 of {len(shop_items)}")
-            #await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 15)
+
             await interaction.response.send_message("Welcome to the shop!", embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="inventory", description='View your items')
@@ -2579,7 +2546,7 @@ class Economy(commands.Cog):
             title=f"{member.display_name}'s Inventory"
         )
         embed = await paginator.send_page()
-        #await self.bot.database.set_cooldown(interaction.user.id, interaction.command.qualified_name, 3)
+
         await interaction.response.send_message(embed=embed, view=paginator)
 
     @app_commands.command(name="use", description="Browse and use items from your inventory")
@@ -2608,8 +2575,7 @@ class Economy(commands.Cog):
             title="Your Inventory — Use an item"
         )
         embed = await paginator.send_page()
-        # apply your usual cooldown
-        #await self.bot.database.set_cooldown(interaction.user.id, interaction.command.qualified_name, 3)
+
         await interaction.response.send_message(embed=embed, view=paginator)
 
     @app_commands.command(name="trade", description="Trade an item to another user")

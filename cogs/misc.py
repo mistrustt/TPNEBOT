@@ -181,7 +181,6 @@ class Misc(commands.Cog, name="Misc"):
         else:
             embed.add_field(name="Bottom 10 Users", value="No data available", inline=True)
 
-        #embed.set_footer(text=f"Your position: {await self.bot.database.get_sobs_user_rank(ctx.author.id)}")
         await ctx.send(embed=embed)
 
     @commands.group(name="skulls", help="Shows the number of skull reactions a user has received and given.", invoke_without_command=True)
@@ -229,7 +228,6 @@ class Misc(commands.Cog, name="Misc"):
         else:
             embed.add_field(name="Bottom 10 Users", value="No data available", inline=True)
 
-        #embed.set_footer(text=f"Your position: {await self.bot.database.get_skulls_user_rank(ctx.author.id)}")
         await ctx.send(embed=embed)
 
     @commands.group(name="flames", aliases=['fires'], help="Shows the number of flame reactions a user has received and given.", invoke_without_command=True)
@@ -277,7 +275,6 @@ class Misc(commands.Cog, name="Misc"):
         else:
             embed.add_field(name="Bottom 10 Users", value="No data available", inline=True)
 
-        #embed.set_footer(text=f"Your position: {await self.bot.database.get_flames_user_rank(ctx.author.id)}")
         await ctx.send(embed=embed)
 
     @commands.group(name="hearts", help="Shows the number of heart reactions a user has received and given.", invoke_without_command=True)
@@ -325,7 +322,6 @@ class Misc(commands.Cog, name="Misc"):
         else:
             embed.add_field(name="Bottom 10 Users", value="No data available", inline=True)
 
-        #embed.set_footer(text=f"Your position: {await self.bot.database.get_hearts_user_rank(ctx.author.id)}")
         await ctx.send(embed=embed)
 
     @commands.group(name="clowns", help="Shows the number of clown reactions a user has received and given.", invoke_without_command=True)
@@ -373,7 +369,6 @@ class Misc(commands.Cog, name="Misc"):
         else:
             embed.add_field(name="Bottom 10 Users", value="No data available", inline=True)
 
-        #embed.set_footer(text=f"Your position: {await self.bot.database.get_clowns_user_rank(ctx.author.id)}")
         await ctx.send(embed=embed)
 
     REACTIONS = {
@@ -450,7 +445,7 @@ class Misc(commands.Cog, name="Misc"):
             color=discord.Color.blurple()
         )
         embed.set_author(name=member.display_name, icon_url=self.utils.get_avatar_url(member))
-        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 900)  # 15 minutes cooldown
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 900)  
         await ctx.reply(embed=embed)
 
     async def change_reputation(self, ctx: Context, member: discord.Member, amount: int) -> None:

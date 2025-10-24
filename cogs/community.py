@@ -62,7 +62,7 @@ class Community(commands.Cog, name="Community"):
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        # ignore DMs, where after.guild is None
+
         if after.guild is None:
             return
 
@@ -70,7 +70,6 @@ class Community(commands.Cog, name="Community"):
         if not spam_channel_id:
             return
 
-        # ignore your own edits
         if after.author == self.bot.user:
             return
 

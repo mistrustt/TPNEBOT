@@ -98,7 +98,6 @@ class Fun(commands.Cog, name="Fun"):
 
                 data = await response.json()
 
-                # Handle both dict and list responses
                 if isinstance(data, dict):
                     item = data
                 elif isinstance(data, list) and data:
@@ -117,7 +116,6 @@ class Fun(commands.Cog, name="Fun"):
                 fact_text = item["text"]
                 source = item.get("source") or item.get("source_url") or "unknown"
 
-                # Choose embed color: DMs get a consistent color
                 color = (
                     discord.Color.blurple()
                     if isinstance(ctx.channel, discord.DMChannel)
@@ -313,7 +311,7 @@ class Fun(commands.Cog, name="Fun"):
     async def boobs(self, ctx: Context, member: discord.Member=None):
         member = member or ctx.author
 
-        size = random.randint(50, 72)  # returns any number between 50 and 72
+        size = random.randint(50, 72)  
 
         color = discord.Color.blurple()
         if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:

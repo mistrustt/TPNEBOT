@@ -30,7 +30,6 @@ class CrashView(discord.ui.View):
         self.host_id = host_id
         self.channel_id = channel_id
 
-        # game state
         self.game_task: asyncio.Task | None = None
         self.is_running = False
         self.start_time: datetime.datetime = None
@@ -38,41 +37,36 @@ class CrashView(discord.ui.View):
         self.game_phase: str = None      
         self.current_multiplier = Decimal('1.0')
 
-        # per-user maps
         self.players: dict[int, Decimal]      = {}  
         self.crash_points: dict[int, Decimal] = {}
         self.cashed_out: dict[int, Decimal]  = {}
         self.crashed_out: dict[int, Decimal] = {}
 
-        # buttons
         self.join_btn = discord.ui.Button(label="Join Crash", style=discord.ButtonStyle.green)
         self.join_btn.callback = self.join_callback
         self.add_item(self.join_btn)
 
-        # Keep cashout button around but start disabled; we'll enable it for the running phase
         self.cashout_btn = discord.ui.Button(label="Cash Out", style=discord.ButtonStyle.red, disabled=True)
         self.cashout_btn.callback = self.cashout_callback
         self.add_item(self.cashout_btn)
 
-        # the message embed
         self.game_message: discord.Message = None
 
     async def join_callback(self, interaction: Interaction):
         """Show the bet modal when someone clicks Join."""
-        # only in the lobby window
+
         now = discord.utils.utcnow()
         if self.game_phase != "starting" or now.timestamp() >= self.countdown_end:
             return await interaction.response.send_message(
                 "Too late to join!", ephemeral=True
             )
-        # disallow double-join
+
         uid = interaction.user.id
         if uid in self.players:
             return await interaction.response.send_message(
                 "You've already joined!", ephemeral=True
             )
 
-        # build and show modal
         casino: Casino = self.bot.get_cog("Casino")
         max_allowed = await self.bot.database.get_max_gamble_amount(uid, False)
         formatted_max = await casino.short_formatter(max_allowed)
@@ -86,7 +80,7 @@ class CrashView(discord.ui.View):
         modal.add_item(amount_input)
 
         async def on_submit(sub_int: discord.Interaction):
-            # parse & validate amount
+
             wallet = await self.bot.database.get_wallet_id_for_user(uid)
             balance = await self.bot.database.get_wallet_balance(wallet)
 
@@ -106,21 +100,18 @@ class CrashView(discord.ui.View):
                     "Insufficient funds.", ephemeral=True
                 )
             if bet > max_allowed:
-                bet = max_allowed  # auto-cap to max
+                bet = max_allowed  
                 await sub_int.response.send_message(
                     f"Bet capped to max {formatted_max}.", ephemeral=True
                 )
 
-            # debit user
             await self.bot.database.process_treasury_transaction(
                 wallet, -bet, "Crash Game Bet"
             )
 
-            # register player & crash point
             self.players[uid] = bet
             self.crash_points[uid] = await self.generate_crash_point(uid)
 
-            # enable cashout for the running phase (and for lobby clients to see it enabled once game starts)
             self.cashout_btn.disabled = False
             await sub_int.followup.send(
                 f"You joined with **{await casino.formatter(bet)}** {casino.currency_name}", ephemeral=True
@@ -142,7 +133,6 @@ class CrashView(discord.ui.View):
         mult = self.current_multiplier
         win  = (bet * mult).quantize(Decimal('0.01'))
 
-        # credit user
         wallet = await self.bot.database.get_wallet_id_for_user(uid)
         await self.bot.database.process_treasury_transaction(
             wallet, win, "Crash Game Payout"
@@ -181,10 +171,8 @@ class CrashView(discord.ui.View):
         self.game_phase = "starting"
         self.current_multiplier = Decimal('1.0')
 
-        # countdown timestamp
         self.countdown_end = int((now + datetime.timedelta(seconds=20)).timestamp())
 
-        # initial embed
         embed = discord.Embed(
             title="🚀 Crash – Lobby",
             description=f"Click **Join** starting <t:{self.countdown_end}:R>",
@@ -192,12 +180,10 @@ class CrashView(discord.ui.View):
         )
         self.game_message = await ctx.send(embed=embed, view=self)
 
-        # lobby tick to update the relative timer & player list
         while discord.utils.utcnow().timestamp() < self.countdown_end:
             await asyncio.sleep(2)
             await self.update_game_message()
 
-        # no‐join? cancel
         if not self.players:
             await self.game_message.edit(
                 embed=discord.Embed(
@@ -210,19 +196,17 @@ class CrashView(discord.ui.View):
             self.is_running = False
             return
 
-        # begin play
         self.game_phase = "running"
         self.join_btn.disabled = True
-        # ensure cashout button is enabled while game is running if there are eligible players
+
         self.cashout_btn.disabled = not any(
             uid not in self.cashed_out and uid not in self.crashed_out for uid in self.players
         )
         await self.update_game_message()
 
-        # multiplier loop
         while len(self.cashed_out | self.crashed_out) < len(self.players):
             self.current_multiplier += self.calculate_increment()
-            # check busts
+
             for uid, cp in self.crash_points.items():
                 if uid not in self.cashed_out and uid not in self.crashed_out:
                     if self.current_multiplier >= cp:
@@ -230,9 +214,8 @@ class CrashView(discord.ui.View):
             await self.update_game_message()
             await asyncio.sleep(1)
 
-        # finalize
         self.game_phase = "ended"
-        # disable cashout at end
+
         self.cashout_btn.disabled = True
         await self.game_message.edit(
             embed=await self.make_embed(), view=None
@@ -255,7 +238,7 @@ class CrashView(discord.ui.View):
         return Decimal('100.0')
 
     async def update_game_message(self):
-        # keep cashout button enabled while the game is running and there are eligible players
+
         active_can_cash = any(uid not in self.cashed_out and uid not in self.crashed_out for uid in self.players)
         self.cashout_btn.disabled = not (self.game_phase == "running" and active_can_cash)
         await self.game_message.edit(embed=await self.make_embed(), view=self)
@@ -265,7 +248,6 @@ class CrashView(discord.ui.View):
         title = "🚀 Crash – Running" if self.game_phase=="running" else "🚀 Crash"
         embed = discord.Embed(title=title, color=discord.Color.blue())
 
-        # Phase‐specific description
         if self.game_phase=="starting":
             embed.description = f"Starting <t:{self.countdown_end}:R>"
         else:
@@ -273,24 +255,22 @@ class CrashView(discord.ui.View):
                 name="Multiplier", value=f"{self.current_multiplier:.2f}×", inline=False
             )
 
-        # Player statuses
         lines = []
         for uid, bet in self.players.items():
             cp = self.crash_points.get(uid, Decimal('0.00'))
-            # base status
+
             if uid in self.cashed_out:
                 status = f"💰 cashed @ {self.cashed_out[uid]:.2f}×"
             elif uid in self.crashed_out:
                 status = f"💥 crashed @ {self.crashed_out[uid]:.2f}×"
             else:
-                # still playing
+
                 if self.game_phase=="running":
                     val = (bet*self.current_multiplier).quantize(Decimal('0.01'))
                     status = f"🟢 playing → {await casino.formatter(val)} {casino.currency_name}"
                 else:
                     status = "🟢 playing"
 
-            # only reveal the hidden crash‐point after the game has ended
             if self.game_phase == "ended":
                 status += f" ( could have reached {cp:.2f}× )"
 
@@ -317,7 +297,7 @@ class MinesView(ui.LayoutView):
         bot: commands.Bot,
         PF: dict,
         currency_emoji: str,
-        fmt_amount_coro,                 # <<< pass your self.formatter here
+        fmt_amount_coro,                 
         timeout: float = 600.0,
     ):
         super().__init__(timeout=timeout)
@@ -333,9 +313,8 @@ class MinesView(ui.LayoutView):
         self.gems_clicked = 0
         self.game_over = False
         self.currency_emoji = currency_emoji
-        self.fmt_amount = fmt_amount_coro     # <<< store your formatter
+        self.fmt_amount = fmt_amount_coro     
 
-        # 25 buttons, 5 rows
         for i in range(self.size):
             for j in range(self.size):
                 idx = i * self.size + j
@@ -347,8 +326,6 @@ class MinesView(ui.LayoutView):
         cash.callback = self._on_cashout
         self.add_item(cash)
 
-    # --- helpers --------------------------------------------------------------
-
     async def _mult(self) -> Decimal:
         val = await self.bot.database.get_mines_multiplier(self.num_bombs, self.gems_clicked)
         try:
@@ -358,7 +335,7 @@ class MinesView(ui.LayoutView):
 
     async def _update_status(self, *, multiplier: Decimal):
         remain = self.size * self.size - self.num_bombs - self.gems_clicked
-        bet_str = await self.fmt_amount(self.bet_amount)   # <<< uses your formatter
+        bet_str = await self.fmt_amount(self.bet_amount)   
         self.status.content = (
             f"**Bombs:** {self.num_bombs}\n"
             f"**Bet:** {self.currency_emoji} **{bet_str}**\n"
@@ -424,8 +401,6 @@ class MinesView(ui.LayoutView):
             await interaction.response.send_message("This isn't your Mines game.", ephemeral=True)
             return False
         return True
-
-    # --- callbacks ------------------------------------------------------------
 
     async def _on_cell(self, idx: int, btn: ui.Button, itx: Interaction):
         if self.game_over:
@@ -496,12 +471,11 @@ class DoubleOrNothingView(View):
         success = await casino.fair_choice(self.user_id, [True, False])
         if success:
 
-
             self.winnings = Decimal(self.winnings) * 2
             revealed_seed, new_hash = await self.bot.database.increment_win(
                 self.user_id, "double", self.initial_amount,
                 client_seed=self.PF['client_seed'],
-                seed_used=None,  # do not log live seed
+                seed_used=None,  
                 nonce=self.PF['nonce'],
                 hash_hex=self.PF['server_seed_hash']
             )
@@ -521,7 +495,7 @@ class DoubleOrNothingView(View):
             revealed_seed, new_hash = await self.bot.database.increment_loss(
                 self.user_id, "double", self.initial_amount,
                 client_seed=self.PF['client_seed'],
-                seed_used=None,  # do not log live seed
+                seed_used=None,  
                 nonce=self.PF['nonce'],
                 hash_hex=self.PF['server_seed_hash']
             )
@@ -562,7 +536,7 @@ class DoubleOrNothingView(View):
         try:
             for child in self.children:
                 child.disabled = True
-            # If you keep a reference to the message, edit it here; otherwise do nothing.
+
         finally:
             self.stop()
 
@@ -596,30 +570,28 @@ class PokerView(View):
         return int(rank)
 
     def _evaluate_5(self, cards5: tuple) -> tuple:
-        # cards5: 5-card tuple, e.g. ('9♥','9♣','5♦','7♠','J♣')
+
         ranks = [self.card_value(c) for c in cards5]
         suits = [c[-1] for c in cards5]
         counts = Counter(ranks)
         freq_sorted = sorted(counts.items(), key=lambda x: (-x[1], -x[0]))
         is_flush = len(set(suits)) == 1
 
-        # Straight detection
         unique = sorted(set(ranks), reverse=True)
         is_straight = False
         top_straight = None
-        # normal straights
+
         for i in range(len(unique) - 4):
             window = unique[i:i+5]
             if window[0] - window[4] == 4:
                 is_straight = True
                 top_straight = window[0]
                 break
-        # wheel straight (A-2-3-4-5)
+
         if not is_straight and set([14,5,4,3,2]).issubset(unique):
             is_straight = True
             top_straight = 5
 
-        # Determine category and tiebreakers
         if is_straight and is_flush:
             category = 9
             tiebreakers = (top_straight,)
@@ -681,7 +653,7 @@ class PokerView(View):
             revealed_seed, new_hash = await self.bot.database.increment_win(
                 self.user_id, "poker", self.bet,
                 client_seed=self.PF['client_seed'],
-                seed_used=None,  # do not log live seed
+                seed_used=None,  
                 nonce=self.PF['nonce'],
                 hash_hex=self.PF['server_seed_hash']
             )
@@ -696,7 +668,7 @@ class PokerView(View):
             revealed_seed, new_hash = await self.bot.database.increment_loss(
                 self.user_id, "poker", self.bet,
                 client_seed=self.PF['client_seed'],
-                seed_used=None,  # do not log live seed
+                seed_used=None,  
                 nonce=self.PF['nonce'],
                 hash_hex=self.PF['server_seed_hash']
             )
@@ -725,7 +697,7 @@ class PokerView(View):
         revealed_seed, new_hash = await self.bot.database.increment_loss(
             self.user_id, "poker", self.bet,
             client_seed=self.PF['client_seed'],
-            seed_used=None,  # do not log live seed
+            seed_used=None,  
             nonce=self.PF['nonce'],
             hash_hex=self.PF['server_seed_hash']
         )
@@ -773,15 +745,12 @@ class GameHistoryPaginator(discord.ui.View):
         self.per_page = 5
         self.current_page = 0
 
-        # precompute simple aggregates for a nicer header
         lc_outcomes = [(getattr(r, "outcome", "") or "").lower() for r in history]
         self.total_games = len(history)
         self.wins = sum(1 for o in lc_outcomes if o in ("win", "won", "victory", "success"))
         self.losses = sum(1 for o in lc_outcomes if o in ("loss", "lost", "defeat", "failure"))
         self.ties = self.total_games - (self.wins + self.losses)
 
-        # locate the generated buttons so we can toggle enabled/disabled state
-        # (buttons defined by decorators are present in self.children after super().__init__)
         self.prev_btn: discord.ui.Button | None = next((c for c in self.children if getattr(c, "label", "").startswith("⬅")), None)
         self.next_btn: discord.ui.Button | None = next((c for c in self.children if getattr(c, "label", "").startswith("➡")), None)
         self._update_button_states()
@@ -830,7 +799,6 @@ class GameHistoryPaginator(discord.ui.View):
             description=f"📊 Total: **{self.total_games}** • 🏆 Wins: **{self.wins}** • 💀 Losses: **{self.losses}** • 🔁 Ties: **{self.ties}**"
         )
 
-        # use avatar if available
         try:
             avatar_url = self.member.avatar.url if self.member.avatar else None
             if avatar_url:
@@ -838,7 +806,6 @@ class GameHistoryPaginator(discord.ui.View):
         except Exception:
             pass
 
-        # emoji map to make each line pop visually
         emoji_map = {
             "win": "🏆",
             "won": "🏆",
@@ -853,7 +820,7 @@ class GameHistoryPaginator(discord.ui.View):
         }
 
         for row in page_items:
-            # defensive access to expected fields
+
             gamename = str(getattr(row, "game_name", "Unknown")).capitalize()
             outcome = str(getattr(row, "outcome", "Unknown"))
             outcome_lc = outcome.lower()
@@ -883,8 +850,6 @@ class GameHistoryPaginator(discord.ui.View):
 
 U64_RANGE = 1 << 64
 
-# --- Internal helpers (pure, deterministic) ---
-
 def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> int:
     """
     Produce a 64-bit unsigned int via HMAC(server_seed, f"{client_seed}:{nonce}:{tag}").
@@ -892,7 +857,7 @@ def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> 
     """
     msg = f"{client_seed}:{nonce}:{tag}".encode()
     digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
-    return int.from_bytes(digest[:8], "big")  # 64-bit value in [0, 2^64)
+    return int.from_bytes(digest[:8], "big")  
 
 def _rehash_u64(u64: int) -> int:
     """Deterministically 'stretch' to a fresh 64-bit value for rejection sampling."""
@@ -927,10 +892,8 @@ class Casino(commands.Cog):
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
-    # --- Public API (async, with DB persistence) ---
-
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
-        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  # <-- new DB method
+        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  
         msg = f"{client_seed}:{nonce}:{tag}".encode()
         digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
         u64 = int.from_bytes(digest[:8], "big")
@@ -947,14 +910,14 @@ class Casino(commands.Cog):
         if upper <= 0:
             raise ValueError("upper must be > 0")
         u64, _ = await self._next_u64(user_id, tag=tag)
-        # unbiased rejection sampling (unchanged)
+
         limit = U64_RANGE - (U64_RANGE % upper)
         while u64 >= limit:
             u64 = int.from_bytes(hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big")
         return u64 % upper
     async def fair_random(self, user_id: int) -> float:
         u64, _ = await self._next_u64(user_id, tag="random")
-        return u64 / float(U64_RANGE)  # [0, 1)
+        return u64 / float(U64_RANGE)  
 
     async def fair_sample(self, user_id: int, seq: Sequence[Any], k: int) -> List[Any]:
         """
@@ -967,15 +930,14 @@ class Casino(commands.Cog):
         await self.fair_shuffle(user_id, clone)
         return clone[:k]
 
-
     async def fair_choice(self, user_id: int, seq: Sequence[Any], *, tag: str = "choice"):
         if not seq:
             raise ValueError("sequence must be non-empty")
         idx = await self.fair_randbelow(user_id, len(seq), tag=tag)
         return seq[idx]
-    
+
     async def fair_shuffle(self, user_id: int, deck: List[Any]) -> None:
-        # Give each swap a specific tag to make replays trivial
+
         for i in range(len(deck) - 1, 0, -1):
             j = await self.fair_randbelow(user_id, i + 1, tag=f"shuffle:{i}")
             deck[i], deck[j] = deck[j], deck[i]
@@ -1004,7 +966,7 @@ class Casino(commands.Cog):
             "client_seed": client_seed,
             "nonce": nonce,
         }
-    
+
     def _fmt_no_sci(self, x: Decimal, *, max_frac: int = 2, rounding=ROUND_HALF_UP) -> str:
         """
         Format a Decimal without scientific notation, with commas,
@@ -1044,7 +1006,6 @@ class Casino(commands.Cog):
                 out = f"{num}{suffix}"
                 return f"-{out}" if negative else out
 
-        # < 1k
         num = self._fmt_no_sci(value, max_frac=2)
         return f"-{num}" if negative else num
 
@@ -1149,7 +1110,6 @@ class Casino(commands.Cog):
 
         return amount
 
-    # ========== GROUP ROOT ==========
     @commands.group(name="casino", invoke_without_command=True, help="Casino command group. Use !casino help for subcommands.")
     async def casino(self, ctx: commands.Context):
         """Root for casino commands. Lists available subcommands."""
@@ -1182,7 +1142,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    # ========== SUBCOMMAND: STATS ==========
     @casino.command(name="stats", help="Check your win/loss statistics for a specific game.")
     async def casino_stats(
         self,
@@ -1196,7 +1155,6 @@ class Casino(commands.Cog):
         member = ctx.author
         game_key = (game_name or "gamble").lower()
 
-        # Validate game
         if game_key not in self.games:
             valid = ", ".join(g.title() for g in sorted(self.games))
             embed = discord.Embed(
@@ -1206,22 +1164,18 @@ class Casino(commands.Cog):
             )
             return await ctx.reply(embed=embed, mention_author=False)
 
-        # 1) wins & losses
         wins, losses = await self.bot.database.get_game_stats(member.id, game_key)
         total_games = wins + losses
         win_rate = (wins / total_games * 100) if total_games else 0.0
 
-        # 2) wager aggregates
         total_wagered, win_wagered, loss_wagered = await self.bot.database.get_wager_stats(
             member.id, game_key
         )
 
-        # 3) compute averages (stay Decimal-safe)
         average_bet  = (total_wagered / total_games) if total_games else Decimal("0")
         average_win  = (win_wagered   / wins      ) if wins       else Decimal("0")
         average_loss = (loss_wagered  / losses    ) if losses     else Decimal("0")
 
-        # 4) build embed
         color = (
             member.top_role.color
             if hasattr(member, "top_role") and member.top_role
@@ -1258,7 +1212,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    # ========== SUBCOMMAND: LEADERBOARD ==========
     @casino.command(name="leaderboard", aliases=["lb"], help="View the top winners and losers for a specific game.")
     async def casino_leaderboard(
         self,
@@ -1272,7 +1225,6 @@ class Casino(commands.Cog):
         """
         game_key = (game_name or "gamble").lower()
 
-        # Validate game
         if game_key not in self.games:
             valid = ", ".join(g.title() for g in sorted(self.games))
             embed = discord.Embed(
@@ -1282,7 +1234,6 @@ class Casino(commands.Cog):
             )
             return await ctx.reply(embed=embed, mention_author=False)
 
-        # fetch winners and losers (same signature, different DB function)
         top_winners = await self.bot.database.get_top_game_winners(game_key, limit)
 
         embed = discord.Embed(
@@ -1302,7 +1253,6 @@ class Casino(commands.Cog):
             embed.add_field(name="Top 10 Users", value="No data available", inline=True)
         await ctx.send(embed=embed)
 
-    # ========== SUBCOMMAND: HISTORY ==========
     @casino.command(name="history", aliases=["games", "ghistory"], help="View your game history.")
     async def casino_history(
         self,
@@ -1316,7 +1266,7 @@ class Casino(commands.Cog):
           !casino ghistory
         """
         member = ctx.author
-        limit = max(1, min(int(limit), 1000))  # clamp to sane range
+        limit = max(1, min(int(limit), 1000))  
 
         history = await self.bot.database.get_user_game_history(member.id, limit)
         if not history:
@@ -1327,7 +1277,6 @@ class Casino(commands.Cog):
             )
             return await ctx.reply(embed=embed, delete_after=5, mention_author=False)
 
-        # Reuse your existing paginator/view
         view = GameHistoryPaginator(
             cog=self,
             history=history,
@@ -1337,7 +1286,6 @@ class Casino(commands.Cog):
         embed = await view.get_page_embed()
         await ctx.reply(embed=embed, view=view, mention_author=False)
 
-    # ========== SUBCOMMAND: VERIFY (OWNER ONLY) ==========
     @casino.command(name="verify", aliases=["v",'verif','check'], help="verify a provably-fair game outcome", hidden=True)
     async def casino_verify(
         self,
@@ -1351,7 +1299,7 @@ class Casino(commands.Cog):
           !casino verify gamble @user 42
           !casino verify supergamble @user 7
           !casino verify dice @user 5
-          !casino verify ladder @user 3 2     # nonce, step
+          !casino verify ladder @user 3 2     
           !casino verify slots @user 10
           !casino verify blackjack @user 15
           !casino verify poker @user 12
@@ -1361,7 +1309,6 @@ class Casino(commands.Cog):
         game_key = (game or "").lower()
         user_id = ctx.author.id
 
-        # Fetch the specific game history record
         record = await self.bot.database.fetch_game_for_user(user_id, game_key, nonce)
         if not record:
             embed = discord.Embed(
@@ -1384,7 +1331,6 @@ class Casino(commands.Cog):
         )
         embed = discord.Embed(title=title, description=desc, color=discord.Color.blurple())
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        #embed.set_footer(text="Values below are independently reproducible from seeds.")
 
         try:
             if game_key == "gamble":
@@ -1407,7 +1353,7 @@ class Casino(commands.Cog):
                     return await ctx.reply("For ladder, supply both nonce and step.", mention_author=False)
                 step = int(extra_args[0])
                 roll_pct, threshold = pf.verify_ladder(server_seed, client_seed, nonce, step)
-                # visual progress bar
+
                 bar_len = 20
                 filled = int(min(max(roll_pct, 0), 100) / 100 * bar_len)
                 bar = "█" * filled + "░" * (bar_len - filled)
@@ -1457,7 +1403,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    # ========== SUBCOMMAND: SEED VIEW ==========
     @casino.command(name="seed", help="View your current client seed and the hashed server seed.")
     async def casino_seed(self, ctx: commands.Context):
         """
@@ -1483,7 +1428,6 @@ class Casino(commands.Cog):
         await self.bot.database.set_cooldown(ctx.author.id, "casino seed", 5)
         await ctx.reply(embed=embed, mention_author=False)
 
-    # ========== SUBCOMMAND: SET SEED ==========
     @casino.command(name="setseed", aliases=["newseed"], help="Update your client seed for provable fairness.")
     async def casino_setseed(self, ctx: commands.Context, *, seed: Optional[str] = None):
         """
@@ -1508,7 +1452,6 @@ class Casino(commands.Cog):
         try:
             user_id = ctx.author.id
 
-            # fetch fairness metadata BEFORE any RNG
             PF = await self.prove_fairness(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -1580,7 +1523,6 @@ class Casino(commands.Cog):
         try:
             user_id = ctx.author.id
 
-            # fetch fairness metadata BEFORE any RNG
             PF = await self.prove_fairness(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -1609,7 +1551,6 @@ class Casino(commands.Cog):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
-            # two provably-fair rolls
             win_roll   = await self.fair_randbelow(user_id, 100)
             bonus_roll = await self.fair_randbelow(user_id, 100)
 
@@ -1688,10 +1629,8 @@ class Casino(commands.Cog):
         user_id     = ctx.author.id
         currency    = self.currency_name
 
-        # 1) ---------- provably-fair entropy snapshot ----------
-        PF = await self.prove_fairness(user_id)        # {'server_seed', 'client_seed', 'nonce', 'server_seed_hash'}
+        PF = await self.prove_fairness(user_id)        
 
-        # 2) ---------- bankroll / bet validation ----------
         wallet_id   = await self.bot.database.get_wallet_id_for_user(user_id)
         bal_raw     = await self.bot.database.get_wallet_balance(wallet_id)
         balance     = Decimal(str(bal_raw))
@@ -1708,36 +1647,33 @@ class Casino(commands.Cog):
                 description=f"High-roller bet capped at **{await self.formatter(stake)} {currency}**.",
                 color=discord.Color.orange()), delete_after=5)
 
-        # debit stake
         try:
             await self.bot.database.process_treasury_transaction(wallet_id, -stake, "Slots Bet")
         except ValueError as e:
             return await ctx.reply(embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()), delete_after=5)
 
-        # 3) ---------- reel generation (provably fair) ----------
         symbols = [":cherries:", ":lemon:", ":seven:", ":bell:", ":beers:", ":gem:"]
-        weights = [4.61, 3.81, 3.03, 2.22, 1.44, 1.08]        # floats or Decimals
+        weights = [4.61, 3.81, 3.03, 2.22, 1.44, 1.08]        
 
-        SCALE   = 10_000                                      # 4-dp precision
-        scaled  = [int(w * SCALE) for w in weights]           # [46100, 38100, …]
+        SCALE   = 10_000                                      
+        scaled  = [int(w * SCALE) for w in weights]           
         cum_int = []
         total_i = 0
         for s in scaled:
             total_i += s
-            cum_int.append(total_i)                           # cumulative integers
+            cum_int.append(total_i)                           
 
         async def weighted_choice_int() -> str:
-            rnd = await self.fair_randbelow(user_id, total_i)  # 0 ≤ rnd < total_i
+            rnd = await self.fair_randbelow(user_id, total_i)  
             for sym, bound in zip(symbols, cum_int):
                 if rnd < bound:
                     return sym
-            return symbols[-1]  # safety (never reached)
+            return symbols[-1]  
 
         reel = [await weighted_choice_int() for _ in range(6)]
 
-        # 4) ---------- Pay-table (multipliers) ----------
         PAY = {
-            # (symbol, match_count): multiplier
+
             (":gem:",   6): 800,
             (":bell:",  6):  60,
             (":beers:", 6):  80,
@@ -1766,17 +1702,14 @@ class Casino(commands.Cog):
             (":lemon:", 3): Decimal("0.8"),
             (":cherries:", 3): Decimal("0.5"),
 
-            # special consolation – only cherries pay for 2-of-a-kind
             (":cherries:", 2): Decimal("0.2"),
         }
 
-        # 5) ---------- determine payout ----------
         counts     = Counter(reel)
         sym, qty   = counts.most_common(1)[0]
         multiplier = Decimal(PAY.get((sym, qty), 0))
         winnings   = (stake * multiplier).quantize(Decimal("0.01"))
 
-        # 6) ---------- treasury settlement ----------
         if winnings:
             await self.bot.database.process_treasury_transaction(wallet_id, winnings, "Slots Win")
             revealed_seed, new_hash = await self.bot.database.increment_win(
@@ -1789,7 +1722,6 @@ class Casino(commands.Cog):
                 client_seed=PF["client_seed"], seed_used=None, nonce=PF["nonce"], hash_hex=PF["server_seed_hash"]
             )
 
-        # 7) ---------- user-facing embed ----------
         if multiplier >= 1:
             title = "Win!"
             col   = discord.Color.blurple() if multiplier < 5 else discord.Color.green()
@@ -1809,7 +1741,6 @@ class Casino(commands.Cog):
         embed = discord.Embed(description=outcome, color=col)
         embed.set_author(name="Slots", icon_url=self.utils.get_avatar_url(ctx.author))
         footer = f"clientSeed={PF['client_seed']} | serverHash={PF['server_seed_hash'][:12]}… | nonceStart={PF['nonce']}"
-        #embed.set_footer(text=footer)
 
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
         await ctx.reply(embed=embed)
@@ -1818,7 +1749,7 @@ class Casino(commands.Cog):
     async def roll(self, ctx: Context, bet_amount: str, guess: str):
         user_id = ctx.author.id
 
-        PF = await self.prove_fairness(user_id)  # fetch fairness metadata before RNG
+        PF = await self.prove_fairness(user_id)  
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -2100,7 +2031,7 @@ class Casino(commands.Cog):
         """Start a double or nothing game with the specified bet amount."""
         user_id = ctx.author.id
 
-        PF = await self.prove_fairness(user_id)  # fetch fairness metadata before RNG
+        PF = await self.prove_fairness(user_id)  
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -2204,7 +2135,6 @@ class Casino(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
             return
 
-        # 4) Build & provably-fair shuffle the deck
         suits = ['♥', '♦', '♣', '♠']
         ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A']
         deck = [f"{r}{s}" for s in suits for r in ranks]
@@ -2321,7 +2251,7 @@ class Casino(commands.Cog):
         async def hit_callback(interaction: Interaction):
             nonlocal player_score, dealer_score
             if not interaction.response.is_done():
-                await interaction.response.defer(thinking=False)  # acknowledges within 3s
+                await interaction.response.defer(thinking=False)  
 
             if interaction.user.id != user_id:
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
@@ -2349,7 +2279,7 @@ class Casino(commands.Cog):
         async def stay_callback(interaction: Interaction):
             nonlocal dealer_score
             if not interaction.response.is_done():
-                await interaction.response.defer(thinking=False)  # acknowledges within 3s
+                await interaction.response.defer(thinking=False)  
 
             if interaction.user.id != user_id:
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
@@ -2427,9 +2357,6 @@ class Casino(commands.Cog):
         view = PokerView(self.bot, self, ctx.author, player_hand, bot_hand, community, bet, wallet_id, user_id, PF)
         await ctx.reply(embed=embed, view=view)
 
-    # ─────────────────────────────────────────────────────────────
-    #  BACCARAT (commission-free Banker 0.5× on 6) – provably fair
-    # ─────────────────────────────────────────────────────────────
     @commands.command(
         name="baccarat",
         aliases=["bac", "punto"],
@@ -2448,8 +2375,7 @@ class Casino(commands.Cog):
         uid      = ctx.author.id
         currency = self.currency_name
 
-        # 1)  ─── provably-fair snapshot & bet sizing ─────────────────────────
-        PF = await self.prove_fairness(uid)          # {server_seed, client_seed, nonce, hash}
+        PF = await self.prove_fairness(uid)          
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(uid)
         bal_raw   = await self.bot.database.get_wallet_balance(wallet_id)
@@ -2472,34 +2398,29 @@ class Casino(commands.Cog):
         except ValueError as e:
             return await ctx.reply(embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()), delete_after=5)
 
-        # 2)  ─── build & shuffle a 6-deck shoe (provably fair) ───────────────
         ranks = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"]
-        card_val = {r:i for i,r in enumerate(ranks, start=1)} | {"10":0,"J":0,"Q":0,"K":0}  # A=1, 2-9 face value, 0 otherwise
+        card_val = {r:i for i,r in enumerate(ranks, start=1)} | {"10":0,"J":0,"Q":0,"K":0}  
         suits = ["♥","♦","♣","♠"]
 
         shoe = [f"{r}{s}" for _ in range(6) for s in suits for r in ranks]
-        await self.fair_shuffle(uid, shoe)           # increments nonce len(shoe) times but provable
+        await self.fair_shuffle(uid, shoe)           
 
-        draw = shoe.pop                         # local alias
+        draw = shoe.pop                         
 
-        # helper to total a hand modulo 10
         def total(hand: list[str]) -> int:
             return sum(card_val[c[:-1]] for c in hand) % 10
 
-        # 3)  ─── initial deal ────────────────────────────────────────────────
         player = [draw(), draw()]
         banker = [draw(), draw()]
 
         p_total = total(player)
         b_total = total(banker)
 
-        # 4)  ─── third-card rule (simplified) ────────────────────────────────
         player_draws = p_total <= 5
         if player_draws:
             player.append(draw())
             p_total = total(player)
 
-        # Banker draw logic per standard rules
         banker_draws = (
             (b_total <= 2) or
             (b_total == 3 and (not player_draws or player[-1][:-1] != "8")) or
@@ -2512,22 +2433,20 @@ class Casino(commands.Cog):
             banker.append(draw())
             b_total = total(banker)
 
-        # 5)  ─── outcome determination ───────────────────────────────────────
         result = "player" if p_total > b_total else "banker" if b_total > p_total else "tie"
 
         payout_mult = Decimal("0")
         if side == "player" and result == "player":
             payout_mult = Decimal("1")
         elif side == "banker" and result == "banker":
-            payout_mult = Decimal("1")               # commission-free
-            if b_total == 6 and len(banker) == 3:    # special 0.5× payout
+            payout_mult = Decimal("1")               
+            if b_total == 6 and len(banker) == 3:    
                 payout_mult = Decimal("0.5")
         elif side == "tie" and result == "tie":
             payout_mult = Decimal("8")
 
         winnings = (stake * payout_mult).quantize(Decimal("0.01"))
 
-        # 6)  ─── treasury settlement & stats ─────────────────────────────────
         if winnings:
             await self.bot.database.process_treasury_transaction(wallet_id, winnings, "Baccarat Win")
             revealed_seed, new_hash = await self.bot.database.increment_win(uid, "baccarat", stake,
@@ -2536,8 +2455,7 @@ class Casino(commands.Cog):
             revealed_seed, new_hash = await self.bot.database.increment_loss(uid, "baccarat", stake,
                 client_seed=PF["client_seed"], seed_used=None, nonce=PF["nonce"], hash_hex=PF["server_seed_hash"])
 
-        # 7)  ─── embed output ────────────────────────────────────────────────
-        def prettify(hand):  # ♥ A ➝ A♥
+        def prettify(hand):  
             return " ".join(hand)
 
         title = f"🏦 Banker {b_total} – 👤 Player {p_total}"
@@ -2581,7 +2499,7 @@ class Casino(commands.Cog):
 
             user_id = ctx.author.id
 
-            PF = await self.prove_fairness(user_id)  # fetch fairness metadata before RNG
+            PF = await self.prove_fairness(user_id)  
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -2754,7 +2672,7 @@ class Casino(commands.Cog):
                         child.label = f"Cash Out {game_state['multiplier']:.2f}x"
 
                 try:
-                    # if we’re inside an interaction we must finish it
+
                     if interaction and interaction.response.is_done():
                         await interaction.followup.edit_message(
                             game_state['message'].id,
@@ -2825,7 +2743,7 @@ class Casino(commands.Cog):
                 if interaction.user.id != user.id:
                     await interaction.response.send_message("This isn't your game!", ephemeral=True)
                     return
-                
+
                 if not game_state['game_active']:
                     return
 
@@ -2976,7 +2894,7 @@ class Casino(commands.Cog):
     async def luckyladder(self, ctx: Context, bet_amount: str):
         """Start climbing the Lucky Ladder with a bet."""
         user_id = ctx.author.id
-        PF = await self.prove_fairness(user_id)  # capture provably-fair info
+        PF = await self.prove_fairness(user_id)  
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -3006,7 +2924,6 @@ class Casino(commands.Cog):
         except ValueError as e:
             return await ctx.reply(embed=discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red()), delete_after=5)
 
-        # initialize game state, storing PF info
         self.ladder_games[user_id] = {
             "step": 0,
             "bet": amount,
@@ -3034,7 +2951,7 @@ class Casino(commands.Cog):
             "**Potential Next Multiplier:** 1.15x"
         ), inline=False)
 
-        view = LadderView(user_id, self)  # your existing View class
+        view = LadderView(user_id, self)  
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
         await ctx.reply(embed=embed, view=view)
 
@@ -3055,14 +2972,13 @@ class Casino(commands.Cog):
         step_probs = {0:80,1:75,2:70,3:65,4:60,5:55,6:50,7:45,8:40,9:35,10:30}
         step_mults = {0:1.00,1:1.15,2:1.30,3:1.50,4:1.75,5:2.05,6:2.40,7:2.80,8:3.25,9:3.75,10:4.20}
 
-        success_chance = step_probs.get(step, 5)  # percent
-        threshold = success_chance * 100          # out of 10000
+        success_chance = step_probs.get(step, 5)  
+        threshold = success_chance * 100          
 
-        # provably-fair roll in [0,9999]
         roll = await self.fair_randbelow(user_id, 10000)
 
         if roll < threshold:
-            # success
+
             game["step"] += 1
             game["current_multiplier"] = Decimal(str(step_mults[game["step"]]))
 
@@ -3085,7 +3001,7 @@ class Casino(commands.Cog):
             ), inline=False)
 
             if game["step"] == 10:
-                # jackpot payout
+
                 wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
                 try:
                     await self.bot.database.process_treasury_transaction(
@@ -3106,7 +3022,7 @@ class Casino(commands.Cog):
             await interaction.response.edit_message(embed=embed, view=view)
 
         else:
-            # failure
+
             revealed_seed, new_hash = await self.bot.database.increment_loss(
                 user_id, "ladder", bet,
                 client_seed=PF['client_seed'],
@@ -3184,40 +3100,37 @@ class Casino(commands.Cog):
         view = CrashView(self.bot, ctx.author.id, cid)
         self.active_games[cid] = view
 
-        # start the game in background so the command returns immediately
         view.game_task = asyncio.create_task(view.start_game(ctx))
 
-        # cooldown
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 10
         )
 
     def cleanup_after_game(self, channel_id: int):
-        # remove both from player‐set and active_games
+
         self.active_players.discard(channel_id)
         self.active_games.pop(channel_id, None)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
-        # only handle our crash buttons/modals
+
         if not interaction.data or not interaction.data.get("custom_id", "").startswith("crash_"):
             return
 
         channel_id = interaction.channel_id
         current_game = self.active_games.get(channel_id)
         if not current_game:
-            return  # no game running here
+            return  
 
         casino_cog = self.bot.get_cog("Casino")
         custom_id = interaction.data["custom_id"]
 
         if custom_id == "crash_join":
-            # show a modal to pick your bet
+
             formatted_max = await casino_cog.short_formatter(current_game.max_allowed_bet)
-            # 1) Create the modal
+
             modal = discord.ui.Modal(title="Join Crash Game")
 
-            # 2) Define the TextInput and add it
             amount_input = discord.ui.TextInput(
                 label="Bet Amount",
                 placeholder=f"Enter amount to bet (Max: {formatted_max})",
@@ -3226,7 +3139,7 @@ class Casino(commands.Cog):
             modal.add_item(amount_input)
 
             async def on_submit(modal_inter: discord.Interaction):
-                # identical logic to debit + register, but now per‐user crash point
+
                 uid = modal_inter.user.id
                 elapsed = (discord.utils.utcnow() - current_game.start_time).total_seconds()
                 if current_game.game_phase != "starting" or elapsed >= 20:
@@ -3240,7 +3153,7 @@ class Casino(commands.Cog):
 
                 await self.bot.database.process_treasury_transaction(wallet_id, -amt, "Crash Bet")
                 current_game.players[uid] = amt
-                # assign a per‐user crash point
+
                 current_game.crash_points[uid] = await current_game.generate_crash_point(uid)
 
                 await modal_inter.response.send_message(f"Joined at {amt}", ephemeral=True)
@@ -3251,7 +3164,7 @@ class Casino(commands.Cog):
 
         elif custom_id == "crash_cashout":
             uid = interaction.user.id
-            # only cash out once
+
             if uid not in current_game.players or uid in current_game.cashed_out:
                 return await interaction.response.send_message("Can't cash out.", ephemeral=True)
 
@@ -3273,7 +3186,6 @@ class Casino(commands.Cog):
         if not view or not view.is_running:
             return await ctx.send("No active crash game here.")
 
-        # build status embed
         embed = discord.Embed(
             title=f"🚀 Crash Status — #{channel.name}", color=discord.Color.blue()
         )
@@ -3282,7 +3194,6 @@ class Casino(commands.Cog):
             value=f"{view.current_multiplier:.2f}×", inline=False
         )
 
-        # For each player, show bet, target crash-point, and their status
         lines = []
         for uid, bet in view.players.items():
             cp = view.crash_points.get(uid, Decimal("0"))
@@ -3302,7 +3213,6 @@ class Casino(commands.Cog):
             inline=False
         )
 
-        # Admin control buttons
         admin_id = ctx.author.id
         admin_view = discord.ui.View(timeout=None)
 
@@ -3346,7 +3256,6 @@ class Casino(commands.Cog):
         win_btn.callback = win_cb
         admin_view.add_item(win_btn)
 
-        # DM the admin
         await ctx.author.send(embed=embed, view=admin_view)
         await ctx.message.add_reaction("✅")
 
@@ -3374,7 +3283,7 @@ class Casino(commands.Cog):
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
         try:
-            amount_dec = await self.amount_handler(bet_amount, balance)  # returns Decimal
+            amount_dec = await self.amount_handler(bet_amount, balance)  
         except ValueError as e:
             await ctx.reply(embed=discord.Embed(description=str(e), color=discord.Color.red()), delete_after=6)
             return
@@ -3382,7 +3291,7 @@ class Casino(commands.Cog):
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if amount_dec > max_allowed:
             amount_dec = max_allowed
-            capped = await self.formatter(amount_dec)      # <<< your formatter
+            capped = await self.formatter(amount_dec)      
             await ctx.reply(
                 embed=discord.Embed(
                     description=f"Bet auto-capped to **{capped}**.",
@@ -3408,11 +3317,10 @@ class Casino(commands.Cog):
             bomb_positions=bomb_positions,
             bot=self.bot,
             PF=PF,
-            currency_emoji=self.currency_name,   # your coin emoji/string
-            fmt_amount_coro=self.formatter,      # <<< pass your formatter coroutine
+            currency_emoji=self.currency_name,   
+            fmt_amount_coro=self.formatter,      
         )
 
-        # prime the status panel once (after we know multiplier)
         mult0 = await view._mult()
         await view._update_status(multiplier=mult0)
 
