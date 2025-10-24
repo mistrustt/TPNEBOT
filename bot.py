@@ -3,7 +3,6 @@ import os, random
 import discord
 import logging
 import platform
-import aiohttp
 import traceback
 import urllib.parse
 from discord import app_commands, Webhook

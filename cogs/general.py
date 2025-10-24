@@ -1144,7 +1144,7 @@ class General(commands.Cog, name="General"):
                     "Content-Type": "application/json"
                 }
                 data = json.dumps({
-                    "model": "tngtech/deepseek-r1t2-chimera:free",
+                    "model": "deepseek/deepseek-chat-v3.1:free",
                     "messages": [{"role": "user", "content": 
                                 f"""You are the mystical “8-Ball Oracle.” Your only job is:
                                     • Read the user’s question (everything they send you is the question).
@@ -1236,7 +1236,7 @@ class General(commands.Cog, name="General"):
                 user_msg = {"role": "user", "content": question}
 
                 payload = {
-                    "model": "tngtech/deepseek-r1t2-chimera:free",
+                    "model": "deepseek/deepseek-chat-v3.1:free",
                     "messages": [system_msg, user_msg]
                 }
 

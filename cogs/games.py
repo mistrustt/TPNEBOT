@@ -60,7 +60,7 @@ async def fetch_wyr_question() -> str | None:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "tngtech/deepseek-r1t2-chimera:free",
+        "model": "deepseek/deepseek-chat-v3.1:free",  # model name
         "messages": [
             {"role": "user", "content": """
                 You are the “Funny WYR Bot.” Your sole task is to generate exactly one short, snarky “Would You Rather” question in the format below—no more, no less:
