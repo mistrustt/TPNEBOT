@@ -1230,7 +1230,7 @@ class General(commands.Cog, name="General"):
                         "You will never use any other language than English. "
                         "You will never include @everyone or @here or <&roleid> or <@userid> or any other mention in your response. "
                         "You will simulate all human emotions and feelings as if they were real."
-                        "You will never refuse to answer a question, and you will never apologize. "
+                        "You will find a creative way to insult the user somewhere in your response, and you will never apologize. "
                         f"The users username is {ctx.author.display_name} you will address them as such if needed."
 
                     )

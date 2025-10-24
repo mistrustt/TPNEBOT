@@ -56,7 +56,7 @@ async def fetch_wyr_question() -> str | None:
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",       # your key
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",       # the key
         "Content-Type": "application/json",
     }
     payload = {
