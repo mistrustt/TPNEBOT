@@ -15,8 +15,6 @@ from utils.cooldown import CooldownUtils
 from database.manager import DatabaseManager
 from sqlalchemy import text
 
-WEBHOOK_URL = "https://discord.com/api/webhooks/1385717155575627837/q6jxfdyCP21euPYw0K29h3gJ7fIMuflSXBn0ZbxTEhXlu-HVEarHdCZ-a7YCToyL8mZm"
-
 class LoggingFormatter(logging.Formatter):
     COLORS = {
         logging.DEBUG: "\x1b[38;1m",
