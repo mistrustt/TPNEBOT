@@ -35,53 +35,7 @@ LANGUAGE_IMAGES = {
     "python": "python:3.9-slim",
     "node": "node:16-slim",
     "ruby": "ruby:3.0-slim",
-    "golang": "golang:1.16-alpine",  # Example for Go, not implemented in run_user_code
 }
-
-# Interactive view: Refresh / Close
-class ResourceView(discord.ui.View):
-    def __init__(self, author_id: int, timeout: float = 120.0):
-        super().__init__(timeout=timeout)
-        self.author_id = author_id
-        self.message = None
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message("You cannot control this view.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.primary, emoji="🔄")
-    async def refresh(self, button: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.defer()
-        try:
-            new_stats = await gather_stats()
-            new_embed = make_embed(new_stats)
-            await interaction.followup.edit_message(self.message.id, embed=new_embed, view=self)
-        except Exception as e:
-            await interaction.followup.send(f"Failed to refresh: {e}", ephemeral=True)
-
-    @discord.ui.button(label="Close", style=discord.ButtonStyle.secondary, emoji="❌")
-    async def close(self, button: discord.ui.Button, interaction: discord.Interaction):
-        for child in self.children:
-            child.disabled = True
-        try:
-            await interaction.response.edit_message(view=self)
-        except Exception:
-            try:
-                await interaction.response.send_message("Closed.", ephemeral=True)
-            except Exception:
-                pass
-        self.stop()
-
-    async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
-        try:
-            if self.message:
-                await self.message.edit(view=self)
-        except Exception:
-            pass
 
 class CodeSafetyChecker(ast.NodeVisitor):
 
@@ -157,22 +111,6 @@ def check_code_safety(code: str, language: str) -> None:
 
         if re.search(r'\beval\s*\(', code):
             raise ValueError("Usage of eval is not allowed in Ruby code.")
-
-    elif language == 'golang':
-
-        if re.search(r'\bfor\s*\(', code):
-            raise ValueError("For loops are not allowed in Go code.")
-        if re.search(r'\bwhile\s*\(', code):
-            raise ValueError("While loops are not allowed in Go code.")
-
-        if re.search(r'\bexec\.Command\s*\(', code):
-            raise ValueError("Usage of exec.Command is not allowed in Go code.")
-
-        if re.search(r'\beval\s*\(', code):
-            raise ValueError("Usage of eval is not allowed in Go code.")
-        
-        if re.search(r'\bimport\s*\(\s*["\']os["\']\s*\)', code):
-            raise ValueError("Importing 'os' package is not allowed in Go code.")
 
     else:
         raise ValueError(f"Unsupported language: {language}")
@@ -686,210 +624,6 @@ class Owner(commands.Cog, name="Owner"):
             logging.error(f"Error clearing tasks: {err}")
             embed = discord.Embed(title="Error", description="An error occurred while clearing tasks.", color=discord.Color.red())
             await ctx.send(embed=embed)
-
-    @commands.command(name="resourceinfo", aliases=['resource', 'resinf'], hidden=True)
-    @commands.is_owner()
-    async def resource_info(self, ctx: Context):
-        """
-        Show a rich snapshot of system resource usage and allow on-demand refresh
-        via buttons.
-        """
-        def _human_bytes(n: float) -> str:
-            # Human-readable bytes
-            units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-            i = 0
-            while n >= 1024 and i < len(units) - 1:
-                n /= 1024.0
-                i += 1
-            return f"{n:.2f} {units[i]}"
-
-        def _human_duration(td: float) -> str:
-            # td is seconds
-            seconds = int(td)
-            days, seconds = divmod(seconds, 86400)
-            hours, seconds = divmod(seconds, 3600)
-            minutes, seconds = divmod(seconds, 60)
-            parts = []
-            if days:
-                parts.append(f"{days}d")
-            if hours:
-                parts.append(f"{hours}h")
-            if minutes:
-                parts.append(f"{minutes}m")
-            parts.append(f"{seconds}s")
-            return " ".join(parts)
-
-        def _collect_stats() -> dict:
-            # Runs synchronously. We'll call it in executor to avoid blocking the event loop.
-            stats = {}
-            # CPU
-            cpu_overall = psutil.cpu_percent(interval=0.1)
-            cpu_percore = psutil.cpu_percent(interval=0.0, percpu=True)
-            try:
-                load1, load5, load15 = os.getloadavg()
-            except Exception:
-                load1 = load5 = load15 = None
-
-            # Memory
-            vm = psutil.virtual_memory()
-            swap = psutil.swap_memory()
-
-            # Disk (root) + partitions summary
-            try:
-                root = psutil.disk_usage('/')
-            except Exception:
-                root = None
-            partitions = []
-            try:
-                for part in psutil.disk_partitions(all=False):
-                    try:
-                        usage = psutil.disk_usage(part.mountpoint)
-                        partitions.append({
-                            "device": part.device,
-                            "mountpoint": part.mountpoint,
-                            "fstype": part.fstype,
-                            "total": usage.total,
-                            "used": usage.used,
-                            "percent": usage.percent
-                        })
-                    except Exception:
-                        continue
-            except Exception:
-                partitions = []
-
-            # Network
-            net = psutil.net_io_counters()
-
-            # Top processes by CPU and by memory
-            procs = []
-            for p in psutil.process_iter(['pid', 'name', 'username', 'cpu_percent', 'memory_info']):
-                try:
-                    info = p.info
-                    mem = info.get('memory_info')
-                    procs.append({
-                        "pid": info.get('pid'),
-                        "name": (info.get('name') or "")[:32],
-                        "user": (info.get('username') or "")[:16],
-                        "cpu": float(info.get('cpu_percent') or 0.0),
-                        "mem": mem.rss if mem else 0
-                    })
-                except Exception:
-                    continue
-
-            procs_by_cpu = sorted(procs, key=lambda x: x['cpu'], reverse=True)[:6]
-            procs_by_mem = sorted(procs, key=lambda x: x['mem'], reverse=True)[:6]
-
-            # Uptime
-            boot_ts = psutil.boot_time()
-            uptime_seconds = max(0.0, (datetime.now() - datetime.fromtimestamp(boot_ts)).total_seconds())
-
-            stats.update({
-                "cpu_overall": cpu_overall,
-                "cpu_percore": cpu_percore,
-                "loadavg": (load1, load5, load15),
-                "vm": vm,
-                "swap": swap,
-                "root": root,
-                "partitions": partitions,
-                "net": net,
-                "procs_by_cpu": procs_by_cpu,
-                "procs_by_mem": procs_by_mem,
-                "uptime_seconds": uptime_seconds,
-            })
-            return stats
-
-        async def gather_stats() -> dict:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, _collect_stats)
-
-        def make_embed(stats: dict) -> discord.Embed:
-            embed = discord.Embed(title="System Resource Snapshot", color=discord.Color.blurple(), timestamp=datetime.utcnow())
-
-            # CPU
-            cpu_field = f"Overall: {stats['cpu_overall']:.1f}%"
-            percore = stats.get('cpu_percore') or []
-            # show up to first 8 cores to avoid spamming
-            if percore:
-                snippets = []
-                for idx, v in enumerate(percore[:8], start=1):
-                    snippets.append(f"Core {idx}: {v:.0f}%")
-                if len(percore) > 8:
-                    snippets.append(f"... +{len(percore)-8} cores")
-                cpu_field += "\n" + " • ".join(snippets)
-            if stats.get('loadavg')[0] is not None:
-                load1, load5, load15 = stats['loadavg']
-                cpu_field += f"\nLoad Avg: {load1:.2f} {load5:.2f} {load15:.2f}"
-            embed.add_field(name="CPU", value=cpu_field, inline=False)
-
-            # Memory
-            vm = stats['vm']
-            mem_field = f"{_human_bytes(vm.used)} / {_human_bytes(vm.total)} ({vm.percent}%)"
-            if stats['swap'] and stats['swap'].total:
-                swap = stats['swap']
-                mem_field += f"\nSwap: {_human_bytes(swap.used)} / {_human_bytes(swap.total)} ({swap.percent}%)"
-            embed.add_field(name="Memory", value=mem_field, inline=False)
-
-            # Disk (root)
-            root = stats.get('root')
-            if root:
-                embed.add_field(
-                    name="Disk ( / )",
-                    value=f"{_human_bytes(root.used)} / {_human_bytes(root.total)} ({root.percent}%)",
-                    inline=False
-                )
-
-            # Top partitions (show a few)
-            parts = stats.get('partitions') or []
-            if parts:
-                part_lines = []
-                for p in parts[:4]:
-                    part_lines.append(f"{p['mountpoint']} {p['percent']}% ({_human_bytes(p['used'])}/{_human_bytes(p['total'])})")
-                if len(parts) > 4:
-                    part_lines.append(f"... and {len(parts)-4} more")
-                embed.add_field(name="Partitions", value="\n".join(part_lines), inline=False)
-
-            # Network
-            net = stats['net']
-            net_field = f"Sent: {_human_bytes(net.bytes_sent)} • Recv: {_human_bytes(net.bytes_recv)}\nPackets: {net.packets_sent} sent • {net.packets_recv} recv"
-            embed.add_field(name="Network I/O", value=net_field, inline=False)
-
-            # Uptime
-            embed.add_field(name="Uptime", value=_human_duration(stats['uptime_seconds']), inline=True)
-
-            # Top processes by CPU
-            def proc_line(p):
-                return f"{p['name']} (pid:{p['pid']}) — {p['cpu']:.1f}% • {_human_bytes(p['mem'])}"
-
-            cpu_lines = [proc_line(p) for p in stats['procs_by_cpu'] if p['cpu'] > 0.0]
-            if cpu_lines:
-                embed.add_field(name="Top CPU processes", value="\n".join(cpu_lines[:6]), inline=False)
-            else:
-                embed.add_field(name="Top CPU processes", value="No active CPU consumers detected (short sample).", inline=False)
-
-            # Top processes by memory
-            mem_lines = [proc_line(p) for p in stats['procs_by_mem'] if p['mem'] > 0]
-            if mem_lines:
-                embed.add_field(name="Top Memory processes", value="\n".join(mem_lines[:6]), inline=False)
-
-            embed.set_footer(text=f"Requested by {ctx.author}", icon_url=getattr(ctx.author, "avatar", None) and ctx.author.avatar.url)
-            return embed
-
-        # Initial send
-        try:
-            stats = await gather_stats()
-        except Exception as e:
-            return await ctx.send(f"Failed to collect stats: {e}")
-
-        embed = make_embed(stats)
-        view = ResourceView(ctx.author.id)
-        sent = await ctx.send(embed=embed, view=view)
-        view.message = sent
-
-    @commands.command(name="rotateseed", help="Rotate the server casino seed.", hidden=True)
-    @commands.is_owner()
-    async def rotate_seed(self, ctx: Context):
-        await self.bot.database.rotate_server_seed()
-        await ctx.reply("Server seed rotated.")
 
     @commands.command(name="setstatus", hidden=True)
     @commands.is_owner()
@@ -1696,7 +1430,7 @@ class Owner(commands.Cog, name="Owner"):
         
         await ctx.send("Finished executing the command.")
 
-    @commands.command(name="runsql", aliases=['rsql', 'sql'], help="Run a SQL query", hidden=True)
+    @commands.command(name="sql", aliases=['db'], help="Run a SQL query", hidden=True)
     @commands.is_owner()
     async def run_sql(self, ctx, *, query: str):
         """Admin-only command to execute SQL queries on the database.
