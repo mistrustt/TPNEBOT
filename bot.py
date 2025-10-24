@@ -77,7 +77,7 @@ class DiscordBot(commands.Bot):
             657182369240973312,
             1173579369399210120,
         ]
-        self.version = "2025.10.20"
+        self.version = "20251024a"
         super().__init__(
             command_prefix=commands.when_mentioned_or(self.get_prefix),
             intents=discord.Intents.all(),
