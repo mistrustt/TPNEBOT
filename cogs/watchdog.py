@@ -17,6 +17,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
         self.max_queue_size = 10  
         self.process_interval = 10  
         self.guild_settings_cache = {}  
+        self.pii_filter = True  # Enable or disable PII filtering
         self.discord_patterns = [
             # Discord gift link pattern
             re.compile(r'(https?://)?discord((app)?.com/gifts|.gifts)/[a-zA-Z0-9-]+/?'),
@@ -373,7 +374,8 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
                 try:
-                    await message.delete()
+                    if self.pii_filter:
+                        await message.delete()
                 except discord.Forbidden:
                     desc += "\n*Failed to delete the message due to insufficient permissions.*"
                 await self.add_log_entry(message.guild.id, desc)
