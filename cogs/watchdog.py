@@ -53,8 +53,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
             r'([a-zA-Z0-9]{24}\.[a-zA-Z0-9]{6}\.[a-zA-Z0-9_\-]{27}|mfa\.[a-zA-Z0-9_\-]{84})'
             ),
 
-            # Social Security Number (SSN) pattern
-            re.compile(r'\b\d{3}-\d{2}-\d{4}\b')
+            # Social Security Number pattern
+            re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN format
+
+            # Social Insurance Number pattern
+            re.compile(r'\b\d{3} \d{3} \d{3}\b'),  # SIN format
 
             # Add more patterns as needed
         ]
@@ -359,7 +362,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         if message.author.bot or not message.guild or not message.content:
             return
-
+        
         content = message.content
         for pattern in self.pii_patterns:
             m = pattern.search(content)
@@ -369,12 +372,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     f"⚠️ Identifying info detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
-                try:
-                    message.delete()
-                except discord.Forbidden:
-                    desc += "\n*Failed to delete the message due to insufficient permissions.*"
-                await self.add_log_entry(message.guild.id, desc)
-                break  
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                desc += "\n*Failed to delete the message due to insufficient permissions.*"
+            await self.add_log_entry(message.guild.id, desc)
+            return  # Skip further processing if a match is found
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
