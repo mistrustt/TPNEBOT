@@ -362,7 +362,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         if message.author.bot or not message.guild or not message.content:
             return
-        
+
         content = message.content
         for pattern in self.pii_patterns:
             m = pattern.search(content)
@@ -372,12 +372,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     f"⚠️ Identifying info detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
-            try:
-                await message.delete()
-            except discord.Forbidden:
-                desc += "\n*Failed to delete the message due to insufficient permissions.*"
-            await self.add_log_entry(message.guild.id, desc)
-            return  # Skip further processing if a match is found
+                try:
+                    await message.delete()
+                except discord.Forbidden:
+                    desc += "\n*Failed to delete the message due to insufficient permissions.*"
+                await self.add_log_entry(message.guild.id, desc)
+                break  
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
