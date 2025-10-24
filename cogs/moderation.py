@@ -2587,6 +2587,13 @@ class Moderation(commands.Cog, name="Moderation"):
         except Exception as e:
             await ctx.send(f"An error occurred while updating the case reason: {e}")
 
+    @commands.command(name='nukemsg', description='Changes the nuke message for the current server')
+    @commands.guild_only()
+    @commands.has_permissions(administrator=True)
+    async def set_nuke_message(self, ctx: Context, *, nuke_message: str):
+        """Sets the nuke message for the server."""
+
+
     @commands.command(name='nuke', description='Deletes and recreates the current channel')
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
@@ -2703,7 +2710,8 @@ class Moderation(commands.Cog, name="Moderation"):
                         pass
 
                     try:
-                        await new_channel.send("# TOXIC HUMANS IS NEVER COMING!!! - DENKOV\n-# This channel was purged to maintain a friendly environment.")
+                        nuke_msg = await self.bot.database.get_nuke_msg(ctx.guild.id)
+                        await new_channel.send(f"# {nuke_msg}\n-# This channel was purged to maintain a friendly environment.")
                     except Exception:
                         pass
 

@@ -4126,6 +4126,32 @@ class DatabaseManager:
         linked.remove(user_id)
         return linked
     
+    async def set_nuke_msg(self, guild_id: int, new_message: str):
+        """Change the nuke confirmation message for a guild."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(ServerSettings).where(ServerSettings.guild_id == guild_id)
+                )
+                settings = result.scalar_one_or_none()
+                if settings:
+                    settings.nuke_msg = new_message
+                else:
+                    settings = ServerSettings(
+                        guild_id=guild_id,
+                        nuke_msg=new_message
+                    )
+                    session.add(settings)
+
+    async def get_nuke_msg(self, guild_id: int) -> str:
+        """Retrieve the nuke confirmation message for a guild."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(ServerSettings.nuke_msg).where(ServerSettings.guild_id == guild_id)
+            )
+            nuke_msg = result.scalar_one_or_none()
+            return nuke_msg if nuke_msg is not None else "TOXIC HUMANS IS NEVER COMING!!! - DENKOV"
+
     async def delete_all_data_for_user(self, user_id: int):
         """Deletes all data in the database for a specific user."""
         async with self.async_sessionmaker() as session:

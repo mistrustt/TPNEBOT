@@ -47,21 +47,22 @@ class ServerSettings(Base):
     __tablename__ = 'server_settings'
 
     guild_id = Column(BigInteger, primary_key=True)
-    watchdog_channel_id = Column(BigInteger, nullable=True)
+    member_count = Column(Integer, nullable=False, default=0)
+    prefix = Column(String, default='!')
+    antimp3_enabled = Column(Boolean, default=False)
     watchdog_enabled = Column(Boolean, default=False)
+    auto_role_ids = Column(ARRAY(BigInteger), nullable=True)
+    nuke_msg = Column(String, nullable=True)
     jail_role_id = Column(BigInteger, nullable=True)
-    jail_channel_id = Column(BigInteger, nullable=True)
     mute_role_id = Column(BigInteger, nullable=True)
     imute_role_id = Column(BigInteger, nullable=True)
     rmute_role_id = Column(BigInteger, nullable=True)
-    member_count_channel_id = Column(BigInteger, nullable=True)
-    member_count = Column(Integer, nullable=False, default=0)
-    report_channel_id = Column(BigInteger, nullable=True)
     booster_role_id = Column(BigInteger, nullable=True)
+    watchdog_channel_id = Column(BigInteger, nullable=True)
+    member_count_channel_id = Column(BigInteger, nullable=True)
+    report_channel_id = Column(BigInteger, nullable=True)
     spam_channel_id = Column(BigInteger, nullable=True)
-    antimp3_enabled = Column(Boolean, default=False)
-    auto_role_ids = Column(ARRAY(BigInteger), nullable=True)
-    prefix = Column(String, default='!')
+    jail_channel_id = Column(BigInteger, nullable=True)
 
 class Punishment(Base):
     __tablename__ = 'punishments'
