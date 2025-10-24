@@ -17,19 +17,46 @@ class Watchdog(commands.Cog, name="Watchdog"):
         self.max_queue_size = 10  
         self.process_interval = 10  
         self.guild_settings_cache = {}  
+        self.discord_patterns = [
+            # Discord gift link pattern
+            re.compile(r'(https?://)?discord((app)?.com/gifts|.gifts)/[a-zA-Z0-9-]+/?'),
 
+            # Discord invite link pattern
+            re.compile(r'(https?://)?(www\.)?(discord\.gg|discord\.com/invite)/[a-zA-Z0-9-]+/?')
+
+            # Add more patterns as needed
+        ]
         self.pii_patterns = [
-
+            # Street addresses pattern
             re.compile(
-                r'\b\d{1,5}(?:\s+\w+)*\s+'
-                r'(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr)\b',
-                re.IGNORECASE
+            r'\b\d{1,5}(?:\s+\w+)*\s+' 
+            r'(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr)\b',
+            re.IGNORECASE
             ),
 
-            re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', re.IGNORECASE),
+            # Email address pattern
+            re.compile(
+            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
+            re.IGNORECASE
+            ),
 
-            re.compile(r'\b(?:\+?\d{1,2}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b')
+            # Phone number patterns (international and US)
+            re.compile(
+            r'\b(?:\+?\d{1,2}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b'
+            ),
 
+            # Credit card number pattern (simplest version tbh)
+            re.compile(r'\b(?:\d[ -]*?){13,16}\b'),
+
+            # Discord authentication token pattern
+            re.compile(
+            r'([a-zA-Z0-9]{24}\.[a-zA-Z0-9]{6}\.[a-zA-Z0-9_\-]{27}|mfa\.[a-zA-Z0-9_\-]{84})'
+            ),
+
+            # Social Security Number (SSN) pattern
+            re.compile(r'\b\d{3}-\d{2}-\d{4}\b')
+
+            # Add more patterns as needed
         ]
         self.process_log_queue.start()
 
@@ -75,7 +102,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             if len(self.log_queue[guild_id]) >= self.max_queue_size:
                 await self.process_logs_for_guild(guild_id)
 
-    @tasks.loop(seconds=10)
+    @tasks.loop(seconds=15)
     async def process_log_queue(self):
         """Process all log queues at regular intervals."""
         try:
@@ -342,6 +369,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     f"⚠️ Identifying info detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
+                try:
+                    message.delete()
+                except discord.Forbidden:
+                    desc += "\n*Failed to delete the message due to insufficient permissions.*"
                 await self.add_log_entry(message.guild.id, desc)
                 break  
 
