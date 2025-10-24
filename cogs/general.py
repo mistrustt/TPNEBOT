@@ -1208,7 +1208,6 @@ class General(commands.Cog, name="General"):
     @commands.command(name="ai", description="Ask the AI a question and get a response.")
     async def ai(self, ctx: commands.Context, *, question: str):
         """Ask the AI a question and get a response."""
-        mood = 
         # Disallow questions longer than 100 characters (admins bypass)
         if len(question) > 100 and not ctx.author.guild_permissions.administrator:
             embed = discord.Embed(
