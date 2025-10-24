@@ -1253,7 +1253,7 @@ class General(commands.Cog, name="General"):
                             description="Too many requests. Please try again later.",
                             color=discord.Color.red()
                         )
-                        embed.set_image(url="https://http.cat/429")
+                        #embed.set_image(url="https://http.cat/429")
                         await ctx.reply(embed=embed, delete_after=5)
                         return
 
