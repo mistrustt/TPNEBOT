@@ -1261,7 +1261,7 @@ class General(commands.Cog, name="General"):
                             description=f"Error: {response.status} - {response.reason}",
                             color=discord.Color.red()
                         )
-                        embed.set_image(url="https://http.cat/" + str(response.status))
+                        #embed.set_image(url="https://http.cat/" + str(response.status))
                         await ctx.reply(embed=embed, delete_after=5)
                         return
 
