@@ -311,7 +311,57 @@ class Owner(commands.Cog, name="Owner"):
             194233626492272641,
         ]
         self.shh_emoji = "🤫"
-        
+
+    def is_whitelisted_tpne(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelisted_users_tpne
+
+    def is_whitelisted_wrld(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelisted_users_wrld
+
+    def is_whitelisted_infohub(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelisted_users_infohub
+
+    def is_whitelisted_private(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelisted_users_private
+
+    async def find_role(self, ctx: Context, role_name: str):
+        """Helper method to find a role by partial name, ID, or mention."""
+        matching_roles = [
+            role for role in ctx.guild.roles 
+            if role_name.lower() in role.name.lower() or role_name.lower() == str(role.id).lower() or role_name.lower() in role.mention.lower()
+        ]
+
+        if not matching_roles:
+            return None, "Role not found."
+
+        if len(matching_roles) > 1:
+            role_list = "\n".join([f"{index + 1}. {role.mention}" for index, role in enumerate(matching_roles)])
+            embed = discord.Embed(description=f"Multiple roles found matching '**{role_name}**':\n{role_list}\nPlease reply with the number of the role you want.")
+            msg = await ctx.send(embed=embed)
+
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
+
+            try:
+                response = await self.bot.wait_for('message', check=check, timeout=30.0)
+                selected_index = int(response.content) - 1
+
+                if selected_index < 0 or selected_index >= len(matching_roles):
+                    return None, "Invalid selection. Command cancelled."
+
+                await msg.delete()
+                return matching_roles[selected_index], None
+            except (ValueError, IndexError):
+                return None, "Invalid selection. Command cancelled."
+            except asyncio.TimeoutError:
+                return None, "You took too long to respond. Command cancelled."
+        else:
+            return matching_roles[0], None
+
     def cleanup_code(self, content: str) -> str:
         """Automatically removes code blocks from the code."""
         # remove ```py\n```

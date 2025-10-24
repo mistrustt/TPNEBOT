@@ -124,22 +124,6 @@ class RoleTools(commands.Cog, name="Roles"):
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
-    def is_whitelisted_tpne(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_tpne
-
-    def is_whitelisted_wrld(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_wrld
-
-    def is_whitelisted_infohub(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_infohub
-
-    def is_whitelisted_private(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_private
-
     async def find_role(self, ctx: Context, role_name: str):
         """Helper method to find a role by partial name, ID, or mention."""
         matching_roles = [
@@ -153,7 +137,7 @@ class RoleTools(commands.Cog, name="Roles"):
         if len(matching_roles) > 1:
             role_list = "\n".join([f"{index + 1}. {role.mention}" for index, role in enumerate(matching_roles)])
             embed = discord.Embed(description=f"Multiple roles found matching '**{role_name}**':\n{role_list}\nPlease reply with the number of the role you want.")
-            await ctx.send(embed=embed)
+            msg = await ctx.send(embed=embed)
 
             def check(m):
                 return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
@@ -165,6 +149,7 @@ class RoleTools(commands.Cog, name="Roles"):
                 if selected_index < 0 or selected_index >= len(matching_roles):
                     return None, "Invalid selection. Command cancelled."
 
+                await msg.delete()
                 return matching_roles[selected_index], None
             except (ValueError, IndexError):
                 return None, "Invalid selection. Command cancelled."
