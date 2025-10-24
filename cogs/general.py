@@ -32,6 +32,7 @@ COINMARKETCAP_API_KEY = os.getenv('COINMARKETCAP_API_KEY')
 COINMARKETCAP_API_URL = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+llmmodel = 'meituan/longcat-flash-chat:free'
 
 NASA_API_KEY = os.getenv("NASA_API_KEY")
 
@@ -1144,7 +1145,7 @@ class General(commands.Cog, name="General"):
                     "Content-Type": "application/json"
                 }
                 data = json.dumps({
-                    "model": "google/gemini-2.0-flash-exp:free",
+                    "model": f"{llmmodel}",
                     "messages": [{"role": "user", "content": 
                                 f"""You are the mystical “8-Ball Oracle.” Your only job is:
                                     • Read the user’s question (everything they send you is the question).
@@ -1236,7 +1237,7 @@ class General(commands.Cog, name="General"):
                 user_msg = {"role": "user", "content": question}
 
                 payload = {
-                    "model": "google/gemini-2.0-flash-exp:free",
+                    "model": f"{llmmodel}",
                     "messages": [system_msg, user_msg]
                 }
 
