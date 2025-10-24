@@ -1989,12 +1989,19 @@ class Moderation(commands.Cog, name="Moderation"):
           !mute @user 30m spamming  > 30-minute mute for "spamming"
           !mute @user spamming      > indefinite mute for "spamming"
         """
-
         member = await self._lookup_member(ctx, identifier)
         if not member:
             return await ctx.send(embed=discord.Embed(
                 description=f"No user found with identifier `{identifier}`.", color=discord.Color.red()
             ))
+
+        if member.top_role.position >= ctx.author.top_role.position:
+            embed = discord.Embed(
+                description="You cannot mute a user with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
 
         duration_seconds: Optional[int] = None
         reason = "No reason provided"
@@ -2143,6 +2150,14 @@ class Moderation(commands.Cog, name="Moderation"):
                 description=f"No user found with identifier `{identifier}`.", color=discord.Color.red()
             ))
 
+        if member.top_role.position >= ctx.author.top_role.position:
+            embed = discord.Embed(
+                description="You cannot mute a user with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
         duration_seconds: Optional[int] = None
         reason = "No reason provided"
         if args:
@@ -2285,6 +2300,14 @@ class Moderation(commands.Cog, name="Moderation"):
                 description=f"No user found with identifier `{identifier}`.", color=discord.Color.red()
             ))
 
+        if member.top_role.position >= ctx.author.top_role.position:
+            embed = discord.Embed(
+                description="You cannot mute a user with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+        
         duration_seconds: Optional[int] = None
         reason = "No reason provided"
         if args:
@@ -2453,7 +2476,7 @@ class Moderation(commands.Cog, name="Moderation"):
             await self.bot.database.set_command_status(command_name, enabled=False, channel_id=channel_id)
             await ctx.send(f"The `{command_name}` command has been disabled in {channel_name}.")
 
-    @commands.command(name='caseinfo')
+    @commands.command(name='case')
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     async def case_info(self, ctx: Context, case_id: int):
