@@ -2592,7 +2592,20 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(administrator=True)
     async def set_nuke_message(self, ctx: Context, *, nuke_message: str):
         """Sets the nuke message for the server."""
-
+        try:
+            await self.bot.database.set_nuke_msg(ctx.guild.id, nuke_message)
+            embed = discord.Embed(
+                description="Nuke message updated successfully.",
+                color=discord.Color.green()
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            logger.exception("Failed to set nuke message")
+            embed = discord.Embed(
+                description="An error occurred while updating the nuke message.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name='nuke', description='Deletes and recreates the current channel')
     @commands.guild_only()
