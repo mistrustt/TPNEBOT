@@ -1507,7 +1507,7 @@ class General(commands.Cog, name="General"):
         binary_result = ' '.join(format(ord(char), '08b') for char in text)
         embed = discord.Embed(
             title="Text to Binary",
-            description=f"`{binary_result}`",
+            description=f"```{binary_result}```",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
@@ -1539,7 +1539,7 @@ class General(commands.Cog, name="General"):
             encoded = f"Error encoding to base64: {e}"
         embed = discord.Embed(
             title="Text to Base64",
-            description=f"`{encoded}`",
+            description=f"```{encoded}```",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
@@ -1562,7 +1562,7 @@ class General(commands.Cog, name="General"):
         ))
         embed = discord.Embed(
             title="ROT13 Encode",
-            description=f"`{rot13_text}`",
+            description=f"```{rot13_text}```",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
@@ -1594,7 +1594,7 @@ class General(commands.Cog, name="General"):
             hex_result = f"Error converting to hex: {e}"
         embed = discord.Embed(
             title="Text to Hexadecimal",
-            description=f"`{hex_result}`",
+            description=f"```{hex_result}```",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
@@ -1688,7 +1688,7 @@ class General(commands.Cog, name="General"):
             if len(binary_values) == 1 and len(binary) % 8 == 0:
                 binary_values = [binary[i:i+8] for i in range(0, len(binary), 8)]
             text_result = ''.join(chr(int(b, 2)) for b in binary_values)
-            embed.description = f"`{text_result}`"
+            embed.description = f"```{text_result}```"
         except ValueError:
             embed.description = "Invalid binary input. Ensure it's composed of 0s and 1s in 8-bit chunks."
         await ctx.reply(embed=embed)
@@ -1712,7 +1712,7 @@ class General(commands.Cog, name="General"):
 
             text = self._clean_input(text)
             decoded = base64.b64decode(text.encode()).decode()
-            embed.description = f"`{decoded}`"
+            embed.description = f"```{decoded}```"
         except Exception as e:
             embed.description = f"Error decoding base64: {str(e)}. Make sure the input is valid base64."
         await ctx.reply(embed=embed)
@@ -1734,7 +1734,7 @@ class General(commands.Cog, name="General"):
         ))
         embed = discord.Embed(
             title="ROT13 Decode",
-            description=f"`{rot13_text}`",
+            description=f"```{rot13_text}```",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
@@ -1759,7 +1759,7 @@ class General(commands.Cog, name="General"):
             text = self._clean_input(text).replace(" ", "")
             bytes_object = bytes.fromhex(text)
             ascii_string = bytes_object.decode()
-            embed.description = f"`{ascii_string}`"
+            embed.description = f"```{ascii_string}```"
         except ValueError:
             embed.description = "Invalid hexadecimal input. Ensure it's a valid hex string."
         await ctx.reply(embed=embed)
@@ -1801,7 +1801,7 @@ class General(commands.Cog, name="General"):
         decoded_message = ''.join(MORSE_CODE_DICT.get(code, '') for code in morse_words)
         embed = discord.Embed(
             title="Morse Code to Text",
-            description=f"`{decoded_message}`",
+            description=f"```{decoded_message}```",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
