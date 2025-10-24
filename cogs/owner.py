@@ -251,19 +251,14 @@ def _parse_cog_list(arg: str) -> List[str]:
             result.append(p)
     return result
 
-
 def _exists_cog_file(name: str) -> bool:
     return os.path.exists(os.path.join("cogs", f"{name}.py"))
 
-
 def _importable_cog(path: str) -> bool:
-    # Helps fail fast on typos that *do* exist as files but won't import
     return importlib.util.find_spec(path) is not None
-
 
 def _fmt_list(items: Iterable[str]) -> str:
     return ", ".join(items) if items else "—"
-
 
 async def _safe_db_call(db_obj, func_name: str, *args) -> Tuple[bool, str]:
     """
@@ -290,6 +285,32 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())  
         self._last_result: Optional[Any] = None
         self.start_time = datetime.now()
+        self.whitelisted_users_tpne = [
+            284439598422163476, #me 
+            1166140569861496853, #voj
+            736148885055078431, #daniel 
+            538773310704582666, #chaos banned
+            657182369240973312, #chaos 
+            425724124057436160, #pop 
+            1142836406255890586, #pop alt
+            1166141915297743010 # dennis 
+        ]
+        self.whitelisted_users_wrld = [
+            284439598422163476, #me
+            1166140569861496853, #voj
+            736148885055078431, #daniel
+            1166141915297743010 # dennis 
+        ]
+        self.whitelisted_users_infohub = [
+            284439598422163476, # me
+            1166140569861496853, #voj
+            736148885055078431, #daniel
+        ]
+        self.whitelisted_users_private = [
+            284439598422163476, # me
+            194233626492272641,
+        ]
+        self.shh_emoji = "🤫"
         
     def cleanup_code(self, content: str) -> str:
         """Automatically removes code blocks from the code."""
@@ -2106,6 +2127,64 @@ class Owner(commands.Cog, name="Owner"):
                 color=discord.Color.red()
             )
         await ctx.send(embed=embed)
+
+    @commands.command(name='shh', hidden=True)
+    async def shush(self, ctx: Context, member: discord.Member = None, *, input_str: str):
+        allowed_guilds = {
+            1270962480742666311: self.is_whitelisted_tpne,
+            1198831682174853142: self.is_whitelisted_infohub,
+            1216776903629869058: self.is_whitelisted_wrld,
+            1336128367166095380: self.is_whitelisted_private,
+        }
+
+        if ctx.guild.id not in allowed_guilds:
+            return
+
+        whitelist_check = allowed_guilds[ctx.guild.id]
+        if not whitelist_check(ctx.author.id):
+            return
+
+        args = input_str.split()
+
+        if len(args) > 1:
+            try:
+                member = await commands.MemberConverter().convert(ctx, args[0])
+                role_identifier = ' '.join(args[1:])
+            except commands.BadArgument:
+                role_identifier = input_str
+                member = ctx.author
+        else:
+            role_identifier = input_str
+            member = member or ctx.author
+
+        role, error = await self.find_role(ctx, role_identifier)
+
+        if error:
+            await ctx.message.add_reaction("‼")
+            await asyncio.sleep(1)
+            await ctx.message.delete()
+            return
+
+        if role is None:
+            await ctx.message.add_reaction("🚫")
+            await asyncio.sleep(1)
+            await ctx.message.delete()
+            return
+
+        if role.position >= ctx.me.top_role.position:
+            error_embed = discord.Embed(
+                description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.",
+                color=discord.Color.red()
+            )
+            return await ctx.reply(embed=error_embed, delete_after=5)
+
+        if role in member.roles:
+            await member.remove_roles(role)
+        else:
+            await member.add_roles(role)
+
+        await ctx.message.add_reaction(self.shh_emoji)
+        await ctx.message.delete()
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))

@@ -118,32 +118,6 @@ class RoleTools(commands.Cog, name="Roles"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.default_avatar_url = "https://cdn.discordapp.com/embed/avatars/1.png"
-        self.whitelisted_users_tpne = [
-            284439598422163476, #me 
-            1166140569861496853, #voj
-            736148885055078431, #daniel 
-            538773310704582666, #chaos banned
-            657182369240973312, #chaos 
-            425724124057436160, #pop 
-            1142836406255890586, #pop alt
-            1166141915297743010 # dennis 
-        ]
-        self.whitelisted_users_wrld = [
-            284439598422163476, #me
-            1166140569861496853, #voj
-            736148885055078431, #daniel
-            1166141915297743010 # dennis 
-        ]
-        self.whitelisted_users_infohub = [
-            284439598422163476, # me
-            1166140569861496853, #voj
-            736148885055078431, #daniel
-        ]
-        self.whitelisted_users_private = [
-            284439598422163476, # me
-            194233626492272641,
-        ]
-        self.shh_emoji = "🤫"
         self.forced_roles = {}
 
     @commands.Cog.listener()
@@ -622,10 +596,8 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=embed)
 
-    # Remaining commands unchanged (list_roles, list_staff_roles, roleinfo, inrole, rolebots, strip, staffstrip, autorole, shh etc.)
     @commands.command(name='roles', aliases=['lr','listroles'], description='Lists all roles or the roles of a specific user.')
     async def list_roles(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        # 1) Gather and sort
         if member:
             raw_roles = [r for r in member.roles if r.name != "@everyone"]
             title = f"{member.display_name}'s Roles"
@@ -633,17 +605,14 @@ class RoleTools(commands.Cog, name="Roles"):
             raw_roles = [r for r in ctx.guild.roles if r.name != "@everyone"]
             title = "Server Roles"
 
-        # sort by position descending (highest first)
         sorted_roles = sorted(raw_roles, key=lambda r: r.position, reverse=True)
         mentions = [r.mention for r in sorted_roles]
 
-        # 2) Paginate (10 per page)
         per_page = 10
         pages = [mentions[i:i+per_page] for i in range(0, len(mentions), per_page)]
         if not pages:
             pages = [[]]
 
-        # 3) Build first embed
         embed = discord.Embed(
             title=title,
             description="\n".join(pages[0]) or "No roles to show.",
@@ -651,14 +620,11 @@ class RoleTools(commands.Cog, name="Roles"):
         )
         embed.set_footer(text=f"Page 1/{len(pages)}")
 
-        # 4) If only one page, just send the embed
         if len(pages) == 1:
             return await ctx.send(embed=embed)
 
-        # 5) Otherwise attach paginator
         paginator = RolesPaginator(ctx.author, pages)
         message = await ctx.send(embed=embed, view=paginator)
-        # so the view can disable buttons on timeout
         paginator.message = message
 
     @commands.command(
@@ -806,64 +772,6 @@ class RoleTools(commands.Cog, name="Roles"):
                 description=f"🚫 An error occurred while managing the bots roles."
             )
             return await ctx.reply(embed=embed)
-
-    @commands.command(name='shh', hidden=True)
-    async def shush(self, ctx: Context, member: discord.Member = None, *, input_str: str):
-        allowed_guilds = {
-            1270962480742666311: self.is_whitelisted_tpne,
-            1198831682174853142: self.is_whitelisted_infohub,
-            1216776903629869058: self.is_whitelisted_wrld,
-            1336128367166095380: self.is_whitelisted_private,
-        }
-
-        if ctx.guild.id not in allowed_guilds:
-            return
-
-        whitelist_check = allowed_guilds[ctx.guild.id]
-        if not whitelist_check(ctx.author.id):
-            return
-
-        args = input_str.split()
-
-        if len(args) > 1:
-            try:
-                member = await commands.MemberConverter().convert(ctx, args[0])
-                role_identifier = ' '.join(args[1:])
-            except commands.BadArgument:
-                role_identifier = input_str
-                member = ctx.author
-        else:
-            role_identifier = input_str
-            member = member or ctx.author
-
-        role, error = await self.find_role(ctx, role_identifier)
-
-        if error:
-            await ctx.message.add_reaction("‼")
-            await asyncio.sleep(1)
-            await ctx.message.delete()
-            return
-
-        if role is None:
-            await ctx.message.add_reaction("🚫")
-            await asyncio.sleep(1)
-            await ctx.message.delete()
-            return
-
-        if role.position >= ctx.me.top_role.position:
-            error_embed = discord.Embed(
-                description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.",
-                color=discord.Color.red()
-            )
-            return await ctx.reply(embed=error_embed, delete_after=5)
-
-        if role in member.roles:
-            await member.remove_roles(role)
-        else:
-            await member.add_roles(role)
-
-        await ctx.message.add_reaction(self.shh_emoji)
-        await ctx.message.delete()
 
 async def setup(bot) -> None:
     await bot.add_cog(RoleTools(bot))

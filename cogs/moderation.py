@@ -598,16 +598,16 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
-        if member.top_role.position >= ctx.guild.me.top_role.position:
+        if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
-                description="I cannot kick a user with a role higher than or equal to mine!",
+                description="🚫 You cannot kick a user with a role higher than or equal to yours!",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
             return
-        if member.top_role.position >= ctx.author.top_role.position:
+        if member.top_role.position >= ctx.guild.me.top_role.position:
             embed = discord.Embed(
-                description="You cannot ban a user with a role higher than or equal to yours!",
+                description="🚫 I cannot kick a user with a role higher than or equal to mine!",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -721,14 +721,14 @@ class Moderation(commands.Cog, name="Moderation"):
         try:
             if member.top_role.position >= ctx.author.top_role.position:
                 embed = discord.Embed(
-                    description="You cannot ban a user with a role higher than or equal to yours!",
+                    description="🚫 You cannot ban a user with a role higher than or equal to yours!",
                     color=discord.Color.red(),
                 )
                 await ctx.send(embed=embed)
                 return
             if member.top_role.position >= ctx.guild.me.top_role.position:
                 embed = discord.Embed(
-                    description="I cannot ban a user with a role higher than or equal to mine!",
+                    description="🚫 I cannot ban a user with a role higher than or equal to mine!",
                     color=discord.Color.red(),
                 )
                 await ctx.send(embed=embed)
@@ -828,16 +828,16 @@ class Moderation(commands.Cog, name="Moderation"):
             ))
         if member == ctx.author:
             return await ctx.send(embed=discord.Embed(
-                description="You cannot temp-ban yourself.", color=discord.Color.red()
+                description="You cannot tempban yourself.", color=discord.Color.red()
             ))
         if isinstance(member, discord.Member):
             if member.top_role >= ctx.author.top_role:
                 return await ctx.send(embed=discord.Embed(
-                    description="You cannot ban someone with an equal or higher role.", color=discord.Color.red()
+                    description="🚫 You cannot tempban someone with an equal or higher role.", color=discord.Color.red()
                 ))
             if member.top_role >= ctx.guild.me.top_role:
                 return await ctx.send(embed=discord.Embed(
-                    description="I cannot ban someone with an equal or higher role than me.", color=discord.Color.red()
+                    description="🚫 I cannot tempban someone with an equal or higher role than me.", color=discord.Color.red()
                 ))
 
         try:
@@ -1358,7 +1358,14 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if member.top_role >= ctx.author.top_role:
             embed = discord.Embed(
-                description="You cannot change the nickname of someone with a role higher than or equal to yours!",
+                description="🚫 You cannot change the nickname of someone with a role higher than or equal to yours!",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
+        if member.top_role >= ctx.guild.me.top_role:
+            embed = discord.Embed(
+                description="🚫 I cannot change the nickname of someone with a role higher than or equal to mine!",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed)
@@ -1419,11 +1426,18 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if member.top_role >= ctx.author.top_role:
             embed = discord.Embed(
-                description="You cannot warn someone with a role higher than or equal to yours!",
+                description="🚫 You cannot warn someone with a role higher than or equal to yours!",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed)
             return   
+        if member.top_role >= ctx.guild.me.top_role:
+            embed = discord.Embed(
+                description="🚫 I cannot warn someone with a role higher than or equal to mine!",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
 
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
@@ -1997,7 +2011,14 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
-                description="You cannot mute a user with a role higher than or equal to yours!",
+                description="🚫 You cannot mute a user with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+        if member.top_role.position >= ctx.guild.me.top_role.position:
+            embed = discord.Embed(
+                description="🚫 I cannot mute a user with a role higher than or equal to mine!",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -2152,7 +2173,14 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
-                description="You cannot mute a user with a role higher than or equal to yours!",
+                description="🚫 You cannot mute a user with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+        if member.top_role.position >= ctx.guild.me.top_role.position:
+            embed = discord.Embed(
+                description="🚫 I cannot mute a user with a role higher than or equal to mine!",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -2302,7 +2330,14 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
-                description="You cannot mute a user with a role higher than or equal to yours!",
+                description="🚫 You cannot mute a user with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+        if member.top_role.position >= ctx.guild.me.top_role.position:
+            embed = discord.Embed(
+                description="🚫 I cannot mute a user with a role higher than or equal to mine!",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
