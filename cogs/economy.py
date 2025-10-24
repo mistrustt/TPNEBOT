@@ -844,10 +844,9 @@ class Economy(commands.Cog):
             284439598422163476, 
             1085252140102062210, 
         ]
-        self.defaultpot = 10000.0
         self.roll_history = defaultdict(list)
         self.games = ["gamble", "supergamble", "dice", "slots", "blackjack", "roulette", "mines", "double", "drop", "ladder", "poker", "crash", "hilo", "ridebus"]
-        self.exchange_rate = Decimal("1000000000000000000") 
+        self.exchange_rate = Decimal("1000000000000")  # 1 USD = 1,000,000,000 bot currency units
         self.validate_economy_task.start()
 
     @commands.Cog.listener()

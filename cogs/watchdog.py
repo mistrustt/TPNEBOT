@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 from discord.ext.commands import Context
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Optional
 
 logger = logging.getLogger("discord_bot")
 
@@ -29,6 +29,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', re.IGNORECASE),
 
             re.compile(r'\b(?:\+?\d{1,2}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b')
+
         ]
         self.process_log_queue.start()
 
@@ -338,7 +339,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             if m:
                 snippet = m.group(0)
                 desc = (
-                    f"⚠️ Possible identifying information detected in {message.channel.mention} by "
+                    f"⚠️ Identifying info detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
                 await self.add_log_entry(message.guild.id, desc)

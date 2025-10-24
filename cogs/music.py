@@ -6,7 +6,6 @@ import asyncio
 from io import BytesIO
 from discord.ext import commands
 from colorthief import ColorThief
-from datetime import datetime, timezone
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 

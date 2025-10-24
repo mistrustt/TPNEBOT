@@ -11,7 +11,6 @@ from datetime import timedelta
 import humanfriendly
 from discord.ext.commands import Context
 from database.models import PunishmentType
-from utils.cooldown import CooldownUtils
 from utils.misc import MiscUtils
 from typing import Optional, Union
 from matplotlib.ticker import MaxNLocator
@@ -81,7 +80,6 @@ class Moderation(commands.Cog, name="Moderation"):
             ch = guild.get_channel(channel_id)
             if ch:
                 return ch
-        # no existing channel → create new one
         name = template.format(count=guild.member_count)
         overwrites = {guild.default_role: discord.PermissionOverwrite(connect=False)}
         vc = await guild.create_voice_channel(name=name, overwrites=overwrites)
@@ -802,8 +800,8 @@ class Moderation(commands.Cog, name="Moderation"):
     ) -> None:
         """
         Usage:
-          !tempban @user 1h spamming    → bans for 1 hour
-          !tempban @user 2d harassment  → bans for 2 days
+          !tempban @user 1h spamming    > bans for 1 hour
+          !tempban @user 2d harassment  > bans for 2 days
         """
 
         member = None
@@ -1506,9 +1504,9 @@ class Moderation(commands.Cog, name="Moderation"):
         Jail a user by assigning them the jail role.
 
         Usage:
-          !jail @user               → indefinite jail
-          !jail @user 2h spamming   → 2-hour jail, reason "spamming"
-          !jail @user griefing      → indefinite jail, reason "griefing"
+          !jail @user               > indefinite jail
+          !jail @user 2h spamming   > 2-hour jail, reason "spamming"
+          !jail @user griefing      > indefinite jail, reason "griefing"
         """
 
         member = None
@@ -1987,9 +1985,9 @@ class Moderation(commands.Cog, name="Moderation"):
     async def mute_user(self, ctx: Context, identifier: str, *args):
         """
         Usage:
-          !mute @user               → indefinite mute (reason defaults)
-          !mute @user 30m spamming  → 30-minute mute for "spamming"
-          !mute @user spamming      → indefinite mute for "spamming"
+          !mute @user               > indefinite mute (reason defaults)
+          !mute @user 30m spamming  > 30-minute mute for "spamming"
+          !mute @user spamming      > indefinite mute for "spamming"
         """
 
         member = await self._lookup_member(ctx, identifier)
@@ -2135,9 +2133,9 @@ class Moderation(commands.Cog, name="Moderation"):
     async def react_mute_user(self, ctx: Context, identifier: str, *args):
         """
         Usage:
-          !rmute @user               → indefinite react-mute
-          !rmute @user 30m spamming  → 30-minute react-mute for "spamming"
-          !rmute @user spamming      → indefinite react-mute for "spamming"
+          !rmute @user               > indefinite react-mute
+          !rmute @user 30m spamming  > 30-minute react-mute for "spamming"
+          !rmute @user spamming      > indefinite react-mute for "spamming"
         """
         member = await self._lookup_member(ctx, identifier)
         if not member:
@@ -2277,9 +2275,9 @@ class Moderation(commands.Cog, name="Moderation"):
     async def image_mute_user(self, ctx: Context, identifier: str, *args):
         """
         Usage:
-          !imute @user               → indefinite image-mute
-          !imute @user 2h spoilers   → 2-hour image-mute for "spoilers"
-          !imute @user spoilers      → indefinite image-mute for "spoilers"
+          !imute @user               > indefinite image-mute
+          !imute @user 2h spoilers   > 2-hour image-mute for "spoilers"
+          !imute @user spoilers      > indefinite image-mute for "spoilers"
         """
         member = await self._lookup_member(ctx, identifier)
         if not member:

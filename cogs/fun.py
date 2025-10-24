@@ -263,13 +263,6 @@ class Fun(commands.Cog, name="Fun"):
                 )
                 embed.set_author(name=f'You', icon_url=self.utils.get_avatar_url(ctx.author))
                 await ctx.reply(embed=embed)
-        elif member.id == 1167418093375606796:
-            embed=discord.Embed(
-                description=f"is 100% gay :rainbow:", 
-                color=color
-            )
-            embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
-            await ctx.reply(embed=embed)
         elif member == ctx.author:
             await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
             if percentage > 50:

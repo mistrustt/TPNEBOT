@@ -34,13 +34,13 @@ class CrashView(discord.ui.View):
         self.game_task: asyncio.Task | None = None
         self.is_running = False
         self.start_time: datetime.datetime = None
-        self.countdown_end: int = None  # unix ts for <t:…:R>
-        self.game_phase: str = None      # "starting", "running", "ended"
+        self.countdown_end: int = None  
+        self.game_phase: str = None      
         self.current_multiplier = Decimal('1.0')
 
         # per-user maps
-        self.players: dict[int, Decimal]      = {}  # user_id → bet
-        self.crash_points: dict[int, Decimal] = {}  # user_id → crash target
+        self.players: dict[int, Decimal]      = {}  
+        self.crash_points: dict[int, Decimal] = {}
         self.cashed_out: dict[int, Decimal]  = {}
         self.crashed_out: dict[int, Decimal] = {}
 
@@ -174,7 +174,7 @@ class CrashView(discord.ui.View):
         return Decimal(str(round(v, 2)))
 
     async def start_game(self, ctx: commands.Context):
-        """Start lobby → run → finish."""
+        """Start lobby > run > finish."""
         self.is_running = True
         now = discord.utils.utcnow()
         self.start_time = now
