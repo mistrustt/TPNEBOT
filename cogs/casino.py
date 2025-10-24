@@ -923,6 +923,10 @@ class Casino(commands.Cog):
         self.games = ["gamble", "supergamble", "dice", "slots", "blackjack", "roulette", "mines", "double", "ladder", "poker", "crash", "hilo", "baccarat"]
         self.fair = ProvenFairness()
 
+    @commands.Cog.listener()
+    async def on_ready(self):
+        logger.info(f"Cog {self.__class__.__name__} is ready!")
+
     # --- Public API (async, with DB persistence) ---
 
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
