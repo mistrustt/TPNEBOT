@@ -2594,11 +2594,20 @@ class Moderation(commands.Cog, name="Moderation"):
         """Sets the nuke message for the server."""
         try:
             await self.bot.database.set_nuke_msg(ctx.guild.id, nuke_message)
+            mentions_pattern = r'@everyone|@here|<@&\d+>'
+            if re.search(mentions_pattern, nuke_message):
+                embed = discord.Embed(
+                    description="No mentions are allowed in the nuke message",
+                )
+                await ctx.send(embed=embed)
+                return
+
             embed = discord.Embed(
                 description="Nuke message updated successfully.",
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
+            
         except Exception as e:
             logger.exception("Failed to set nuke message")
             embed = discord.Embed(
