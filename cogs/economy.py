@@ -1,0 +1,2640 @@
+import os
+import hmac
+import discord
+import logging
+import secrets
+import asyncio
+import random
+import hmac, hashlib
+from discord import app_commands
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from discord import ui, Button, Interaction
+from discord.ui import View, Button
+from discord.ext import commands, tasks
+from utils.misc import MiscUtils
+from collections import defaultdict
+import re
+from decimal import Decimal
+from typing import Sequence, List, Any, Optional
+
+logger = logging.getLogger("discord_bot")
+
+COINMARKETCAP_API_KEY = os.getenv('COINMARKETCAP_API_KEY')
+COINMARKETCAP_API_URL = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
+
+class DropView(discord.ui.View):
+    def __init__(self, bot, inter, amount, drop_author, currency_name, emoji, cog):
+        super().__init__(timeout=120.0)
+        self.bot = bot
+        self.inter = inter
+        self.amount = amount
+        self.drop_author = drop_author
+        self.currency_name = currency_name
+        self.emoji = emoji
+        self.claimed = False
+        self.expired = False
+        self.cog = cog  
+        self.message = None
+        self.lock = asyncio.Lock()
+
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.primary)
+    async def claim_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+
+        if interaction.user.bot:
+            await interaction.response.send_message("Bots are not allowed to claim drops.", ephemeral=True)
+            return
+
+        if interaction.user == self.drop_author:
+            await interaction.response.send_message("You can't claim your own drop!", ephemeral=True)
+            return
+
+        active_info = self.cog.active_drops.get(interaction.message.id)
+        if self.claimed or (active_info and active_info.get("claimed")):
+            await interaction.response.send_message("This drop has already been claimed.", ephemeral=True)
+            return
+
+        if await self.cog.bot.database.is_user_blacklisted(int(interaction.user.id)):
+            await interaction.response.send_message("You are not allowed to claim drops.", ephemeral=True)
+            return
+
+        await self.complete_claim(interaction)
+
+    async def complete_claim(self, interaction: discord.Interaction):
+        async with self.lock:
+            if self.expired:
+                await interaction.response.send_message("This drop has expired.", ephemeral=True)
+                return
+
+            active_info = self.cog.active_drops.get(self.message.id)
+            if self.claimed or (active_info and active_info.get("claimed")):
+                await interaction.response.send_message("This drop has already been claimed.", ephemeral=True)
+                return
+
+            claim_wallet = await self.cog.bot.database.get_wallet_id_for_user(interaction.user.id)
+            await self.cog.bot.database.process_treasury_transaction(
+                wallet_id=claim_wallet,
+                amount=Decimal(self.amount),
+                description="Drop Claim"
+            )
+            self.claimed = True
+
+            for child in self.children:
+                child.disabled = True
+
+        embed = discord.Embed(
+            description=(
+                f"**{interaction.user.display_name}** claimed the {self.currency_name} "
+                f"**{await self.cog.formatter(self.amount)}** dropped by **{self.drop_author.display_name}**! 🎉"
+            ),
+            color=discord.Color.green()
+        )
+
+        if self.message is not None and self.message.embeds:
+            await self.message.edit(embed=self.message.embeds[0], view=self)
+
+        # first response:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed)
+        else:
+            # (unlikely) fallback to followup if you’ve already responded
+            await interaction.followup.send(embed=embed)
+
+        if self.message and self.message.id in self.cog.active_drops:
+            del self.cog.active_drops[self.message.id]
+
+    async def on_timeout(self):
+        if not self.claimed:
+            self.expired = True
+            refund_wallet = await self.cog.bot.database.get_wallet_id_for_user(self.drop_author.id)
+            await self.cog.bot.database.process_treasury_transaction(
+                wallet_id=refund_wallet,
+                amount=Decimal(self.amount),
+                description="Drop Refund"
+            )
+
+            for child in self.children:
+                child.disabled = True
+
+            if self.message:
+                try:
+                    await self.message.edit(
+                        content="Drop ended! No one claimed the drop, so the money was refunded.",
+                        view=self
+                    )
+                except Exception:
+                    pass
+
+            if self.message and self.message.id in self.cog.active_drops:
+                del self.cog.active_drops[self.message.id]
+
+class AirDropView(discord.ui.View):
+    def __init__(self, bot, amount, currency_name, initiator_wallet, initiator):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.amount = amount
+        self.currency_name = currency_name
+        self.initiator_wallet = initiator_wallet
+        self.initiator = initiator
+        self.joiners = set()
+        self.message = None
+
+        self.auto_disable_task = asyncio.create_task(self.auto_disable())
+
+    async def auto_disable(self):
+        await asyncio.sleep(15)
+
+        economy = self.bot.get_cog("Economy")
+
+        # Disable all buttons
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        self.stop()
+
+        if not self.joiners:
+            # Refund the initiator
+            async with self.bot.database.get_session() as session:
+                async with session.begin():
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=self.initiator_wallet,
+                        amount=self.amount,
+                        description="AirDrop Refund"
+                    )
+            try:
+                embed = discord.Embed(
+                    description="Airdrop cancelled! No one joined, so the money was refunded.",
+                    color=discord.Color.red()
+                )
+                await self.message.channel.send(embed=embed)
+            except Exception:
+                pass
+
+        else:
+            # Split the pot
+            share = self.amount / Decimal(len(self.joiners))
+            for user_id in self.joiners:
+                recipient_wallet = await self.bot.database.get_wallet_id_for_user(user_id)
+                async with self.bot.database.get_session() as session:
+                    async with session.begin():
+                        await self.bot.database.process_treasury_transaction(
+                            wallet_id=recipient_wallet,
+                            amount=share,
+                            description=f"Airdrop from {self.initiator.display_name}"
+                        )
+
+            # Build a mention list of winners
+            winners = [f"<@{uid}>" for uid in self.joiners]
+            winners_str = ", ".join(winners)
+
+            try:
+                embed = discord.Embed(
+                    description=(
+                        f"Airdrop ended! **{len(self.joiners)} user(s)** joined: {winners_str}\n"
+                        f"Each received {self.currency_name} **{await economy.formatter(share)}**."
+                    ),
+                    color=discord.Color.gold()
+                )
+                await self.message.edit(embed=embed, view=None)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="Join", style=discord.ButtonStyle.primary)
+    async def join_gift(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id == self.initiator.id:
+            return await interaction.response.send_message(
+                "You cannot join your own airdrop!", ephemeral=True
+            )
+        if interaction.user.id in self.joiners:
+            return await interaction.response.send_message(
+                "You already joined the airdrop!", ephemeral=True
+            )
+
+        if await self.bot.database.is_user_blacklisted(int(interaction.user.id)):
+            await interaction.response.send_message("You are not allowed to claim drops.", ephemeral=True)
+            return
+
+        self.joiners.add(interaction.user.id)
+        await interaction.response.send_message("You joined the airdrop!", ephemeral=True)
+
+        # now update the embed in the original message
+        share = (self.amount / Decimal(len(self.joiners))).quantize(Decimal("0.01"))
+        economy = self.bot.get_cog("Economy")
+
+        embed = discord.Embed(
+            title="🎁 Airdrop In Progress",
+            description=(
+                f"**{self.initiator.display_name}** dropped **{economy.currency_name} "
+                f"{await economy.formatter(self.amount)}**!\n\n"
+                f"Click **Join** within **15s** to claim.  "
+                f"**{len(self.joiners)}** joined so far, each will receive:"
+            ),
+            color=discord.Color.gold()
+        )
+        embed.add_field(
+            name="Per Person Payout",
+            value=f"{economy.currency_name} **{await economy.formatter(share)}**",
+            inline=False
+        )
+        embed.add_field(
+            name="Current Joiners",
+            value="\n".join(f"<@{uid}>" for uid in self.joiners),
+            inline=False
+        )
+
+        # re-edit the original message
+        await self.message.edit(embed=embed, view=self)
+
+class ShopView(View):
+    def __init__(self, bot, shop_items, user_id, currency_name):
+        """
+        Redesigned shop view for browsing and purchasing shop items.
+
+        Args:
+            bot: The bot instance.
+            shop_items: List of shop item objects.
+            user_id: ID of the user using the shop.
+            currency_name: Name of the currency.
+        """
+        super().__init__(timeout=90)
+        self.bot = bot
+        self.shop_items = shop_items  
+        self.user_id = user_id
+        self.currency_name = currency_name
+        self.current_index = 0
+
+    async def update_embed(self, interaction: discord.Interaction):
+        """Update the embed to reflect the current shop item details."""
+        economy = self.bot.get_cog("Economy")
+        if not self.shop_items:
+            embed = discord.Embed(
+                description="There are no items in the shop right now. Please check back later!",
+                color=discord.Color.red()
+            )
+        else:
+            item = self.shop_items[self.current_index]
+            item_price = Decimal(item.price)
+            embed = discord.Embed(
+                title=f"{item.name}",
+                description=item.description or "No description provided.",
+                color=discord.Color.blurple()
+            )
+            embed.add_field(
+                name="Price",
+                value=f"{self.currency_name} **{await economy.formatter(item_price)}**",
+                inline=True
+            )
+            qty_text = "∞" if getattr(item, "unlimited", False) else f"**{item.quantity}** left in stock."
+            embed.add_field(
+                name="Quantity",
+                value=qty_text,
+                inline=True
+            )
+            embed.set_footer(
+                text=f"Item {self.current_index + 1} of {len(self.shop_items)} • Use the navigation buttons below."
+            )
+        if interaction.response.is_done():
+            await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
+    async def previous_button(self, interaction: discord.Interaction, _: discord.ui.Button):
+        """Go to the previous shop item."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        if self.shop_items:
+            self.current_index = (self.current_index - 1) % len(self.shop_items)
+        await self.update_embed(interaction)
+
+    @discord.ui.button(label="Buy Now", style=discord.ButtonStyle.success)
+    async def buy_button(self, interaction: discord.Interaction, _: discord.ui.Button):
+        """
+        Initiate purchase confirmation of the current shop item.
+        On confirmation, charges the user and transfers the item.
+        """
+        economy = self.bot.get_cog("Economy")
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        if not self.shop_items:
+            await interaction.response.send_message("No items available for purchase.", ephemeral=True)
+            return
+
+        if await self.bot.database.is_user_blacklisted(int(interaction.user.id)):
+            await interaction.response.send_message("You are not allowed to purchase items.", ephemeral=True)
+            return
+
+        item = self.shop_items[self.current_index]
+        wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
+        user_balance = await self.bot.database.get_wallet_balance(wallet_id)
+        item_price = Decimal(item.price)
+
+        if user_balance < item_price:
+            await interaction.response.send_message(
+                "You don't have enough funds to purchase this item.", ephemeral=True
+            )
+            return
+
+        if not getattr(item, "unlimited", False) and item.quantity <= 0:
+            await interaction.response.send_message(
+                "Sorry, this item is out of stock.", ephemeral=True
+            )
+            return
+
+        stock_line = (
+            f"Stock left: **{item.quantity}**"
+            if not getattr(item, "unlimited", False)
+            else "Unlimited stock"
+        )
+        confirm_embed = discord.Embed(
+            title="Confirm Purchase",
+            description=(
+                f"Are you sure you want to buy **{item.name}** for "
+                f"{self.currency_name} **{await economy.formatter(item_price)}**?\n"
+                f"{stock_line}"
+            ),
+            color=discord.Color.gold()
+        )
+        confirm_view = ConfirmPurchaseView(self.bot, self.user_id, item, self.currency_name, self)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=confirm_embed, view=confirm_view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=confirm_embed, view=confirm_view, ephemeral=True)
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, _: discord.ui.Button):
+        """Go to the next shop item."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        if self.shop_items:
+            self.current_index = (self.current_index + 1) % len(self.shop_items)
+        await self.update_embed(interaction)
+
+class ConfirmPurchaseView(View):
+    def __init__(self, bot, user_id, item, currency_name, parent_view: ShopView):
+        """
+        Confirmation view for purchasing an item.
+
+        Args:
+            bot: Bot instance.
+            user_id: ID of the user confirming purchase.
+            item: The shop item object.
+            currency_name: Name of the currency.
+            parent_view: The ShopView instance that spawned this confirmation.
+        """
+        super().__init__(timeout=30)
+        self.bot = bot
+        self.user_id = user_id
+        self.item = item
+        self.currency_name = currency_name
+        self.parent_view = parent_view
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
+    async def confirm_button(self, interaction: discord.Interaction, _: discord.ui.Button):
+        """Handle the confirmation of the purchase."""
+        economy = self.bot.get_cog("Economy")
+        if not self.item:
+            await interaction.response.send_message("No item selected for purchase.", ephemeral=True)
+            return
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+
+        if await self.bot.database.is_user_blacklisted(int(interaction.user.id)):
+            await interaction.response.send_message("You are not allowed to purchase items.", ephemeral=True)
+            return
+
+        item_price = Decimal(self.item.price).quantize(Decimal('0.01'))
+        try:
+            async with self.bot.database.get_session() as session:
+
+                await self.bot.database.purchase_shop_item(self.user_id, self.item.id, quantity=1)
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Purchase failed due to an error: {str(e)}", ephemeral=True
+            )
+            return
+
+        if not getattr(self.item, "unlimited", False):
+            self.item.quantity -= 1
+        if not getattr(self.item, "unlimited", False) and self.item.quantity <= 0:
+
+            self.parent_view.shop_items.pop(self.parent_view.current_index)
+            if self.parent_view.shop_items:
+                self.parent_view.current_index %= len(self.parent_view.shop_items)
+            else:
+                self.parent_view.current_index = 0
+
+        await interaction.response.send_message(
+            f"✅ You successfully purchased **{self.item.name}** for {self.currency_name} **{await economy.formatter(item_price)}**!",
+            ephemeral=True
+        )
+
+        try:
+            await self.parent_view.update_embed(interaction)
+        except:
+            pass
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    async def cancel_button(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        await interaction.response.send_message("Purchase canceled.", ephemeral=True)
+        self.stop()
+
+class ItemPaginator(View):
+    def __init__(self, bot, entries, user_id, title="Items", items_per_page=1):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.entries = entries
+        self.user_id = user_id
+        self.title = title
+        self.items_per_page = items_per_page
+        self.current_page = 0
+        self.max_page = (len(entries) - 1) // items_per_page
+
+        self.prev_button = Button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+        self.next_button = Button(label="Next ➡", style=discord.ButtonStyle.secondary)
+        self.refresh_button = Button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+
+        self.prev_button.callback = self.prev_button_callback
+        self.next_button.callback = self.next_button_callback
+        self.refresh_button.callback = self.refresh_callback
+
+        self.add_item(self.prev_button)
+        self.add_item(self.refresh_button)
+        self.add_item(self.next_button)
+
+        self.update_buttons()
+
+    def update_buttons(self):
+        """Enable or disable buttons based on the current page."""
+        self.prev_button.disabled = self.current_page <= 0
+        self.next_button.disabled = self.current_page >= self.max_page
+
+    async def build_embed(self):
+        """Build and return the paginated embed message."""
+        start = self.current_page * self.items_per_page
+        end = start + self.items_per_page
+        embed = discord.Embed(title=self.title, color=discord.Color.blurple())
+
+        if not self.entries:
+            embed.add_field(name="No items", value="There are no items to display.", inline=False)
+        else:
+            for item in self.entries[start:end]:
+                name = item.get("name", "Unnamed")
+                quantity = item.get("quantity", 0)
+                description = item.get("description", "No description available")
+                embed.add_field(
+                    name=f"{name} (x{quantity})",
+                    value=f"{description}",
+                    inline=False
+                )
+
+        embed.set_footer(text=f"Page {self.current_page + 1} of {self.max_page + 1}")
+        return embed
+
+    async def send_page(self, interaction=None):
+        """Send or update the paginated embed message."""
+        embed = await self.build_embed()
+
+        if interaction:
+            if interaction.response.is_done():
+                await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=self)
+            else:
+                await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            return embed
+
+    async def prev_button_callback(self, interaction: discord.Interaction):
+        """Display the previous page."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        self.current_page = max(0, self.current_page - 1)
+        self.update_buttons()
+        await self.send_page(interaction)
+
+    async def next_button_callback(self, interaction: discord.Interaction):
+        """Display the next page."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        self.current_page = min(self.max_page, self.current_page + 1)
+        self.update_buttons()
+        await self.send_page(interaction)
+
+    async def refresh_callback(self, interaction: discord.Interaction):
+        """Refresh the current page."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your embed!", ephemeral=True)
+            return
+        await asyncio.sleep(0.5)
+        await self.send_page(interaction)
+
+class UseItemPaginator(View):
+    def __init__(self, bot, entries, user_id, title="Use an Item", items_per_page=1):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.entries = entries
+        self.user_id = user_id
+        self.title = title
+        self.items_per_page = items_per_page
+        self.current_page = 0
+        self.max_page = (len(entries) - 1) // items_per_page
+
+        # Prev / Next / Refresh
+        self.prev_button = Button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+        self.next_button = Button(label="Next ➡",     style=discord.ButtonStyle.secondary)
+        self.refresh_button = Button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+        # New “Use Item” button
+        self.use_button = Button(label="✅ Use Item", style=discord.ButtonStyle.success)
+
+        # wire callbacks
+        self.prev_button.callback    = self.prev_button_callback
+        self.next_button.callback    = self.next_button_callback
+        self.refresh_button.callback = self.refresh_callback
+        self.use_button.callback     = self.use_callback
+
+        # add to view
+        self.add_item(self.prev_button)
+        self.add_item(self.refresh_button)
+        self.add_item(self.next_button)
+        self.add_item(self.use_button)
+
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_button.disabled = (self.current_page <= 0)
+        self.next_button.disabled = (self.current_page >= self.max_page)
+        # disable Use if quantity is 0 or no entries
+        if not self.entries:
+            self.use_button.disabled = True
+        else:
+            entry = self.entries[self.current_page]
+            self.use_button.disabled = (entry.get("quantity", 0) <= 0)
+
+    async def build_embed(self):
+        start = self.current_page * self.items_per_page
+        end   = start + self.items_per_page
+
+        embed = discord.Embed(title=self.title, color=discord.Color.blurple())
+        if not self.entries:
+            embed.add_field(name="No items", value="Your inventory is empty.", inline=False)
+        else:
+            entry = self.entries[start]
+            name        = entry.get("name", "Unnamed")
+            quantity    = entry.get("quantity", 0)
+            description = entry.get("description", "No description available.")
+            embed.add_field(name=f"{name} (x{quantity})", value=description, inline=False)
+
+        embed.set_footer(text=f"Page {self.current_page+1} of {self.max_page+1}")
+        return embed
+
+    async def send_page(self, interaction=None):
+        embed = await self.build_embed()
+
+        if interaction:
+            # followup vs direct response depending on state
+            if interaction.response.is_done():
+                await interaction.followup.edit_message(
+                    message_id=interaction.message.id,
+                    embed=embed,
+                    view=self
+                )
+            else:
+                await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            return embed
+
+    async def prev_button_callback(self, interaction: discord.Interaction):
+        self.current_page = max(0, self.current_page - 1)
+        self.update_buttons()
+        await self.send_page(interaction)
+
+    async def next_button_callback(self, interaction: discord.Interaction):
+        self.current_page = min(self.max_page, self.current_page + 1)
+        self.update_buttons()
+        await self.send_page(interaction)
+
+    async def refresh_callback(self, interaction: discord.Interaction):
+        await asyncio.sleep(0.5)
+        await self.send_page(interaction)
+
+    async def use_callback(self, interaction: discord.Interaction):
+        entry   = self.entries[self.current_page]
+        item_id = entry.get("id")  # or adjust key if your dict uses another field
+        try:
+            # perform the “use”
+            message = await self.bot.database.use_inventory_item(self.user_id, item_id)
+
+            # reload the entries so quantities/update properly
+            self.entries = await self.bot.database.get_user_inventory_grouped(self.user_id)
+            self.max_page = (len(self.entries) - 1) // self.items_per_page
+            self.current_page = min(self.current_page, self.max_page)
+            self.update_buttons()
+
+            # update embed
+            embed = await self.build_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+
+            # send a confirmation
+            await interaction.followup.send(message, ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+
+class TransactionPaginator(discord.ui.View):
+    def __init__(self, cog, transactions, member, requesting_user):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.transactions = transactions
+        self.member = member
+        self.requesting_user = requesting_user
+        self.current_page = 0
+        self.per_page = 3
+        self.message = None
+
+        for child in self.children:
+            if child.label == "Previous":
+                child.disabled = True
+            if child.label == "Next" and len(transactions) <= self.per_page:
+                child.disabled = True
+
+    @property
+    def max_pages(self):
+        return max(1, (len(self.transactions) + self.per_page - 1) // self.per_page)
+
+    async def get_page_embed(self, page):
+        start_idx = page * self.per_page
+        end_idx = min(start_idx + self.per_page, len(self.transactions))
+        page_transactions = self.transactions[start_idx:end_idx]
+
+        color = self.member.top_role.color if hasattr(self.member, 'top_role') else discord.Color.blurple()
+        embed = discord.Embed(
+            title=f"{self.member.display_name}'s Transactions",
+            color=color
+        )
+
+        for tx in page_transactions:
+
+            amount = Decimal(tx.amount) if tx.amount else Decimal('0')
+            formatted_amount = await self.cog.formatter(amount)
+            description = tx.description if tx.description else "No description"
+
+            timestamp = tx.timestamp.strftime("%Y-%m-%d %H:%M") if tx.timestamp else "Unknown time"
+
+            if tx.from_user_id == self.member.id and tx.to_user_id != self.member.id:
+
+                direction = "📤 Sent"
+            elif tx.from_user_id != self.member.id and tx.to_user_id == self.member.id:
+
+                direction = "📥 Received"
+            else:
+
+                direction = "🔄 Internal"
+
+            embed.add_field(
+                name=f"{direction} • {timestamp}",
+                value=(
+                    f"**Amount:** {self.cog.currency_name} **{formatted_amount}**\n"
+                    f"**Details:** {description}\n"
+                    f"**ID:** `{tx.id}`"
+                ),
+                inline=False
+            )
+
+        embed.set_footer(text=f"Page {page + 1} of {self.max_pages} • Total: {len(self.transactions)} transactions")
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray, emoji="⬅️")
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if interaction.user.id != self.requesting_user.id:
+            await interaction.response.send_message("This isn't your embed!", ephemeral=True)
+            return
+
+        self.current_page = max(0, self.current_page - 1)
+
+        button.disabled = self.current_page == 0
+        next_button = [x for x in self.children if x.label == "Next"][0]
+        next_button.disabled = self.current_page >= (self.max_pages - 1)
+
+        embed = await self.get_page_embed(self.current_page)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.gray, emoji="➡️")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.requesting_user.id:
+            await interaction.response.send_message("This isn't your embed!", ephemeral=True)
+            return
+
+        self.current_page = min(self.max_pages - 1, self.current_page + 1)
+
+        button.disabled = self.current_page >= (self.max_pages - 1)
+        prev_button = [x for x in self.children if x.label == "Previous"][0]
+        prev_button.disabled = self.current_page == 0
+
+        embed = await self.get_page_embed(self.current_page)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+class PortfolioView(ui.View):
+    """Pagination view for displaying crypto portfolio."""
+    def __init__(self, cog: 'Economy', interaction: discord.Interaction, assets: List, per_page: int = 5):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.interaction = interaction
+        self.assets = [a for a in assets if a.amount >= Decimal('0.01')]
+        self.per_page = per_page
+        self.current_page = 0
+        self.max_pages = max(1, (len(self.assets) + per_page - 1) // per_page)
+        if self.max_pages <= 1:
+            for child in self.children:
+                child.disabled = True
+
+    @ui.button(label="Previous", style=discord.ButtonStyle.gray, emoji="⬅️")
+    async def previous_button(self, button: ui.Button, interaction: discord.Interaction):
+        if interaction.user.id != self.interaction.user.id:
+            return await interaction.response.send_message("This isn't your portfolio.", ephemeral=True)
+        self.current_page = (self.current_page - 1) % self.max_pages
+        await self.update_message(interaction)
+
+    @ui.button(label="Next", style=discord.ButtonStyle.gray, emoji="➡️")
+    async def next_button(self, button: ui.Button, interaction: discord.Interaction):
+        if interaction.user.id != self.interaction.user.id:
+            return await interaction.response.send_message("This isn't your portfolio.", ephemeral=True)
+        self.current_page = (self.current_page + 1) % self.max_pages
+        await self.update_message(interaction)
+
+    async def update_message(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="🗂️ Crypto Portfolio", color=discord.Color.gold())
+        start = self.current_page * self.per_page
+        for asset in self.assets[start: start + self.per_page]:
+            price = await self.cog.bot.database.get_crypto_price(asset.symbol)
+            if price:
+                value = asset.amount * price
+                cost = asset.amount * asset.purchase_price
+                pnl = value - cost
+                pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal('0')
+                symbol = "📈" if pnl >= 0 else "📉"
+                embed.add_field(
+                    name=asset.symbol,
+                    value=(
+                        f"Amount: **{asset.amount:.8f}**\n"
+                        f"Value: **{value:.2f} {self.cog.currency_name}**\n"
+                        f"P/L: {symbol} **{pnl:.2f}** ({pnl_pct:.2f}%)"
+                    ),
+                    inline=False
+                )
+            else:
+                embed.add_field(name=asset.symbol, value="Price data unavailable", inline=False)
+
+        if self.max_pages > 1:
+            embed.set_footer(text=f"Page {self.current_page+1}/{self.max_pages}")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+U64_RANGE = 1 << 64
+
+# --- Internal helpers (pure, deterministic) ---
+
+def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> int:
+    """
+    Produce a 64-bit unsigned int via HMAC(server_seed, f"{client_seed}:{nonce}:{tag}").
+    'tag' provides domain-separation across functions so the same nonce doesn't correlate outputs.
+    """
+    msg = f"{client_seed}:{nonce}:{tag}".encode()
+    digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
+    return int.from_bytes(digest[:8], "big")  # 64-bit value in [0, 2^64)
+
+def _rehash_u64(u64: int) -> int:
+    """Deterministically 'stretch' to a fresh 64-bit value for rejection sampling."""
+    return int.from_bytes(hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big")
+
+def _rand_below_unbiased(u64: int, n: int) -> int:
+    """
+    Rejection sampling to remove modulo bias. Returns x in [0, n).
+    """
+    if n <= 0:
+        raise ValueError("upper bound must be positive")
+    limit = U64_RANGE - (U64_RANGE % n)
+    while u64 >= limit:
+        u64 = _rehash_u64(u64)
+    return u64 % n
+
+class Economy(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.utils = MiscUtils(self)
+        self.currency_name = "<:coin:1359823671581085847>"
+        self.active_drops = {}
+        self.active_players = set()
+        self.immune_user_ids = [
+            1277696931816144998, 
+            1290501613311496206, 
+            1166141915297743010, 
+            493432686694629376,  
+            1166140569861496853, 
+            284439598422163476, 
+            1085252140102062210, 
+        ]
+        self.defaultpot = 10000.0
+        self.roll_history = defaultdict(list)
+        self.games = ["gamble", "supergamble", "dice", "slots", "blackjack", "roulette", "mines", "double", "drop", "ladder", "poker", "crash", "hilo", "ridebus"]
+        self.exchange_rate = Decimal("1000000000000000000") 
+        self.validate_economy_task.start()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        logger.info(f"Cog {self.__class__.__name__} is ready!")
+
+    def cog_unload(self):
+        self.validate_economy_task.cancel()
+
+    def to_usd(self, bot_amount: Decimal) -> Decimal:
+        return (bot_amount / self.exchange_rate).quantize(Decimal("0.01"))
+
+    def from_usd(self, usd_amount: Decimal) -> Decimal:
+        return (usd_amount * self.exchange_rate).quantize(Decimal("1"))
+
+    # --- Public API (async, with DB persistence) ---
+
+    async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
+        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  # <-- new DB method
+        msg = f"{client_seed}:{nonce}:{tag}".encode()
+        digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
+        u64 = int.from_bytes(digest[:8], "big")
+        proof = {
+            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
+            "client_seed": client_seed,
+            "nonce": nonce,
+            "tag": tag,
+            "u64_hex": digest[:8].hex(),
+        }
+        return u64, proof
+
+    async def fair_randbelow(self, user_id: int, upper: int, *, tag: str = "randbelow") -> int:
+        if upper <= 0:
+            raise ValueError("upper must be > 0")
+        u64, _ = await self._next_u64(user_id, tag=tag)
+        # unbiased rejection sampling (unchanged)
+        limit = U64_RANGE - (U64_RANGE % upper)
+        while u64 >= limit:
+            u64 = int.from_bytes(hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big")
+        return u64 % upper
+    async def fair_random(self, user_id: int) -> float:
+        u64, _ = await self._next_u64(user_id, tag="random")
+        return u64 / float(U64_RANGE)  # [0, 1)
+
+    async def fair_sample(self, user_id: int, seq: Sequence[Any], k: int) -> List[Any]:
+        """
+        Sample k elements without replacement using a Fisher–Yates shuffle.
+        We increment the nonce inside fair_randbelow per swap; there is NO extra increment here.
+        """
+        if k < 0 or k > len(seq):
+            raise ValueError("Sample size cannot exceed sequence length and must be non-negative.")
+        clone = list(seq)
+        await self.fair_shuffle(user_id, clone)
+        return clone[:k]
+
+
+    async def fair_choice(self, user_id: int, seq: Sequence[Any], *, tag: str = "choice"):
+        if not seq:
+            raise ValueError("sequence must be non-empty")
+        idx = await self.fair_randbelow(user_id, len(seq), tag=tag)
+        return seq[idx]
+    
+    async def fair_shuffle(self, user_id: int, deck: List[Any]) -> None:
+        # Give each swap a specific tag to make replays trivial
+        for i in range(len(deck) - 1, 0, -1):
+            j = await self.fair_randbelow(user_id, i + 1, tag=f"shuffle:{i}")
+            deck[i], deck[j] = deck[j], deck[i]
+
+    async def fair_uniform(self, user_id: int, min_value: float, max_value: float) -> float:
+        if min_value >= max_value:
+            raise ValueError("min_value must be less than max_value")
+        r = await self.fair_random(user_id)
+        return min_value + (max_value - min_value) * r
+
+    async def fair_systemrandom(self, user_id: int, min_value: int, max_value: int, *, tag: str = "systemrandom") -> int:
+        if min_value > max_value:
+            raise ValueError("min_value must be <= max_value")
+        span = (max_value - min_value) + 1
+        idx = await self.fair_randbelow(user_id, span, tag=tag)
+        return min_value + idx
+
+    async def prove_fairness(self, user_id: int) -> dict:
+        """
+        Publish commitment only; reveal raw seed only after rotation.
+        """
+        server_seed = await self.bot.database.get_server_seed(user_id)
+        client_seed, nonce = await self.bot.database.get_client_seed(user_id)
+        return {
+            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
+            "client_seed": client_seed,
+            "nonce": nonce,
+        }
+
+    def _fmt_no_sci(self, x: Decimal, *, max_frac: int = 2, rounding=ROUND_HALF_UP) -> str:
+        """
+        Format a Decimal without scientific notation, with commas,
+        and trim trailing zeros up to max_frac places.
+        """
+        if max_frac < 0:
+            max_frac = 0
+        quant = Decimal(1).scaleb(-max_frac) if max_frac else Decimal(1)
+        xq = x.quantize(quant, rounding=rounding)
+        s = f"{xq:,.{max_frac}f}"
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s
+
+    async def formatter(self, value: Decimal) -> str:
+        """Currency-friendly long format (e.g., 1000000 -> '1 million')."""
+        negative = value < 0
+        value = abs(value)
+
+        suffixes = [
+            (Decimal('1e33'), " decillion"),
+            (Decimal('1e30'), " nonillion"),
+            (Decimal('1e27'), " octillion"),
+            (Decimal('1e24'), " septillion"),
+            (Decimal('1e21'), " sextillion"),
+            (Decimal('1e18'), " quintillion"),
+            (Decimal('1e15'), " quadrillion"),
+            (Decimal('1e12'), " trillion"),
+            (Decimal('1e9'),  " billion"),
+            (Decimal('1e6'),  " million"),
+            (Decimal('1e3'),  " thousand"),
+        ]
+
+        for threshold, suffix in suffixes:
+            if value >= threshold:
+                num = self._fmt_no_sci(value / threshold, max_frac=2)
+                out = f"{num}{suffix}"
+                return f"-{out}" if negative else out
+
+        # < 1k
+        num = self._fmt_no_sci(value, max_frac=2)
+        return f"-{num}" if negative else num
+
+    async def short_formatter(self, value: Decimal) -> str:
+        """Currency-friendly short format (e.g., 1000000 -> '1 mil')."""
+        negative = value < 0
+        value = abs(value)
+
+        suffixes = [
+            (Decimal('1e33'), " dec"),
+            (Decimal('1e30'), " non"),
+            (Decimal('1e27'), " oct"),
+            (Decimal('1e24'), " sept"),
+            (Decimal('1e21'), " sext"),
+            (Decimal('1e18'), " quin"),
+            (Decimal('1e15'), " quad"),
+            (Decimal('1e12'), " tril"),
+            (Decimal('1e9'),  " bil"),
+            (Decimal('1e6'),  " mil"),
+            (Decimal('1e3'),  "k"),
+        ]
+
+        for threshold, suffix in suffixes:
+            if value >= threshold:
+                num = self._fmt_no_sci(value / threshold, max_frac=2)
+                out = f"{num}{suffix}"
+                return f"-{out}" if negative else out
+
+        num = self._fmt_no_sci(value, max_frac=2)
+        return f"-{num}" if negative else num
+    
+    async def amount_handler(self, amount_input: str, user_balance: Decimal) -> Decimal:
+        """
+        Process the bet input and return the corresponding bet amount.
+        Supports keywords ('all', 'half', 'quarter'), percentages, and suffixed values.
+        The returned amount is truncated (not rounded) to two decimal places.
+        """
+
+        if not isinstance(amount_input, str):
+            raise ValueError("Invalid amount input type.")
+
+        amount_input = amount_input.strip().lower()
+
+        if amount_input == "all" or amount_input == "max":
+            amount = user_balance
+        elif amount_input == "half":
+            amount = user_balance / Decimal('2')
+        elif amount_input == "quarter":
+            amount = user_balance / Decimal('4')
+
+        elif amount_input.endswith('%'):
+            percentage_match = re.match(r'^([0-9]+(\.[0-9]+)?)%$', amount_input)
+            if percentage_match:
+                try:
+                    percentage = Decimal(percentage_match.group(1))
+                    if Decimal('1') <= percentage <= Decimal('100'):
+                        amount = user_balance * (percentage / Decimal('100'))
+                    else:
+                        raise ValueError("Percentage must be between 1% and 100%.")
+                except InvalidOperation:
+                    raise ValueError("Invalid percentage value.")
+            else:
+                raise ValueError("Invalid percentage format.")
+        else:
+
+            multipliers = {
+                'k': Decimal('1000'),
+                'm': Decimal('1000000'),
+                'b': Decimal('1000000000'),
+                't': Decimal('1000000000000'),
+                'q': Decimal('1000000000000000'),
+                'qu': Decimal('1000000000000000000'),
+                's': Decimal('1000000000000000000000'),
+            }
+
+            multiplier_match = re.match(r'^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s)?$', amount_input)
+            if not multiplier_match:
+                raise ValueError("Invalid amount format.")
+
+            try:
+                number = Decimal(multiplier_match.group(1))
+                if multiplier_match.group(3):  
+                    multiplier = multipliers[multiplier_match.group(3)]
+                    amount = number * multiplier
+                else:
+                    amount = number
+            except (InvalidOperation, KeyError):
+                raise ValueError("Invalid amount.")
+
+        if amount.is_nan():
+            raise ValueError("Invalid amount.")
+
+        try:
+            amount = amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            raise ValueError("Invalid amount.")
+
+        if amount > user_balance:
+            raise ValueError("Insufficient Funds.")
+        if amount <= Decimal('0'):
+            raise ValueError("Amount must be greater than 0.")
+
+        return amount
+
+    @tasks.loop(minutes=10)
+    async def validate_economy_task(self):
+        try:
+            await self.bot.database.validate_economy()
+        except ValueError as e:
+            await self.bot.database.initialize_supply_record()
+            logger.error(f"ValueError validating economy: {e}")
+        except Exception as e:
+            logger.error(f"Error validating economy: {e}")
+        logger.info("Successfully validated the economy.")
+
+    @validate_economy_task.before_loop
+    async def before_validate_economy_task(self):
+        await self.bot.wait_until_ready()
+
+    @commands.command(name="balance", aliases=["bal"], description="Check your current balance.")
+    async def balance(self, ctx: commands.Context, member: discord.Member = None):
+        """Check your current balance."""
+        try:
+            member = member or ctx.author
+            id = await self.bot.database.get_wallet_id_for_user(member.id)
+
+            wallet_balance = await self.bot.database.get_wallet_balance_by_user_id(member.id)
+            wallet_balance = Decimal(wallet_balance)
+            wallet_balance = wallet_balance if wallet_balance is not None else 0
+
+            bank_balance = await self.bot.database.get_bank_balance(id)
+            bank_balance = Decimal(bank_balance)
+            bank_balance = bank_balance if bank_balance is not None else 0
+
+            color = discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel):
+                color = discord.Color.blurple()
+            else:
+                color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+            embed = discord.Embed(
+                description=f"Wallet Balance: :credit_card:\n> {self.currency_name} **{await self.short_formatter(wallet_balance)}**\n\nBank Balance: :bank:\n> {self.currency_name} **{await self.short_formatter(bank_balance)}**",
+                color=color,
+            )
+            embed.set_author(
+                name=f"{member.display_name}'s Balance",
+                icon_url=self.utils.get_avatar_url(member),
+            )
+            embed.set_footer(text=f"Total: {await self.formatter(wallet_balance + bank_balance)}")
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
+            embed.set_author(name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="leaderboard", aliases=["lb"], description="View the top 10 users by net balance.")
+    async def leaderboard(self, ctx: commands.Context):
+        """Displays the top 10 users by net balance."""
+        top_users = await self.bot.database.get_top_balance_users(limit=10)
+        embed = discord.Embed(
+            color=ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+        )
+
+        if top_users:
+            top_list = []
+            rank_emojis = ["<:crown:1360657246165537011>"] + [f"{idx}." for idx in range(2, 11)]
+            for idx, (user_id, total_balance) in enumerate(top_users):
+                user = (
+                    ctx.guild.get_member(user_id)
+                    or self.bot.get_user(user_id)
+                    or await self.bot.fetch_user(user_id)
+                )
+                display_name = user.display_name if user else f"Unknown {user_id}"
+                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                top_list.append(f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)")
+            embed.add_field(
+                name="Top 10 Users by Net Balance",
+                value="\n".join(top_list),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Top 10 Users by Net Balance", 
+                value="No data available", 
+                inline=False
+            )
+
+        embed.set_author(name="Economy Leaderboard", icon_url=self.utils.get_avatar_url(ctx.author))
+        #embed.set_footer(text=f"Your position: {await self.bot.database.get_balance_user_rank(ctx.author.id)}")
+        await ctx.reply(embed=embed)
+
+    @commands.command(name="economy", aliases=["eco","econ"], description="View economy statistics.")
+    async def economy_status(self, ctx: commands.Context):
+        """Fetch and display economy statistics."""
+        try:
+            wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
+            treasury_balance = await self.bot.database.get_treasury_balance()
+            supply = await self.bot.database.get_supply_record()
+            balance = await self.bot.database.get_wallet_balance_by_user_id(ctx.author.id)
+            balance = Decimal(balance)
+            bank_balance = await self.bot.database.get_bank_balance(wallet_id)
+            bank_balance = Decimal(bank_balance)
+            balance = balance if balance is not None else 0
+            bank_balance = bank_balance if bank_balance is not None else 0
+
+            embed = discord.Embed(
+                title="📊 Economy Statistics",
+                color=discord.Color.blurple()
+            )
+            embed.add_field(name="Total Supply", value=f"{self.currency_name} **{await self.formatter(supply.total_supply)}**", inline=False)
+            embed.add_field(name="Circulating Supply", value=f"{self.currency_name} **{await self.formatter(supply.circulating)}**", inline=False)
+            #embed.add_field(name="Treasury Balance", value=f"💰 **{await self.short_formatter(treasury_balance)}**", inline=False)
+            total_supply = supply.total_supply
+            percentage = ((balance + bank_balance) / total_supply) * 100 if total_supply > 0 else 0
+            health_percentage = (treasury_balance / total_supply * 100) if total_supply > 0 else 0
+            health_emoji = "⚠️" if health_percentage < 20 else "📈"
+            embed.add_field(name="Economy Health", value=f"{health_emoji} **{await self.short_formatter(health_percentage)}%**", inline=False)
+            embed.add_field(name="Wins/Losses", value=f"{await self.bot.database.get_global_wins():,}/{await self.bot.database.get_global_losses():,}", inline=False)
+            embed.add_field(name="Your Holdings", value=f"**{percentage:.2f}%** of Total Supply", inline=False)
+
+            await ctx.reply(embed=embed)
+
+        except Exception as e:
+            await ctx.reply(f"🚫 Error fetching economy stats, Please try again later.", delete_after=5)
+            logger.error(f"Error fetching economy stats: {e}")
+
+    @commands.command(name="daily", description="Claim your daily reward.")
+    async def daily(self, ctx: commands.Context):
+        """Receive a daily reward."""
+        try:
+
+            daily_amount = secrets.randbelow(55000 - 15000) + 15000
+            wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=Decimal(daily_amount),
+                    description="Daily Reward"
+                )
+            except ValueError as e:
+                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+            color = discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel):
+                color = discord.Color.blurple()
+            else:
+                color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 86400)  # 24 hours cooldown
+            embed = discord.Embed(description=f"You received your daily reward of {self.currency_name} **{await self.formatter(daily_amount)}**!", color=color)
+            embed.set_author(name='Daily', icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
+            embed.set_author(name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="weekly", description="Claim your weekly reward.")
+    async def weekly(self, ctx: commands.Context):
+        """Receive a weekly reward."""
+        try:
+
+            weekly_amount = secrets.randbelow(310000 - 110000) + 110000
+            wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=Decimal(weekly_amount),
+                    description="Weekly Reward"
+                )
+            except ValueError as e:
+                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+
+            color = discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel):
+                color = discord.Color.blurple()
+            else:
+                color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 604800)  # 7 days cooldown
+            embed = discord.Embed(description=f"You received your weekly reward of {self.currency_name} **{await self.formatter(weekly_amount)}**!", color=color)
+            embed.set_author(name='Weekly', icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
+            embed.set_author(name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="monthly", description="Claim your monthly reward.")
+    async def monthly(self, ctx: commands.Context):
+        """Receive a monthly reward."""
+        try:
+
+            monthly_amount = secrets.randbelow(9799990 - 3399990) + 3399990
+            wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=Decimal(monthly_amount),
+                    description="Monthly Reward"
+                )
+            except ValueError as e:
+                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+            color = discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel):
+                color = discord.Color.blurple()
+            else:
+                color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 2592000)  # 30 days cooldown
+            embed = discord.Embed(
+                description=f"Your monthly reward is **{self.currency_name} {await self.formatter(monthly_amount)}**.",
+                color=color,
+            )
+            embed.set_author(
+                name="Monthly",
+                icon_url=self.utils.get_avatar_url(ctx.author)
+            )
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
+            embed.set_author(name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="beg", description="Beg for money. Maybe you'll get lucky!")
+    async def beg(self, ctx: commands.Context):
+        """Beg for money. Maybe you'll get lucky!"""
+
+        names = [
+            "DJ Relentt",
+            "DJ Scheme",
+            "Googly",
+            "Daniel",
+            "Pete",
+            "G Money",
+            "Lil Bibby",
+            "Ally Lotti",
+            "Mysterious Stranger",
+            "Your Mom",
+            "Your Dad",
+            "Seezyn",
+            "Chris Long",
+            "Lil Uzi Vert",
+            "Playboi Carti",
+            "Young Thug",
+            "Gunna",
+            "Dennis",
+            "Lil Peep",
+            "Juice WRLD",
+        ]
+
+        name = secrets.choice(names)
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = await self.bot.database.get_wallet_balance(wallet_id)
+
+        positive_interactions = [
+            f"**{name}** smiles and says, 'Here, take this. It's not much, but it should help.'",
+            f"**{name}** looks at you sympathetically and hands you a few coins. 'Hang in there,' they say.",
+            f"'You look like you could use this,' **{name}** says, giving you some spare change.",
+            f"**{name}** laughs, 'I was going to buy a coffee, but you need this more than I do.'",
+            f"'I hope this helps,' **{name}** says, pressing some money into your hand.",
+            f"**{name}** digs into their pocket and pulls out a crumpled bill. 'Here, it's yours,' they say.",
+            f"'I don't usually give out money, but you seem like a good person,' **{name}** says as they hand you some cash.",
+            f"**{name}** winks and slips you some money. 'Don't spend it all in one place,' they joke.",
+            f"'It's not much, but it's something,' **{name}** says, offering you a small amount.",
+            f"**{name}** passes by and drops some change in your hand with a nod of encouragement.",
+        ]
+
+        negative_interactions = [
+            f"**{name}** walks past you without even making eye contact. Tough luck.",
+            f"**{name}** frowns and says, 'Get a job,' before walking away.",
+            f"'Sorry, I don't have any spare change,' **{name}** mutters as they hurry off.",
+            f"**{name}** pretends not to hear you and continues on their way.",
+            f"'Not today, buddy,' **{name}** says, shaking their head and moving on.",
+            f"**{name}** gives you a look of disdain and ignores your request.",
+            f"'You think I'm made of money?' **{name}** scoffs and walks away.",
+            f"**{name}** just shrugs and says, 'Maybe next time,' as they keep walking.",
+            f"'I can't help you,' **{name}** says bluntly before disappearing into the crowd.",
+            f"**{name}** gives you a cold stare and continues on their way without a word.",
+            f"**{name}** looks you dead in the eye and screams, 'TOXIC HUMANS IS NEVER COMING'",
+        ]
+        seq = [True] * 4 + [False] * 6
+        is_successful = await self.fair_choice(user_id, seq)
+
+        try:
+            if is_successful:
+
+                response = secrets.choice(positive_interactions)
+                amount = secrets.randbelow(6000) + 200
+                amount = Decimal(amount) 
+
+                try:
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=wallet_id,
+                        amount=amount,
+                        description="Beg"
+                    )
+                except ValueError as e:
+                    embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+                    return
+                color = discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel):
+                    color = discord.Color.blurple()
+                else:
+                    color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+                embed = discord.Embed(
+                    description=f"{response}\n\n**{name}** gave you {self.currency_name} **{await self.formatter(amount)}**.",
+                    color=color,
+                )
+                embed.set_author(
+                    name="Beg",
+                    icon_url=self.utils.get_avatar_url(ctx.author),
+                )
+            else:
+
+                response = secrets.choice(negative_interactions)
+
+                embed = discord.Embed(
+                    description=f"{response}\n\n**{name}** completely ignored you.",
+                    color=discord.Color.red(),
+                )
+                embed.set_author(
+                    name="Beg",
+                    icon_url=self.utils.get_avatar_url(ctx.author),
+                )
+                await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 3)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+
+        await ctx.reply(embed=embed)
+
+    @commands.command(name="work", description="Perform a job and earn rewards.")
+    async def work(self, ctx: commands.Context):
+        """Perform a job and earn rewards based on your streak."""
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id))).quantize(Decimal("0.01"))
+        work_streak = await self.bot.database.get_work_streak(user_id)
+        if work_streak is None:
+            work_streak = 0  
+
+        jobs = [
+            {"job": "delivering pizzas", "pay": (Decimal("20000"), Decimal("45000"))},
+            {"job": "trading cryptocurrency", "pay": (Decimal("400000"), Decimal("850000"))},
+            {"job": "selling mp3 files", "pay": (Decimal("2210000"), Decimal("6500000"))},
+            {"job": "walking dogs", "pay": (Decimal("100"), Decimal("9990"))},
+            {"job": "selling fashion designs", "pay": (Decimal("70000"), Decimal("2000000"))},
+            {"job": "selling lemonade", "pay": (Decimal("50"), Decimal("300"))},
+            {"job": "livestreaming", "pay": (Decimal("30000"), Decimal("100000"))},
+            {"job": "acting as a stunt double", "pay": (Decimal("100000"), Decimal("350000"))},
+            {"job": "working as a theme park mascot", "pay": (Decimal("15000"), Decimal("60000"))},
+            {"job": "writing viral X posts", "pay": (Decimal("20000"), Decimal("55000"))},
+            {"job": "programming a new app", "pay": (Decimal("100000"), Decimal("500000"))},
+            {"job": "teaching an online class", "pay": (Decimal("50000"), Decimal("150000"))},
+            {"job": "scamming", "pay": (Decimal("20000"), Decimal("9000000"))},
+            {"job": "building PCs", "pay": (Decimal("120000"), Decimal("300000"))},
+            {"job": "playing guitar at a local gig", "pay": (Decimal("30000"), Decimal("120000"))},
+            {"job": "selling rare sneakers", "pay": (Decimal("40000"), Decimal("200000"))},
+        ]
+
+        weights = [5, 10, 3, 2, 8, 4, 15, 5, 3, 4, 7, 5, 6, 6, 4, 7]
+
+        async def weighted_choice(jobs, weights):
+            cumulative_sum = 0
+            cumulative_weights = []
+            for weight in weights:
+                cumulative_sum += weight
+                cumulative_weights.append(cumulative_sum)
+            random_value = await self.fair_randbelow(user_id, cumulative_sum)
+            for i, cw in enumerate(cumulative_weights):
+                if random_value < cw:
+                    return jobs[i]
+            return jobs[-1]
+
+        job = await weighted_choice(jobs, weights)
+        job_name = job["job"]
+        pay_range = job["pay"]
+
+        base_pay = (secrets.randbelow(int(pay_range[1] - pay_range[0])) + int(pay_range[0]))
+        base_pay = Decimal(base_pay)
+
+        streak_bonus = Decimal(work_streak) * Decimal("5000")
+
+        work_bonus = Decimal(secrets.randbelow(9500) + 500)
+
+        total_pay = base_pay + streak_bonus
+
+        outcome = await self.fair_randbelow(user_id, 100)
+
+        result_message = ""
+        new_streak = work_streak
+
+        if outcome < 10:
+            result_message = f"Unfortunately, you were let go while {job_name}. Better luck with your next job!"
+            total_pay = Decimal("0")
+            new_streak = 0
+        elif outcome < 25:
+            total_pay += work_bonus
+            bonus_message = {
+            "delivering pizzas": "You delivered all the pizzas early and got hella cheddar.",
+            "trading cryptocurrency": "The market surged at just the right time and your trades paid off!",
+            "selling mp3 files": "Your groupbuy finished early with more participants than expected!",
+            "walking dogs": "The dogs were exceptionally well-behaved today and the owners rewarded you!",
+            "selling fashion designs": "A high-profile client loved your work and referred you to their network!",
+            "selling lemonade": "You set up shop on the hottest day of the week and sold out completely!",
+            "livestreaming": "A popular streamer raided your channel and fans showered you with donations!",
+            "acting as a stunt double": "Your perfect execution impressed the director who offered a performance bonus!",
+            "working as a theme park mascot": "Your character performance went viral on social media, earning you recognition!",
+            "writing viral X posts": "A celebrity amplified your content, bringing in sponsorship opportunities!",
+            "programming a new app": "Your app got featured on the store's front page, driving premium subscriptions!",
+            "teaching an online class": "Students gave such positive feedback that enrollment doubled for your next session!",
+            "scamming": "You found a particularly gullible mark who fell for every upsell!",
+            "building PCs": "A client ordered multiple high-margin custom builds after seeing your craftsmanship!",
+            "playing guitar at a local gig": "The venue owner was so impressed they booked you for a recurring weekly spot!",
+            "selling rare sneakers": "You authenticated a rare pair that sold for much more than expected!"
+            }.get(job_name, "Your exceptional work earned you special recognition and a bonus!")
+            result_message = f"While {job_name}, you went above and beyond and earned a bonus of {self.currency_name} **{await self.formatter(work_bonus)}**!\n\n{bonus_message}\n\nTotal earnings: {self.currency_name} **{await self.formatter(total_pay)}**"
+            new_streak += 1
+        else:
+            result_message = f"You earned {self.currency_name} **{await self.formatter(total_pay)}** by {job_name}."
+            new_streak += 1
+
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=total_pay,
+                description="Work Payment"
+            )
+        except ValueError as e:
+            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        await self.bot.database.update_work_streak(user_id, new_streak)
+        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 3600)
+        color = discord.Color.blurple() if isinstance(ctx.channel, discord.DMChannel) else (ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple())
+        embed = discord.Embed(description=result_message, color=color)
+        embed.set_author(name="Work", icon_url=self.utils.get_avatar_url(ctx.author))
+        await ctx.reply(embed=embed)
+
+    @commands.command(name="scout", aliases=['mark'], description="Scout for potential \'job\' candidates.")
+    async def scout(self, ctx: commands.Context):
+
+        guild_member_ids = {m.id for m in ctx.guild.members}
+
+        top_users = await self.bot.database.get_top_wallet_users(limit=50)
+
+        eligible = [
+            (uid, bal)
+            for uid, bal in top_users
+            if bal >= Decimal("10000") and uid in guild_member_ids
+        ]
+
+        if not eligible:
+            embed = discord.Embed(
+                title="Scout Report",
+                description="No guild members with balance ≥ 10,000 were found.",
+                color=discord.Color.red()
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        user_id, balance = random.choice(eligible)
+
+        member = ctx.guild.get_member(user_id)
+        if not member:
+            try:
+                member = await ctx.guild.fetch_member(user_id)
+            except discord.NotFound:
+                member = None
+
+        if member:
+            name    = member.mention
+            avatar  = member.avatar.url if member.avatar else ctx.guild.icon.url
+        else:
+            name    = f"`{user_id}`"
+            avatar  = None
+
+        embed = discord.Embed(
+            title="Scout Report",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="User",    value=name, inline=True)
+        embed.add_field(
+            name="Balance",
+            value=f"**{self.currency_name} {await self.formatter(balance)}**",
+            inline=True
+        )
+        if avatar:
+            embed.set_thumbnail(url=avatar)
+
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 900)
+        await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="rob", description="Attempt to rob another user.")
+    async def rob(self, ctx: commands.Context, target: discord.Member):
+        """Attempt to rob another user."""
+        user_id = ctx.author.id
+        user_wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        target_wallet_id = await self.bot.database.get_wallet_id_for_user(target.id)
+        robber_balance = Decimal(str(await self.bot.database.get_wallet_balance(user_wallet_id)))
+        target_balance = Decimal(str(await self.bot.database.get_wallet_balance(target_wallet_id)))
+        target_bank_balance = Decimal(str(await self.bot.database.get_bank_balance(target_wallet_id)))
+
+        if target.id == self.bot.user.id:
+            return await ctx.reply("Get away from me.", delete_after=5)
+        if user_id == target.id:
+            return await ctx.reply("You cannot rob yourself!", delete_after=5)
+        if target.bot:
+            return await ctx.reply("You cannot rob a bot!", delete_after=5)
+
+        if target_balance <= Decimal("10000"):
+            embed = discord.Embed(
+                description=f"{target.display_name} doesn't have enough money to rob.", 
+                color=discord.Color.red()
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+        if robber_balance < Decimal("100000"):
+            embed = discord.Embed(
+                description="You need at least 100,000 to attempt a robbery.", 
+                color=discord.Color.red()
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        outcomes = {
+            "critical_success": 10,   
+            "success": 40,            
+            "partial_failure": 25,    
+            "failure": 23,            
+            #"bank_robbery": 2         
+        }
+        total_weight = sum(outcomes.values())
+        roll = secrets.randbelow(total_weight)
+        cumulative = 0
+        for outcome, weight in outcomes.items():
+            cumulative += weight
+            if roll < cumulative:
+                result = outcome
+                break
+
+        result_message = ""
+        cooldown_seconds = 1800
+        try:
+            if result == "critical_success":
+                percentage = Decimal(secrets.randbelow(21) + 40) / Decimal("100")  
+                amount_stolen = (target_balance * percentage).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                counter_loss = (target_balance * Decimal("0.10")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                total_theft = amount_stolen + counter_loss
+
+                target_has_bounty = await self.bot.database.user_has_bounty(target.id)
+                bounty_msg = ""
+                if target_has_bounty:
+                    await self.bot.database.claim_bounty(ctx.author.id, target.id)
+                    bounty_msg = f"\nYou also claimed the bounty on {target.display_name}."
+
+                await self.bot.database.process_p2p_transaction(
+                    sender_wallet_id=target_wallet_id,
+                    receiver_wallet_id=user_wallet_id,
+                    amount=total_theft,
+                    description=f"Critical Robbery by {ctx.author.name}"
+                )
+                result_message = (
+                    f"🔥 **You caught {target.mention} LACKING** at the gas station.\n"
+                    f"You stole {self.currency_name} **{await self.formatter(total_theft)}**"
+                    f"{bounty_msg}"
+                )
+            elif result == "success":
+                percentage = Decimal(secrets.randbelow(16) + 20) / Decimal("100")  
+                amount_stolen = (target_balance * percentage).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+                target_has_bounty = await self.bot.database.user_has_bounty(target.id)
+                bounty_msg = ""
+                if target_has_bounty:
+                    await self.bot.database.claim_bounty(ctx.author.id, target.id)
+                    bounty_msg = f"\nYou also claimed the bounty on {target.display_name}."
+
+                await self.bot.database.process_p2p_transaction(
+                    sender_wallet_id=target_wallet_id,
+                    receiver_wallet_id=user_wallet_id,
+                    amount=amount_stolen,
+                    description=f"Robbery by {ctx.author.name}"
+                )
+
+                result_message = (
+                    f"😎 **You successfully** robbed {target.mention} and stole "
+                    f"{self.currency_name} **{await self.formatter(amount_stolen)}**."
+                    f"{bounty_msg}"
+                )
+            elif result == "partial_failure":
+                percentage = Decimal(secrets.randbelow(6) + 10) / Decimal("100")  
+                stolen = (target_balance * percentage).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                recoup = (stolen * Decimal("0.50")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                net_gain = stolen - recoup
+                await self.bot.database.process_p2p_transaction(
+                    sender_wallet_id=target_wallet_id,
+                    receiver_wallet_id=user_wallet_id,
+                    amount=net_gain,
+                    description=f"Partial Robbery by {ctx.author.name}"
+                )
+                result_message = (
+                    f"🤏 **You attempted** to rob {target.mention} and managed to steal"
+                    f"{self.currency_name} **{await self.formatter(net_gain)}** after they recouped some of it."
+                )
+            elif result == "failure":
+                percentage = Decimal(secrets.randbelow(5) + 1) / Decimal("100")  
+                amount_fined = (robber_balance * percentage).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                try:
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=user_wallet_id,
+                        amount=-amount_fined,
+                        description="Fine for failed robbery"
+                    )
+                except ValueError as e:
+                    embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+                    return
+                bonus = (target_balance * Decimal("0.01")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                result_message = (
+                    f"💥 **You failed** to rob {target.mention} and were fined "
+                    f"{self.currency_name} **{await self.formatter(amount_fined)}**!\n"
+                    f"{target.mention} received {self.currency_name} **{await self.formatter(bonus)}** as compensation."
+                )
+                try:
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=target_wallet_id,
+                        amount=bonus,
+                        description="Bonus for foiling robbery"
+                    )
+                except ValueError as e:
+                    embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+                    return
+            elif result == "bank_robbery":
+                percentage = Decimal(secrets.randbelow(11) + 10) / Decimal("100")  
+                amount_stolen = (target_bank_balance * percentage).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                if amount_stolen > 0:
+                    await self.bot.database.withdraw_from_bank(
+                        wallet_id=target_wallet_id,
+                        amount=amount_stolen,
+                        description=f"Bank Robbery by {ctx.author.name}"
+                    )
+                    try:
+                        await self.bot.database.process_treasury_transaction(
+                            wallet_id=user_wallet_id,
+                            amount=amount_stolen,
+                            description="Bank Robbery Success"
+                        )
+                    except ValueError as e:
+                        embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                        await ctx.reply(embed=embed, delete_after=5)
+                        return
+                    result_message = (
+                        f"🏦 **You successfully robbed** {target.mention}'s bank account and stole "
+                        f"{self.currency_name} **{await self.formatter(amount_stolen)}**!"
+                    )
+                else:
+                    result_message = (
+                        f"💥 **You attempted to rob** {target.mention}'s bank account but found nothing to steal!"
+                    )
+
+            await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, cooldown_seconds)
+            embed = discord.Embed(
+                description=result_message,
+                color=discord.Color.green() if result in ["critical_success", "success", "bank_robbery"] else discord.Color.red(),
+            )
+            embed.set_author(name="Robbery", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(
+                description=str(e),
+                color=discord.Color.red()
+            )
+            embed.set_author(name="Robbery Error", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="drain", description="Drain a single user's wallet of its entire balance once a day.")
+    async def drain(self, ctx: commands.Context, target: discord.Member):
+        """Attempt to drain another user's wallet."""
+
+        if target.id == self.bot.user.id:
+            await ctx.reply("Get away from me.", delete_after=5)
+            return
+        if target.id == ctx.author.id:
+            await ctx.reply("You cannot drain your own wallet.", delete_after=5)
+            return
+        if target.bot:
+            await ctx.reply("You cannot drain a bot's wallet.", delete_after=5)
+            return
+
+        robber_wallet = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
+        target_wallet = await self.bot.database.get_wallet_id_for_user(target.id)
+        target_balance = Decimal(str(await self.bot.database.get_wallet_balance(target_wallet)))
+        robber_balance = Decimal(str(await self.bot.database.get_wallet_balance(robber_wallet)))
+
+        if target_balance <= Decimal("10000"):
+            embed = discord.Embed(
+                description=f"{target.display_name} doesn't have enough money to drain.", 
+                color=discord.Color.red()
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        if robber_balance < Decimal("100000"):
+            return await ctx.reply(f"You need at least {self.currency_name} **100k** to attempt a drain.", delete_after=5)
+
+        outcome_roll = secrets.randbelow(100)
+        success_threshold = 80  
+
+        if outcome_roll < success_threshold:
+            try:
+
+                await self.bot.database.process_p2p_transaction(
+                    sender_wallet_id=target_wallet,
+                    receiver_wallet_id=robber_wallet,
+                    amount=target_balance,
+                    description=f"Drained by {ctx.author.name}"
+                )
+
+                await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 86400)
+
+                result_message = (
+                    f"💰 You successfully drained {self.currency_name} **{await self.formatter(target_balance)}** "
+                    f"from {target.mention}'s wallet!"
+                )
+
+                target_has_bounty = await self.bot.database.user_has_bounty(target.id)
+                if target_has_bounty:
+                    await self.bot.database.claim_bounty(ctx.author.id, target.id)
+                    result_message += f"\nYou also claimed the bounty on {target.display_name}."
+
+                embed = discord.Embed(
+                    description=result_message,
+                    color=discord.Color.green()
+                )
+                embed.set_author(name="Drain", icon_url=self.utils.get_avatar_url(ctx.author))
+                await ctx.reply(embed=embed)
+
+            except ValueError as e:
+
+                embed = discord.Embed(
+                    description=f"An error occurred: {str(e)}",
+                    color=discord.Color.red()
+                )
+                await ctx.reply(embed=embed, delete_after=5 )
+                return
+        else:
+            fine_percentage = Decimal("0.05")  
+            amount_fined = (robber_balance * fine_percentage).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=robber_wallet,
+                    amount=-amount_fined,
+                    description="Fine for failed drain attempt"
+                )
+            except ValueError as e:
+                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 86400)
+            embed = discord.Embed(
+                description=(
+                    f"🚨 You attempted to drain {target.mention}'s wallet but got caught! "
+                    f"You were fined {self.currency_name} **{await self.formatter(amount_fined)}**"
+                ),
+                color=discord.Color.red()
+            )
+            embed.set_author(name="Drain", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+
+    @commands.command(name="send", aliases=['transfer','tfr','give'], description="Transfer currency to another user.")
+    async def transfer(self, ctx: commands.Context, member: discord.Member, amount: str):
+        """Transfer currency to another user."""
+        sender = ctx.author
+        receiver = member
+
+        try:
+            if member.id == self.bot.user.id:
+                await ctx.reply("I don't need your money.", delete_after=5)
+                return
+
+            if member.bot:
+                await ctx.reply("You can't transfer money to bots.", delete_after=5)
+                return
+
+            if sender == receiver:
+                await ctx.reply("You can't transfer money to yourself.", delete_after=5)
+                return
+            if receiver.bot:
+                await ctx.reply("You can't transfer money to bots.", delete_after=5)
+                return
+
+            sender_wallet_id = await self.bot.database.get_wallet_id_for_user(sender.id)
+            receiver_wallet_id = await self.bot.database.get_wallet_id_for_user(receiver.id)
+            sender_balance = await self.bot.database.get_wallet_balance(sender_wallet_id)
+            sender_balance = Decimal(str(sender_balance))
+            try:
+                amount = await self.amount_handler(amount, sender_balance)
+            except ValueError as e:
+                embed = discord.Embed(description=str(e), color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+
+            txid = await self.bot.database.process_p2p_transaction(
+                sender_wallet_id=sender_wallet_id,
+                receiver_wallet_id=receiver_wallet_id,
+                amount=amount,
+                description=f"Transfer from {sender.name} to {receiver.name}"
+            )
+            color = discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel):
+                color = discord.Color.blurple()
+            else:
+                color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+            embed = discord.Embed(
+                description=(
+                    f"**{sender.mention}** transferred {self.currency_name} "
+                    f"**{await self.formatter(amount)}** to **{receiver.mention}**.\n"
+                    f"ID: `{txid}`"
+                ),
+                color=color,
+            )
+            embed.set_author(name="Transfer", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+            embed = discord.Embed(
+                description=(
+                    f"**{sender.mention}** transferred {self.currency_name} "
+                    f"**{await self.formatter(amount)}** to you.\n"
+                    f"ID: `{txid}`"
+                )
+            )
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 10)
+
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            embed.set_author(name="Transfer Error", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="drop", description='Drop money for others to claim')
+    async def drop(self, ctx: commands.Context, amount: str):
+        user_id = ctx.author.id
+        drop_wallet = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = await self.bot.database.get_wallet_balance(drop_wallet)
+        balance = Decimal(str(balance))
+        try:
+            amount = await self.amount_handler(amount, balance)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        if amount < Decimal('100000'):
+            embed = discord.Embed(
+                description=f"You don't have enough in your wallet to do a drop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=drop_wallet,
+                amount=-amount,
+                description="Money Drop"
+            )
+        except ValueError as e:
+            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        symbols = ['💰', '💸', '💳', '💵', '💶', '🪙', '💷', '💴']
+        choice = secrets.choice(symbols)
+
+        embed = discord.Embed(
+            description=(
+                f"**{ctx.author.display_name}** has dropped {self.currency_name} **{await self.formatter(amount)}**!\n\n"
+                f"Click the **Button** below to claim it!"
+            ),
+            color=discord.Color.gold(),
+        )
+        embed.set_thumbnail(url=self.utils.get_avatar_url(ctx.author))
+        embed.set_author(name="Money Drop", icon_url=self.utils.get_avatar_url(ctx.author))
+
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+        view = DropView(self.bot, ctx, amount, ctx.author, self.currency_name, choice, self)
+        drop_message = await ctx.reply(embed=embed, view=view)
+        view.message = drop_message
+
+        self.active_drops[drop_message.id] = {
+            "amount": amount,
+            "claimed": False,
+            "author": ctx.author,
+        }
+
+    @commands.command(name="airdrop", description="Start a money airdrop.")
+    async def airdrop(self, ctx: commands.Context, amount: str):
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = await self.bot.database.get_wallet_balance(wallet_id)
+        balance = Decimal(str(balance))
+
+        try:
+            amount_converted = await self.amount_handler(amount, balance)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        if amount_converted < Decimal('100000'):
+            embed = discord.Embed(
+                description=f"You don't have enough in your wallet to do an airdrop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=-amount_converted,
+                description="Airdrop"
+            )
+        except ValueError as e:
+            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        embed = discord.Embed(
+            description=(
+                f"**{ctx.author.display_name}** has initiated an **Airdrop** of "
+                f"{self.currency_name} **{await self.formatter(amount_converted)}**!\n\n"
+                "Click the **Join** button below within **15 seconds** to claim it!"
+            ),
+            color=discord.Color.gold()
+        )
+        embed.set_author(name=f"AirDrop", icon_url=self.utils.get_avatar_url(ctx.author))
+
+        view = AirDropView(self.bot, amount_converted, self.currency_name, wallet_id, ctx.author)
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 15)
+        message = await ctx.reply(embed=embed, view=view)
+        view.message = message
+
+    @commands.group(name='invest', aliases=["coin"], invoke_without_command=True)
+    async def invest(self, ctx: commands.Context):
+        prefix = (await self.bot.get_prefix(ctx.message))
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = f" (or: {', '.join(cmd.aliases)})" if getattr(cmd, "aliases", None) else ""
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}invest {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}invest {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="Invest — Available Commands",
+            description=description,
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text=f"Use {prefix}invest <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @invest.command(name="bal", aliases=["portfolio","balance","port"], description="View your cryptocurrency portfolio")
+    async def invest_portfolio(self, ctx: commands.Context):
+        user_id = ctx.author.id
+        assets = await self.bot.database.get_crypto_assets(user_id)
+        filtered = [a for a in assets if a.amount >= Decimal('0.01')]
+        if not filtered:
+            return await ctx.reply("You don't have any significant cryptocurrency holdings.", delete_after=5)
+
+        embed = discord.Embed(title="🗂️ Crypto Portfolio", color=discord.Color.gold())
+        total_usd = Decimal("0")
+
+        for asset in filtered[:5]:
+            price = await self.bot.database.get_crypto_price(asset.symbol)
+            if price:
+                value = asset.amount * price
+                cost = asset.amount * asset.purchase_price
+                pnl = value - cost
+                pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal('0')
+                symbol = "📈" if pnl >= 0 else "📉"
+                usd_value = self.to_usd(value)
+                total_usd += usd_value
+                embed.add_field(
+                    name=asset.symbol,
+                    value=(
+                        f"Amount: **{await self.short_formatter(asset.amount)}**\n"
+                        f"Value: **{await self.short_formatter(value)} {self.currency_name}** "
+                        f"(~${usd_value})\n"
+                        f"P/L: {symbol} **{await self.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
+                    ),
+                    inline=False
+                )
+            else:
+                embed.add_field(name=asset.symbol, value="Price data unavailable", inline=False)
+
+        embed.set_footer(text=f"Total Portfolio ≈ ${total_usd}")
+        await ctx.reply(embed=embed)
+
+    @invest.command(name="buy", description="Buy cryptocurrency with your balance")
+    async def invest_buy(self, ctx: commands.Context, amount: str, currency: str):
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
+        
+        symbol = currency.upper()
+        price = await self.bot.database.get_crypto_price(symbol)
+        if not price or price <= Decimal('0.00000001'):
+            return await ctx.reply(f"Price data for '{symbol}' is invalid or unavailable.", delete_after=5)
+
+        # Handle USD or bot currency input
+        if amount.upper().endswith("USD"):
+            usd_amt = Decimal(amount[:-3])
+            spend = self.from_usd(usd_amt)
+        else:
+            try:
+                spend = await self.amount_handler(amount, balance)
+            except ValueError as e:
+                return await ctx.reply(str(e), delete_after=5)
+
+        if spend > balance:
+            return await ctx.reply(f"Insufficient balance. You only have {await self.short_formatter(balance)}.", delete_after=5)
+
+        # Deduct cost and record asset
+        await self.bot.database.process_treasury_transaction(wallet_id, -spend, f"Buy {symbol}")
+        coins = (spend / price).quantize(Decimal('0.00000001'))
+        await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
+
+        embed = discord.Embed(
+            description=f"✅ Purchased **{await self.short_formatter(coins)} {symbol}** "
+                        f"for **{self.currency_name} {await self.short_formatter(spend)}** "
+                        f"(~${self.to_usd(spend)})",
+            color=discord.Color.green()
+        )
+        await ctx.reply(embed=embed, delete_after=10)
+
+    @invest.command(name="sell", description="Sell cryptocurrency for your balance")
+    async def invest_sell(self, ctx: commands.Context, amount: str, currency: str):
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        symbol = currency.upper()
+        asset = await self.bot.database.get_crypto_asset(user_id, symbol)
+        if not asset or asset.amount <= 0:
+            return await ctx.reply(f"You have no '{symbol}' to sell.", delete_after=5)
+
+        balance_coins = asset.amount
+        try:
+            sell_amt = await self.crypto_amount_handler(amount, balance_coins)
+        except ValueError as e:
+            return await ctx.reply(str(e), delete_after=5)
+
+        price = await self.bot.database.get_crypto_price(symbol)
+        if not price or price <= Decimal('0.00000001'):
+            return await ctx.reply(f"Price data for '{symbol}' is unavailable.", delete_after=5)
+
+        proceeds = (sell_amt * price).quantize(Decimal('0.01'))
+        await self.bot.database.process_treasury_transaction(wallet_id, proceeds, f"Sell {symbol}")
+        await self.bot.database.update_crypto_amount(user_id, symbol, -sell_amt)
+
+        embed = discord.Embed(
+            description=f"✅ Sold **{await self.short_formatter(sell_amt)} {symbol}** "
+                        f"for **{self.currency_name} {await self.short_formatter(proceeds)}** "
+                        f"(~${self.to_usd(proceeds)})",
+            color=discord.Color.red()
+        )
+        await ctx.reply(embed=embed, delete_after=10)
+
+    async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:
+        s = input_str.strip().lower()
+        if s == 'all':
+            return balance
+        if s == 'half':
+            return (balance / 2).quantize(Decimal('0.00000001'))
+        if s == 'quarter':
+            return (balance / 4).quantize(Decimal('0.00000001'))
+        if s.endswith('%'):
+            try:
+                pct = Decimal(s.strip('%'))
+                if not (Decimal('1') <= pct <= Decimal('100')):
+                    raise ValueError()
+                return (balance * (pct / 100)).quantize(Decimal('0.00000001'))
+            except:
+                raise ValueError("Invalid percentage format. Use 1%–100%.")
+        try:
+            amt = Decimal(s).quantize(Decimal('0.00000001'))
+            if amt <= 0 or amt > balance:
+                raise ValueError()
+            return amt
+        except InvalidOperation:
+            pass
+        raise ValueError("Invalid amount. Use 'all', 'half', 'quarter', a percentage, or a valid number.")
+
+    @commands.command(name="deposit", aliases=["dep","dp","depo"], description="Deposit currency into your bank.")
+    async def deposit(self, ctx: commands.Context, amount: str):
+        """Deposit currency into the bank."""
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = await self.bot.database.get_wallet_balance(wallet_id)
+        balance = Decimal(str(balance))
+
+        try:
+            amount = await self.amount_handler(amount, balance)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        async with self.bot.database.get_session() as session:
+            async with session.begin():
+                try:
+                    await self.bot.database.deposit_to_bank(wallet_id, amount, "Bank Deposit")
+
+                    embed = discord.Embed(
+                        description=f"You successfully deposited {self.currency_name} **{await self.formatter(amount)}**.",
+                        color=discord.Color.green()
+                    )
+                    await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 10)
+                    await ctx.reply(embed=embed)
+
+                except ValueError as e:
+                    await session.rollback()
+                    embed = discord.Embed(description="An error occurred during deposit.", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+                except commands.UnexpectedQuoteError:
+                    embed = discord.Embed(description="Lol dumbass.", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="withdraw", aliases=["with","wd"], description="Withdraw currency from your bank.")
+    async def withdraw(self, ctx: commands.Context, amount: str):
+        """Withdraw currency from the bank."""
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        bank_balance = await self.bot.database.get_bank_balance(wallet_id)
+        bank_balance = Decimal(str(bank_balance))
+
+        try:
+            amount = await self.amount_handler(amount, bank_balance)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        async with self.bot.database.get_session() as session:
+            async with session.begin():
+                try:
+                    await self.bot.database.withdraw_from_bank(wallet_id, amount, "Bank Withdrawal")
+
+                    embed = discord.Embed(
+                        description=f"You successfully withdrew {self.currency_name} **{await self.formatter(amount)}**.",
+                        color=discord.Color.green()
+                    )
+                    await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 10)
+                    await ctx.reply(embed=embed)
+
+                except ValueError as e:
+                    await session.rollback()
+                    embed = discord.Embed(description="An error occurred during withdrawal.", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+                    embed = discord.Embed(description=str(e), color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+                except commands.UnexpectedQuoteError:
+                    embed = discord.Embed(description="Lol dumbass.", color=discord.Color.red())
+                    await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="treasury", aliases=["treas"], description="Displays the current treasury balance.")
+    async def treasury_info(self, ctx: commands.Context):
+        """Fetch and display treasury balance and latest transactions."""
+        try:
+            treasury_balance = await self.bot.database.get_treasury_balance()
+
+            embed = discord.Embed(
+                title="🏦 Treasury Information",
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="Treasury Balance", value=f"💰 **{await self.formatter(treasury_balance)}**", inline=False)
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 3)
+            await ctx.reply(embed=embed)
+
+        except Exception as e:
+            embed = discord.Embed(description="Error fetching treasury info.", color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            logger.error(f"Error fetching treasury info: {str(e)}")
+
+    @commands.command(name="transactions", aliases=["txs"], description="View your latest transactions.")
+    async def transactions_cmd(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+
+        requesting_user = ctx.author
+
+        user_transactions = await self.bot.database.get_transactions_by_user_id(member.id, limit=100)
+
+        if not user_transactions:
+            embed = discord.Embed(description="No transactions found.", color=discord.Color.red())
+            await ctx.reply(embed=embed)
+        else:
+
+            paginator = TransactionPaginator(self, user_transactions, member, requesting_user)
+            initial_embed = await paginator.get_page_embed(0)
+            message = await ctx.reply(embed=initial_embed, view=paginator)
+            paginator.message = message
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+
+    @commands.command(name="transaction", aliases=["tx"], description="Lookup a transaction by ID.")
+    async def transaction_lookup_cmd(self, ctx: commands.Context, txid: str):
+        """Look up a transaction by its UUID and present a clean, informative embed."""
+        try:
+            import uuid
+            from datetime import datetime, timezone
+
+            # Validate UUID
+            try:
+                uuid_obj = uuid.UUID(txid)
+                txid = str(uuid_obj)
+            except ValueError:
+                await ctx.reply("❌ Invalid transaction ID format. Please provide a valid UUID.", delete_after=5)
+                return
+
+            transaction = await self.bot.database.get_transaction_by_id(txid)
+            if not transaction:
+                await ctx.reply("🔍 No transaction found with that ID.", delete_after=5)
+                return
+
+            # Resolve users for nicer display
+            async def resolve_user(uid):
+                if not uid:
+                    return None
+                # Try guild member first (if applicable), then cached user, then fetch
+                try:
+                    if ctx.guild:
+                        member = ctx.guild.get_member(uid)
+                        if member:
+                            return member
+                    user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
+                    return user
+                except Exception:
+                    return None
+
+            from_user = await resolve_user(getattr(transaction, "from_user_id", None))
+            to_user = await resolve_user(getattr(transaction, "to_user_id", None))
+
+            # Determine amount and color
+            amt = getattr(transaction, "amount", None)
+            try:
+                amt_decimal = Decimal(str(amt)) if amt is not None else Decimal("0")
+            except Exception:
+                amt_decimal = Decimal("0")
+
+            if amt_decimal > 0:
+                color = discord.Color.green()
+                sign = "+"
+            elif amt_decimal < 0:
+                color = discord.Color.red()
+                sign = "-"
+            else:
+                color = discord.Color.blurple()
+                sign = ""
+
+            formatted_amount = await self.formatter(abs(amt_decimal)) if hasattr(self, "formatter") else str(abs(amt_decimal))
+            amount_field = f"{self.currency_name} {sign}**{formatted_amount}**"
+
+            # Build embed
+            embed = discord.Embed(title="📄 Transaction Details", color=color)
+            embed.add_field(name="Transaction ID", value=f"`{transaction.id}`", inline=False)
+
+            # From / To fields
+            if from_user:
+                from_display = f"{getattr(from_user, 'mention', getattr(from_user, 'display_name', str(from_user)))}"
+            else:
+                from_display = "System" if not getattr(transaction, "from_user_id", None) else f"User ID: `{transaction.from_user_id}`"
+
+            if to_user:
+                to_display = f"{getattr(to_user, 'mention', getattr(to_user, 'display_name', str(to_user)))}"
+            else:
+                to_display = "System" if not getattr(transaction, "to_user_id", None) else f"User ID: `{transaction.to_user_id}`"
+
+            embed.add_field(name="From", value=from_display, inline=True)
+            embed.add_field(name="To", value=to_display, inline=True)
+
+            # Amount / Type / Wallets
+            embed.add_field(name="Amount", value=amount_field, inline=False)
+            tx_type = "P2P" if getattr(transaction, "from_user_id", None) and getattr(transaction, "to_user_id", None) else "Treasury / System"
+            embed.add_field(name="Type", value=tx_type, inline=True)
+
+            sender_wallet = getattr(transaction, "from_wallet_id", None) or getattr(transaction, "sender_wallet_id", None)
+            receiver_wallet = getattr(transaction, "to_wallet_id", None) or getattr(transaction, "receiver_wallet_id", None)
+            if sender_wallet:
+                embed.add_field(name="Sender Wallet", value=f"`{sender_wallet}`", inline=True)
+            if receiver_wallet:
+                embed.add_field(name="Receiver Wallet", value=f"`{receiver_wallet}`", inline=True)
+
+            # Description (trim if very long)
+            desc = getattr(transaction, "description", "") or ""
+            if desc:
+                if len(desc) > 1024:
+                    desc = desc[:1016] + "…"
+                embed.add_field(name="Description", value=desc, inline=False)
+
+            # Timestamp
+            ts = getattr(transaction, "timestamp", None)
+            if ts:
+                # Ensure timezone-aware UTC for embed.timestamp if possible
+                try:
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+                embed.timestamp = ts
+                embed.set_footer(text="Transaction time (UTC)")
+            else:
+                embed.set_footer(text="Transaction time: Unknown")
+
+            # Small author / thumbnail for context
+            # Prefer 'from' avatar if available, else bot avatar
+            try:
+                author_icon = None
+                if from_user and getattr(from_user, "avatar", None):
+                    author_icon = getattr(from_user, "avatar").url if getattr(from_user, "avatar", None) else None
+                if not author_icon:
+                    author_icon = self.utils.get_avatar_url(ctx.author)
+                embed.set_author(name=f"{ctx.author.display_name}", icon_url=author_icon)
+            except Exception:
+                pass
+
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+            await ctx.reply(embed=embed)
+
+        except Exception as e:
+            logger.exception("Error in transaction lookup")
+            await ctx.reply("❌ An unexpected error occurred while fetching the transaction.", delete_after=5)
+
+    @commands.group(name="bounty", description="Manage bounties")
+    async def bounty(self, ctx: commands.Context):
+        """Group command for managing bounties."""
+        prefix = (await self.bot.get_prefix(ctx.message))
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        # If invoked as a group, ctx.command refers to the Group object;
+        # its .commands attribute holds the subcommand Command objects.
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            # show primary usage, aliases and short help/description
+            name = cmd.name
+            aliases = f" (or: {', '.join(cmd.aliases)})" if getattr(cmd, "aliases", None) else ""
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}bounty {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}bounty {name}`{aliases}")
+
+        if not lines:
+            description = "No subcommands available."
+        else:
+            description = "\n".join(lines)
+
+        embed = discord.Embed(
+            title="Bounty — Available Commands",
+            description=description,
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text=f"Use {prefix}bounty <subcommand> for details.")
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @bounty.command(name="set", description="Set a bounty on another user")
+    async def bounty_set(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        amount: str
+    ):
+        await ctx.reply("Setting bounty...")
+        user = ctx.author
+        if member == user:
+            return await ctx.reply("You cannot set a bounty on yourself.", delete_after=5)
+        if member == ctx.guild.me:
+            return await ctx.reply("I appreciate the trust, but no self-bounties on me!", delete_after=5)
+
+        # Fetch balances
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user.id)
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
+        # Parse amount
+        try:
+            amt = await self.amount_handler(amount, balance)
+        except ValueError as e:
+            return await ctx.reply(f"🚫 {e}", delete_after=5)
+
+        # Place bounty
+        bounty = await self.bot.database.place_bounty(user.id, member.id, amt)
+        if bounty is None:
+            return await ctx.reply(
+                "🚫 Failed to place bounty. Try again later.", delete_after=5
+            )
+
+        desc = (
+            f"{user.mention} has placed a bounty of {self.currency_name} **{amt:.2f}** on {member.mention}!"
+        )
+        embed = discord.Embed(description=desc, color=discord.Color.green())
+        await ctx.reply(embed=embed)
+
+    @bounty.command(name="list", description="List top active bounties")
+    async def bounty_list(self, ctx: commands.Context):
+        msg = await ctx.reply("Fetching top bounties...")
+        top_bounties: List = await self.bot.database.get_top_bounty_users(10)
+        if not top_bounties:
+            return await msg.edit(
+                "There are no active bounties right now.", delete_after=5
+            )
+
+        embed = discord.Embed(title="🎯 Top Bounties", color=discord.Color.blurple())
+        for user_id, total in top_bounties:
+            # Resolve username
+            member = ctx.guild.get_member(user_id)
+            if member:
+                name = member.display_name
+            else:
+                try:
+                    user_obj = await self.bot.fetch_user(user_id)
+                    name = user_obj.name
+                except:
+                    name = f"User ID {user_id}"
+            embed.add_field(
+                name=name,
+                value=f"{self.currency_name} **{await self.short_formatter(total)}**",
+                inline=False
+            )
+        await msg.edit(embed=embed)
+
+    @app_commands.command(name="shop", description="View the shop and buy items.")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def shop(self, interaction: Interaction):
+
+        shop_items = await self.bot.database.list_shop_items()
+        if not shop_items:
+            embed = discord.Embed(
+                description="There are no items in the shop currently. Check back later!",
+                color=discord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            view = ShopView(
+                bot=self.bot,
+                shop_items=shop_items,
+                user_id=interaction.user.id,
+                currency_name=self.currency_name
+            )
+            item = shop_items[0]
+            embed = discord.Embed(
+                title=item.name,
+                description=item.description or "No description available.",
+                color=discord.Color.blurple()
+            )
+            embed.add_field(
+                name="Price",
+                value=f"{self.currency_name} **{await self.formatter(Decimal(item.price))}**"
+            )
+            qty_text = "∞" if getattr(item, "unlimited", False) else f"**{item.quantity}** left in stock."
+            embed.add_field(
+                name="Quantity",
+                value=qty_text,
+                inline=True
+            )
+            embed.set_footer(text=f"Item 1 of {len(shop_items)}")
+            #await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 15)
+            await interaction.response.send_message("Welcome to the shop!", embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="inventory", description='View your items')
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def inventory(self, interaction: Interaction, member: discord.Member = None):
+        member = member or interaction.user
+
+        entries = await self.bot.database.get_user_inventory_grouped(member.id)
+        if not entries:
+            embed = discord.Embed(
+                title="Inventory",
+                description="Your inventory is empty.",
+                color=discord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        paginator = ItemPaginator(
+            self.bot,
+            entries,
+            user_id=member.id,
+            title=f"{member.display_name}'s Inventory"
+        )
+        embed = await paginator.send_page()
+        #await self.bot.database.set_cooldown(interaction.user.id, interaction.command.qualified_name, 3)
+        await interaction.response.send_message(embed=embed, view=paginator)
+
+    @app_commands.command(name="use", description="Browse and use items from your inventory")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def use_item(self, interaction: Interaction):
+        not_implemented = True
+        if not_implemented:
+            await interaction.response.send_message("This command is not yet implemented.", ephemeral=True)
+            return
+
+        entries = await self.bot.database.get_user_inventory_grouped(interaction.user.id)
+        if not entries:
+            embed = discord.Embed(
+                title="Inventory",
+                description="Your inventory is empty.",
+                color=discord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        paginator = UseItemPaginator(
+            bot=self.bot,
+            entries=entries,
+            user_id=interaction.user.id,
+            title="Your Inventory — Use an item"
+        )
+        embed = await paginator.send_page()
+        # apply your usual cooldown
+        #await self.bot.database.set_cooldown(interaction.user.id, interaction.command.qualified_name, 3)
+        await interaction.response.send_message(embed=embed, view=paginator)
+
+    @app_commands.command(name="trade", description="Trade an item to another user")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def trade_item(self, interaction: Interaction, member: discord.Member, item_id: int, quantity: int = 1):
+        not_implemented = True
+        if not_implemented:
+            await interaction.response.send_message("This command is not yet implemented.", ephemeral=True)
+            return
+
+        if member.bot or member.id == interaction.user.id:
+            await interaction.response.send_message("Invalid target user.", ephemeral=True)
+            return
+        try:
+            await self.bot.database.transfer_item(interaction.user.id, member.id, item_id, quantity)
+            message = f"Transferred {quantity} of item {item_id} to {member.display_name}."
+            color = discord.Color.green()
+        except Exception as e:
+            message = str(e)
+            color = discord.Color.red()
+        embed = discord.Embed(description=message, color=color)
+        await interaction.response.send_message(embed=embed)
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Economy(bot))
+    logger.debug("Economy cog initialized successfully")

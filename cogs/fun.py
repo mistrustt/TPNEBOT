@@ -1,0 +1,399 @@
+import os
+import random
+import aiohttp
+import discord
+import logging
+from discord.ext import commands
+from discord.ext.commands import Context
+from datetime import datetime
+import logging
+from utils.misc import MiscUtils
+
+logger = logging.getLogger("discord_bot")
+class Fun(commands.Cog, name="Fun"):
+
+    def __init__(self, bot) -> None:
+        self.bot = bot
+        self.utils = MiscUtils(self)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        logger.info(f"Cog {self.__class__.__name__} is ready!")
+
+    @commands.command(name="randomfact", aliases=['rfact'], description="Get a random fact.")
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def randomfact(self, ctx: Context) -> None:
+        """
+        Get a random fact from API Ninjas.
+        """
+        self.api_key = os.getenv("API_NINJAS_KEY")
+        if not self.api_key:
+            embed = discord.Embed(
+                title="Error!",
+                description="API key for API Ninjas is not set.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+        url = "https://api.api-ninjas.com/v1/facts"
+        headers = {"X-Api-Key": self.api_key}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as request:
+                if request.status == 200:
+                    data = await request.json()
+
+                    fact_text = data[0].get("fact") if isinstance(data, list) and data else None
+
+                    if fact_text:
+
+                        color = (
+                            discord.Color.blurple()
+                            if isinstance(ctx.channel, discord.DMChannel)
+                            else (ctx.author.top_role.color or discord.Color.blurple())
+                        )
+                        embed = discord.Embed(
+                            title="Random Fact",
+                            description=fact_text,
+                            color=color,
+                            timestamp=datetime.now()
+                        )
+                        embed.set_footer(text="Source: API Ninjas")
+                    else:
+                        embed = discord.Embed(
+                            title="Oops!",
+                            description="Couldn't parse a fact from API Ninjas.", 
+                            color=discord.Color.red()
+                        )
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Facts API. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                    embed.set_image(url=f"https://http.cat/{request.status}")
+
+                await ctx.send(embed=embed)
+
+    @commands.command(
+        name='fotd',
+        aliases=['factoftheday'],
+        description="Get a random fact of the day."
+    )
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def fotd(self, ctx: Context) -> None:
+        """Get a random fact of the day."""
+        url = "https://uselessfacts.jsph.pl/api/v2/facts/today?language=en"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Useless Facts API. Please try again later.",
+                        color=discord.Color.red()
+                    )
+                    embed.set_image(url=f"https://http.cat/{response.status}")
+                    return await ctx.reply(embed=embed)
+
+                data = await response.json()
+
+                # Handle both dict and list responses
+                if isinstance(data, dict):
+                    item = data
+                elif isinstance(data, list) and data:
+                    item = data[0]
+                else:
+                    item = None
+
+                if not item or not item.get("text"):
+                    embed = discord.Embed(
+                        title="Oops!",
+                        description="Couldn't parse a fact of the day from the API response.",
+                        color=discord.Color.red()
+                    )
+                    return await ctx.reply(embed=embed)
+
+                fact_text = item["text"]
+                source = item.get("source") or item.get("source_url") or "unknown"
+
+                # Choose embed color: DMs get a consistent color
+                color = (
+                    discord.Color.blurple()
+                    if isinstance(ctx.channel, discord.DMChannel)
+                    else (ctx.author.top_role.color or discord.Color.blurple())
+                )
+
+                embed = discord.Embed(
+                    title=f"Fact of the Day – {datetime.now().strftime('%Y-%m-%d')}",
+                    description=fact_text,
+                    color=color
+                )
+                embed.set_footer(text=f"Source: {source}")
+
+                await ctx.reply(embed=embed)
+
+    @commands.command(name='dog')
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def dog(self, ctx: commands.Context):
+        """Get a random dog photo."""
+        url = "https://random.dog/woof.json"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    await ctx.reply(data['url'])
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Dog API. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    await ctx.reply(embed=embed)
+
+    @commands.command(name='cat')
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def cat(self, ctx: commands.Context):
+        """Get a random cat photo."""
+        url = "https://api.thecatapi.com/v1/images/search"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    await ctx.reply(data[0]['url'])
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Cat API. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    await ctx.reply(embed=embed)
+
+    @commands.command(name='fox')
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def fox(self, ctx: commands.Context):
+        """Get a random fox photo."""
+        url = "https://randomfox.ca/floof/"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    await ctx.reply(data['image'])
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Fox API. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    await ctx.reply(embed=embed)
+
+    @commands.command(name='penguin')
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def penguin(self, ctx: commands.Context):
+        """Get a random penguin photo."""
+        url = "https://penguin.sjsharivker.workers.dev/api"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    await ctx.reply(data['img'])
+                if resp.status == 201:
+                    data = await resp.json()
+                    await ctx.reply(data['img'])
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Penguin API. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    await ctx.reply(embed=embed)
+
+    @commands.command(name='duck', hidden=True)
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def duck(self, ctx: commands.Context):
+        """Get a random duck photo."""
+        url = "https://random-d.uk/api/v2/random"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    await ctx.reply(data['url'])
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description="There was a problem contacting the Duck API. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    await ctx.reply(embed=embed)
+
+    @commands.command(name='boom', aliases=['kaboom'], description='boom.')
+    async def pow(self, ctx: Context):
+        await ctx.defer()
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+        await ctx.reply("pow :boom:")
+
+    @commands.command(name='gay', aliases=['gayrate'], help='Estimates how homosexual a user is')
+    async def random_percentage(self, ctx: Context, member: discord.Member = None):
+        """Estimates how homosexual a user is"""
+        await ctx.defer()
+        percentage = random.randrange(100)
+        color = discord.Color.blurple()
+        if isinstance(ctx.channel, discord.DMChannel):
+            color = discord.Color.blurple()
+        else:
+            color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+        if member is None:
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+            if percentage > 50:
+                embed=discord.Embed(
+                    description=f"are {percentage}% gay :rainbow:", 
+                    color=color
+                )
+                embed.set_author(name=f'You', icon_url=self.utils.get_avatar_url(ctx.author))
+                await ctx.reply(embed=embed)
+            else:
+                embed=discord.Embed(
+                    description=f"are {percentage}% gay", 
+                    color=color
+                )
+                embed.set_author(name=f'You', icon_url=self.utils.get_avatar_url(ctx.author))
+                await ctx.reply(embed=embed)
+        elif member.id == 1167418093375606796:
+            embed=discord.Embed(
+                description=f"is 100% gay :rainbow:", 
+                color=color
+            )
+            embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
+            await ctx.reply(embed=embed)
+        elif member == ctx.author:
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+            if percentage > 50:
+                embed=discord.Embed(
+                    description=f"are {percentage}% gay :rainbow:", 
+                    color=color
+                )
+                embed.set_author(name=f'You', icon_url=self.utils.get_avatar_url(ctx.author))
+                await ctx.reply(embed=embed)
+            else:
+                embed=discord.Embed(
+                    description=f"are {percentage}% gay", 
+                    color=color
+                )
+                embed.set_author(name=f'You', icon_url=self.utils.get_avatar_url(ctx.author))
+                await ctx.reply(embed=embed)
+        elif member != ctx.author:
+            await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+            if percentage > 50:
+                embed=discord.Embed(
+                    description=f"is {percentage}% gay :rainbow:", 
+                    color=color
+                )
+                embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
+                await ctx.reply(embed=embed)
+            else:
+                embed=discord.Embed(
+                    description=f"is {percentage}% gay", 
+                    color=color
+                )
+                embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
+                await ctx.reply(embed=embed)
+
+    @commands.command(name="penis", aliases=["dih"], help="Find out how large your penis is.")
+    async def size(self, ctx: Context, member: discord.Member=None):
+        member = member or ctx.author
+
+        size = random.randrange(start=0,stop=21)
+        if size == 0:
+            penis = "No penis detected" 
+        else:
+            penis = f"8{'=' * size}D"
+        embed=discord.Embed(description=f"{penis}")
+        embed.set_author(name=f'{member.display_name}\'s Penis Size', icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
+
+    @commands.command(name="boobs", aliases=["tits"], help="Find out how large your tits are.")
+    async def boobs(self, ctx: Context, member: discord.Member=None):
+        member = member or ctx.author
+
+        size = random.randint(50, 72)  # returns any number between 50 and 72
+
+        color = discord.Color.blurple()
+        if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:
+            color = ctx.author.top_role.color
+
+        embed = discord.Embed(description=f"{size}", color=color)
+        embed.set_author(name=f"{member.display_name}'s Boob Size", icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
+
+    @commands.command(name="weight", help="Find out how much you weigh")
+    async def weight(self, ctx: Context, member: discord.Member = None):
+        """Find out how much you weigh"""
+        member = member or ctx.author
+
+        units = ['kg', 'lb', 'tons']
+        selected_unit = random.choice(units)
+
+        if selected_unit == 'kg':
+            if random.random() < 0.85:
+                weight = random.randint(50, 150)
+            else:
+                weight = random.randint(151, 1000)
+        elif selected_unit == 'lb':
+            if random.random() < 0.85:
+                weight = random.randint(110, 330)
+            else:
+                weight = random.randint(331, 2200)
+        else:
+            if random.random() < 0.85:
+                weight = round(random.uniform(0.1, 0.5), 2)
+            else:
+                weight = round(random.uniform(0.51, 50), 2)
+
+        color = discord.Color.blurple()
+        if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:
+            color = ctx.author.top_role.color
+
+        embed = discord.Embed(
+            description=f"weighs {weight} {selected_unit}",
+            color=color
+        )
+        embed.set_author(name=member.display_name, icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
+
+    @commands.command(name="height", help="Find out how tall you are")
+    async def height(self, ctx: Context, member: discord.Member = None):
+        """Find out how tall you are (for comedic purposes)."""
+        member = member or ctx.author
+
+        if random.random() < 0.85:  
+            feet = random.randint(3, 7)
+            inches = random.randint(0, 11)
+        else:
+            if random.random() < 0.5:
+                feet = random.randint(8, 17)
+                inches = random.randint(0, 11)
+            else:
+                feet = random.randint(0, 2)
+                inches = random.randint(0, 11)
+
+        height_str = f"{feet} ft {inches} in"
+
+        color = discord.Color.blurple()
+        if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:
+            color = ctx.author.top_role.color
+
+        embed = discord.Embed(
+            description=f"has a height of {height_str}",
+            color=color
+        )
+        embed.set_author(name=member.display_name, icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
+
+async def setup(bot) -> None:
+    await bot.add_cog(Fun(bot))
+    logger.debug('Fun cog initialized successfully')
