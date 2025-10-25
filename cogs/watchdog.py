@@ -413,10 +413,21 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         description = f"{member.display_name} (`{member.id}`) has joined the server."
 
-        if account_age < timedelta(days=60):
-            description += f"\n:warning: **New Account** - Created {account_age.days} days ago"
+        total_seconds = int(account_age.total_seconds())
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
 
-        description += f"\n**Creation**: {member.created_at.strftime('%Y-%m-%d')}"
+        if days > 0:
+            age_str = f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}"
+        else:
+            age_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        if account_age < timedelta(days=60):
+            description += f"\n:warning: **New Account** - Created {age_str} ago"
+
+        description += f"\n**Creation**: {member.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
 
         await self.add_log_entry(member.guild.id, description)
 
