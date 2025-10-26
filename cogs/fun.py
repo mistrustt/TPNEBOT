@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+from datetime import timedelta
 import aiohttp
 import discord
 import logging
@@ -519,7 +520,7 @@ class Fun(commands.Cog, name="Fun"):
         timeout_duration = random.randint(60, 600)  # 1-10 minutes
 
         try:
-            await victim.timeout(discord.utils.utcnow() + discord.timedelta(seconds=timeout_duration), reason="Lost Timeout Roulette")
+            await victim.timeout(discord.utils.utcnow() + timedelta(seconds=timeout_duration), reason="Lost Timeout Roulette")
             embed = discord.Embed(
                 title="Timeout Roulette",
                 description=f"{victim.mention} has been timed out for {timeout_duration // 60} minutes and {timeout_duration % 60} seconds! ⏰",
