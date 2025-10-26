@@ -452,13 +452,26 @@ class Fun(commands.Cog, name="Fun"):
             await message.edit(embed=embed)
             return
 
-        victim.ban(reason="Lost Ban Roulette")
-
-        embed = discord.Embed(
-            title="Ban Roulette",
-            description=f"{victim.mention} has been banned! :hammer:",
-            color=discord.Color.green()
-        )
+        try:
+            await victim.ban(reason="Lost Ban Roulette")
+            embed = discord.Embed(
+                title="Ban Roulette",
+                description=f"{victim.mention} has been banned! :hammer:",
+                color=discord.Color.green()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="Ban Roulette",
+                description=f"{victim.mention} would have been banned, but I don't have permission! :hammer:",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="Ban Roulette",
+                description=f"Failed to ban {victim.mention}: {str(e)}",
+                color=discord.Color.red()
+            )
+        
         await message.edit(embed=embed)
 
 async def setup(bot) -> None:
