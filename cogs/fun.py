@@ -442,9 +442,21 @@ class Fun(commands.Cog, name="Fun"):
 
         banned_user = random.choice(list(users))
 
+        victim = await ctx.guild.fetch_member(banned_user.id)
+        if not victim:
+            embed = discord.Embed(
+                title="Ban Roulette",
+                description="Could not find the selected user in the guild.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        victim.ban(reason="Lost Ban Roulette")
+
         embed = discord.Embed(
-            title="Banroulette",
-            description=f"The game has ended! {banned_user.mention} has been banned! :hammer:",
+            title="Ban Roulette",
+            description=f"{victim.mention} has been banned! :hammer:",
             color=discord.Color.green()
         )
         await message.edit(embed=embed)
