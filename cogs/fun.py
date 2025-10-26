@@ -475,9 +475,10 @@ class Fun(commands.Cog, name="Fun"):
                 color=discord.Color.red()
             )
         
-        await message.edit(embed=embed)
+        await ctx.send(embed=embed)
 
     @commands.command(name="timeoutroulette", aliases=["tr"], help="Play a game of timeout roulette")
+    @commands.has_guild_permissions(moderate_members=True)
     async def timeoutroulette(self, ctx: Context):
         """Play a game of timeout roulette. Players react to join the game and one player is randomly selected to be timed out."""
         embed = discord.Embed(
@@ -542,7 +543,7 @@ class Fun(commands.Cog, name="Fun"):
                 color=discord.Color.red()
             )
         
-        await message.edit(embed=embed)
+        await ctx.send(embed=embed)
 
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))
