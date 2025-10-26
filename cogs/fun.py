@@ -415,13 +415,13 @@ class Fun(commands.Cog, name="Fun"):
         """Play a game of banroulette. Players react to join the game and one player is randomly selected to be 'banned'."""
         embed = discord.Embed(
             title="Banroulette",
-            description="React with 🔫 to join the game! You have 30 seconds.",
+            description="React with 🔫 to join the game! You have 15 seconds.",
             color=discord.Color.blurple()
         )
         message = await ctx.reply(embed=embed)
         await message.add_reaction("🔫")
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
 
         message = await ctx.fetch_message(message.id)
         users = set()
