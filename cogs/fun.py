@@ -1,3 +1,4 @@
+import asyncio
 import os
 import random
 import aiohttp
@@ -384,6 +385,69 @@ class Fun(commands.Cog, name="Fun"):
         )
         embed.set_author(name=member.display_name, icon_url=self.utils.get_avatar_url(member))
         await ctx.reply(embed=embed)
+
+    @commands.command(name="iq", help="Find out your IQ")
+    async def iq(self, ctx: Context, member: discord.Member = None):
+        """Find out your IQ."""
+        member = member or ctx.author
+
+        if random.random() < 0.85:
+            iq = random.randint(90, 130)
+        else:
+            if random.random() < 0.5:
+                iq = random.randint(131, 200)
+            else:
+                iq = random.randint(1, 89)
+
+        color = discord.Color.blurple()
+        if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:
+            color = ctx.author.top_role.color
+
+        embed = discord.Embed(
+            description=f"has an IQ of {iq}",
+            color=color
+        )
+        embed.set_author(name=member.display_name, icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
+    
+    @commands.command(name="banroulette", aliases=["br"], help="Play a game of banroulette")
+    async def banroulette(self, ctx: Context):
+        """Play a game of banroulette. Players react to join the game and one player is randomly selected to be 'banned'."""
+        embed = discord.Embed(
+            title="Banroulette",
+            description="React with 🔫 to join the game! You have 30 seconds.",
+            color=discord.Color.blurple()
+        )
+        message = await ctx.reply(embed=embed)
+        await message.add_reaction("🔫")
+
+        await asyncio.sleep(30)
+
+        message = await ctx.fetch_message(message.id)
+        users = set()
+        for reaction in message.reactions:
+            if str(reaction.emoji) == "🔫":
+                async for user in reaction.users():
+                    if not user.bot:
+                        users.add(user)
+
+        if len(users) < 2:
+            embed = discord.Embed(
+                title="Banroulette",
+                description="Not enough players joined the game. Need at least 2 players.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        banned_user = random.choice(list(users))
+
+        embed = discord.Embed(
+            title="Banroulette",
+            description=f"The game has ended! {banned_user.mention} has been banned! :hammer:",
+            color=discord.Color.green()
+        )
+        await message.edit(embed=embed)
 
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))
