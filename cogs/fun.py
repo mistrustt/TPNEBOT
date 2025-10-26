@@ -474,6 +474,72 @@ class Fun(commands.Cog, name="Fun"):
         
         await message.edit(embed=embed)
 
+    @commands.command(name="timeoutroulette", aliases=["tr"], help="Play a game of timeout roulette")
+    async def timeoutroulette(self, ctx: Context):
+        """Play a game of timeout roulette. Players react to join the game and one player is randomly selected to be timed out."""
+        embed = discord.Embed(
+            title="Timeout Roulette",
+            description="React with ⏰ to join the game! You have 15 seconds.",
+            color=discord.Color.blurple()
+        )
+        message = await ctx.reply(embed=embed)
+        await message.add_reaction("⏰")
+
+        await asyncio.sleep(15)
+
+        message = await ctx.fetch_message(message.id)
+        users = set()
+        for reaction in message.reactions:
+            if str(reaction.emoji) == "⏰":
+                async for user in reaction.users():
+                    if not user.bot:
+                        users.add(user)
+
+        if len(users) < 2:
+            embed = discord.Embed(
+                title="Timeout Roulette",
+                description="Not enough players joined the game. Need at least 2 players.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        timeout_user = random.choice(list(users))
+
+        victim = await ctx.guild.fetch_member(timeout_user.id)
+        if not victim:
+            embed = discord.Embed(
+                title="Timeout Roulette",
+                description="Could not find the selected user in the guild.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        timeout_duration = random.randint(60, 600)  # 1-10 minutes
+
+        try:
+            await victim.timeout(discord.utils.utcnow() + discord.timedelta(seconds=timeout_duration), reason="Lost Timeout Roulette")
+            embed = discord.Embed(
+                title="Timeout Roulette",
+                description=f"{victim.mention} has been timed out for {timeout_duration // 60} minutes and {timeout_duration % 60} seconds! ⏰",
+                color=discord.Color.orange()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="Timeout Roulette",
+                description=f"{victim.mention} would have been timed out, but I don't have permission! ⏰",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="Timeout Roulette",
+                description=f"Failed to timeout {victim.mention}: {str(e)}",
+                color=discord.Color.red()
+            )
+        
+        await message.edit(embed=embed)
+
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))
     logger.debug('Fun cog initialized successfully')
