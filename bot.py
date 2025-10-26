@@ -128,14 +128,6 @@ class DiscordBot(commands.Bot):
     def is_coolguy(self, user_id: int):
         return user_id in self.cool_guys
 
-    async def notify_startup():
-        webhook = Webhook.from_url(WEBHOOK_URL, client=bot)
-        await webhook.send("⚡️ **Bot is starting up…**")
-
-    async def notify_shutdown():
-        webhook = Webhook.from_url(WEBHOOK_URL, client=bot)
-        await webhook.send("💤 **Bot is shutting down…**")
-
     async def setup_hook(self) -> None:
         try:
             self.logger.info(f"Logged in as {self.user.name}")
