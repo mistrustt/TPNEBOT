@@ -412,6 +412,7 @@ class Fun(commands.Cog, name="Fun"):
         await ctx.reply(embed=embed)
     
     @commands.command(name="banroulette", aliases=["br"], help="Play a game of banroulette")
+    @commands.has_guild_permissions(ban_members=True)
     async def banroulette(self, ctx: Context):
         """Play a game of banroulette. Players react to join the game and one player is randomly selected to be 'banned'."""
         embed = discord.Embed(
@@ -434,7 +435,7 @@ class Fun(commands.Cog, name="Fun"):
 
         if len(users) < 2:
             embed = discord.Embed(
-                title="Banroulette",
+                title="Ban Roulette",
                 description="Not enough players joined the game. Need at least 2 players.",
                 color=discord.Color.red()
             )
@@ -476,6 +477,7 @@ class Fun(commands.Cog, name="Fun"):
         await message.edit(embed=embed)
 
     @commands.command(name="timeoutroulette", aliases=["tr"], help="Play a game of timeout roulette")
+    @commands.has_guild_permissions(moderate_members=True)
     async def timeoutroulette(self, ctx: Context):
         """Play a game of timeout roulette. Players react to join the game and one player is randomly selected to be timed out."""
         embed = discord.Embed(
