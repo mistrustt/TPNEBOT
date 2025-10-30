@@ -3,7 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ext.commands import Context 
 import os
+import json
 import io
+import subprocess
 import docker
 import time
 import uuid
@@ -2153,6 +2155,47 @@ class Owner(commands.Cog, name="Owner"):
 
         await ctx.message.add_reaction(self.shh_emoji)
         await ctx.message.delete()
+
+    def create_user(self, username):
+        try:
+            subprocess.run(
+                ["headscale", "users", "create", username],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            return f"✅ User `{username}` created."
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode()
+            if "already exists" in stderr:
+                return f"ℹ️ User `{username}` already exists."
+            else:
+                return f"❌ Error creating user: `{stderr}`"
+
+    def create_reusable_preauthkey(self, username):
+        try:
+            result = subprocess.run(
+                ["headscale", "preauthkeys", "create", "--user", username, "--reusable", "--output", "json"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            key_data = json.loads(result.stdout)
+            return key_data["key"]
+        except subprocess.CalledProcessError as e:
+            return f"❌ Failed to generate key: `{e.stderr.decode()}`"
+
+    @commands.command(name="vpn", hidden=True)
+    @commands.is_owner()
+    async def genkey(self, ctx, username: str):
+        await ctx.reply(f"🔧 Generating reusable tailscale key for `{username}`...")
+
+        user_result = self.create_user(username)
+        await ctx.send(user_result)
+
+        key_result = self.create_reusable_preauthkey(username)
+
+        await ctx.author.send(f"🔑 Preauth Key for `{username}`:\n```\n{key_result}\n```")
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
