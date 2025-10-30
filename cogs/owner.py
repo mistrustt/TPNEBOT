@@ -2185,17 +2185,76 @@ class Owner(commands.Cog, name="Owner"):
         except subprocess.CalledProcessError as e:
             return f"❌ Failed to generate key: `{e.stderr.decode()}`"
 
-    @commands.command(name="vpn", hidden=True)
+    @commands.group(name="vpn", invoke_without_command=True, hidden=True)
     @commands.is_owner()
-    async def genkey(self, ctx, username: str):
-        await ctx.reply(f"🔧 Generating reusable tailscale key for `{username}`...")
+    async def vpn(self, ctx):
+        """VPN management commands. Subcommands: create, user, key"""
+        embed = discord.Embed(
+            title="VPN",
+            description="Subcommands:\n• create <username> — create user + reusable key\n• user <username> — create user only\n• key <username> — create reusable key for existing user (DMs key)",
+            color=discord.Color.blurple()
+        )
+        await ctx.reply(embed=embed)
 
-        user_result = self.create_user(username)
+    def _valid_vpn_username(self, username: str) -> bool:
+        # conservative validation: letters, digits, dot, dash, underscore, max length 64
+        return bool(re.match(r'^[A-Za-z0-9._-]{1,64}$', username))
+
+    @vpn.command(name="user", hidden=True)
+    @commands.is_owner()
+    async def vpn_user(self, ctx, username: str):
+        """Create a new VPN user only."""
+        if not self._valid_vpn_username(username):
+            return await ctx.reply("❌ Invalid username. Use only letters, numbers, dot, dash or underscore (max 64 chars).")
+
+        loading = await ctx.reply(f"🔧 Creating user `{username}`…")
+        loop = asyncio.get_running_loop()
+        user_result = await loop.run_in_executor(None, self.create_user, username)
         await ctx.send(user_result)
+        await loading.edit(content=f"✅ Done: {username}")
 
-        key_result = self.create_reusable_preauthkey(username)
+    @vpn.command(name="key", hidden=True)
+    @commands.is_owner()
+    async def vpn_key(self, ctx, username: str):
+        """Generate a reusable auth key for an existing user."""
+        if not self._valid_vpn_username(username):
+            return await ctx.reply("❌ Invalid username. Use only letters, numbers, dot, dash or underscore (max 64 chars).")
 
-        await ctx.author.send(f"🔑 Preauth Key for `{username}`:\n```\n{key_result}\n```")
+        loading = await ctx.reply(f"🔑 Generating reusable key for `{username}`…")
+        loop = asyncio.get_running_loop()
+        key_result = await loop.run_in_executor(None, self.create_reusable_preauthkey, username)
+
+        try:
+            await ctx.author.send(f"🔑 Preauth Key for `{username}`:\n```\ntailscale up --login-server http://headscale.mistrust.dev --auth-key {key_result}\n```")
+            await loading.edit(content=f"✅ Key generated and sent to your DMs.")
+        except Exception:
+            return await loading.edit(content="❌ Failed to send DM. Please check your privacy settings.")
+
+    @vpn.command(name="register", hidden=True)
+    @commands.is_owner()
+    async def new_node(self, ctx, username: str, *key: str):
+        """Register a new VPN node for a user with the given preauth key."""
+        if not self._valid_vpn_username(username):
+            return await ctx.reply("❌ Invalid username. Use only letters, numbers, dot, dash or underscore (max 64 chars).")
+
+        preauth_key = ' '.join(key).strip()
+        if not preauth_key:
+            return await ctx.reply("❌ You must provide a preauth key.")
+
+        loading = await ctx.reply(f"🔧 Registering new node for `{username}`…")
+        try:
+            result = subprocess.run(
+                ["headscale", "nodes", "register", "--user", username, "--key", preauth_key, "--output", "json"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            node_data = json.loads(result.stdout)
+            node_name = node_data.get("name", "unknown")
+            await loading.edit(content=f"✅ Node `{node_name}` registered for user `{username}`.")
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode()
+            await loading.edit(content=f"❌ Failed to register node: `{stderr}`")
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
