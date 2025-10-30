@@ -2174,8 +2174,28 @@ class Owner(commands.Cog, name="Owner"):
 
     def create_reusable_preauthkey(self, username):
         try:
+            # First, get the user's uint ID
+            users_result = subprocess.run(
+                ["headscale", "users", "list", "--output", "json"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            users_data = json.loads(users_result.stdout)
+            
+            # Find the user's uint ID
+            user_uint = None
+            for user in users_data:
+                if user['name'] == username:
+                    user_uint = user['id']
+                    break
+            
+            if user_uint is None:
+                return f"❌ User `{username}` not found."
+            
+            # Create the preauth key using the uint ID
             result = subprocess.run(
-                ["headscale", "preauthkeys", "create", "--user", username, "--reusable", "--output", "json"],
+                ["headscale", "preauthkeys", "create", "--user", str(user_uint), "--reusable", "--output", "json"],
                 check=True,
                 capture_output=True,
                 text=True
@@ -2183,7 +2203,9 @@ class Owner(commands.Cog, name="Owner"):
             key_data = json.loads(result.stdout)
             return key_data["key"]
         except subprocess.CalledProcessError as e:
-            return f"❌ Failed to generate key: `{e.stderr}`"
+            return f"❌ Failed to generate key: `{e.stderr.decode()}`"
+        except (json.JSONDecodeError, KeyError) as e:
+            return f"❌ Error parsing response: `{e}`"
 
     @commands.group(name="vpn", invoke_without_command=True, hidden=True)
     @commands.is_owner()
