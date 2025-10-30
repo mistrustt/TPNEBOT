@@ -2213,6 +2213,34 @@ class Owner(commands.Cog, name="Owner"):
         await ctx.send(user_result)
         await loading.edit(content=f"✅ Done: {username}")
 
+    @vpn.command(name="userlist", hidden=True)
+    @commands.is_owner()
+    async def vpn_userlist(self, ctx):
+        """List all VPN users."""
+        loading = await ctx.reply("📋 Fetching VPN user list…")
+        try:
+            result = subprocess.run(
+                ["headscale", "users", "list", "--output", "json"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            users_data = json.loads(result.stdout)
+            if not users_data:
+                await loading.edit(content="ℹ️ No VPN users found.")
+                return
+
+            user_list = "\n".join(f"- {user['name']}" for user in users_data)
+            embed = discord.Embed(
+                title="VPN Users",
+                description=user_list,
+                color=discord.Color.blurple()
+            )
+            await loading.edit(content="", embed=embed)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode()
+            await loading.edit(content=f"❌ Failed to fetch user list: `{stderr}`")
+
     @vpn.command(name="key", hidden=True)
     @commands.is_owner()
     async def vpn_key(self, ctx, username: str):
