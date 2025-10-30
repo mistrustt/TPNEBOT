@@ -2183,7 +2183,7 @@ class Owner(commands.Cog, name="Owner"):
             key_data = json.loads(result.stdout)
             return key_data["key"]
         except subprocess.CalledProcessError as e:
-            return f"❌ Failed to generate key: `{e.stderr.decode()}`"
+            return f"❌ Failed to generate key: `{e.stderr}`"
 
     @commands.group(name="vpn", invoke_without_command=True, hidden=True)
     @commands.is_owner()
