@@ -2191,7 +2191,7 @@ class Owner(commands.Cog, name="Owner"):
         """VPN management commands. Subcommands: create, user, key"""
         embed = discord.Embed(
             title="VPN",
-            description="Subcommands:\n• create <username> — create user + reusable key\n• user <username> — create user only\n• key <username> — create reusable key for existing user (DMs key)",
+            description="Available subcommands: `user`, `userlist`, `key`, `register`",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
