@@ -2210,10 +2210,9 @@ class Owner(commands.Cog, name="Owner"):
     @commands.group(name="vpn", invoke_without_command=True, hidden=True)
     @commands.is_owner()
     async def vpn(self, ctx):
-        """VPN management commands. Subcommands: create, user, key"""
         embed = discord.Embed(
             title="VPN",
-            description="Available subcommands: `user`, `userlist`, `key`, `register`",
+            description="Available subcommands: `newuser`, `userlist`, `key`, `register`",
             color=discord.Color.blurple()
         )
         await ctx.reply(embed=embed)
@@ -2222,7 +2221,7 @@ class Owner(commands.Cog, name="Owner"):
         # conservative validation: letters, digits, dot, dash, underscore, max length 64
         return bool(re.match(r'^[A-Za-z0-9._-]{1,64}$', username))
 
-    @vpn.command(name="user", hidden=True)
+    @vpn.command(name="newuser", hidden=True)
     @commands.is_owner()
     async def vpn_user(self, ctx, username: str):
         """Create a new VPN user only."""

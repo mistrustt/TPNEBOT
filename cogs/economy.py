@@ -1558,7 +1558,7 @@ class Economy(commands.Cog):
             embed.set_thumbnail(url=avatar)
 
         await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 900)
-        await ctx.reply(embed=embed, delete_after=5)
+        await ctx.reply(embed=embed, delete_after=15)
 
     @commands.command(name="rob", description="Attempt to rob another user.")
     async def rob(self, ctx: commands.Context, target: discord.Member):
