@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from discord.ext.commands import Context
 from collections import defaultdict
 from typing import Optional
+import base64
 
 logger = logging.getLogger("discord_bot")
 
@@ -46,7 +47,21 @@ class Watchdog(commands.Cog, name="Watchdog"):
             r'\b(?:\+?\d{1,2}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b'
             ),
 
-            # Credit card vendor patterns
+            # Discord authentication token pattern
+            "Discord Token": re.compile(
+            r'([a-zA-Z0-9]{24}\.[a-zA-Z0-9]{6}\.[a-zA-Z0-9_\-]{27}|mfa\.[a-zA-Z0-9_\-]{84})'
+            ),
+
+            # Social Security Number pattern
+            "Social Security Number": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN format
+
+            # Social Insurance Number pattern
+            "Social Insurance Number": re.compile(r'\b\d{3} \d{3} \d{3}\b')  # SIN format
+
+            # Add more patterns as needed
+        }
+        self.paymentcard_patterns = {
+                        # Credit card vendor patterns
             # --- American Express ---
             "American Express Card": re.compile(r"\b3[47][0-9]{13}\b"),
 
@@ -66,17 +81,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 r"\b(6011|65[0-9]{2}|64[4-9][0-9]|62212[6-9]|622[2-8][0-9]{2}|6229[01][0-9]|62292[0-5])[0-9]{10,13}\b"
             ),
 
-            # --- UkrCart ---
-            "UkrCart Card": re.compile(r"\b6040(0[1-9]|1[0-9]|2[0-9])[0-9]{8,11}\b"),
-
             # --- RuPay ---
             "RuPay Card": re.compile(r"\b(60|65|81|82|508|353|356)[0-9]{10,13}\b"),
 
             # --- InterPayment ---
             "InterPayment Card": re.compile(r"\b636[0-9]{13,16}\b"),
-
-            # --- InstaPayment ---
-            "InstaPayment Card": re.compile(r"\b63[7-9][0-9]{13}\b"),
 
             # --- JCB ---
             "JCB Card": re.compile(r"\b35(2[8-9]|[3-8][0-9])[0-9]{12,15}\b"),
@@ -97,9 +106,6 @@ class Watchdog(commands.Cog, name="Watchdog"):
             # --- Mir ---
             "Mir Card": re.compile(r"\b220[0-4][0-9]{12,15}\b"),
 
-            # --- BORICA ---
-            "BORICA Card": re.compile(r"\b2205[0-9]{12}\b"),
-
             # --- Mastercard ---
             "Mastercard Card": re.compile(
                 r"\b(5[1-5][0-9]{14}|2(2[2-9][0-9]{12}|[3-6][0-9]{13}|7[01][0-9]{12}|720[0-9]{12}))\b"
@@ -119,38 +125,40 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 r"\b(506099|5061[0-9]{2}|6500(0[2-9]|1[0-9]|2[0-7])|5078(6[5-9]|7[0-9]|8[0-9]|9[0-4]))[0-9]{10,13}\b"
             ),
 
-            # --- LankaPay ---
-            "LankaPay Card": re.compile(r"\b357111[0-9]{10}\b"),
-
-            # --- Uzcard ---
-            "Uzcard Card": re.compile(r"\b(8600|5614)[0-9]{12}\b"),
-
-            # --- HUMO ---
-            "HUMO Card": re.compile(r"\b9860[0-9]{12}\b"),
-
             # --- GPN ---
             "GPN Card": re.compile(r"\b(1946|50|56|58|6[0-3])[0-9]{12,15}\b"),
 
-            # --- Napas ---
-            "Napas Card": re.compile(r"\b9704[0-9]{12,15}\b"),
-
-            # Discord authentication token pattern
-            "Discord Token": re.compile(
-            r'([a-zA-Z0-9]{24}\.[a-zA-Z0-9]{6}\.[a-zA-Z0-9_\-]{27}|mfa\.[a-zA-Z0-9_\-]{84})'
-            ),
-
-            # Social Security Number pattern
-            "Social Security Number": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN format
-
-            # Social Insurance Number pattern
-            "Social Insurance Number": re.compile(r'\b\d{3} \d{3} \d{3}\b')  # SIN format
-
-            # Add more patterns as needed
         }
         self.process_log_queue.start()
 
     def cog_unload(self):
         self.process_log_queue.cancel()
+
+    def luhn(self, cn:str) -> bool:
+        """
+        Validate a card number using the Luhn algorithm.
+        
+        Args:
+            cn (str): The card number to validate
+            
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        cn = str(cn).replace(' ', '')
+        
+        if not cn.isdigit():
+            return False
+
+        di = [int(d) for d in cn]
+        
+        for i in range(len(di) - 2, -1, -2):
+            di[i] *= 2
+            if di[i] > 9:
+                di[i] -= 9
+
+        t = sum(di)
+
+        return t % 10 == 0
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -445,11 +453,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-
         if message.author.bot or not message.guild or not message.content:
             return
 
         content = message.content
+        
+        # Check PII patterns
         for pattern_name, pattern in self.pii_patterns.items():
             m = pattern.search(content)
             if m:
@@ -458,13 +467,41 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     f"⚠️ {pattern_name} detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
+                
+                if pattern_name == "Discord Token":
+                    try:
+                        token_parts = snippet.split('.')
+                        if len(token_parts) >= 1:
+                            user_id = base64.b64decode(token_parts[0] + '==').decode('utf-8')
+                            desc += f"\n**Token User ID**: {user_id}"
+                    except:
+                        pass
+                
                 try:
                     if self.pii_filter:
                         await message.delete()
                 except discord.Forbidden:
                     desc += "\n*Failed to delete the message due to insufficient permissions.*"
                 await self.add_log_entry(message.guild.id, desc)
-                break  
+                return # Exit after first PII match
+        
+        for pattern_name, pattern in self.paymentcard_patterns.items():
+            matches = pattern.findall(content)
+            for match in matches:
+                card_number = ''.join(filter(str.isdigit, str(match)))
+                
+                if self.luhn(card_number):
+                    desc = (
+                        f"⚠️ Valid {pattern_name} detected in {message.channel.mention} sent by "
+                        f"{message.author} (`{message.author.id}`)"
+                    )
+                    try:
+                        if self.pii_filter:
+                            await message.delete()
+                    except discord.Forbidden:
+                        desc += "\n*Failed to delete the message due to insufficient permissions.*"
+                    await self.add_log_entry(message.guild.id, desc)
+                    return  # Exit after first valid card match
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
