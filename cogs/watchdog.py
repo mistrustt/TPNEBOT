@@ -61,7 +61,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
             # Add more patterns as needed
         }
-        self.paymentcard_patterns = {
+        self.card_patterns = {
             # --- American Express ---
             "American Express Card": re.compile(r"\b3[47][0-9]{13}\b"),
 
@@ -482,7 +482,6 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         content = message.content
 
-        # 1) PII
         for pattern_name, pattern in self.pii_patterns.items():
             m = pattern.search(content)
             if m:
@@ -507,12 +506,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     desc += "\n*Failed to delete the message due to insufficient permissions.*"
 
                 await self.add_log_entry(message.guild.id, desc)
-                return  # stop after first PII
+                return
 
-        # 2) Payment cards
-        NON_LUHN = {"Diners Club enRoute Card"}  # expand if needed
+        NON_LUHN = {"Diners Club enRoute Card"}
 
-        for pattern_name, pattern in self.paymentcard_patterns.items():
+        for pattern_name, pattern in self.card_patterns.items():
             for m in pattern.finditer(content):
                 card_number = re.sub(r"\D", "", m.group(0))
 
@@ -520,7 +518,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     continue
 
                 desc = (
-                    f"⚠️ Valid {pattern_name} detected in {message.channel.mention} sent by "
+                    f"⚠️ Genuine Credit Card detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`)"
                 )
                 try:
