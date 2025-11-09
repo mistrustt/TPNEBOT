@@ -18,13 +18,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
         self.max_queue_size = 10  
         self.process_interval = 10  
         self.guild_settings_cache = {}  
-        self.pii_filter = True  # Enable or disable PII filtering
         self.discord_patterns = [
             # Discord gift link pattern
             re.compile(r'(https?://)?discord((app)?.com/gifts|.gifts)/[a-zA-Z0-9-]+/?'),
 
             # Discord invite link pattern
-            re.compile(r'(https?://)?(www\.)?(discord\.gg|discord\.com/invite)/[a-zA-Z0-9-]+/?')
+            re.compile(r'(https?://)?(www\.)?(discord\.gg|discord\.com/invite)/[a-zA-Z0-9-]+/?'),
 
             # Add more patterns as needed
         ]
@@ -129,6 +128,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             "GPN Card": re.compile(r"\b(1946|50|56|58|6[0-3])[0-9]{12,15}\b"),
 
         }
+
         self.process_log_queue.start()
 
     def cog_unload(self):
@@ -480,6 +480,21 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         content = message.content
+        
+        # Check Discord patterns
+        #for pattern in self.discord_patterns:
+        #    if pattern.search(content):
+        #        desc = (
+        #            f"⚠️ Discord link detected in {message.channel.mention} sent by "
+        #            f"{message.author} (`{message.author.id}`)"
+        #        )
+        #        try:
+        #            if self.pii_filter:
+        #                await message.delete()
+        #        except discord.Forbidden:
+        #            desc += "\n*Failed to delete the message due to insufficient permissions.*"
+        #        await self.add_log_entry(message.guild.id, desc)
+        #        return # Exit after first Discord link match
         
         # Check PII patterns
         for pattern_name, pattern in self.pii_patterns.items():
