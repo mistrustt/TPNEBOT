@@ -38,7 +38,8 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
             # Email address pattern
             "Email Address": re.compile(
-            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
+            r'^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@',
+            r'((\[(\d{1,3}\.){3}\d{1,3}\])|(([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}))$',
             re.IGNORECASE
             ),
 
@@ -61,7 +62,6 @@ class Watchdog(commands.Cog, name="Watchdog"):
             # Add more patterns as needed
         }
         self.paymentcard_patterns = {
-                        # Credit card vendor patterns
             # --- American Express ---
             "American Express Card": re.compile(r"\b3[47][0-9]{13}\b"),
 
