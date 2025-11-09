@@ -38,7 +38,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
             # Email address pattern
             "Email Address": re.compile(
-            r'^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@',
+            r'^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@'
             r'((\[(\d{1,3}\.){3}\d{1,3}\])|(([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}))$',
             re.IGNORECASE
             ),
