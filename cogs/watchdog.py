@@ -27,41 +27,126 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
             # Add more patterns as needed
         ]
-        self.pii_patterns = [
+        self.pii_patterns = {
             # Street addresses pattern
-            re.compile(
+            "Street Address": re.compile(
             r'\b\d{1,5}(?:\s+\w+)*\s+' 
             r'(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr)\b',
             re.IGNORECASE
             ),
 
             # Email address pattern
-            re.compile(
+            "Email Address": re.compile(
             r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
             re.IGNORECASE
             ),
 
             # Phone number patterns (international and US)
-            re.compile(
+            "Phone Number": re.compile(
             r'\b(?:\+?\d{1,2}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b'
             ),
 
-            # Credit card number pattern (simplest version tbh)
-            re.compile(r'\b(?:\d[ -]*?){13,16}\b'),
+            # Credit card vendor patterns
+            # --- American Express ---
+            "American Express Card": re.compile(r"\b3[47][0-9]{13}\b"),
+
+            # --- China T-Union ---
+            "China T-Union Card": re.compile(r"\b31[0-9]{17}\b"),
+
+            # --- China UnionPay ---
+            "China UnionPay Card": re.compile(r"\b62[0-9]{14,17}\b"),
+
+            # --- Diners Club ---
+            "Diners Club enRoute Card": re.compile(r"\b(2014|2149)[0-9]{11}\b"),
+            "Diners Club International Card": re.compile(r"\b3(?:0[0-5]|[689][0-9])[0-9]{11,16}\b"),
+            "Diners Club United States & Canada Card": re.compile(r"\b55[0-9]{14}\b"),
+
+            # --- Discover ---
+            "Discover Card": re.compile(
+                r"\b(6011|65[0-9]{2}|64[4-9][0-9]|62212[6-9]|622[2-8][0-9]{2}|6229[01][0-9]|62292[0-5])[0-9]{10,13}\b"
+            ),
+
+            # --- UkrCart ---
+            "UkrCart Card": re.compile(r"\b6040(0[1-9]|1[0-9]|2[0-9])[0-9]{8,11}\b"),
+
+            # --- RuPay ---
+            "RuPay Card": re.compile(r"\b(60|65|81|82|508|353|356)[0-9]{10,13}\b"),
+
+            # --- InterPayment ---
+            "InterPayment Card": re.compile(r"\b636[0-9]{13,16}\b"),
+
+            # --- InstaPayment ---
+            "InstaPayment Card": re.compile(r"\b63[7-9][0-9]{13}\b"),
+
+            # --- JCB ---
+            "JCB Card": re.compile(r"\b35(2[8-9]|[3-8][0-9])[0-9]{12,15}\b"),
+
+            # --- Laser (Inactive) ---
+            "Laser Card": re.compile(r"\b(6304|6706|6709|6771)[0-9]{12,15}\b"),
+
+            # --- Maestro ---
+            "Maestro UK": re.compile(r"\b(6759|676770|676774)[0-9]{6,13}\b"),
+            "Maestro": re.compile(r"\b(5018|5020|5038|5893|6304|6759|676[1-3])[0-9]{6,13}\b"),
+
+            # --- Dankort ---
+            "Dankort Card": re.compile(r"\b5019[0-9]{12}\b"),
+
+            # --- Visa/Dankort co-branded ---
+            "Dankort (Visa co-branded) Card": re.compile(r"\b4571[0-9]{12}\b"),
+
+            # --- Mir ---
+            "Mir Card": re.compile(r"\b220[0-4][0-9]{12,15}\b"),
+
+            # --- BORICA ---
+            "BORICA Card": re.compile(r"\b2205[0-9]{12}\b"),
+
+            # --- Mastercard ---
+            "Mastercard Card": re.compile(
+                r"\b(5[1-5][0-9]{14}|2(2[2-9][0-9]{12}|[3-6][0-9]{13}|7[01][0-9]{12}|720[0-9]{12}))\b"
+            ),
+
+            # --- Troy ---
+            "Troy Card": re.compile(r"\b(65|9792)[0-9]{12,15}\b"),
+
+            # --- Visa ---
+            "Visa Card": re.compile(r"\b4[0-9]{12}(?:[0-9]{3})?(?:[0-9]{3})?\b"),
+
+            # --- UATP ---
+            "UATP Card": re.compile(r"\b1[0-9]{14}\b"),
+
+            # --- Verve ---
+            "Verve Card": re.compile(
+                r"\b(506099|5061[0-9]{2}|6500(0[2-9]|1[0-9]|2[0-7])|5078(6[5-9]|7[0-9]|8[0-9]|9[0-4]))[0-9]{10,13}\b"
+            ),
+
+            # --- LankaPay ---
+            "LankaPay Card": re.compile(r"\b357111[0-9]{10}\b"),
+
+            # --- Uzcard ---
+            "Uzcard Card": re.compile(r"\b(8600|5614)[0-9]{12}\b"),
+
+            # --- HUMO ---
+            "HUMO Card": re.compile(r"\b9860[0-9]{12}\b"),
+
+            # --- GPN ---
+            "GPN Card": re.compile(r"\b(1946|50|56|58|6[0-3])[0-9]{12,15}\b"),
+
+            # --- Napas ---
+            "Napas Card": re.compile(r"\b9704[0-9]{12,15}\b"),
 
             # Discord authentication token pattern
-            re.compile(
+            "Discord Token": re.compile(
             r'([a-zA-Z0-9]{24}\.[a-zA-Z0-9]{6}\.[a-zA-Z0-9_\-]{27}|mfa\.[a-zA-Z0-9_\-]{84})'
             ),
 
             # Social Security Number pattern
-            re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN format
+            "Social Security Number": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN format
 
             # Social Insurance Number pattern
-            re.compile(r'\b\d{3} \d{3} \d{3}\b'),  # SIN format
+            "Social Insurance Number": re.compile(r'\b\d{3} \d{3} \d{3}\b')  # SIN format
 
             # Add more patterns as needed
-        ]
+        }
         self.process_log_queue.start()
 
     def cog_unload(self):
@@ -365,12 +450,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         content = message.content
-        for pattern in self.pii_patterns:
+        for pattern_name, pattern in self.pii_patterns.items():
             m = pattern.search(content)
             if m:
                 snippet = m.group(0)
                 desc = (
-                    f"⚠️ Identifying info detected in {message.channel.mention} sent by "
+                    f"⚠️ {pattern_name} detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
                 try:
