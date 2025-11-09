@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from discord.ext.commands import Context
 from collections import defaultdict
 from typing import Optional
+import humanfriendly
 import base64
 
 logger = logging.getLogger("discord_bot")
@@ -480,23 +481,8 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         content = message.content
-        
-        # Check Discord patterns
-        #for pattern in self.discord_patterns:
-        #    if pattern.search(content):
-        #        desc = (
-        #            f"⚠️ Discord link detected in {message.channel.mention} sent by "
-        #            f"{message.author} (`{message.author.id}`)"
-        #        )
-        #        try:
-        #            if self.pii_filter:
-        #                await message.delete()
-        #        except discord.Forbidden:
-        #            desc += "\n*Failed to delete the message due to insufficient permissions.*"
-        #        await self.add_log_entry(message.guild.id, desc)
-        #        return # Exit after first Discord link match
-        
-        # Check PII patterns
+
+        # 1) PII
         for pattern_name, pattern in self.pii_patterns.items():
             m = pattern.search(content)
             if m:
@@ -505,7 +491,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     f"⚠️ {pattern_name} detected in {message.channel.mention} sent by "
                     f"{message.author} (`{message.author.id}`): `{snippet}`"
                 )
-                
+
                 if pattern_name == "Discord Token":
                     try:
                         token_parts = snippet.split('.')
@@ -514,32 +500,36 @@ class Watchdog(commands.Cog, name="Watchdog"):
                             desc += f"\n**Token User ID**: {user_id}"
                     except:
                         pass
-                
+
                 try:
-                    if self.pii_filter:
-                        await message.delete()
+                    await message.delete()
                 except discord.Forbidden:
                     desc += "\n*Failed to delete the message due to insufficient permissions.*"
+
                 await self.add_log_entry(message.guild.id, desc)
-                return # Exit after first PII match
-        
+                return  # stop after first PII
+
+        # 2) Payment cards
+        NON_LUHN = {"Diners Club enRoute Card"}  # expand if needed
+
         for pattern_name, pattern in self.paymentcard_patterns.items():
-            matches = pattern.findall(content)
-            for match in matches:
-                card_number = ''.join(filter(str.isdigit, str(match)))
-                
-                if self.luhn(card_number):
-                    desc = (
-                        f"⚠️ Valid {pattern_name} detected in {message.channel.mention} sent by "
-                        f"{message.author} (`{message.author.id}`)"
-                    )
-                    try:
-                        if self.pii_filter:
-                            await message.delete()
-                    except discord.Forbidden:
-                        desc += "\n*Failed to delete the message due to insufficient permissions.*"
-                    await self.add_log_entry(message.guild.id, desc)
-                    return  # Exit after first valid card match
+            for m in pattern.finditer(content):
+                card_number = re.sub(r"\D", "", m.group(0))
+
+                if pattern_name not in NON_LUHN and not self.luhn(card_number):
+                    continue
+
+                desc = (
+                    f"⚠️ Valid {pattern_name} detected in {message.channel.mention} sent by "
+                    f"{message.author} (`{message.author.id}`)"
+                )
+                try:
+                    await message.delete()
+                except discord.Forbidden:
+                    desc += "\n*Failed to delete the message due to insufficient permissions.*"
+
+                await self.add_log_entry(message.guild.id, desc)
+                return
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
@@ -573,16 +563,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         description = f"{member.display_name} (`{member.id}`) has joined the server."
 
-        total_seconds = int(account_age.total_seconds())
-        days = total_seconds // 86400
-        hours = (total_seconds % 86400) // 3600
-        minutes = (total_seconds % 3600) // 60
-        seconds = total_seconds % 60
-
-        if days > 0:
-            age_str = f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}"
-        else:
-            age_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        age_str = humanfriendly.format_timespan(account_age.total_seconds())
 
         if account_age < timedelta(days=60):
             description += f"\n:warning: **New Account** - Created {age_str} ago"

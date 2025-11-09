@@ -2,7 +2,6 @@ import os
 import re
 import io
 import json
-import time
 import base64
 import string
 import discord
@@ -15,16 +14,15 @@ import platform
 import humanfriendly
 from decimal import Decimal
 from sqlalchemy import text
-from discord import ui, Interaction, Embed, SelectOption, ButtonStyle, Color, app_commands
+from discord import ui, Interaction, SelectOption, ButtonStyle, app_commands
 from discord.ext import commands
 from utils.misc import MiscUtils
 from urllib.parse import urlparse
 from typing import List
 from discord.ext.commands import Context
-from datetime import datetime, timedelta
+from datetime import datetime
 from PIL import ImageFont, Image, ImageDraw, ImageFilter
 import random
-import importlib
 
 logger = logging.getLogger("discord_bot")
 
@@ -391,7 +389,7 @@ class General(commands.Cog, name="General"):
             afk_data = self.afk_users.pop(user_id)
             afk_duration = datetime.now() - afk_data["start_time"]
             embed=discord.Embed(
-                description=f"Welcome back, {message.author.mention}! You were AFK for **{humanfriendly.format_timespan(afk_duration)}**."
+                description=f"Welcome back {message.author.mention}! You were AFK for **{humanfriendly.format_timespan(afk_duration, False)}**."
                 )
             await message.channel.send(embed=embed)
         for mentioned in message.mentions:
@@ -399,7 +397,7 @@ class General(commands.Cog, name="General"):
                 afk_data = self.afk_users[mentioned.id]
                 afk_duration = datetime.now() - afk_data["start_time"]
                 embed=discord.Embed(
-                    description=f"{mentioned.display_name} is currently AFK\n\nReason: **{afk_data['reason']}**\n\nDuration: **{humanfriendly.format_timespan(afk_duration)}**."
+                    description=f"{mentioned.display_name} is currently AFK\n\nReason: **{afk_data['reason']}**\n\nDuration: **{humanfriendly.format_timespan(afk_duration, False)}**."
                     )
                 await message.channel.send(embed=embed)
 
@@ -603,7 +601,7 @@ class General(commands.Cog, name="General"):
             duration = datetime.now() - previous_time
 
             embed = discord.Embed(
-                description=f"You are already AFK:\n**Reason:** {previous_reason}\n**Duration:** {humanfriendly.format_timespan(duration)}",
+                description=f"You are already AFK:\n**Reason:** {previous_reason}\n**Duration:** {humanfriendly.format_timespan(duration, False)}",
                 color=discord.Color.yellow()
             )
             await ctx.reply(embed=embed, delete_after=5)
@@ -618,7 +616,7 @@ class General(commands.Cog, name="General"):
             }
 
             embed = discord.Embed(
-                description=f"{ctx.author.mention} is now AFK for {reason}",
+                description=f"{ctx.author.mention} is now AFK for **{reason}**",
                 color=ctx.author.top_role.color if hasattr(ctx.author, "top_role") else discord.Color.blurple()
             )
             embed.timestamp = datetime.now()
