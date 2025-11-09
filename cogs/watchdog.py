@@ -295,19 +295,42 @@ class Watchdog(commands.Cog, name="Watchdog"):
     async def before_process_log_queue(self):
         await self.bot.wait_until_ready()
 
-    @commands.group(name='watchdog', invoke_without_command=True)
+    @commands.group(name='watchdog', aliases=['modlog', 'ml'], invoke_without_command=True)
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def watchdog_cmd(self, ctx: Context):
         """Main command group for managing Watchdog logging."""
-        embed = discord.Embed(
-            title='Watchdog Commands',
-            description='Available subcommands: `setchannel`, `toggle`, `status`\nUse each subcommand to manage logging settings.',
-            color=discord.Color.green()
-        )
-        await ctx.reply(embed=embed)
+        prefix = (await self.bot.get_prefix(ctx.message))
+        if isinstance(prefix, list):
+            prefix = prefix[0]
 
-    @watchdog_cmd.command(name='setchannel')
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+
+            name = cmd.name
+            aliases = f" (or: {', '.join(cmd.aliases)})" if getattr(cmd, "aliases", None) else ""
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}watchdog {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}watchdog {name}`{aliases}")
+
+        if not lines:
+            description = "No subcommands available."
+        else:
+            description = "\n".join(lines)
+
+        embed = discord.Embed(
+            title="Watchdog — Available Commands",
+            description=description,
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text=f"Use {prefix}watchdog <subcommand> for details.")
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @watchdog_cmd.command(name='channel', aliases=['c'])
     @commands.has_permissions(administrator=True)
     async def set_channel(self, ctx: Context, channel: discord.TextChannel):
         """Set the logging channel for this server."""
@@ -319,7 +342,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         await ctx.send(f'Log channel has been set to {channel.mention}.')
 
-    @watchdog_cmd.command(name='toggle')
+    @watchdog_cmd.command(name='toggle', aliases=['t'])
     @commands.has_permissions(administrator=True)
     async def toggle_listener(self, ctx: Context):
         """Enable or disable logging for this server."""
