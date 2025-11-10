@@ -54,7 +54,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             ),
 
             # Social Security Number pattern
-            "Social Security Number": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),  # SSN format
+            "Social Security Number": re.compile(r'\b\d{3} \d{2} \d{4}\b'),  # SSN format
 
             # Social Insurance Number pattern
             "Social Insurance Number": re.compile(r'\b\d{3} \d{3} \d{3}\b')  # SIN format
