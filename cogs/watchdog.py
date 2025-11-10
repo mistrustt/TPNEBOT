@@ -32,7 +32,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
             # Street addresses pattern
             "Street Address": re.compile(
             r'\b\d{1,5}(?:\s+\w+)*\s+' 
-            r'(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr)\b',
+            r'(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|'
+            r'Circle|Cir|Court|Ct|Place|Pl|Terrace|Ter|Way|Square|Sq|'
+            r'Parkway|Pkwy|Highway|Hwy|Route|Rt|Alley|Plaza|Crescent|Cres|'
+            r'Trail|Loop|Path|Walk|Row|Close|Grove|Heights|Hts|Ridge|'
+            r'Valley|View|Mill|Creek|Park|Commons|Gardens|Estates)\b',
             re.IGNORECASE
             ),
 
