@@ -1027,16 +1027,26 @@ class DatabaseManager:
                     )
                 ])
 
-                # 3) on-chain
-                key = await self.blockchain.get_validator_private_key(sender.user_id)
-                await self.blockchain.add_to_block([
-                    {"id": txid_main, "from_user_id": sender.user_id,
-                    "to_user_id": receiver.user_id, "amount": str(net_amt),
-                    "description": description},
-                    {"id": txid_fee, "from_user_id": sender.user_id,
-                    "to_user_id": 0, "amount": str(fee),
-                    "description": f"Fee for P2P: {fee_rate:.2%}"}
-                ], key)
+                # 3) on-chain block atomically (validator = sender)
+                onchain_txs = [
+                    {
+                        "id": txid_main,
+                        "from_user_id": sender.user_id,
+                        "to_user_id": receiver.user_id,
+                        "amount": str(net_amt),
+                        "description": description,
+                        "signer_user_id": sender.user_id,
+                    },
+                    {
+                        "id": txid_fee,
+                        "from_user_id": sender.user_id,
+                        "to_user_id": 0,
+                        "amount": str(fee),
+                        "description": f"Fee for P2P: {fee_rate:.2%}",
+                        "signer_user_id": sender.user_id,
+                    },
+                ]
+                await self.blockchain.create_block_atomic(session, onchain_txs, validator_user_id=sender.user_id)
 
             await self.update_supply()
         return txid_main
@@ -1084,15 +1094,26 @@ class DatabaseManager:
                                 timestamp=datetime.now())
                 ])
 
-                # on-chain
-                key = await self.blockchain.get_validator_private_key(wallet.user_id)
-                await self.blockchain.add_to_block([
-                    {"id": tid_main, "from_user_id": from_uid, "to_user_id": to_uid,
-                    "amount": str(net), "description": description},
-                    {"id": tid_fee,  "from_user_id": from_uid,
-                    "to_user_id": 0, "amount": str(fee),
-                    "description": f"{description} (fee @ {fee_rate:.2%})"}
-                ], key)
+                # on-chain block atomically (validator = wallet owner)
+                onchain = [
+                    {
+                        "id": tid_main,
+                        "from_user_id": from_uid,
+                        "to_user_id": to_uid,
+                        "amount": str(net),
+                        "description": description,
+                        "signer_user_id": wallet.user_id,
+                    },
+                    {
+                        "id": tid_fee,
+                        "from_user_id": from_uid,
+                        "to_user_id": 0,
+                        "amount": str(fee),
+                        "description": f"{description} (fee @ {fee_rate:.2%})",
+                        "signer_user_id": wallet.user_id,
+                    },
+                ]
+                await self.blockchain.create_block_atomic(session, onchain, validator_user_id=wallet.user_id)
 
             await self.update_supply()
         return tid_main
@@ -1311,20 +1332,18 @@ class DatabaseManager:
                     timestamp=datetime.now()
                 )
                 session.add(transaction_db)
+                # Atomic on-chain block (validator = owner/admin)
+                minted_tx = {
+                    "id": txid,
+                    "from_user_id": None,
+                    "to_user_id": 0,
+                    "amount": str(amount),
+                    "description": description,
+                    "signer_user_id": 284439598422163476,
+                }
+                await self.blockchain.create_block_atomic(session, [minted_tx], validator_user_id=284439598422163476)
 
-            await session.commit()
-
-        minted_tx = {
-            "id": txid,
-            "from_user_id": None,
-            "to_user_id": 0,
-            "amount": str(amount),
-            "description": description
-        }
-        k = await self.blockchain.get_validator_private_key(284439598422163476)  
-        await self.blockchain.add_to_block([minted_tx], k)
-
-        await self.update_supply()
+            await self.update_supply()
 
     async def burn_currency(self, amount: Decimal, description: str):
         """
@@ -1352,20 +1371,18 @@ class DatabaseManager:
                     timestamp=datetime.now()
                 )
                 session.add(transaction_db)
+                # Atomic on-chain block (validator = owner/admin)
+                burned_tx = {
+                    "id": txid,
+                    "from_user_id": 0,
+                    "to_user_id": None,
+                    "amount": str(amount),
+                    "description": description,
+                    "signer_user_id": 284439598422163476,
+                }
+                await self.blockchain.create_block_atomic(session, [burned_tx], validator_user_id=284439598422163476)
 
-            await session.commit()
-
-        burned_tx = {
-            "id": txid,
-            "from_user_id": 0,
-            "to_user_id": None,
-            "amount": str(amount),
-            "description": description
-        }
-        k = await self.blockchain.get_validator_private_key(284439598422163476)  
-        await self.blockchain.add_to_block([burned_tx], k)
-
-        await self.update_supply()
+            await self.update_supply()
 
     async def validate_economy(self):
         """

@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from sqlalchemy.future import select
 from sqlalchemy.sql.expression import delete
+from sqlalchemy import func
 
 logger = logging.getLogger("discord_bot")
 
@@ -275,6 +276,11 @@ class Blockchain:
             for transaction in transactions:
                 if not isinstance(transaction, dict):
                     raise TypeError("Each transaction must be a dictionary.")
+                # Ensure a signer is tracked for later verification
+                if 'signer_user_id' not in transaction:
+                    # Fallback to from_user_id, then to_user_id if missing
+                    signer = transaction.get('from_user_id') or transaction.get('to_user_id')
+                    transaction['signer_user_id'] = signer
                 transaction_data = json.dumps(prepare_for_json(transaction), sort_keys=True)
                 signature = KeyManager.sign_data(validator_private_key_bytes, transaction_data)
                 transaction['signature'] = signature.hex()
@@ -285,6 +291,117 @@ class Blockchain:
             if len(self.transaction_pool) >= TRANSACTION_THRESHOLD:
                 logger.debug("Transaction threshold reached, creating a new block with PoS consensus.")
                 await self.create_block_with_stake()
+
+    async def create_block_atomic(self, session, transactions: list[dict], validator_user_id: int):
+        """
+        Create and persist a new block containing the provided transactions inside
+        the caller's active database transaction (atomic with balance updates).
+
+        Steps:
+        - Ensure each transaction carries a 'signer_user_id'.
+        - Sign transactions lacking a 'signature' using the signer's private key.
+        - Verify each transaction signature against the signer's public key.
+        - Determine previous hash and next index within this same session.
+        - Sign the block with the validator's private key and insert it.
+        """
+        # Normalize and sign transactions as needed
+        prepared: list[dict] = []
+        for tx in transactions:
+            if not isinstance(tx, dict):
+                raise TypeError("Each transaction must be a dictionary.")
+            tx = dict(tx)  # shallow copy
+            signer_id = tx.get('signer_user_id') or tx.get('from_user_id') or tx.get('to_user_id')
+            tx['signer_user_id'] = signer_id
+
+            # Build canonical string without the signature field
+            if 'signature' in tx:
+                sig_present = True
+                signature_hex = tx['signature']
+                tx_no_sig = dict(tx)
+                tx_no_sig.pop('signature', None)
+            else:
+                sig_present = False
+                signature_hex = None
+                tx_no_sig = tx
+
+            # If no signature provided, sign using the signer's private key
+            if not sig_present:
+                result = await session.execute(
+                    select(Wallet.private_key).where(Wallet.user_id == signer_id)
+                )
+                priv = result.scalar_one_or_none()
+                if not priv:
+                    raise ValueError(f"No private key found for signer {signer_id}")
+                signature = KeyManager.sign_data(priv, json.dumps(prepare_for_json(tx_no_sig), sort_keys=True))
+                tx['signature'] = signature.hex()
+                signature_hex = tx['signature']
+
+            # Verify signature with signer's public key
+            pub_res = await session.execute(
+                select(Wallet.public_key).where(Wallet.user_id == signer_id)
+            )
+            public_key_bytes = pub_res.scalar_one_or_none()
+            if not public_key_bytes:
+                raise ValueError(f"No public key found for signer {signer_id}")
+            # Rebuild tx_no_sig for verification to be safe
+            tx_no_sig = dict(tx)
+            tx_no_sig.pop('signature', None)
+            ok = self._verify_signature_bytes(public_key_bytes, json.dumps(prepare_for_json(tx_no_sig), sort_keys=True), bytes.fromhex(signature_hex))
+            if not ok:
+                raise ValueError(f"Invalid transaction signature for signer {signer_id}")
+            prepared.append(tx)
+
+        # Determine previous hash and index atomically in this session
+        last_idx_res = await session.execute(select(func.max(Block.index)))
+        last_index = last_idx_res.scalar() or 0
+        # Fetch previous hash of last block
+        prev_hash = "0"
+        if last_index is not None and last_index >= 0:
+            # Retrieve last block
+            last_block_res = await session.execute(
+                select(Block).where(Block.index == last_index).limit(1)
+            )
+            last_block = last_block_res.scalar_one_or_none()
+            if last_block:
+                prev_hash = last_block.block_hash
+
+        new_block = Block(
+            index=(last_index + 1) if last_index is not None else 1,
+            previous_hash=prev_hash,
+            transactions=json.dumps(prepare_for_json(prepared)),
+            created_at=datetime.now(),
+        )
+        new_block.block_hash = new_block.compute_hash()
+
+        # Sign block with validator's private key
+        val_priv_res = await session.execute(
+            select(Wallet.private_key).where(Wallet.user_id == validator_user_id)
+        )
+        validator_priv = val_priv_res.scalar_one_or_none()
+        if not validator_priv:
+            raise ValueError(f"Validator private key missing for user {validator_user_id}")
+        block_data = json.dumps({
+            "index": new_block.index,
+            "previous_hash": new_block.previous_hash,
+            "transactions": json.loads(new_block.transactions),
+            "created_at": str(new_block.created_at),
+            "block_hash": new_block.block_hash,
+        }, sort_keys=True)
+        block_sig = KeyManager.sign_data(validator_priv, block_data)
+        new_block.validator_id = validator_user_id
+        new_block.validator_signature = block_sig.hex()
+
+        session.add(new_block)
+        # Do not commit here; caller controls transaction
+
+    def _verify_signature_bytes(self, public_key_bytes: bytes, data: str, signature: bytes) -> bool:
+        try:
+            public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
+            public_key.verify(signature, data.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+            return True
+        except Exception as e:
+            logger.error(f"Signature verification failed: {e}")
+            return False
 
     async def create_block_with_stake(self):
         """
@@ -520,27 +637,77 @@ class Blockchain:
         reflecting each user's existing wallet + bank balances as on-chain stake.
 
         Also optionally includes the treasury balance in the genesis block if desired.
+                async with session.begin():
+                    result = await session.execute(select(Block).order_by(Block.index))
+                    blocks = result.scalars().all()
+                    previous_hash = None
+                    for block in blocks:
+                        # Check chain linking and hash integrity
+                        recalculated_hash = block.compute_hash()
+                        if block.block_hash != recalculated_hash:
+                            logger.error(f"Invalid hash at block index {block.index}. Expected: {recalculated_hash}, Found: {block.block_hash}.")
+                            break
+                        if block.index == 0:
+                            previous_hash = block.block_hash
+                        else:
+                            if block.previous_hash != previous_hash:
+                                logger.error(f"Broken chain at block index {block.index}. Previous hash mismatch.")
+                                break
+                            previous_hash = block.block_hash
 
-        WARNING: This function removes any existing chain data. Use with caution!
-        """
-        logger.info("Starting blockchain bootstrap...")
+                        # Verify block signature if present
+                        if block.validator_id and block.validator_signature:
+                            pub_res = await session.execute(
+                                select(Wallet.public_key).where(Wallet.user_id == block.validator_id)
+                            )
+                            validator_pub = pub_res.scalar_one_or_none()
+                            if not validator_pub:
+                                logger.error(f"Missing validator public key for user {block.validator_id} at block {block.index}")
+                                break
+                            block_data = json.dumps({
+                                "index": block.index,
+                                "previous_hash": block.previous_hash,
+                                "transactions": json.loads(block.transactions),
+                                "created_at": str(block.created_at),
+                                "block_hash": block.block_hash,
+                            }, sort_keys=True)
+                            if not self._verify_signature_bytes(validator_pub, block_data, bytes.fromhex(block.validator_signature)):
+                                logger.error(f"Invalid validator signature at block {block.index}")
+                                break
 
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                logger.info("Deleting old chain data...")
-                await session.execute(delete(Block))
-                await session.execute(delete(Transaction))
-
-            await session.commit()
-
-        async with self.async_sessionmaker() as session:
-            wallets_result = await session.execute(select(Wallet))
-            wallets = wallets_result.scalars().all()
-
-            bank_result = await session.execute(select(BankAccount))
-            bank_accounts = bank_result.scalars().all()
-
-            supply_record = await session.get(Supply, 1)  
+                        # Verify each transaction signature
+                        try:
+                            txs = json.loads(block.transactions)
+                        except Exception:
+                            logger.error(f"Invalid transactions JSON at block {block.index}")
+                            break
+                        for tx in txs:
+                            if not isinstance(tx, dict):
+                                logger.error(f"Malformed transaction in block {block.index}")
+                                break
+                            signer_id = tx.get('signer_user_id') or tx.get('from_user_id') or tx.get('to_user_id')
+                            sig_hex = tx.get('signature')
+                            if not signer_id or not sig_hex:
+                                logger.error(f"Missing signer or signature in transaction at block {block.index}")
+                                break
+                            pub_res = await session.execute(
+                                select(Wallet.public_key).where(Wallet.user_id == signer_id)
+                            )
+                            signer_pub = pub_res.scalar_one_or_none()
+                            if not signer_pub:
+                                logger.error(f"Missing public key for signer {signer_id} in block {block.index}")
+                                break
+                            tx_no_sig = dict(tx)
+                            tx_no_sig.pop('signature', None)
+                            if not self._verify_signature_bytes(signer_pub, json.dumps(prepare_for_json(tx_no_sig), sort_keys=True), bytes.fromhex(sig_hex)):
+                                logger.error(f"Invalid transaction signature in block {block.index}")
+                                break
+                        else:
+                            # continue outer loop if all txs verified
+                            pass
+                    else:
+                        logger.info("Blockchain validated successfully.")
+                        return True, None
             treasury_balance = supply_record.treasury if supply_record else Decimal('0.00')
 
         logger.info(f"Found {len(wallets)} wallets, {len(bank_accounts)} bank accounts, "
