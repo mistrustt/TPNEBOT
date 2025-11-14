@@ -15,7 +15,7 @@ from utils.misc import MiscUtils
 from collections import defaultdict
 import re
 from decimal import Decimal
-from typing import Sequence, List, Any, Optional
+from typing import Sequence, List, Any
 
 logger = logging.getLogger("discord_bot")
 

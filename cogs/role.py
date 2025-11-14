@@ -14,9 +14,8 @@ class RolesPaginator(discord.ui.View):
         self.pages = pages
         self.current = 0
 
-        # disable prev on first page
         self.prev_button.disabled = True
-        # disable next on last page
+
         if len(pages) == 1:
             self.next_button.disabled = True
 
@@ -55,7 +54,7 @@ class RolesPaginator(discord.ui.View):
     async def on_timeout(self):
         for btn in self.children:
             btn.disabled = True
-        # edit the message to disable buttons
+
         try:
             await self.message.edit(view=self)
         except Exception:
@@ -70,7 +69,6 @@ class InRolePaginator(discord.ui.View):
         self.per_page = per_page
         self.current_page = 0
 
-        # Grab references to our two buttons
         self.prev_btn: discord.ui.Button = self.children[0]
         self.next_btn: discord.ui.Button = self.children[1]
         self._update_buttons()
@@ -198,8 +196,6 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=embed)
 
-    # Subcommands under the role group
-
     @role.command(name='create', description='Creates a new role.')
     @commands.has_permissions(manage_roles=True)
     async def create_role(self, ctx: Context, *, role_name: str):
@@ -321,7 +317,7 @@ class RoleTools(commands.Cog, name="Roles"):
                 color=discord.Color.red()
             )
             return await ctx.reply(embed=error_embed, delete_after=5)       
-    
+
         if role.position >= ctx.me.top_role.position:
             error_embed = discord.Embed(
                 description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.",
@@ -364,7 +360,7 @@ class RoleTools(commands.Cog, name="Roles"):
                 color=discord.Color.red()
             )
             return await ctx.reply(embed=error_embed, delete_after=5)
-    
+
         if ctx.guild.id in self.forced_roles and member.id in self.forced_roles[ctx.guild.id] and role.id in self.forced_roles[ctx.guild.id][member.id]:
             self.forced_roles[ctx.guild.id][member.id].remove(role.id)
             await ctx.send(f"✅ Removed forced role {role.name} from {member.name}.")
@@ -464,17 +460,13 @@ class RoleTools(commands.Cog, name="Roles"):
         try:
             await member.add_roles(*roles_to_add, reason=f"Roles restored by {ctx.author.name}")
 
-            # remove persisted record from the database
             await self.bot.database.remove_user_roles(member.id)
 
-            # remove any in-memory caches that might hold the roles (safe no-op if not present)
-            # common cache attribute names are attempted; adapt if your bot uses different names
             for cache_attr in ("user_roles_cache", "role_restore_cache", "cached_user_roles"):
                 cache = getattr(self.bot, cache_attr, None)
                 if isinstance(cache, dict):
                     cache.pop(member.id, None)
 
-            # also try to clear a cache on the database object if it exists
             db_cache = getattr(self.bot.database, "cache", None)
             if isinstance(db_cache, dict):
                 db_cache.pop(member.id, None)
@@ -704,7 +696,6 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=error_embed, delete_after=5)
 
-        # sort so pages stay in a predictable order
         members = sorted(role.members, key=lambda m: m.display_name)
         if not members:
             embed = discord.Embed(

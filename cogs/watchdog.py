@@ -57,15 +57,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
             r'([a-zA-Z0-9]{24}\.[a-zA-Z0-9]{6}\.[a-zA-Z0-9_\-]{27}|mfa\.[a-zA-Z0-9_\-]{84})'
             ),
 
-            # Social Security Number pattern
-            "Social Security Number": re.compile(r'\b\d{3} \d{2} \d{4}\b'),  # SSN format
-
-            # Social Insurance Number pattern
-            "Social Insurance Number": re.compile(r'\b\d{3} \d{3} \d{3}\b')  # SIN format
-
             # Add more patterns as needed
         }
         self.card_patterns = {
+            # we verify relevant cards with Luhn algorithm to reduce false positives
+
             # --- American Express ---
             "American Express Card": re.compile(r"\b3[47][0-9]{13}\b"),
 
@@ -163,7 +159,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         t = sum(di)
 
-        return t % 10 == 0
+        return t % 10 == 0 #https://github.com/mmcloughlin/luhn/blob/master/luhn.py
 
     @commands.Cog.listener()
     async def on_ready(self):

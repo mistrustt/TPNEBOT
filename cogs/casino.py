@@ -9,7 +9,7 @@ import functools
 import hmac, hashlib
 from itertools import combinations
 from collections import Counter
-from decimal import ROUND_DOWN, Decimal, ROUND_HALF_UP, InvalidOperation
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from discord import ui, ButtonStyle, Interaction
 from discord.ui import View, Button
 from discord.ext import commands
