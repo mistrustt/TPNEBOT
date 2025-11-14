@@ -633,140 +633,80 @@ class Blockchain:
 
     async def bootstrap_blockchain(self):
         """
-        Bootstrap the blockchain by creating a new genesis block with transactions
-        reflecting each user's existing wallet + bank balances as on-chain stake.
-
-        Also optionally includes the treasury balance in the genesis block if desired.
-                async with session.begin():
-                    result = await session.execute(select(Block).order_by(Block.index))
-                    blocks = result.scalars().all()
-                    previous_hash = None
-                    for block in blocks:
-                        # Check chain linking and hash integrity
-                        recalculated_hash = block.compute_hash()
-                        if block.block_hash != recalculated_hash:
-                            logger.error(f"Invalid hash at block index {block.index}. Expected: {recalculated_hash}, Found: {block.block_hash}.")
-                            break
-                        if block.index == 0:
-                            previous_hash = block.block_hash
-                        else:
-                            if block.previous_hash != previous_hash:
-                                logger.error(f"Broken chain at block index {block.index}. Previous hash mismatch.")
-                                break
-                            previous_hash = block.block_hash
-
-                        # Verify block signature if present
-                        if block.validator_id and block.validator_signature:
-                            pub_res = await session.execute(
-                                select(Wallet.public_key).where(Wallet.user_id == block.validator_id)
-                            )
-                            validator_pub = pub_res.scalar_one_or_none()
-                            if not validator_pub:
-                                logger.error(f"Missing validator public key for user {block.validator_id} at block {block.index}")
-                                break
-                            block_data = json.dumps({
-                                "index": block.index,
-                                "previous_hash": block.previous_hash,
-                                "transactions": json.loads(block.transactions),
-                                "created_at": str(block.created_at),
-                                "block_hash": block.block_hash,
-                            }, sort_keys=True)
-                            if not self._verify_signature_bytes(validator_pub, block_data, bytes.fromhex(block.validator_signature)):
-                                logger.error(f"Invalid validator signature at block {block.index}")
-                                break
-
-                        # Verify each transaction signature
-                        try:
-                            txs = json.loads(block.transactions)
-                        except Exception:
-                            logger.error(f"Invalid transactions JSON at block {block.index}")
-                            break
-                        for tx in txs:
-                            if not isinstance(tx, dict):
-                                logger.error(f"Malformed transaction in block {block.index}")
-                                break
-                            signer_id = tx.get('signer_user_id') or tx.get('from_user_id') or tx.get('to_user_id')
-                            sig_hex = tx.get('signature')
-                            if not signer_id or not sig_hex:
-                                logger.error(f"Missing signer or signature in transaction at block {block.index}")
-                                break
-                            pub_res = await session.execute(
-                                select(Wallet.public_key).where(Wallet.user_id == signer_id)
-                            )
-                            signer_pub = pub_res.scalar_one_or_none()
-                            if not signer_pub:
-                                logger.error(f"Missing public key for signer {signer_id} in block {block.index}")
-                                break
-                            tx_no_sig = dict(tx)
-                            tx_no_sig.pop('signature', None)
-                            if not self._verify_signature_bytes(signer_pub, json.dumps(prepare_for_json(tx_no_sig), sort_keys=True), bytes.fromhex(sig_hex)):
-                                logger.error(f"Invalid transaction signature in block {block.index}")
-                                break
-                        else:
-                            # continue outer loop if all txs verified
-                            pass
-                    else:
-                        logger.info("Blockchain validated successfully.")
-                        return True, None
-            treasury_balance = supply_record.treasury if supply_record else Decimal('0.00')
-
-        logger.info(f"Found {len(wallets)} wallets, {len(bank_accounts)} bank accounts, "
-                    f"and treasury balance = {treasury_balance} for genesis block.")
-
-        bank_dict = {}
-        for bank_acct in bank_accounts:
-            bank_dict[bank_acct.wallet_id] = bank_acct.balance
-
-        genesis_transactions = []
-        for wallet in wallets:
-            user_total = wallet.balance
-            if wallet.wallet_id in bank_dict:
-                user_total += bank_dict[wallet.wallet_id]
-
-            if user_total > Decimal('0'):
-                tx = {
-                    "from_user_id": 0,  
-                    "to_user_id": wallet.user_id,
-                    "amount": float(user_total),
-                    "description": "Genesis distribution (wallet+bank)"
-                }
-                genesis_transactions.append(tx)
-
-        if treasury_balance > Decimal('0'):
-
-            tx = {
-                "from_user_id": None,  
-                "to_user_id": 0,  
-                "amount": float(treasury_balance),
-                "description": "Genesis distribution (treasury)"
-            }
-            genesis_transactions.append(tx)
-
-        logger.info(f"Prepared {len(genesis_transactions)} genesis transactions total.")
-
-        genesis_data = json.dumps(prepare_for_json(genesis_transactions), sort_keys=True)
-        genesis_block = Block(
-            index=0,
-            previous_hash="0",
-            transactions=genesis_data,
-            created_at=datetime.now(),
-            block_hash="0",      
-            validator_id=0,   
-            validator_signature=""
-        )
-
-        genesis_block.block_hash = genesis_block.compute_hash()
+        Bootstrap the blockchain by creating a genesis block that reflects
+        each user's wallet + bank balances as on-chain stake. Optionally
+        includes the treasury balance.
+        """
 
         async with self.async_sessionmaker() as session:
             async with session.begin():
+                existing = await session.execute(select(Block).order_by(Block.index).limit(1))
+                if existing.scalar_one_or_none() is not None:
+                    logger.info("Blockchain already exists; skipping bootstrap.")
+                    return
+
+                wallets_res = await session.execute(select(Wallet))
+                wallets = wallets_res.scalars().all()
+
+                bank_res = await session.execute(select(BankAccount))
+                bank_accounts = bank_res.scalars().all()
+
+                supply_res = await session.execute(select(Supply).limit(1))
+                supply_record = supply_res.scalar_one_or_none()
+
+                treasury_balance = supply_record.treasury if supply_record else Decimal('0.00')
+
+                logger.info(
+                    f"Found {len(wallets)} wallets, {len(bank_accounts)} bank accounts, "
+                    f"and treasury balance = {treasury_balance} for genesis block."
+                )
+
+                bank_dict = {acct.wallet_id: acct.balance for acct in bank_accounts}
+
+                genesis_transactions = []
+                for wallet in wallets:
+                    user_total = wallet.balance + bank_dict.get(wallet.wallet_id, Decimal('0'))
+                    if user_total > Decimal('0'):
+                        tx = {
+                            "from_user_id": 0,
+                            "to_user_id": wallet.user_id,
+                            "amount": float(user_total),
+                            "description": "Genesis distribution (wallet+bank)",
+                        }
+                        genesis_transactions.append(tx)
+
+                if treasury_balance > Decimal('0'):
+                    tx = {
+                        "from_user_id": None,
+                        "to_user_id": 0,
+                        "amount": float(treasury_balance),
+                        "description": "Genesis distribution (treasury)",
+                    }
+                    genesis_transactions.append(tx)
+
+                logger.info(f"Prepared {len(genesis_transactions)} genesis transactions total.")
+
+                genesis_data = json.dumps(prepare_for_json(genesis_transactions), sort_keys=True)
+                genesis_block = Block(
+                    index=0,
+                    previous_hash="0",
+                    transactions=genesis_data,
+                    created_at=datetime.now(),
+                    block_hash="0",
+                    validator_id=0,
+                    validator_signature="",
+                )
+
+                genesis_block.block_hash = genesis_block.compute_hash()
                 session.add(genesis_block)
-            await session.commit()
 
         logger.info("Genesis block created and saved to the database.")
 
         is_valid, invalid_block_index = await self.validate_blockchain()
         if not is_valid:
-            logger.error(f"Blockchain validation failed after bootstrap at block {invalid_block_index}.")
+            logger.error(
+                f"Blockchain validation failed after bootstrap at block {invalid_block_index}."
+            )
         else:
             logger.info("Blockchain successfully validated after bootstrap.")
 
