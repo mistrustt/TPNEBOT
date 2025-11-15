@@ -280,7 +280,7 @@ class CrashView(discord.ui.View):
         return embed
 
 class MinesView(discord.ui.View):
-    def __init__(self, grid, bomb_positions, main_message, user_id, bet_amount, bot):
+    def __init__(self, grid, bomb_positions, main_message, user_id, bet_amount, bot, PF: dict):
         super().__init__(timeout=600)
         self.grid = grid
         self.bomb_positions = bomb_positions
@@ -291,6 +291,7 @@ class MinesView(discord.ui.View):
         self.bomb_emoji = "<:bombs:1278849752301309994>"
         self.gem_emoji = "<:gems:1278849818025918497>"
         self.bot = bot
+        self.PF = PF
         self.remaining_safe_cells = 25 - len(bomb_positions)
         self.gems_clicked = 0
         self.clicked_positions = set()
@@ -348,6 +349,15 @@ class MinesView(discord.ui.View):
                 child.disabled = True
 
             final_grid = self.create_final_grid()
+            # Record provably-fair loss in game history
+            try:
+                await self.bot.database.increment_loss(
+                    self.user_id, "mines", self.bet_amount,
+                    client_seed=self.PF['client_seed'], seed_used=None,
+                    nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash']
+                )
+            except Exception as e:
+                logger.error(f"Failed to record mines loss: {e}")
             embed = self.create_loss_embed(final_grid)
             await interaction.response.edit_message(embed=embed, view=self)
         except Exception as e:
@@ -476,6 +486,15 @@ class MinesView(discord.ui.View):
             description=f"🎉 PERFECT! You cleared all gems and won {await casino.formatter(winnings)} at {multiplier}x multiplier!\n\n{final_grid}",
             color=discord.Color.gold()
         )
+        # Record provably-fair win in game history
+        try:
+            await self.bot.database.increment_win(
+                self.user_id, "mines", self.bet_amount,
+                client_seed=self.PF['client_seed'], seed_used=None,
+                nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash']
+            )
+        except Exception as e:
+            logger.error(f"Failed to record mines win: {e}")
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def send_final_grid(self, interaction: Interaction, message_text):
@@ -542,7 +561,17 @@ class CashoutView(discord.ui.View):
             amount=winnings,
             description="Mines game cashout"
         )
-        await self.bot.database.increment_win(self.game_view.user_id, "mines")
+        # Record provably-fair win in game history using the game view's PF
+        PF = getattr(self.game_view, 'PF', None)
+        if PF:
+            try:
+                await self.bot.database.increment_win(
+                    self.game_view.user_id, "mines", self.bet_amount,
+                    client_seed=PF['client_seed'], seed_used=None,
+                    nonce=PF['nonce'], hash_hex=PF['server_seed_hash']
+                )
+            except Exception as e:
+                logger.error(f"Failed to record mines cashout win: {e}")
 
         # Disable all game buttons and update the main game message with final state
         for child in self.game_view.children:
@@ -3463,7 +3492,9 @@ class Casino(commands.Cog):
 
             try:
                 main_message = await ctx.reply(embed=embed)
-                game_view = MinesView(grid, bomb_positions, main_message, user_id, bet_amount, self.bot)
+                # Capture provable fairness context for Mines
+                PF = await self.prove_fairness(user_id)
+                game_view = MinesView(grid, bomb_positions, main_message, user_id, bet_amount, self.bot, PF)
                 await main_message.edit(view=game_view)
 
                 cashout_view = CashoutView(main_message, game_view, user_id, bet_amount, self.bot)
