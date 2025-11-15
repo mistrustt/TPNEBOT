@@ -3483,7 +3483,6 @@ class Casino(commands.Cog):
             # Grid contents are rendered via button emojis and final grid; no prefill needed
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
-            fbet = f"{bet_amount:,.2f}"
             init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
             multiplier = float(init_multi) if init_multi else 1.0
 
@@ -3494,7 +3493,7 @@ class Casino(commands.Cog):
                 color=discord.Color.gold()
             )
             embed.add_field(name="Number of bombs", value=f"{num_bombs}", inline=False)
-            embed.add_field(name="Bet amount", value=f"**{await self.formatter(fbet)}** **{self.currency_name}**", inline=False)
+            embed.add_field(name="Bet amount", value=f"**{await self.formatter(bet_amount)}** **{self.currency_name}**", inline=False)
             embed.add_field(name="Remaining Gems", value=f"{remaining_safe_cells}", inline=False)
             embed.add_field(name="Multiplier", value=f"x{multiplier:.3g}", inline=False)
             embed.set_author(name=ctx.author.display_name, icon_url=avatar_url)
