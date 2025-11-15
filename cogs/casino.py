@@ -292,6 +292,7 @@ class MinesView(discord.ui.View):
         self.gem_emoji = "<:gems:1278849818025918497>"
         self.bot = bot
         self.PF = PF
+        self.cashout_message: Optional[discord.Message] = None  # linked after cashout view send
         self.remaining_safe_cells = 25 - len(bomb_positions)
         self.gems_clicked = 0
         self.clicked_positions = set()
@@ -360,6 +361,12 @@ class MinesView(discord.ui.View):
                 logger.error(f"Failed to record mines loss: {e}")
             embed = await self.create_loss_embed(final_grid)
             await interaction.response.edit_message(embed=embed, view=self)
+            # Delete cashout message if present (loss state)
+            if self.cashout_message:
+                try:
+                    await self.cashout_message.delete()
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Error handling bomb click: {str(e)}")
             await self.send_error_message(interaction)
@@ -480,14 +487,12 @@ class MinesView(discord.ui.View):
 
         for child in self.children:
             child.disabled = True
-        # Update the main embed with final grid and message
         final_grid = self.create_final_grid()
         embed = discord.Embed(
             title="Game Results",
-            description=f"🎉 PERFECT! You cleared all gems and won {await casino.formatter(winnings)} at {multiplier}x multiplier!\n\n{final_grid}",
+            description=f"🎉 PERFECT! You cleared all gems and won {await casino.formatter(winnings)} **{casino.currency_name}** at {multiplier}x multiplier!\n\n{final_grid}",
             color=discord.Color.gold()
         )
-        # Record provably-fair win in game history
         try:
             await self.bot.database.increment_win(
                 self.user_id, "mines", self.bet_amount,
@@ -497,6 +502,12 @@ class MinesView(discord.ui.View):
         except Exception as e:
             logger.error(f"Failed to record mines win: {e}")
         await interaction.response.edit_message(embed=embed, view=self)
+        # Delete cashout message if present (perfect clear)
+        if self.cashout_message:
+            try:
+                await self.cashout_message.delete()
+            except Exception:
+                pass
 
     async def send_final_grid(self, interaction: Interaction, message_text):
         """Update the main game message with the final grid and message."""
@@ -588,11 +599,17 @@ class CashoutView(discord.ui.View):
         # Disable cashout button view and acknowledge the interaction ephemerally
         for child in self.children:
             child.disabled = True
-        await interaction.message.edit(view=self)
+        # Acknowledge then delete the cashout message, leaving only the mines board
         await interaction.response.send_message(
             f"Cashed out with **{await casino.formatter(winnings)}** **{casino.currency_name}** at {multiplier}x.",
             ephemeral=True
         )
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
+        # Clear reference so MinesView does not attempt double delete
+        self.game_view.cashout_message = None
 
 class DoubleOrNothingView(View):
     def __init__(self, bot, initial_user, initial_amount, winnings, currency_name, user_id, PF):
@@ -3455,9 +3472,8 @@ class Casino(commands.Cog):
                 return
 
             if bet_amount > balance:
-                fbal = f"{balance:,.2f}"
                 embed = discord.Embed(
-                    description=f'You do not have enough balance to place this bet. Your current balance is **${fbal}**.',
+                    description=f'You do not have enough balance to place this bet. Your current balance is **{await self.formatter(balance)}** **{self.currency_name}**.',
                     color=discord.Color.red()
                 )
                 await ctx.reply(embed=embed)
@@ -3506,7 +3522,8 @@ class Casino(commands.Cog):
                 await main_message.edit(view=game_view)
 
                 cashout_view = CashoutView(main_message, game_view, user_id, bet_amount, self.bot)
-                await ctx.reply(view=cashout_view)
+                cashout_msg = await ctx.reply(view=cashout_view)
+                game_view.cashout_message = cashout_msg
             except discord.errors.NotFound:
                 pass
 
