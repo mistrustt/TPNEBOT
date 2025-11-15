@@ -580,7 +580,7 @@ class CashoutView(discord.ui.View):
         final_grid = self.game_view.create_final_grid()
         final_embed = discord.Embed(
             title="Game Results",
-            description=f"Cashed out with {await casino.formatter(winnings)} at {multiplier}x multiplier!\n\n{final_grid}",
+            description=f"Cashed out with **{await casino.formatter(winnings)}** **{casino.currency_name}** at {multiplier}x multiplier!\n\n{final_grid}",
             color=discord.Color.gold()
         )
         await self.game_view.main_message.edit(embed=final_embed, view=self.game_view)
@@ -590,7 +590,7 @@ class CashoutView(discord.ui.View):
             child.disabled = True
         await interaction.message.edit(view=self)
         await interaction.response.send_message(
-            f"Cashed out with {await casino.formatter(winnings)} at {multiplier}x.",
+            f"Cashed out with **{await casino.formatter(winnings)}** **{casino.currency_name}** at {multiplier}x.",
             ephemeral=True
         )
 
@@ -663,7 +663,7 @@ class DoubleOrNothingView(View):
 
         embed = discord.Embed(
             description=(
-                f"You cashed out with {self.currency_name} **{await casino.formatter(self.winnings)}**!"
+                f"You cashed out with **{await casino.formatter(self.winnings)}** **{self.currency_name}**!"
             ),
             color=discord.Color.blue(),
         )
@@ -2841,12 +2841,12 @@ class Casino(commands.Cog):
                 if win:
                     result_text = (
                         f"Cashed out with a **{game_state['multiplier']:.2f}x multiplier**\n"
-                        f"Won **{self.currency_name} {await self.formatter(game_state['bet_amount'] * game_state['multiplier'])}**"
+                        f"Won **{await self.formatter(game_state['bet_amount'] * game_state['multiplier'])}** **{self.currency_name}**"
                     )
                 else:
                     result_text = (
                         f"Lost with a possible multiplier of **{game_state['multiplier']:.2f}x**\n"
-                        f"Bet: **{self.currency_name} {await self.formatter(game_state['bet_amount'])}**"
+                        f"Bet: **{await self.formatter(game_state['bet_amount'])}** **{self.currency_name}**"
                     )
 
                 status = "Cashed Out" if win else "Lost"
