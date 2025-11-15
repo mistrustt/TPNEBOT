@@ -360,13 +360,13 @@ class MinesView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Failed to record mines loss: {e}")
             embed = await self.create_loss_embed(final_grid)
-            await interaction.response.edit_message(embed=embed, view=self)
-            # Delete cashout message if present (loss state)
+            # Delete cashout message if present (loss state) BEFORE responding
             if self.cashout_message:
                 try:
                     await self.cashout_message.delete()
                 except Exception:
                     pass
+            await interaction.response.edit_message(embed=embed, view=self)
         except Exception as e:
             logger.error(f"Error handling bomb click: {str(e)}")
             await self.send_error_message(interaction)
@@ -501,13 +501,13 @@ class MinesView(discord.ui.View):
             )
         except Exception as e:
             logger.error(f"Failed to record mines win: {e}")
-        await interaction.response.edit_message(embed=embed, view=self)
-        # Delete cashout message if present (perfect clear)
+        # Delete cashout message if present (perfect clear) BEFORE responding
         if self.cashout_message:
             try:
                 await self.cashout_message.delete()
             except Exception:
                 pass
+        await interaction.response.edit_message(embed=embed, view=self)
 
     async def send_final_grid(self, interaction: Interaction, message_text):
         """Update the main game message with the final grid and message."""
@@ -540,17 +540,21 @@ class CashoutView(discord.ui.View):
             return
 
         if self.game_view.game_over:
-            for child in self.children:
-                child.disabled = True
-            await interaction.message.edit(view=self)
+            # Game already ended; delete the cashout message
             await interaction.response.send_message("You cannot cashout after the game has ended!", ephemeral=True)
+            try:
+                await interaction.message.delete()
+            except Exception:
+                pass
             return
 
         if hasattr(self.game_view, 'game_result') and self.game_view.game_result == "Lost":
-            for child in self.children:
-                child.disabled = True
-            await interaction.message.edit(view=self)
+            # Already lost; delete the cashout message
             await interaction.response.send_message("You cannot cashout after losing!", ephemeral=True)
+            try:
+                await interaction.message.delete()
+            except Exception:
+                pass
             return
 
         if not hasattr(self.game_view, 'gems_clicked'):
@@ -596,18 +600,15 @@ class CashoutView(discord.ui.View):
         )
         await self.game_view.main_message.edit(embed=final_embed, view=self.game_view)
 
-        # Disable cashout button view and acknowledge the interaction ephemerally
-        for child in self.children:
-            child.disabled = True
-        # Acknowledge then delete the cashout message, leaving only the mines board
+        # Acknowledge ephemerally then delete the cashout message, leaving only the mines board
         await interaction.response.send_message(
             f"Cashed out with **{await casino.formatter(winnings)}** **{casino.currency_name}** at {multiplier}x.",
             ephemeral=True
         )
         try:
             await interaction.message.delete()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to delete cashout message: {e}")
         # Clear reference so MinesView does not attempt double delete
         self.game_view.cashout_message = None
 
