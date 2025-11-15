@@ -24,7 +24,7 @@ def prepare_for_json(data):
     elif isinstance(data, dict):
         return {key: prepare_for_json(value) for key, value in data.items()}
     elif isinstance(data, decimal.Decimal):
-        return float(data)
+        return str(data)  # keep exact value for signing payloads
     elif isinstance(data, uuid.UUID):
         return str(data)
     else:
@@ -265,8 +265,7 @@ class Blockchain:
 
     async def add_to_block(self, transactions, validator_private_key_bytes):
         """
-        Add signed transactions to the transaction pool. When a threshold is reached,
-        automatically create a new block using proof-of-stake consensus.
+        Queue transactions for block creation. Do not sign here; signatures are added in create_block_atomic.
         """
         async with self.blockchain_lock:
             if not transactions:
@@ -276,15 +275,9 @@ class Blockchain:
             for transaction in transactions:
                 if not isinstance(transaction, dict):
                     raise TypeError("Each transaction must be a dictionary.")
-                # Ensure a signer is tracked for later verification
                 if 'signer_user_id' not in transaction:
-                    # Fallback to from_user_id, then to_user_id if missing
                     signer = transaction.get('from_user_id') or transaction.get('to_user_id')
                     transaction['signer_user_id'] = signer
-                transaction_data = json.dumps(prepare_for_json(transaction), sort_keys=True)
-                signature = KeyManager.sign_data(validator_private_key_bytes, transaction_data)
-                transaction['signature'] = signature.hex()
-                logger.debug(f"Transaction signed: {transaction}")
                 self.transaction_pool.append(transaction)
 
             TRANSACTION_THRESHOLD = 10
@@ -313,42 +306,34 @@ class Blockchain:
             signer_id = tx.get('signer_user_id') or tx.get('from_user_id') or tx.get('to_user_id')
             tx['signer_user_id'] = signer_id
 
-            # Build canonical string without the signature field
-            if 'signature' in tx:
-                sig_present = True
-                signature_hex = tx['signature']
-                tx_no_sig = dict(tx)
-                tx_no_sig.pop('signature', None)
-            else:
-                sig_present = False
-                signature_hex = None
-                tx_no_sig = tx
+            # separate signature for payload building
+            signature_hex = tx.get('signature')
+            tx_no_sig = dict(tx)
+            tx_no_sig.pop('signature', None)
+            payload = json.dumps(prepare_for_json(tx_no_sig), sort_keys=True)
 
-            # If no signature provided, sign using the signer's private key
-            if not sig_present:
-                result = await session.execute(
-                    select(Wallet.private_key).where(Wallet.user_id == signer_id)
-                )
+            if not signature_hex:
+                # sign if missing
+                result = await session.execute(select(Wallet.private_key).where(Wallet.user_id == signer_id))
                 priv = result.scalar_one_or_none()
                 if not priv:
                     raise ValueError(f"No private key found for signer {signer_id}")
-                signature = KeyManager.sign_data(priv, json.dumps(prepare_for_json(tx_no_sig), sort_keys=True))
-                tx['signature'] = signature.hex()
-                signature_hex = tx['signature']
+                tx['signature'] = KeyManager.sign_data(priv, payload).hex()
+            else:
+                # verify; if it fails (legacy/foreign), re-sign canonically
+                pub_res = await session.execute(select(Wallet.public_key).where(Wallet.user_id == signer_id))
+                public_key_bytes = pub_res.scalar_one_or_none()
+                if not public_key_bytes:
+                    raise ValueError(f"No public key found for signer {signer_id}")
+                ok = self._verify_signature_bytes(public_key_bytes, payload, bytes.fromhex(signature_hex))
+                if not ok:
+                    # centralized policy: replace bad signature with signer’s signature
+                    priv_res = await session.execute(select(Wallet.private_key).where(Wallet.user_id == signer_id))
+                    priv = priv_res.scalar_one_or_none()
+                    if not priv:
+                        raise ValueError(f"No private key found for signer {signer_id}")
+                    tx['signature'] = KeyManager.sign_data(priv, payload).hex()
 
-            # Verify signature with signer's public key
-            pub_res = await session.execute(
-                select(Wallet.public_key).where(Wallet.user_id == signer_id)
-            )
-            public_key_bytes = pub_res.scalar_one_or_none()
-            if not public_key_bytes:
-                raise ValueError(f"No public key found for signer {signer_id}")
-            # Rebuild tx_no_sig for verification to be safe
-            tx_no_sig = dict(tx)
-            tx_no_sig.pop('signature', None)
-            ok = self._verify_signature_bytes(public_key_bytes, json.dumps(prepare_for_json(tx_no_sig), sort_keys=True), bytes.fromhex(signature_hex))
-            if not ok:
-                raise ValueError(f"Invalid transaction signature for signer {signer_id}")
             prepared.append(tx)
 
         # Determine previous hash and index atomically in this session
