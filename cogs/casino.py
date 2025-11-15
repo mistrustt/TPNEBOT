@@ -287,8 +287,9 @@ class MinesView(discord.ui.View):
         self.main_message = main_message
         self.user_id = user_id
         self.bet_amount = bet_amount
-        self.bomb_emoji = "<:minesbomb:1360657089013223644>"
-        self.gem_emoji = "<:minesgem:1360657101336350910>"
+        # Use the same emoji set as embeds for consistency
+        self.bomb_emoji = "<:bombs:1278849752301309994>"
+        self.gem_emoji = "<:gems:1278849818025918497>"
         self.bot = bot
         self.remaining_safe_cells = 25 - len(bomb_positions)
         self.gems_clicked = 0
@@ -428,8 +429,8 @@ class MinesView(discord.ui.View):
         final_grid = ""
         for row in range(5):
             final_grid += "".join(
-                ['<:bombs:1278849752301309994>' if (row * 5 + col) in self.bomb_positions 
-                 else '<:gems:1278849818025918497>' for col in range(5)]
+                [self.bomb_emoji if (row * 5 + col) in self.bomb_positions 
+                 else self.gem_emoji for col in range(5)]
             ) + "\n"
         return final_grid
 
@@ -3377,8 +3378,8 @@ class Casino(commands.Cog):
                 return
 
             user_id = ctx.author.id
-            wallet_id = await self.bot.database.get_wallet_id(user_id)
-            balance = Decimal(str(await self.bot.database.get_balance(wallet_id)))
+            wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+            balance = await self.bot.database.get_wallet_balance(wallet_id)
 
             try:
                 parsed_bet_amount = await self.bet_handler(bet_amount, balance)
@@ -3415,7 +3416,7 @@ class Casino(commands.Cog):
                 return
 
             try:
-                await self.bot.database.process_transaction(
+                await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id,
                     amount=-bet_amount,
                     description="Mines game bet"
@@ -3426,31 +3427,17 @@ class Casino(commands.Cog):
                 return
 
             grid_size = 5
-            bomb_emoji = "<:bombs:1278849752301309994>"
-            gem_emoji = "<:gems:1278849818025918497>"
             grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
+            
+            # Provably fair bomb selection aligned with other games
+            bomb_positions = await self.fair_sample(user_id, list(range(grid_size * grid_size)), num_bombs)
 
-            def secure_sample(population, k):
-                """Securely select k unique elements from the population."""
-                chosen = []
-                available = list(population)
-                for _ in range(k):
-                    element = secrets.choice(available)
-                    chosen.append(element)
-                    available.remove(element)
-                return chosen
-
-            bomb_positions = secure_sample(range(grid_size * grid_size), num_bombs)
-
-            for pos in bomb_positions:
-                row = pos // grid_size
-                col = pos % grid_size
-                grid[row][col] = bomb_emoji
+            # Grid contents are rendered via button emojis and final grid; no prefill needed
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
             fbet = f"{bet_amount:,.2f}"
-            multipliers = self.load_multipliers()
-            multiplier = multipliers.get((num_bombs, 0), 1.0)
+            init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
+            multiplier = float(init_multi) if init_multi else 1.0
 
             avatar_url = ctx.author.avatar.url if ctx.author.avatar else "https://cdn.discordapp.com/embed/avatars/0.png"
             embed = discord.Embed(
@@ -3466,7 +3453,7 @@ class Casino(commands.Cog):
 
             try:
                 main_message = await ctx.reply(embed=embed)
-                game_view = MinesView(grid, bomb_positions, main_message, user_id, bet_amount, bomb_emoji, gem_emoji, self.bot)
+                game_view = MinesView(grid, bomb_positions, main_message, user_id, bet_amount, self.bot)
                 await main_message.edit(view=game_view)
 
                 cashout_view = CashoutView(main_message, game_view, user_id, bet_amount, self.bot)
