@@ -3429,7 +3429,7 @@ class Casino(commands.Cog):
 
             bet_amount = parsed_bet_amount
 
-            if not num_bombs.is_integer():
+            if not isinstance(num_bombs, int):
                 embed = discord.Embed(
                     description='Please provide a valid integer number of bombs.',
                     color=discord.Color.red()
