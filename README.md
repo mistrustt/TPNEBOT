@@ -31,7 +31,7 @@ Recommended Python 3.11 or newer. Ensure compatibility with pinned dependency ve
 
 ## Quick Start
 1. Clone repository:
-   `git clone` [https://github.com/mistrustt//TPNEBOT.git](https://github.com/mistrustt/TPNEBOT)
+   `git clone` [https://github.com/mistrustt/TPNEBOT.git](https://github.com/mistrustt/TPNEBOT)
    `cd TPNEBOT`
 2. Create virtual environment (Windows PowerShell example):
    `python -m venv .venv`
