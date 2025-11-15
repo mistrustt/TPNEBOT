@@ -279,174 +279,279 @@ class CrashView(discord.ui.View):
         embed.add_field(name="Players", value="\n".join(lines), inline=False)
         return embed
 
-BOMB_EMOJI = "<:minesbomb:1360657089013223644>"
-GEM_EMOJI  = "<:minesgem:1360657101336350910>"
-
-class MinesView(ui.LayoutView):
-    header = ui.TextDisplay("**Mines**\nClick gems. Avoid bombs.")
-    status = ui.TextDisplay("")
-
-    def __init__(
-        self,
-        *,
-        user_id: int,
-        wallet_id,
-        bet_amount: Decimal,
-        num_bombs: int,
-        bomb_positions: set[int],
-        bot: commands.Bot,
-        PF: dict,
-        currency_emoji: str,
-        fmt_amount_coro,                 
-        timeout: float = 600.0,
-    ):
-        super().__init__(timeout=timeout)
-        self.bot = bot
+class MinesView(discord.ui.View):
+    def __init__(self, grid, bomb_positions, main_message, user_id, bet_amount, bot):
+        super().__init__(timeout=600)
+        self.grid = grid
+        self.bomb_positions = bomb_positions
+        self.main_message = main_message
         self.user_id = user_id
-        self.wallet_id = wallet_id
-        self.bet_amount = Decimal(bet_amount)
-        self.num_bombs = int(num_bombs)
-        self.bomb_positions = set(bomb_positions)
-        self.PF = PF
-        self.size = 5
-        self.clicked: set[int] = set()
+        self.bet_amount = bet_amount
+        self.bomb_emoji = "<:minesbomb:1360657089013223644>"
+        self.gem_emoji = "<:minesgem:1360657101336350910>"
+        self.bot = bot
+        self.remaining_safe_cells = 25 - len(bomb_positions)
         self.gems_clicked = 0
+        self.clicked_positions = set()
         self.game_over = False
-        self.currency_emoji = currency_emoji
-        self.fmt_amount = fmt_amount_coro     
+        self.error_count = 0  
 
-        for i in range(self.size):
-            for j in range(self.size):
-                idx = i * self.size + j
-                btn = ui.Button(label="\u200b", style=ButtonStyle.secondary, custom_id=f"m:{idx}", row=i)
-                btn.callback = functools.partial(self._on_cell, idx, btn)
-                self.add_item(btn)
+        for i in range(5):
+            for j in range(5):
+                button = discord.ui.Button(label="\u200B", style=discord.ButtonStyle.secondary, custom_id=f"{i}_{j}")
+                button.callback = self.button_callback
+                self.add_item(button)
 
-        cash = ui.Button(label="Cashout", style=ButtonStyle.success, custom_id="m:cash")
-        cash.callback = self._on_cashout
-        self.add_item(cash)
-
-    async def _mult(self) -> Decimal:
-        val = await self.bot.database.get_mines_multiplier(self.num_bombs, self.gems_clicked)
+    async def button_callback(self, interaction: Interaction):
         try:
-            return Decimal(str(val))
-        except Exception:
-            return Decimal("1")
+            if self.game_over:
+                await interaction.response.send_message("The game has already ended.", ephemeral=True)
+                return
 
-    async def _update_status(self, *, multiplier: Decimal):
-        remain = self.size * self.size - self.num_bombs - self.gems_clicked
-        bet_str = await self.fmt_amount(self.bet_amount)   
-        self.status.content = (
-            f"**Bombs:** {self.num_bombs}\n"
-            f"**Bet:** {self.currency_emoji} **{bet_str}**\n"
-            f"**Remaining Gems:** {remain}\n"
-            f"**Multiplier:** x{multiplier:.3g}\n"
-            f"`nonce={self.PF['nonce']}  tag=shuffle`\n"
-            f"`seed_hash={self.PF['server_seed_hash'][:10]}…`"
-        )
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message("This isn't your Mines game.", ephemeral=True)
+                return
 
-    def _disable_all(self):
-        for item in self.children:
-            if isinstance(item, ui.Button) and item.custom_id and item.custom_id.startswith("m:") and item.custom_id != "m:cash":
-                item.disabled = True
+            i, j = map(int, interaction.data.get('custom_id', '0_0').split('_'))
+            pos = i * 5 + j
 
-    def _reveal_board(self):
-        for item in self.children:
-            if not isinstance(item, ui.Button) or not item.custom_id or item.custom_id == "m:cash":
-                continue
-            idx = int(item.custom_id.split(":")[1])
-            if idx in self.bomb_positions:
-                item.emoji = BOMB_EMOJI
-                item.style = ButtonStyle.danger
-            elif idx in self.clicked:
-                pass
+            if pos in self.clicked_positions:
+                await interaction.response.send_message("This gem has already been clicked!", ephemeral=True)
+                return
+
+            await interaction.response.defer(thinking=True, ephemeral=False)
+
+            if pos in self.bomb_positions:
+                await self.handle_bomb_click(interaction, pos)
             else:
-                item.emoji = GEM_EMOJI
-                item.style = ButtonStyle.secondary
-            item.disabled = True
+                await self.handle_safe_click(interaction, pos)
 
-    async def _finish_loss(self, itx: Interaction):
-        self.game_over = True
-        self._disable_all()
-        self._reveal_board()
-        revealed_seed, new_hash = await self.bot.database.increment_loss(
-            self.user_id, "mines", self.bet_amount,
-            client_seed=self.PF["client_seed"], seed_used=None,
-            nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"]
+        except discord.errors.InteractionResponded:
+
+            pass
+        except Exception as e:
+            logger.error(f"Error in mines game: {str(e)}")
+            self.error_count += 1
+            if self.error_count >= 3:
+
+                await self.emergency_end_game(interaction)
+            else:
+                await self.send_error_message(interaction)
+
+    async def handle_bomb_click(self, interaction: Interaction, pos):
+        await interaction.response.defer(thinking=True, ephemeral=False)
+        try:
+            self.game_over = True
+            self.children[pos].emoji = self.bomb_emoji
+            self.children[pos].style = discord.ButtonStyle.danger
+
+            for child in self.children:
+                child.disabled = True
+
+            final_grid = self.create_final_grid()
+            embed = self.create_loss_embed(final_grid)
+
+            try:
+                await interaction.followup.send(embed=embed)
+            except:
+                await interaction.channel.send(embed=embed)
+
+            await self.main_message.edit(embed=interaction.message.embeds[0], view=self)
+        except Exception as e:
+            logger.error(f"Error handling bomb click: {str(e)}")
+            await self.send_error_message(interaction)
+
+    async def handle_safe_click(self, interaction: Interaction, pos):
+        try:
+            self.children[pos].emoji = self.gem_emoji
+            self.children[pos].style = discord.ButtonStyle.success
+            self.clicked_positions.add(pos)
+            self.remaining_safe_cells -= 1
+            self.gems_clicked += 1
+
+            embed = await self.update_game_embed(interaction.message.embeds[0])
+            await interaction.edit_original_response(embed=embed, view=self)
+
+            if self.remaining_safe_cells == 0:
+                await self.automatic_cashout(interaction)
+        except Exception as e:
+            logger.error(f"Error handling safe click: {str(e)}")
+            await self.send_error_message(interaction)
+
+    async def calculate_multiplier(self):
+        try:
+            multiplier = await self.bot.database.get_mines_multiplier(len(self.bomb_positions), self.gems_clicked)
+            return float(multiplier) if multiplier else 1.0
+        except Exception as e:
+            logger.error(f"Error calculating multiplier: {str(e)}")
+            return 1.0
+
+    async def emergency_end_game(self, interaction: Interaction):
+        """Handle critical errors by ending the game and refunding the bet."""
+        try:
+            self.game_over = True
+            wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=self.bet_amount,
+                description="Mines game refund due to error"
+            )
+
+            embed = discord.Embed(
+                title="Game Error",
+                description="The game encountered an error and has been cancelled. Your bet has been refunded.",
+                color=discord.Color.red()
+            )
+
+            for child in self.children:
+                child.disabled = True
+
+            await interaction.channel.send(embed=embed)
+            await self.main_message.edit(view=self)
+        except Exception as e:
+            logger.error(f"Critical error in emergency end game: {str(e)}")
+
+    async def send_error_message(self, interaction: Interaction):
+        """Send a generic error message to the user."""
+        try:
+            embed = discord.Embed(
+                title="Error",
+                description="An error occurred. Please try again or contact support if the issue persists.",
+                color=discord.Color.red()
+            )
+            await interaction.channel.send(embed=embed, ephemeral=True)
+        except:
+            pass
+
+    def create_final_grid(self):
+        """Create the final grid display."""
+        final_grid = ""
+        for row in range(5):
+            final_grid += "".join(
+                ['<:bombs:1278849752301309994>' if (row * 5 + col) in self.bomb_positions 
+                 else '<:gems:1278849818025918497>' for col in range(5)]
+            ) + "\n"
+        return final_grid
+
+    async def update_game_embed(self, embed):
+        """Update the game embed with current state."""
+        try:
+            embed.set_field_at(2, name="Remaining Gems", value=f"{self.remaining_safe_cells}", inline=False)
+            multiplier = await self.calculate_multiplier()
+            embed.set_field_at(3, name="Multiplier", value=f"x{multiplier:.3g}", inline=False)
+            return embed
+        except Exception as e:
+            logger.error(f"Error updating game embed: {str(e)}")
+            return embed
+
+    def create_loss_embed(self, final_grid):
+        """Create an embed for when the player loses by hitting a bomb."""
+        embed = discord.Embed(
+            title="💥 BOOM! Game Over",
+            description=f"You clicked on a bomb and lost your bet of **{self.bet_amount}**.\n\n{final_grid}",
+            color=discord.Color.red()
         )
-        if itx.response.is_done():
-            await itx.edit_original_response(view=self)
-        else:
-            await itx.response.edit_message(view=self)
+        return embed
 
-    async def _finish_win(self, itx: Interaction, winnings: Decimal):
+    async def automatic_cashout(self, interaction: Interaction):
+        """Automatically cash out when all safe cells are cleared."""
         self.game_over = True
-        self._disable_all()
-        self._reveal_board()
+        casino: Casino = self.bot.get_cog("Casino")
+
+        multiplier = await self.calculate_multiplier()
+        winnings = self.bet_amount * Decimal(multiplier)
+
+        wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
         await self.bot.database.process_treasury_transaction(
-            wallet_id=self.wallet_id, amount=winnings, description="Mines win"
+            wallet_id=wallet_id,
+            amount=winnings,
+            description="Mines game win - all gems cleared"
         )
-        revealed_seed, new_hash = await self.bot.database.increment_win(
-            self.user_id, "mines", winnings,
-            client_seed=self.PF["client_seed"], seed_used=None,
-            nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"]
-        )
-        if itx.response.is_done():
-            await itx.edit_original_response(view=self)
-        else:
-            await itx.response.edit_message(view=self)
+        await self.bot.database.increment_win(self.user_id, "mines")
 
-    async def interaction_check(self, interaction: Interaction) -> bool:
-        if interaction.user.id != self.user_id:
+        for child in self.children:
+            child.disabled = True
+
+        await self.send_final_grid(interaction, f"🎉 PERFECT! You cleared all gems and won {await casino.formatter(winnings)} at {multiplier}x multiplier!")
+
+    async def send_final_grid(self, interaction: Interaction, message_text):
+        """Send the final grid display with a message."""
+        final_grid = self.create_final_grid()
+
+        embed = discord.Embed(
+            title="Game Results",
+            description=f"{message_text}\n\n{final_grid}",
+            color=discord.Color.gold()
+        )
+
+        try:
+            await interaction.channel.send(embed=embed)
+        except:
+            await interaction.channel.send(embed=embed)
+
+        await self.main_message.edit(view=self)
+
+class CashoutView(discord.ui.View):
+    def __init__(self, main_message, game_view, user_id, bet_amount, bot):
+        super().__init__(timeout=600)
+        self.main_message = main_message
+        self.game_view = game_view
+        self.user_id = user_id
+        self.bet_amount = bet_amount
+        self.bot = bot
+
+        cashout_button = discord.ui.Button(label="Cashout", style=discord.ButtonStyle.success, custom_id="cashout")
+        cashout_button.callback = self.cashout_callback
+        self.add_item(cashout_button)
+
+    async def cashout_callback(self, interaction: discord.Interaction):
+        casino: Casino = self.bot.get_cog("Casino")
+
+        if interaction.user.id != self.game_view.user_id:
             await interaction.response.send_message("This isn't your Mines game.", ephemeral=True)
-            return False
-        return True
-
-    async def _on_cell(self, idx: int, btn: ui.Button, itx: Interaction):
-        if self.game_over:
-            await itx.response.send_message("The game has ended.", ephemeral=True)
-            return
-        if idx in self.clicked:
-            await itx.response.send_message("Already opened.", ephemeral=True)
             return
 
-        if idx in self.bomb_positions:
-            btn.emoji = BOMB_EMOJI
-            btn.style = ButtonStyle.danger
-            await self._finish_loss(itx)
+        if self.game_view.game_over:
+            for child in self.children:
+                child.disabled = True
+            await interaction.message.edit(view=self)
+            await interaction.response.send_message("You cannot cashout after the game has ended!", ephemeral=True)
             return
 
-        btn.emoji = GEM_EMOJI
-        btn.style = ButtonStyle.success
-        btn.disabled = True
-
-        self.clicked.add(idx)
-        self.gems_clicked += 1
-
-        mult = await self._mult()
-        await self._update_status(multiplier=mult)
-
-        if self.gems_clicked == (self.size * self.size - self.num_bombs):
-            winnings = (self.bet_amount * mult).quantize(Decimal("0.01"))
-            await self._finish_win(itx, winnings)
+        if hasattr(self.game_view, 'game_result') and self.game_view.game_result == "Lost":
+            for child in self.children:
+                child.disabled = True
+            await interaction.message.edit(view=self)
+            await interaction.response.send_message("You cannot cashout after losing!", ephemeral=True)
             return
 
-        if itx.response.is_done():
-            await itx.edit_original_response(view=self)
-        else:
-            await itx.response.edit_message(view=self)
-
-    async def _on_cashout(self, itx: Interaction):
-        if self.game_over:
-            await itx.response.send_message("Already finished.", ephemeral=True)
-            return
-        if self.gems_clicked == 0:
-            await itx.response.send_message("Click at least one gem first.", ephemeral=True)
+        if not hasattr(self.game_view, 'gems_clicked'):
+            await interaction.response.send_message("There was an error with the game state. Please try again.", ephemeral=True)
             return
 
-        mult = await self._mult()
-        winnings = (self.bet_amount * mult).quantize(Decimal("0.01"))
-        await self._finish_win(itx, winnings)
+        if self.game_view.gems_clicked == 0:
+            await interaction.response.send_message("You need to click a gem before cashing out!", ephemeral=True)
+            return
+
+        self.game_view.game_over = True
+        self.game_view.game_result = "Won"
+
+        multiplier = await self.game_view.calculate_multiplier()
+        winnings = self.bet_amount * Decimal(multiplier)
+
+        wallet_id = await self.bot.database.get_wallet_id_for_user(self.game_view.user_id)
+        await self.bot.database.process_treasury_transaction(
+            wallet_id=wallet_id,
+            amount=winnings,
+            description="Mines game cashout"
+        )
+        await self.bot.database.increment_win(self.game_view.user_id, "mines")
+
+        for child in self.game_view.children:
+            child.disabled = True
+        await self.game_view.main_message.edit(view=self.game_view)
+
+        await self.game_view.send_final_grid(interaction, f"Cashed out with {await casino.formatter(winnings)} at {multiplier}x multiplier!")
 
 class DoubleOrNothingView(View):
     def __init__(self, bot, initial_user, initial_amount, winnings, currency_name, user_id, PF):
@@ -3259,73 +3364,124 @@ class Casino(commands.Cog):
         await ctx.author.send(embed=embed, view=admin_view)
         await ctx.message.add_reaction("✅")
 
-    @commands.command(name="mines", description="Play Mines with N bombs and a bet.")
+    @commands.command(name='mines')
     async def mines(self, ctx: commands.Context, num_bombs: int = None, bet_amount: str = None):
-        if num_bombs is None or bet_amount is None:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Usage",
-                    description="`!mines <bombs 1-24> <amount|all>`",
-                    color=discord.Color.red(),
-                ),
-                delete_after=8,
-            )
-            return
-
-        if not (1 <= int(num_bombs) <= 24):
-            await ctx.reply(embed=discord.Embed(description="Bombs must be 1–24.", color=discord.Color.red()), delete_after=6)
-            return
-        num_bombs = int(num_bombs)
-
-        user_id = ctx.author.id
-        PF = await self.prove_fairness(user_id)
-
-        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
         try:
-            amount_dec = await self.amount_handler(bet_amount, balance)  
-        except ValueError as e:
-            await ctx.reply(embed=discord.Embed(description=str(e), color=discord.Color.red()), delete_after=6)
+            if num_bombs is None or bet_amount is None:
+                embed = discord.Embed(
+                    title="Missing required arguments",
+                    description="Syntax: !mines (bomb amount) (bet amount)\nUsage: !mines 5 5000",
+                    color=discord.Color.red()
+                )
+                await ctx.reply(embed=embed)
+                return
+
+            user_id = ctx.author.id
+            wallet_id = await self.bot.database.get_wallet_id(user_id)
+            balance = Decimal(str(await self.bot.database.get_balance(wallet_id)))
+
+            try:
+                parsed_bet_amount = await self.bet_handler(bet_amount, balance)
+            except ValueError as e:
+                embed = discord.Embed(description=str(e), color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+
+            bet_amount = parsed_bet_amount
+
+            if num_bombs < 1 or num_bombs > 24:
+                embed = discord.Embed(
+                    description='Please provide a number of bombs between 1 and 24.',
+                    color=discord.Color.red()
+                )
+                await ctx.reply(embed=embed)
+                return
+
+            if bet_amount <= 0:
+                embed = discord.Embed(
+                    description='Please provide a valid bet amount greater than 0.',
+                    color=discord.Color.red()
+                )
+                await ctx.reply(embed=embed)
+                return
+
+            if bet_amount > balance:
+                fbal = f"{balance:,.2f}"
+                embed = discord.Embed(
+                    description=f'You do not have enough balance to place this bet. Your current balance is **${fbal}**.',
+                    color=discord.Color.red()
+                )
+                await ctx.reply(embed=embed)
+                return
+
+            try:
+                await self.bot.database.process_transaction(
+                    wallet_id=wallet_id,
+                    amount=-bet_amount,
+                    description="Mines game bet"
+                )
+            except ValueError as e:
+                embed = discord.Embed(description=str(e), color=discord.Color.red())
+                await ctx.reply(embed=embed)
+                return
+
+            grid_size = 5
+            bomb_emoji = "<:bombs:1278849752301309994>"
+            gem_emoji = "<:gems:1278849818025918497>"
+            grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
+
+            def secure_sample(population, k):
+                """Securely select k unique elements from the population."""
+                chosen = []
+                available = list(population)
+                for _ in range(k):
+                    element = secrets.choice(available)
+                    chosen.append(element)
+                    available.remove(element)
+                return chosen
+
+            bomb_positions = secure_sample(range(grid_size * grid_size), num_bombs)
+
+            for pos in bomb_positions:
+                row = pos // grid_size
+                col = pos % grid_size
+                grid[row][col] = bomb_emoji
+
+            remaining_safe_cells = grid_size * grid_size - num_bombs
+            fbet = f"{bet_amount:,.2f}"
+            multipliers = self.load_multipliers()
+            multiplier = multipliers.get((num_bombs, 0), 1.0)
+
+            avatar_url = ctx.author.avatar.url if ctx.author.avatar else "https://cdn.discordapp.com/embed/avatars/0.png"
+            embed = discord.Embed(
+                title=f"Mines",
+                description="Click the gems to avoid bombs!",
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="Number of bombs", value=f"{num_bombs}", inline=False)
+            embed.add_field(name="Bet amount", value=f"${fbet}", inline=False)
+            embed.add_field(name="Remaining Gems", value=f"{remaining_safe_cells}", inline=False)
+            embed.add_field(name="Multiplier", value=f"x{multiplier:.3g}", inline=False)
+            embed.set_author(name=ctx.author.display_name, icon_url=avatar_url)
+
+            try:
+                main_message = await ctx.reply(embed=embed)
+                game_view = MinesView(grid, bomb_positions, main_message, user_id, bet_amount, bomb_emoji, gem_emoji, self.bot)
+                await main_message.edit(view=game_view)
+
+                cashout_view = CashoutView(main_message, game_view, user_id, bet_amount, self.bot)
+                await ctx.reply(view=cashout_view)
+            except discord.errors.NotFound:
+                pass
+
+        except Exception as e:
+            embed = discord.Embed(
+                description=f"An unexpected error occurred: {str(e)}",
+                color=discord.Color.red()
+            )
+            await ctx.reply(embed=embed)
             return
 
-        max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
-        if amount_dec > max_allowed:
-            amount_dec = max_allowed
-            capped = await self.formatter(amount_dec)      
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"Bet auto-capped to **{capped}**.",
-                    color=discord.Color.orange(),
-                ),
-                delete_after=5,
-            )
-
-        await self.bot.database.process_treasury_transaction(
-            wallet_id=wallet_id,
-            amount=-amount_dec,
-            description="Mines bet",
-        )
-
-        positions = await self.fair_sample(user_id, list(range(25)), num_bombs)
-        bomb_positions = set(int(p) for p in positions)
-
-        view = MinesView(
-            user_id=user_id,
-            wallet_id=wallet_id,
-            bet_amount=amount_dec,
-            num_bombs=num_bombs,
-            bomb_positions=bomb_positions,
-            bot=self.bot,
-            PF=PF,
-            currency_emoji=self.currency_name,   
-            fmt_amount_coro=self.formatter,      
-        )
-
-        mult0 = await view._mult()
-        await view._update_status(multiplier=mult0)
-
-        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
-        await ctx.reply(view=view)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Casino(bot))
