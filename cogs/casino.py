@@ -320,8 +320,7 @@ class MinesView(discord.ui.View):
                 await interaction.response.send_message("This gem has already been clicked!", ephemeral=True)
                 return
 
-            await interaction.response.defer(thinking=True, ephemeral=False)
-
+            # Update the existing game message instead of sending new embeds
             if pos in self.bomb_positions:
                 await self.handle_bomb_click(interaction, pos)
             else:
@@ -340,7 +339,6 @@ class MinesView(discord.ui.View):
                 await self.send_error_message(interaction)
 
     async def handle_bomb_click(self, interaction: Interaction, pos):
-        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             self.game_over = True
             self.children[pos].emoji = self.bomb_emoji
@@ -351,13 +349,7 @@ class MinesView(discord.ui.View):
 
             final_grid = self.create_final_grid()
             embed = self.create_loss_embed(final_grid)
-
-            try:
-                await interaction.followup.send(embed=embed)
-            except:
-                await interaction.channel.send(embed=embed)
-
-            await self.main_message.edit(embed=interaction.message.embeds[0], view=self)
+            await interaction.response.edit_message(embed=embed, view=self)
         except Exception as e:
             logger.error(f"Error handling bomb click: {str(e)}")
             await self.send_error_message(interaction)
@@ -371,10 +363,11 @@ class MinesView(discord.ui.View):
             self.gems_clicked += 1
 
             embed = await self.update_game_embed(interaction.message.embeds[0])
-            await interaction.edit_original_response(embed=embed, view=self)
-
+            # If this click cleared the board, perform automatic cashout and show final embed
             if self.remaining_safe_cells == 0:
                 await self.automatic_cashout(interaction)
+            else:
+                await interaction.response.edit_message(embed=embed, view=self)
         except Exception as e:
             logger.error(f"Error handling safe click: {str(e)}")
             await self.send_error_message(interaction)
@@ -407,8 +400,8 @@ class MinesView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
 
-            await interaction.channel.send(embed=embed)
-            await self.main_message.edit(view=self)
+            # Update the main game message with an error notice
+            await self.main_message.edit(embed=embed, view=self)
         except Exception as e:
             logger.error(f"Critical error in emergency end game: {str(e)}")
 
@@ -420,7 +413,11 @@ class MinesView(discord.ui.View):
                 description="An error occurred. Please try again or contact support if the issue persists.",
                 color=discord.Color.red()
             )
-            await interaction.channel.send(embed=embed, ephemeral=True)
+            # Prefer followup ephemeral if possible; otherwise, post to channel
+            try:
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            except Exception:
+                await interaction.channel.send(embed=embed)
         except:
             pass
 
@@ -472,25 +469,24 @@ class MinesView(discord.ui.View):
 
         for child in self.children:
             child.disabled = True
-
-        await self.send_final_grid(interaction, f"🎉 PERFECT! You cleared all gems and won {await casino.formatter(winnings)} at {multiplier}x multiplier!")
+        # Update the main embed with final grid and message
+        final_grid = self.create_final_grid()
+        embed = discord.Embed(
+            title="Game Results",
+            description=f"🎉 PERFECT! You cleared all gems and won {await casino.formatter(winnings)} at {multiplier}x multiplier!\n\n{final_grid}",
+            color=discord.Color.gold()
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
 
     async def send_final_grid(self, interaction: Interaction, message_text):
-        """Send the final grid display with a message."""
+        """Update the main game message with the final grid and message."""
         final_grid = self.create_final_grid()
-
         embed = discord.Embed(
             title="Game Results",
             description=f"{message_text}\n\n{final_grid}",
             color=discord.Color.gold()
         )
-
-        try:
-            await interaction.channel.send(embed=embed)
-        except:
-            await interaction.channel.send(embed=embed)
-
-        await self.main_message.edit(view=self)
+        await self.main_message.edit(embed=embed, view=self)
 
 class CashoutView(discord.ui.View):
     def __init__(self, main_message, game_view, user_id, bet_amount, bot):
@@ -548,11 +544,25 @@ class CashoutView(discord.ui.View):
         )
         await self.bot.database.increment_win(self.game_view.user_id, "mines")
 
+        # Disable all game buttons and update the main game message with final state
         for child in self.game_view.children:
             child.disabled = True
-        await self.game_view.main_message.edit(view=self.game_view)
+        final_grid = self.game_view.create_final_grid()
+        final_embed = discord.Embed(
+            title="Game Results",
+            description=f"Cashed out with {await casino.formatter(winnings)} at {multiplier}x multiplier!\n\n{final_grid}",
+            color=discord.Color.gold()
+        )
+        await self.game_view.main_message.edit(embed=final_embed, view=self.game_view)
 
-        await self.game_view.send_final_grid(interaction, f"Cashed out with {await casino.formatter(winnings)} at {multiplier}x multiplier!")
+        # Disable cashout button view and acknowledge the interaction ephemerally
+        for child in self.children:
+            child.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message(
+            f"Cashed out with {await casino.formatter(winnings)} at {multiplier}x.",
+            ephemeral=True
+        )
 
 class DoubleOrNothingView(View):
     def __init__(self, bot, initial_user, initial_amount, winnings, currency_name, user_id, PF):
