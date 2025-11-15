@@ -3382,7 +3382,7 @@ class Casino(commands.Cog):
             balance = await self.bot.database.get_wallet_balance(wallet_id)
 
             try:
-                parsed_bet_amount = await self.bet_handler(bet_amount, balance)
+                parsed_bet_amount = await self.amount_handler(bet_amount, balance)
             except ValueError as e:
                 embed = discord.Embed(description=str(e), color=discord.Color.red())
                 await ctx.reply(embed=embed, delete_after=5)
