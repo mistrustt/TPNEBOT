@@ -358,7 +358,7 @@ class MinesView(discord.ui.View):
                 )
             except Exception as e:
                 logger.error(f"Failed to record mines loss: {e}")
-            embed = self.create_loss_embed(final_grid)
+            embed = await self.create_loss_embed(final_grid)
             await interaction.response.edit_message(embed=embed, view=self)
         except Exception as e:
             logger.error(f"Error handling bomb click: {str(e)}")
@@ -452,11 +452,12 @@ class MinesView(discord.ui.View):
             logger.error(f"Error updating game embed: {str(e)}")
             return embed
 
-    def create_loss_embed(self, final_grid):
+    async def create_loss_embed(self, final_grid):
         """Create an embed for when the player loses by hitting a bomb."""
+        casino: Casino = self.bot.get_cog("Casino")
         embed = discord.Embed(
             title="💥 BOOM! Game Over",
-            description=f"You clicked on a bomb and lost your bet of **{self.bet_amount}**.\n\n{final_grid}",
+            description=f"You clicked on a bomb and lost your bet of **{await casino.formatter(self.bet_amount)}** **{casino.currency_name}**.\n\n{final_grid}",
             color=discord.Color.red()
         )
         return embed
