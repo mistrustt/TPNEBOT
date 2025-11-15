@@ -31,30 +31,30 @@ Recommended Python 3.11 or newer. Ensure compatibility with pinned dependency ve
 
 ## Quick Start
 1. Clone repository:
-   git clone [https://github.com/mistrustt//TPNEBOT.git](https://github.com/mistrustt/TPNEBOT)
-   cd TPNEBOT
+   `git clone [https://github.com/mistrustt//TPNEBOT.git](https://github.com/mistrustt/TPNEBOT)`
+   `cd TPNEBOT`
 2. Create virtual environment (Windows PowerShell example):
-   python -m venv .venv
-   .venv\\Scripts\\activate
+   `python -m venv .venv`
+   `.venv\\Scripts\\activate`
 3. Install dependencies:
-   pip install --upgrade pip
-   pip install -r requirements.txt
+   `pip install --upgrade pip`
+   `pip install -r requirements.txt`
 4. Prepare Postgres (local default):
    - Install PostgreSQL
    - Ensure a database named postgres exists (default cluster) or adjust URL
    - Create user and grant privileges if needed
 5. Create `.env` file in project root:
-   TOKEN=your_bot_token_here
-   DB_PW=your_postgres_password_here
-   DEVELOPER_CHANNEL_ID=123456789012345678
+   `TOKEN=your_bot_token_here`
+   `DB_PW=your_postgres_password_here`
+   `DEVELOPER_CHANNEL_ID=123456789012345678`
 6. Run database initialization automatically by starting bot:
-   python bot.py
+   `python bot.py`
 7. Invite bot to your server using the OAuth2 URL (discord developer portal).
 
 ## Environment Variables (.env)
-- TOKEN: Discord bot token (required)
-- DB_PW: Password for Postgres user postgres (required)
-- DEVELOPER_CHANNEL_ID: Channel ID for internal error reporting (required)
+- `TOKEN`: Discord bot token (required)
+- `DB_PW`: Password for Postgres user postgres (required)
+- `DEVELOPER_CHANNEL_ID`: Channel ID for internal error reporting (required)
 
 ## Architecture Overview
 High level module structure:
