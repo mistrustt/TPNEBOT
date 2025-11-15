@@ -3429,6 +3429,14 @@ class Casino(commands.Cog):
 
             bet_amount = parsed_bet_amount
 
+            if not num_bombs.is_integer():
+                embed = discord.Embed(
+                    description='Please provide a valid integer number of bombs.',
+                    color=discord.Color.red()
+                )
+                await ctx.reply(embed=embed)
+                return
+
             if num_bombs < 1 or num_bombs > 24:
                 embed = discord.Embed(
                     description='Please provide a number of bombs between 1 and 24.',
