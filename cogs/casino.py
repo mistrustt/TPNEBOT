@@ -287,12 +287,12 @@ class MinesView(discord.ui.View):
         self.main_message = main_message
         self.user_id = user_id
         self.bet_amount = bet_amount
-        # Use the same emoji set as embeds for consistency
+
         self.bomb_emoji = "<:bombs:1278849752301309994>"
         self.gem_emoji = "<:gems:1278849818025918497>"
         self.bot = bot
         self.PF = PF
-        self.cashout_message: Optional[discord.Message] = None  # linked after cashout view send
+        self.cashout_message: Optional[discord.Message] = None  
         self.remaining_safe_cells = 25 - len(bomb_positions)
         self.gems_clicked = 0
         self.clicked_positions = set()
@@ -322,7 +322,6 @@ class MinesView(discord.ui.View):
                 await interaction.response.send_message("This gem has already been clicked!", ephemeral=True)
                 return
 
-            # Update the existing game message instead of sending new embeds
             if pos in self.bomb_positions:
                 await self.handle_bomb_click(interaction, pos)
             else:
@@ -350,7 +349,7 @@ class MinesView(discord.ui.View):
                 child.disabled = True
 
             final_grid = self.create_final_grid()
-            # Record provably-fair loss in game history
+
             try:
                 await self.bot.database.increment_loss(
                     self.user_id, "mines", self.bet_amount,
@@ -360,7 +359,7 @@ class MinesView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Failed to record mines loss: {e}")
             embed = await self.create_loss_embed(final_grid)
-            # Delete cashout message if present (loss state) BEFORE responding
+
             if self.cashout_message:
                 try:
                     await self.cashout_message.delete()
@@ -380,7 +379,7 @@ class MinesView(discord.ui.View):
             self.gems_clicked += 1
 
             embed = await self.update_game_embed(interaction.message.embeds[0])
-            # If this click cleared the board, perform automatic cashout and show final embed
+
             if self.remaining_safe_cells == 0:
                 await self.automatic_cashout(interaction)
             else:
@@ -417,7 +416,6 @@ class MinesView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
 
-            # Update the main game message with an error notice
             await self.main_message.edit(embed=embed, view=self)
         except Exception as e:
             logger.error(f"Critical error in emergency end game: {str(e)}")
@@ -430,7 +428,7 @@ class MinesView(discord.ui.View):
                 description="An error occurred. Please try again or contact support if the issue persists.",
                 color=discord.Color.red()
             )
-            # Prefer followup ephemeral if possible; otherwise, post to channel
+
             try:
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
@@ -501,7 +499,7 @@ class MinesView(discord.ui.View):
             )
         except Exception as e:
             logger.error(f"Failed to record mines win: {e}")
-        # Delete cashout message if present (perfect clear) BEFORE responding
+
         if self.cashout_message:
             try:
                 await self.cashout_message.delete()
@@ -540,7 +538,7 @@ class CashoutView(discord.ui.View):
             return
 
         if self.game_view.game_over:
-            # Game already ended; delete the cashout message
+
             await interaction.response.send_message("You cannot cashout after the game has ended!", ephemeral=True)
             try:
                 await interaction.message.delete()
@@ -549,7 +547,7 @@ class CashoutView(discord.ui.View):
             return
 
         if hasattr(self.game_view, 'game_result') and self.game_view.game_result == "Lost":
-            # Already lost; delete the cashout message
+
             await interaction.response.send_message("You cannot cashout after losing!", ephemeral=True)
             try:
                 await interaction.message.delete()
@@ -577,7 +575,7 @@ class CashoutView(discord.ui.View):
             amount=winnings,
             description="Mines game cashout"
         )
-        # Record provably-fair win in game history using the game view's PF
+
         PF = getattr(self.game_view, 'PF', None)
         if PF:
             try:
@@ -589,7 +587,6 @@ class CashoutView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Failed to record mines cashout win: {e}")
 
-        # Disable all game buttons and update the main game message with final state
         for child in self.game_view.children:
             child.disabled = True
         final_grid = self.game_view.create_final_grid()
@@ -600,7 +597,6 @@ class CashoutView(discord.ui.View):
         )
         await self.game_view.main_message.edit(embed=final_embed, view=self.game_view)
 
-        # Acknowledge ephemerally then delete the cashout message, leaving only the mines board
         await interaction.response.send_message(
             f"Cashed out with **{await casino.formatter(winnings)}** **{casino.currency_name}** at {multiplier}x.",
             ephemeral=True
@@ -609,7 +605,7 @@ class CashoutView(discord.ui.View):
             await interaction.message.delete()
         except Exception as e:
             logger.error(f"Failed to delete cashout message: {e}")
-        # Clear reference so MinesView does not attempt double delete
+
         self.game_view.cashout_message = None
 
 class DoubleOrNothingView(View):
@@ -3493,11 +3489,8 @@ class Casino(commands.Cog):
 
             grid_size = 5
             grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
-            
-            # Provably fair bomb selection aligned with other games
-            bomb_positions = await self.fair_sample(user_id, list(range(grid_size * grid_size)), num_bombs)
 
-            # Grid contents are rendered via button emojis and final grid; no prefill needed
+            bomb_positions = await self.fair_sample(user_id, list(range(grid_size * grid_size)), num_bombs)
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
             init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
@@ -3517,7 +3510,7 @@ class Casino(commands.Cog):
 
             try:
                 main_message = await ctx.reply(embed=embed)
-                # Capture provable fairness context for Mines
+
                 PF = await self.prove_fairness(user_id)
                 game_view = MinesView(grid, bomb_positions, main_message, user_id, bet_amount, self.bot, PF)
                 await main_message.edit(view=game_view)
@@ -3535,7 +3528,6 @@ class Casino(commands.Cog):
             )
             await ctx.reply(embed=embed)
             return
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Casino(bot))
