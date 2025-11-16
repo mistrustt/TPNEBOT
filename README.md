@@ -95,12 +95,6 @@ Production deployment guidance (containers, systemd, Docker) is documented in `d
 ## Security
 Follow least privilege for Postgres credentials and secure storage of seeds and private keys. See `docs/SECURITY.md`.
 
-## Contributing
-See `docs/CONTRIBUTING.md` for guidelines on issues, pull requests, code style, and testing conventions.
-
-## Code of Conduct
-See `docs/CODE_OF_CONDUCT.md`.
-
 ## License
 Add your chosen license file (e.g. MIT, Apache 2.0) in the project root. This documentation does not include a license text by default.
 
