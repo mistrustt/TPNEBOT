@@ -31,14 +31,14 @@ Recommended Python 3.11 or newer. Ensure compatibility with pinned dependency ve
 
 ## Quick Start
 1. Clone repository:
-   `git clone` [https://github.com/mistrustt/TPNEBOT.git](https://github.com/mistrustt/TPNEBOT)
-   `cd TPNEBOT`
+   ```git clone https://github.com/mistrustt/TPNEBOT.git```
+   ```cd TPNEBOT```
 2. Create virtual environment (Windows PowerShell example):
-   `python -m venv .venv`
-   `.venv\\Scripts\\activate`
+   ```python -m venv .venv```
+   ```.venv\\Scripts\\activate```
 3. Install dependencies:
-   `pip install --upgrade pip`
-   `pip install -r requirements.txt`
+   ```pip install --upgrade pip```
+   ```pip install -r requirements.txt```
 4. Prepare Postgres (local default):
    - Install PostgreSQL
    - Ensure a database named postgres exists (default cluster) or adjust URL
@@ -48,7 +48,7 @@ Recommended Python 3.11 or newer. Ensure compatibility with pinned dependency ve
    `DB_PW=your_postgres_password_here`
    `DEVELOPER_CHANNEL_ID=123456789012345678`
 6. Run database initialization automatically by starting bot:
-   `python bot.py`
+   ```python bot.py```
 7. Invite bot to your server using the OAuth2 URL (discord developer portal).
 
 ## Environment Variables (.env)
@@ -65,7 +65,7 @@ High level module structure:
 - `utils/fairness.py`: Provable fairness deterministic RNG and verification functions
 - `utils/cooldown.py`: Cooldown embed helper for command rate limiting
 
-Detailed architecture is described in `docs/ARCHITECTURE.md`.
+Detailed architecture is described in [ARCHITECTURE.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/ARCHITECTURE.md).
 
 ## Database
 Uses Postgres with async SQLAlchemy. Models include:
@@ -75,10 +75,10 @@ Uses Postgres with async SQLAlchemy. Models include:
 - Block, Supply for blockchain style ledger
 - Role, reputation, reaction, settings tables
 
-Further schema explanations are in `docs/DATABASE.md`.
+Further schema explanations are in [DATABASE.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/DATABASE.md).
 
 ## Provable Fairness
-Fairness uses HMAC SHA256 with server seed, client seed, and nonce to produce unbiased draws. Verification helpers in `utils/fairness.py` allow external reproduction and auditing of game outcomes. See `docs/FAIRNESS.md` for reproducibility procedures.
+Fairness uses HMAC SHA256 with server seed, client seed, and nonce to produce unbiased draws. Verification helpers in `utils/fairness.py` allow external reproduction and auditing of game outcomes. See `[FAIRNESS.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/FAIRNESS.md)` for reproducibility procedures.
 
 ## Development
 Enable developer diagnostics by loading the `jishaku` extension (auto loaded). Use logging output in `discord.log` for historical analysis. Rotating file handler restricts size.
@@ -87,19 +87,13 @@ Enable developer diagnostics by loading the `jishaku` extension (auto loaded). U
 Add new cogs by creating a file in `cogs/` and loading via config (BotConfig table) or default auto load. Each cog should define a `setup` function returning an extension.
 
 ## Configuration
-Runtime configuration stored in database tables (BotConfig, ServerSettings, CommandStatus, CommandRoleRestriction, etc.). See `docs/CONFIGURATION.md`.
+Runtime configuration stored in database tables (BotConfig, ServerSettings, CommandStatus, CommandRoleRestriction, etc.). See [CONFIGURATION.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/CONFIGURATION.md).
 
 ## Deployment
-Production deployment guidance (containers, systemd, Docker) is documented in `docs/DEPLOYMENT.md`.
+Production deployment guidance (containers, systemd, Docker) is documented in [DEPLOYMENT.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/DEPLOYMENT.md).
 
 ## Security
-Follow least privilege for Postgres credentials and secure storage of seeds and private keys. See `docs/SECURITY.md`.
-
-## Contributing
-See `docs/CONTRIBUTING.md` for guidelines on issues, pull requests, code style, and testing conventions.
-
-## Code of Conduct
-See `docs/CODE_OF_CONDUCT.md`.
+Follow least privilege for Postgres credentials and secure storage of seeds and private keys. See [SECURITY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/SECURITY.md).
 
 ## License
 Add your chosen license file (e.g. MIT, Apache 2.0) in the project root. This documentation does not include a license text by default.
