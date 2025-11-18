@@ -283,7 +283,7 @@ class Owner(commands.Cog, name="Owner"):
         self.whitelisted_users_tpne_unbans = [
             567401702190350347, # problems
             284439598422163476, #me
-            538773310704582666, #chaos banned
+            657182369240973312, #chaos
             1290501613311496206, #joejoe
         ]
         self.whitelisted_users_wrld = [
