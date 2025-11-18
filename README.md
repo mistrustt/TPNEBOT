@@ -78,7 +78,7 @@ Uses Postgres with async SQLAlchemy. Models include:
 Further schema explanations are in [DATABASE.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/DATABASE.md).
 
 ## Provable Fairness
-Fairness uses HMAC SHA256 with server seed, client seed, and nonce to produce unbiased draws. Verification helpers in `utils/fairness.py` allow external reproduction and auditing of game outcomes. See `[FAIRNESS.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/FAIRNESS.md)` for reproducibility procedures.
+Fairness uses HMAC SHA256 with server seed, client seed, and nonce to produce unbiased draws. Verification helpers in `utils/fairness.py` allow external reproduction and auditing of game outcomes. See [FAIRNESS.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/FAIRNESS.md) for reproducibility procedures.
 
 ## Development
 Enable developer diagnostics by loading the `jishaku` extension (auto loaded). Use logging output in `discord.log` for historical analysis. Rotating file handler restricts size.
