@@ -25,22 +25,22 @@ First 8 bytes of digest produce a 64 bit unsigned integer (u64). Rejection sampl
 
 ## Game Verification Functions
 The verifier class `ProvenFairness` mirrors production logic. Key examples:
-- verify_gamble: Single binary draw (win or loss) via randbelow(2).
-- verify_supergamble: Two consecutive percentile draws for win and bonus evaluation.
-- verify_dice: Two six sided rolls using consecutive nonces.
-- verify_ladder: Percentile draw compared against step threshold probabilities.
-- verify_slots: Six weighted symbol selections using cumulative buckets.
-- verify_blackjack: Fisher Yates style shuffle with per swap tagged draws then first cards distribution.
-- verify_roulette: Choice among 0 to 36 plus 00 returning color and parity flags.
-- verify_poker: Shuffle then deal player, bot, and community cards.
-- verify_mines: Partial Fisher Yates sampling of bomb positions.
-- verify_crash: One uniform draw mapped through a multiplier function.
+- `verify_gamble`: Single binary draw (win or loss) via randbelow(2).
+- `verify_supergamble`: Two consecutive percentile draws for win and bonus evaluation.
+- `verify_dice`: Two six sided rolls using consecutive nonces.
+- `verify_ladder`: Percentile draw compared against step threshold probabilities.
+- `verify_slots`: Six weighted symbol selections using cumulative buckets.
+- `verify_blackjack`: Fisher Yates style shuffle with per swap tagged draws then first cards distribution.
+- `verify_roulette`: Choice among 0 to 36 plus 00 returning color and parity flags.
+- `verify_poker`: Shuffle then deal player, bot, and community cards.
+- `verify_mines`: Partial Fisher Yates sampling of bomb positions.
+- `verify_crash`: One uniform draw mapped through a multiplier function.
 
 ## Shuffle Integrity
 Deck shuffle uses a reverse loop Fisher Yates algorithm. Each swap uses a tag shuffle:i so independent draws produce deterministic positions. Verifier reproduces identical sequence given seeds and starting nonce.
 
 ## Reproducing Outcomes (Example)
-Given: server_seed, client_seed, starting nonce, and internal game parameters.
+Given: `server_seed`, `client_seed`, starting nonce, and internal game parameters.
 1. Identify draw sequence and number of draws from game logic.
 2. Apply verifier function with same inputs.
 3. Compare results to recorded GameHistory entry (hash, wagered, outcome fields) if stored.
@@ -51,7 +51,7 @@ Given: server_seed, client_seed, starting nonce, and internal game parameters.
 - Client seed changes must not reset nonce unexpectedly; resetting can enable partial prediction windows.
 
 ## Auditing Steps
-1. Fetch GameHistory row (contains user_id, game_name, client_seed, used_server_seed, nonce, hash).
+1. Fetch `GameHistory` row (contains `user_id`, `game_name`, `client_seed`, `used_server_seed`, `nonce`, `hash`).
 2. Run corresponding verifier with stored seeds and nonce.
 3. Confirm deterministic outputs match logged outcome and compute hash of game record fields. Compare with stored hash.
 
