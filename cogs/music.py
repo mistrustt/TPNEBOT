@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 logger = logging.getLogger("discord_bot")
 
+JUICEWRLD_API = 'https://juicewrldapi.com/juicewrld'
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -794,6 +795,30 @@ class Music(commands.Cog, name="Music"):
                 description='There was an error fetching the cover art for the currently playing song. This should not happen. Please try again later.',
                 color=0x36393E
             ))
+
+    @commands.command(name='randomleak')
+    async def randomleak(self, ctx: commands.Context) -> None:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(JUICEWRLD_API + "/radio/random/") as response:
+                if response.status != 200:
+                    embed = discord.Embed(
+                        description="Request failed. Please try again later.",
+                        color=discord.Color.red()
+                    )
+                    embed.set_image(url="https://http.cat/429")
+                    await ctx.reply(embed=embed, delete_after=5)
+                    return
+
+                data = await response.json()
+                leak_title = data.get('title', 'Unknown Title')
+
+                # TODO: get album cover or wtv with the /songs/ req. GROPE ELI
+                embed = discord.Embed(
+                    title='Random Juice WRLD Leak',
+                    description=f'**{leak_title}**',
+                    color=0xFF4500
+                )
+                await ctx.reply(embed=embed)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
