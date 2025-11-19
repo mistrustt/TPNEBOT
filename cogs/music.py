@@ -862,8 +862,13 @@ class Music(commands.Cog, name="Music"):
                         album = now_playing.get('album', 'Unknown Album')
                         cover_url = now_playing.get('album_art_url') or now_playing.get('cover_url') or now_playing.get('image_url')
                         track_url = now_playing.get('track_url') or now_playing.get('url', '')
-                        duration_ms = now_playing.get('duration', 0)
-                        duration_seconds = duration_ms / 1000.0 if duration_ms > 100000 else duration_ms
+                        duration_raw = now_playing.get('duration', 0)
+                        duration_as_seconds = duration_raw
+                        duration_as_milliseconds = duration_raw / 1000.0
+                        if duration_raw > 600 and duration_as_milliseconds <= 600:
+                            duration_seconds = duration_as_milliseconds
+                        else:
+                            duration_seconds = duration_as_seconds
                         start_time_str = now_playing.get('timestamp') or now_playing.get('start_time')
                         position = now_playing.get('position', 0)
 
