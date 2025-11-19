@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 logger = logging.getLogger("discord_bot")
 
-JUICEWRLD_API = 'https://juicewrldapi.com/juicewrld'
+JUICEWRLD_API = 'https://juicewrldapi.com'
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -799,7 +799,7 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name='randomleak')
     async def randomleak(self, ctx: commands.Context) -> None:
         async with aiohttp.ClientSession() as session:
-            async with session.get(JUICEWRLD_API + "/radio/random/") as response:
+            async with session.get(JUICEWRLD_API + "juicewrld/radio/random/") as response:
                 if response.status != 200:
                     embed = discord.Embed(
                         description="Request failed. Please try again later.",
@@ -810,14 +810,28 @@ class Music(commands.Cog, name="Music"):
                     return
 
                 data = await response.json()
-                leak_title = data.get('title', 'Unknown Title')
 
-                # TODO: get album cover or wtv with the /songs/ req. GROPE ELI
+                song_data = data.get('song', {})
+                song_name = song_data.get('name', 'Unknown Title')
+                era = song_data.get('era', {})
+                era_name = era.get('name', 'Unknown Era')
+                alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
+                image_url = song_data.get('image_url', '')
+
                 embed = discord.Embed(
                     title='Random Juice WRLD Leak',
-                    description=f'**{leak_title}**',
+                    description=f'**{song_name} ({era_name})**',
                     color=0xFF4500
                 )
+                if len(alt_names) > 0:
+                    embed.add_field(
+                        name='Alternative Names',
+                        value=', '.join(alt_names) if alt_names else 'N/A',
+                        inline=False
+                    )
+                if len(image_url) > 0:
+                    embed.set_image(url=JUICEWRLD_API + image_url)
+
                 await ctx.reply(embed=embed)
 
 async def setup(bot: commands.Bot) -> None:
