@@ -840,12 +840,12 @@ class Music(commands.Cog, name="Music"):
                 producers = data.get('producers', [])
                 length = song_data.get('length', 0)
 
-                color = self.album_colors.get(era_id, 0xFFFFFF)
+                color = self.album_colors.get(era_id, "#FFFFFF")
 
                 embed = discord.Embed(
                     title='Random Juice WRLD Leak',
                     description=f'**{song_name} ({era_name})**',
-                    color=color
+                    color=discord.Color(value=color)
                 )
                 if len(alt_names) > 0:
                     embed.add_field(
