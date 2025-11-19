@@ -847,7 +847,7 @@ class Music(commands.Cog, name="Music"):
                 image_url = song_data.get('image_url', '')
                 producers = song_data.get('producers', "N/A")
                 length = song_data.get('length', 0)
-                path = song_data.get('path', '')
+                path = data.get('path', '')
 
                 color = self.album_colors.get(era_id, "#FFFFFF")
                 color_int = int(color.replace("#", "0x"), 16)
@@ -856,7 +856,7 @@ class Music(commands.Cog, name="Music"):
                 class SongView(discord.ui.View):
                     def __init__(self, download_url):
                         super().__init__()
-                        self.add_item(discord.ui.Button(label="Download 🡕", url=download_url))
+                        self.add_item(discord.ui.Button(label="Download", url=download_url))
 
                 embed = discord.Embed(
                     title='Random Juice WRLD Leak',
