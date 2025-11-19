@@ -2554,7 +2554,7 @@ class Moderation(commands.Cog, name="Moderation"):
     async def update_case(self, ctx: Context, case_id: int, *, new_reason: str):
         """Update the reason for a specific case."""
         try:
-            punishment = await self.bot.database.get_punishment(case_id=case_id)
+            punishment = await self.bot.database.get_punishment(case_id=case_id, guild_id=ctx.guild.id)
             if not punishment:
                 await ctx.send(f"Case {case_id} not found.")
                 return
