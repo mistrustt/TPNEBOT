@@ -818,7 +818,7 @@ class Music(commands.Cog, name="Music"):
     @commands.command(aliases=['rleak'])
     async def randomleak(self, ctx: commands.Context) -> None:
         async with aiohttp.ClientSession() as session:
-            async with session.get(JUICEWRLD_API + "juicewrld/radio/random/") as response:
+            async with session.get(JUICEWRLD_API + "/juicewrld/radio/random/") as response:
                 if response.status != 200:
                     embed = discord.Embed(
                         description="Request failed. Please try again later.",
