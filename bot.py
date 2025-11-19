@@ -76,7 +76,7 @@ class DiscordBot(commands.Bot):
             1173579369399210120,
             1219090700407279656,
             1095747082599530627, # ENVY
-            1382196396190470215 # FLOW (GOATED)
+            1382196396190470215 # FLOW (GOATED ASF) 
         ]
         self.version = "20251024a"
         super().__init__(
