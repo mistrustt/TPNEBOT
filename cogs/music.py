@@ -884,7 +884,11 @@ class Music(commands.Cog, name="Music"):
                     inline=False
                 )
 
-                download_url = f'{JUICEWRLD_API}/files/{quote(path).replace("/", "%2F")}'
+                def special_url_encode(str):
+                    return quote(str).replace("/", "%2F").replace("%28", "(").replace("%29", ")")
+
+                file_name = path.split("/")[-1]
+                download_url = f'{JUICEWRLD_API}/files/{special_url_encode(path)}?highlight={special_url_encode(file_name)}'
                 view = SongView(download_url)
                 await ctx.reply(embed=embed, view=view)
 
