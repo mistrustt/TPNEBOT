@@ -863,7 +863,7 @@ class Music(commands.Cog, name="Music"):
                     title=f'**{song_name}**',
                     color=discord.Color(value=color_int)
                 )
-                embed.set_author(name=f'Juice WRLD Random Song - {ctx.author.display_name}', icon_url=ctx.author.display_avatar.url)
+                embed.set_author(name=f'{ctx.author.display_name} - Random Juice WRLD Song', icon_url=ctx.author.display_avatar.url)
                 if len(alt_names) > 0:
                     embed.add_field(
                         name='Alternative Name(s)',
@@ -898,7 +898,9 @@ class Music(commands.Cog, name="Music"):
 
                 download_url = f'{JUICEWRLD_API}/files/{special_url_encode(path)}?highlight={special_url_encode(file_name)}'
                 view = SongView(download_url)
-                await ctx.reply(embed=embed, view=view)
+                message = await ctx.reply(embed=embed, view=view)
+                await message.add_reaction("👍")
+                await message.add_reaction("👎")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
