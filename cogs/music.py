@@ -819,16 +819,24 @@ class Music(commands.Cog, name="Music"):
     async def randomleak(self, ctx: commands.Context) -> None:
         async with aiohttp.ClientSession() as session:
             async with session.get(JUICEWRLD_API + "/juicewrld/radio/random/") as response:
-                if response.status != 200:
+                async def handle_request_failed(ctx):
                     embed = discord.Embed(
                         description="Request failed. Please try again later.",
                         color=discord.Color.red()
                     )
                     embed.set_image(url="https://http.cat/429")
                     await ctx.reply(embed=embed, delete_after=5)
+
+                if response.status != 200:
+                    await handle_request_failed(ctx)
                     return
 
                 data = await response.json()
+
+                song_data = data.get('song', None)
+                if not song_data:
+                    await handle_request_failed(ctx)
+                    return
 
                 song_data = data.get('song', {})
                 song_name = song_data.get('name', 'Unknown Title')
@@ -839,9 +847,16 @@ class Music(commands.Cog, name="Music"):
                 image_url = song_data.get('image_url', '')
                 producers = song_data.get('producers', "N/A")
                 length = song_data.get('length', 0)
+                path = song_data.get('path', '')
 
                 color = self.album_colors.get(era_id, "#FFFFFF")
                 color_int = int(color.replace("#", "0x"), 16)
+
+                # TODO: make this somewhere else
+                class SongView(discord.ui.View):
+                    def __init__(self, download_url):
+                        super().__init__()
+                        self.add_item(discord.ui.Button(label="Download 🡕", url=download_url))
 
                 embed = discord.Embed(
                     title='Random Juice WRLD Leak',
@@ -856,6 +871,7 @@ class Music(commands.Cog, name="Music"):
                         )
                 if len(image_url) > 0:
                     embed.set_thumbnail(url=JUICEWRLD_API + image_url)
+
                 embed.add_field(
                     name='Producers',
                     value=producers,
@@ -867,7 +883,9 @@ class Music(commands.Cog, name="Music"):
                     inline=False
                 )
 
-                await ctx.reply(embed=embed)
+                download_url = JUICEWRLD_API + "/" + path
+                view = SongView(download_url)
+                await ctx.reply(embed=embed, view=view)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
