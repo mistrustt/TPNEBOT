@@ -841,24 +841,25 @@ class Music(commands.Cog, name="Music"):
                 length = song_data.get('length', 0)
 
                 color = self.album_colors.get(era_id, "#FFFFFF")
+                color_int = int(color.replace("#", "0x"), 16)
 
                 embed = discord.Embed(
                     title='Random Juice WRLD Leak',
                     description=f'**{song_name} ({era_name})**',
-                    color=discord.Color(value=color)
+                    color=discord.Color(value=color_int)
                 )
                 if len(alt_names) > 0:
                     embed.add_field(
                         name='Alternative Names',
                         value=', '.join(alt_names) if alt_names else 'N/A',
                         inline=False
-                    )
                 if len(image_url) > 0:
                     embed.set_image(url=JUICEWRLD_API + image_url)
                 embed.add_field(
                     name='Producers',
-                    value=producers,
+                    value=', '.join(producers) if producers else 'N/A',
                     inline=False
+                )
                 )
                 embed.add_field(
                     name='Length',
