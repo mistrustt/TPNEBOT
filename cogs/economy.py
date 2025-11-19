@@ -2086,7 +2086,7 @@ class Economy(commands.Cog):
 
         embed = discord.Embed(
             description=f"✅ Purchased **{await self.short_formatter(coins)} {symbol}** "
-                        f"for **{self.currency_name} {await self.short_formatter(spend)}** "
+                        f"for **{self.currency_name} {await self.short_formatter(spend)}** ",
             color=discord.Color.green()
         )
         await ctx.reply(embed=embed)
@@ -2116,7 +2116,7 @@ class Economy(commands.Cog):
 
         embed = discord.Embed(
             description=f"✅ Sold **{await self.short_formatter(sell_amt)} {symbol}** "
-                        f"for **{self.currency_name} {await self.short_formatter(proceeds)}** "
+                        f"for **{self.currency_name} {await self.short_formatter(proceeds)}** ",
             color=discord.Color.red()
         )
         await ctx.reply(embed=embed)
