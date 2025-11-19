@@ -860,13 +860,15 @@ class Music(commands.Cog, name="Music"):
                         self.add_item(discord.ui.Button(label="Download", url=download_url))
 
                 embed = discord.Embed(
-                    title='Random Juice WRLD Leak',
-                    description=f'**{song_name} ({era_name})**',
+                    title=' Random Juice WRLD Leak',
+                    description=f'**{song_name}**',
                     color=discord.Color(value=color_int)
                 )
+                embed.author.name = "🎵 Random Juice WRLD Leak"
+                embed.author.icon_url = ctx.guild.icon.url if ctx.guild.icon else None
                 if len(alt_names) > 0:
                     embed.add_field(
-                        name='Alternative Names',
+                        name='Alternative Name(s)',
                         value=', '.join(alt_names) if alt_names else 'N/A',
                         inline=False
                         )
@@ -874,7 +876,12 @@ class Music(commands.Cog, name="Music"):
                     embed.set_thumbnail(url=JUICEWRLD_API + image_url)
 
                 embed.add_field(
-                    name='Producers',
+                    name='Era',
+                    value=era_name,
+                    inline=False
+                )
+                embed.add_field(
+                    name='Producer(s)',
                     value=producers,
                     inline=False
                 )
