@@ -860,11 +860,10 @@ class Music(commands.Cog, name="Music"):
                         self.add_item(discord.ui.Button(label="Download", url=download_url))
 
                 embed = discord.Embed(
-                    description=f'**{song_name}**',
+                    title=f'**{song_name}**',
                     color=discord.Color(value=color_int)
                 )
-                embed.add_field(name='Song Name', value=song_name, inline=False)
-                embed.set_author(name=f'Random Juice WRLD Song', icon_url=ctx.guild.icon.url)
+                embed.set_author(name=f'Juice WRLD Random Song - {ctx.author.display_name}', icon_url=ctx.author.display_avatar.url)
                 if len(alt_names) > 0:
                     embed.add_field(
                         name='Alternative Name(s)',
