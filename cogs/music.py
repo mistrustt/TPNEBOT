@@ -8,7 +8,6 @@ from discord.ext import commands
 from colorthief import ColorThief
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from urllib.parse import urlencode
 from urllib.parse import quote
 
 logger = logging.getLogger("discord_bot")
@@ -885,7 +884,7 @@ class Music(commands.Cog, name="Music"):
                     inline=False
                 )
 
-                download_url = f'{JUICEWRLD_API}/files/{quote(path)}'
+                download_url = f'{JUICEWRLD_API}/files{quote(f"/{path}").replace("/", "%2F")}'
                 view = SongView(download_url)
                 await ctx.reply(embed=embed, view=view)
 
