@@ -1622,8 +1622,8 @@ class Economy(commands.Cog):
                     description=f"Critical Robbery by {ctx.author.name}"
                 )
                 result_message = (
-                    f"🔥 **You caught {target.mention} LACKING** at the gas station.\n"
-                    f"You stole {self.currency_name} **{await self.formatter(total_theft)}**"
+                    f"🔥 **YOU STOLE BASICALLY EVERYTHING LMFAOOOOOOOOOOOO**.\n"
+                    f"{target.mention} woke up missing {self.currency_name} **{await self.formatter(total_theft)}**"
                     f"{bounty_msg}"
                 )
             elif result == "success":
@@ -1644,7 +1644,7 @@ class Economy(commands.Cog):
                 )
 
                 result_message = (
-                    f"😎 **You successfully** robbed {target.mention} and stole "
+                    f"😎 You **robbed** {target.mention} and stole "
                     f"{self.currency_name} **{await self.formatter(amount_stolen)}**."
                     f"{bounty_msg}"
                 )
@@ -1660,8 +1660,8 @@ class Economy(commands.Cog):
                     description=f"Partial Robbery by {ctx.author.name}"
                 )
                 result_message = (
-                    f"🤏 **You attempted** to rob {target.mention} and managed to steal"
-                    f"{self.currency_name} **{await self.formatter(net_gain)}** after they recouped some of it."
+                    f"🤏 You **robbed** {target.mention} but they fought back, you managed to steal "
+                    f"{self.currency_name} **{await self.formatter(net_gain)}** after they recovered some of it."
                 )
             elif result == "failure":
                 percentage = Decimal(secrets.randbelow(5) + 1) / Decimal("100")  
@@ -2027,7 +2027,7 @@ class Economy(commands.Cog):
         embed.set_footer(text=f"Use {prefix}invest <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @invest.command(name="bal", aliases=["portfolio","balance","port"], description="View your cryptocurrency portfolio")
+    @invest.command(name="balance", aliases=["bal","port"], description="View your cryptocurrency portfolio")
     async def invest_portfolio(self, ctx: commands.Context):
         user_id = ctx.author.id
         assets = await self.bot.database.get_crypto_assets(user_id)
