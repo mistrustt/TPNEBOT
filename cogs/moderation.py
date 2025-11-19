@@ -2499,7 +2499,11 @@ class Moderation(commands.Cog, name="Moderation"):
         """View details of a specific case."""
         guild_id = ctx.guild.id
 
-        punishments = await self.bot.database.get_user_punishments(case_id, guild_id)
+        if not isinstance(case_id, int):
+            await ctx.send("Please provide a valid case ID.")
+            return
+
+        punishments = await self.bot.database.get_punishment_history(case_id, guild_id)
 
         if not punishments:
             await ctx.send("No punishments found for this case.")
