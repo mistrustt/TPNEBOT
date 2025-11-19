@@ -842,8 +842,8 @@ class Music(commands.Cog, name="Music"):
 
                         if not data.get('is_linked'):
                             await ctx.reply(embed=discord.Embed(
-                                title='Error',
-                                description='Your Discord account is not linked to JuiceWRLD API.\n\nUse the link command to connect your account.',
+                                title='Account Not Linked',
+                                description=f'🚫 {member.mention}\'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to settings and connect your Discord account\n3. Then try this command again!',
                                 color=0x36393E
                             ))
                             return
@@ -1025,10 +1025,11 @@ class Music(commands.Cog, name="Music"):
                         img.save(image_bytes, format='PNG')
                         image_bytes.seek(0)
                         file = discord.File(fp=image_bytes, filename='now_playing.png')
+                        embed_color = int('{:02x}{:02x}{:02x}'.format(color1[0], color1[1], color1[2]), 16)
                         embed = discord.Embed(
                             title='Now Playing on JuiceWRLD API',
                             description=f'[{title}]({track_url})' if track_url else title,
-                            color=discord.Color.green()
+                            color=embed_color
                         )
                         embed.set_image(url="attachment://now_playing.png")
 
