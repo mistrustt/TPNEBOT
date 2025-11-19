@@ -22,19 +22,38 @@ class Music(commands.Cog, name="Music"):
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
         self.standard_colors = {
-        "black": "#000000",
-        "white": "#FFFFFF",
-        "red": "#FF0000",
-        "green": "#008000",
-        "blue": "#0000FF",
-        "yellow": "#FFFF00",
-        "cyan": "#00FFFF",
-        "magenta": "#FF00FF",
-        "gray": "#808080",
-        "purple": "#800080",
-        "orange": "#FFA500",
-        "pink": "#FFC0CB",
-    }
+            "black": "#000000",
+            "white": "#FFFFFF",
+            "red": "#FF0000",
+            "green": "#008000",
+            "blue": "#0000FF",
+            "yellow": "#FFFF00",
+            "cyan": "#00FFFF",
+            "magenta": "#FF00FF",
+            "gray": "#808080",
+            "purple": "#800080",
+            "orange": "#FFA500",
+            "pink": "#FFC0CB",
+        }
+        self.album_colors = {
+            101: "#FFE602", #JUICE UP EP
+            102: "#F700FF", #LEGENDS NEVER DIE
+            103: "#000000", #AFFLICTION
+            104: "#FF653E", #HEARTBROKEN IN HOLLYWOOD 999
+            105: "#FF2C2C", #JUICE WRLD 999
+            107: "#FF8800", #NOTHINGS DIFFERENT
+            108: "#008CFF", #GBGR
+            109: "#00FF94", #WOD
+            110: "#FF9900", #DRFL
+            111: "#2B2B2B", #OUTSIDERS
+            112: "#00CCFF", #POST TODO: make this accurate
+            113: "#EA00FF", # PRE PARTY EP
+            114: "#EA00FF", # PRE PARTY EP EXTENDED
+            115: "#2E2E2E", # FIGHTING DEMONS
+            116: "#2E2E2E", # FIGHTING DEMONS DELUXE
+            117: "#CC00FF", # THE PARTY NEVER ENDS
+            # TODO: IM NOT DOING THE REST
+        }
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -796,10 +815,10 @@ class Music(commands.Cog, name="Music"):
                 color=0x36393E
             ))
 
-    @commands.command(name='randomleak')
+    @commands.command(aliases=['rleak'])
     async def randomleak(self, ctx: commands.Context) -> None:
         async with aiohttp.ClientSession() as session:
-            async with session.get(JUICEWRLD_API + "/juicewrld/radio/random/") as response:
+            async with session.get(JUICEWRLD_API + "juicewrld/radio/random/") as response:
                 if response.status != 200:
                     embed = discord.Embed(
                         description="Request failed. Please try again later.",
@@ -814,14 +833,19 @@ class Music(commands.Cog, name="Music"):
                 song_data = data.get('song', {})
                 song_name = song_data.get('name', 'Unknown Title')
                 era = song_data.get('era', {})
+                era_id = era.get('id', 0)
                 era_name = era.get('name', 'Unknown Era')
                 alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
                 image_url = song_data.get('image_url', '')
+                producers = data.get('producers', [])
+                length = song_data.get('length', 0)
+
+                color = self.album_colors.get(era_id, 0xFFFFFF)
 
                 embed = discord.Embed(
                     title='Random Juice WRLD Leak',
                     description=f'**{song_name} ({era_name})**',
-                    color=0xFF4500
+                    color=color
                 )
                 if len(alt_names) > 0:
                     embed.add_field(
@@ -831,6 +855,16 @@ class Music(commands.Cog, name="Music"):
                     )
                 if len(image_url) > 0:
                     embed.set_image(url=JUICEWRLD_API + image_url)
+                embed.add_field(
+                    name='Producers',
+                    value=producers,
+                    inline=False
+                )
+                embed.add_field(
+                    name='Length',
+                    value=f'{length}',
+                    inline=False
+                )
 
                 await ctx.reply(embed=embed)
 
