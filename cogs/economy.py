@@ -846,9 +846,6 @@ class Economy(commands.Cog):
     def to_usd(self, bot_amount: Decimal) -> Decimal:
         return (bot_amount / self.exchange_rate).quantize(Decimal("0.01"))
 
-    def from_usd(self, usd_amount: Decimal) -> Decimal:
-        return (usd_amount * self.exchange_rate).quantize(Decimal("1"))
-
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
         server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  
         msg = f"{client_seed}:{nonce}:{tag}".encode()
@@ -2081,14 +2078,10 @@ class Economy(commands.Cog):
         if not price or price <= Decimal('0.00000001'):
             return await ctx.reply(f"Price data for '{symbol}' is invalid or unavailable.", delete_after=5)
 
-        if amount.upper().endswith("USD"):
-            usd_amt = Decimal(amount[:-3])
-            spend = self.from_usd(usd_amt)
-        else:
-            try:
-                spend = await self.amount_handler(amount, balance)
-            except ValueError as e:
-                return await ctx.reply(str(e), delete_after=5)
+        try:
+            spend = await self.amount_handler(amount, balance)
+        except ValueError as e:
+            return await ctx.reply(str(e), delete_after=5)
 
         if spend > balance:
             return await ctx.reply(f"Insufficient balance. You only have {await self.short_formatter(balance)}.", delete_after=5)
