@@ -837,7 +837,7 @@ class Music(commands.Cog, name="Music"):
                 era_name = era.get('name', 'Unknown Era')
                 alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
                 image_url = song_data.get('image_url', '')
-                producers = data.get('producers', [])
+                producers = data.get('producers', "N/A")
                 length = song_data.get('length', 0)
 
                 color = self.album_colors.get(era_id, "#FFFFFF")
@@ -858,7 +858,7 @@ class Music(commands.Cog, name="Music"):
                     embed.set_image(url=JUICEWRLD_API + image_url)
                 embed.add_field(
                     name='Producers',
-                    value=', '.join(producers) if producers else 'N/A',
+                    value=producers,
                     inline=False
                 )
                 embed.add_field(
