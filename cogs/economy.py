@@ -843,6 +843,12 @@ class Economy(commands.Cog):
     def cog_unload(self):
         self.validate_economy_task.cancel()
 
+    def to_usd(self, bot_amount: Decimal) -> Decimal:
+        return (bot_amount / self.exchange_rate).quantize(Decimal("0.01"))
+
+    def from_usd(self, usd_amount: Decimal) -> Decimal:
+        return (usd_amount * self.exchange_rate).quantize(Decimal("1"))
+
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
         server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  
         msg = f"{client_seed}:{nonce}:{tag}".encode()
@@ -1622,8 +1628,8 @@ class Economy(commands.Cog):
                     description=f"Critical Robbery by {ctx.author.name}"
                 )
                 result_message = (
-                    f"🔥 **YOU STOLE BASICALLY EVERYTHING LMFAOOOOOOOOOOOO**.\n"
-                    f"{target.mention} woke up missing {self.currency_name} **{await self.formatter(total_theft)}**"
+                    f"🔥 **You caught {target.mention} LACKING** at the gas station.\n"
+                    f"You stole {self.currency_name} **{await self.formatter(total_theft)}**"
                     f"{bounty_msg}"
                 )
             elif result == "success":
@@ -1644,7 +1650,7 @@ class Economy(commands.Cog):
                 )
 
                 result_message = (
-                    f"😎 You **robbed** {target.mention} and stole "
+                    f"😎 **You successfully** robbed {target.mention} and stole "
                     f"{self.currency_name} **{await self.formatter(amount_stolen)}**."
                     f"{bounty_msg}"
                 )
@@ -1660,8 +1666,8 @@ class Economy(commands.Cog):
                     description=f"Partial Robbery by {ctx.author.name}"
                 )
                 result_message = (
-                    f"🤏 You **robbed** {target.mention} but they fought back, you managed to steal "
-                    f"{self.currency_name} **{await self.formatter(net_gain)}** after they recovered some of it."
+                    f"🤏 **You attempted** to rob {target.mention} and managed to steal"
+                    f"{self.currency_name} **{await self.formatter(net_gain)}** after they recouped some of it."
                 )
             elif result == "failure":
                 percentage = Decimal(secrets.randbelow(5) + 1) / Decimal("100")  
@@ -2027,7 +2033,7 @@ class Economy(commands.Cog):
         embed.set_footer(text=f"Use {prefix}invest <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @invest.command(name="balance", aliases=["bal","port"], description="View your cryptocurrency portfolio")
+    @invest.command(name="bal", aliases=["portfolio","balance","port"], description="View your cryptocurrency portfolio")
     async def invest_portfolio(self, ctx: commands.Context):
         user_id = ctx.author.id
         assets = await self.bot.database.get_crypto_assets(user_id)
@@ -2046,11 +2052,14 @@ class Economy(commands.Cog):
                 pnl = value - cost
                 pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal('0')
                 symbol = "📈" if pnl >= 0 else "📉"
+                usd_value = self.to_usd(value)
+                total_usd += usd_value
                 embed.add_field(
                     name=asset.symbol,
                     value=(
                         f"Amount: **{await self.short_formatter(asset.amount)}**\n"
                         f"Value: **{await self.short_formatter(value)} {self.currency_name}** "
+                        f"(~${usd_value})\n"
                         f"P/L: {symbol} **{await self.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
                     ),
                     inline=False
@@ -2072,10 +2081,14 @@ class Economy(commands.Cog):
         if not price or price <= Decimal('0.00000001'):
             return await ctx.reply(f"Price data for '{symbol}' is invalid or unavailable.", delete_after=5)
 
-        try:
-            spend = await self.amount_handler(amount, balance)
-        except ValueError as e:
-            return await ctx.reply(str(e), delete_after=5)
+        if amount.upper().endswith("USD"):
+            usd_amt = Decimal(amount[:-3])
+            spend = self.from_usd(usd_amt)
+        else:
+            try:
+                spend = await self.amount_handler(amount, balance)
+            except ValueError as e:
+                return await ctx.reply(str(e), delete_after=5)
 
         if spend > balance:
             return await ctx.reply(f"Insufficient balance. You only have {await self.short_formatter(balance)}.", delete_after=5)
@@ -2086,7 +2099,8 @@ class Economy(commands.Cog):
 
         embed = discord.Embed(
             description=f"✅ Purchased **{await self.short_formatter(coins)} {symbol}** "
-                        f"for **{self.currency_name} {await self.short_formatter(spend)}** ",
+                        f"for **{self.currency_name} {await self.short_formatter(spend)}** "
+                        f"(~${self.to_usd(spend)})",
             color=discord.Color.green()
         )
         await ctx.reply(embed=embed)
@@ -2116,10 +2130,11 @@ class Economy(commands.Cog):
 
         embed = discord.Embed(
             description=f"✅ Sold **{await self.short_formatter(sell_amt)} {symbol}** "
-                        f"for **{self.currency_name} {await self.short_formatter(proceeds)}** ",
+                        f"for **{self.currency_name} {await self.short_formatter(proceeds)}** "
+                        f"(~${self.to_usd(proceeds)})",
             color=discord.Color.red()
         )
-        await ctx.reply(embed=embed)
+        await ctx.reply(embed=embed, delete_after=10)
 
     async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:
         s = input_str.strip().lower()
