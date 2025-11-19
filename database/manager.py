@@ -610,7 +610,7 @@ class DatabaseManager:
 
                 notes_result = await session.execute(
                     select(CaseNote)
-                    .where(CaseNote.punishment_id == punishment.id)
+                    .where(CaseNote.case_id == punishment.id)
                     .order_by(CaseNote.created_at.desc())
                 )
                 return notes_result.scalars().all()
