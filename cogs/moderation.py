@@ -372,8 +372,9 @@ class Moderation(commands.Cog, name="Moderation"):
 
                 @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
                 async def accept_report(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    await self.bot.database.change_punishment_moderator(
+                    await self.bot.database.update_punishment_moderator(
                         case_id=self.case_id,
+                        guild_id=interaction.guild.id,
                         new_moderator_id=interaction.user.id
                     )
 
@@ -610,7 +611,7 @@ class Moderation(commands.Cog, name="Moderation"):
                     guild_id=ctx.guild.id,
                     command_name=PunishmentType.KICK
                 )
-                await self.bot.database.add_punishment(
+                case_id = await self.bot.database.add_punishment(
                     user_id=member.id,
                     guild_id=ctx.guild.id,
                     moderator_id=ctx.author.id,
@@ -625,7 +626,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 embed.set_author(
                     name=f"Moderator: {ctx.author}", icon_url=self.utils.get_avatar_url(ctx.author)
                 )
-                embed.set_footer(text=f"Case ID: {await self.bot.database.get_punishment_caseid(ctx.guild.id)}")
+                embed.set_footer(text=f"Case ID: {case_id}")
                 await ctx.send(embed=embed)
 
                 try:
@@ -637,7 +638,7 @@ class Moderation(commands.Cog, name="Moderation"):
                         name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
                     )
                     dm_embed.add_field(name="Reason:", value=reason)
-                    dm_embed.set_footer(text=f"Action by: {ctx.author} Case ID: {await self.bot.database.get_punishment_caseid(ctx.guild.id)}")
+                    dm_embed.set_footer(text=f"Action by: {ctx.author} Case ID: {case_id}")
                     await member.send(embed=dm_embed)
                 except:
                     await ctx.reply(
@@ -725,6 +726,19 @@ class Moderation(commands.Cog, name="Moderation"):
                 await ctx.send(embed=embed)
                 return
             else:
+                await self.bot.database.log_punishment_command(
+                    moderator_id=ctx.author.id,
+                    guild_id=ctx.guild.id,
+                    command_name=PunishmentType.BAN
+                )
+                case_id = await self.bot.database.add_punishment(
+                    user_id=member.id,
+                    guild_id=ctx.guild.id,
+                    moderator_id=ctx.author.id,
+                    punishment_type=PunishmentType.BAN,
+                    reason=reason,
+                    duration=None  
+                )
                 embed = discord.Embed(
                     description=f"**{member}** was banned for `{reason}`.",
                     color=discord.Color.blurple(),
@@ -732,7 +746,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 embed.set_author(
                     name=f"Moderator: {ctx.author}", icon_url=self.utils.get_avatar_url(ctx.author)
                 )
-                embed.set_footer(text=f"Case ID: {await self.bot.database.get_punishment_caseid(ctx.guild.id)}")
+                embed.set_footer(text=f"Case ID: {case_id}")
                 await ctx.send(embed=embed, delete_after=10)
                 try:
                     dm_embed = discord.Embed(
@@ -743,27 +757,13 @@ class Moderation(commands.Cog, name="Moderation"):
                         name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
                     )
                     dm_embed.add_field(name="Reason:", value=reason)
-                    dm_embed.set_footer(text=f"Action by: {ctx.author} Case ID: {await self.bot.database.get_punishment_caseid(ctx.guild.id) + 1}")
+                    dm_embed.set_footer(text=f"Action by: {ctx.author} Case ID: {case_id}")
                     await member.send(embed=dm_embed)
                 except:
                     embed = discord.Embed(
                         description=f"Could not send user a DM message!", color=0x36393E
                     )
                     await ctx.reply(embed=embed)
-
-                await self.bot.database.log_punishment_command(
-                    moderator_id=ctx.author.id,
-                    guild_id=ctx.guild.id,
-                    command_name=PunishmentType.BAN
-                )
-                await self.bot.database.add_punishment(
-                    user_id=member.id,
-                    guild_id=ctx.guild.id,
-                    moderator_id=ctx.author.id,
-                    punishment_type=PunishmentType.BAN,
-                    reason=reason,
-                    duration=None  
-                )
 
                 await member.ban(reason=reason)
         except Exception as e:
@@ -837,7 +837,7 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.send("Invalid duration format. Use like `15m`, `2h`, `1d`, etc.")
 
         await member.ban(reason=reason)
-        case_id = await self.bot.database.get_punishment_caseid(ctx.guild.id)
+        case_id = await self.bot.database.get_next_case_id(ctx.guild.id)
 
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
@@ -2499,7 +2499,7 @@ class Moderation(commands.Cog, name="Moderation"):
         """View details of a specific case."""
         guild_id = ctx.guild.id
 
-        punishments = await self.bot.database.get_punishments(case_id, guild_id)
+        punishments = await self.bot.database.get_user_punishments(case_id, guild_id)
 
         if not punishments:
             await ctx.send("No punishments found for this case.")
@@ -2527,7 +2527,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 inline=False
             )
 
-        notes = await self.bot.database.get_case_notes(case_id)
+        notes = await self.bot.database.get_case_notes(case_id, ctx.guild.id)
         notes_str = "\n".join([f"Note by {ctx.guild.get_member(note.moderator_id).mention if ctx.guild.get_member(note.moderator_id) else 'Unknown'} at {note.created_at.strftime('%Y-%m-%d %I:%M %p UTC')}: {note.note}" for note in notes])
 
         if notes_str:
@@ -2543,7 +2543,7 @@ class Moderation(commands.Cog, name="Moderation"):
     async def add_note(self, ctx: Context, case_id: int, *, note: str):
         """Add a note to a specific case."""
         try:
-            await self.bot.database.add_case_note(case_id=case_id, moderator_id=ctx.author.id, note=note)
+            await self.bot.database.add_case_note(case_id=case_id, guild_id=ctx.guild.id, moderator_id=ctx.author.id, note=note)
             await ctx.send(f"Note added to case {case_id}.")
         except Exception as e:
             await ctx.send(f"An error occurred while adding the note: {e}")
@@ -2563,7 +2563,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 await ctx.send("You are not authorized to update this case as you were not the original moderator.")
                 return
 
-            await self.bot.database.update_punishment_reason(case_id=case_id, new_reason=new_reason)
+            await self.bot.database.update_punishment_reason(case_id=case_id, guild_id=ctx.guild.id, new_reason=new_reason)
             await ctx.send(f"Case {case_id} updated with new reason.")
         except Exception as e:
             await ctx.send(f"An error occurred while updating the case reason: {e}")
