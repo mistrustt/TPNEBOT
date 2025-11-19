@@ -4,6 +4,7 @@ import logging
 import aiohttp
 import asyncio
 from io import BytesIO
+from datetime import datetime
 from discord.ext import commands
 from colorthief import ColorThief
 from discord.ext.commands import Context
@@ -163,16 +164,20 @@ class Music(commands.Cog, name="Music"):
         user_id = int(ctx.author.id)
         np_upvotes, np_downvotes = await self.bot.database.get_vote_stats(user_id, 'np')
         snp_upvotes, snp_downvotes = await self.bot.database.get_vote_stats(user_id, 'snp')
+        jnp_upvotes, jnp_downvotes = await self.bot.database.get_vote_stats(user_id, 'jnp')
         embed_color = await self.bot.database.get_lastfm_embed_color(user_id)
 
         np_ratio = (np_upvotes - np_downvotes) / max(np_downvotes, 1) if np_downvotes >= np_downvotes else -(np_downvotes - np_downvotes) / max(np_downvotes, 1)
         snp_ratio = (snp_upvotes - snp_downvotes) / max(snp_downvotes, 1) if snp_upvotes >= snp_downvotes else -(snp_downvotes - snp_upvotes) / max(snp_upvotes, 1)
+        jnp_ratio = (jnp_upvotes - jnp_downvotes) / max(jnp_downvotes, 1) if jnp_upvotes >= jnp_downvotes else -(jnp_downvotes - jnp_upvotes) / max(jnp_upvotes, 1)
 
         description = (
             f"**Now Playing (np)**:\n"
             f"Upvotes: {np_upvotes}\nDownvotes: {np_downvotes}\nRatio: {np_ratio:.3g}\n\n"
             f"**Spotify Now Playing (snp)**:\n"
-            f"Upvotes: {snp_upvotes}\nDownvotes: {snp_downvotes}\nRatio: {snp_ratio:.3g}"
+            f"Upvotes: {snp_upvotes}\nDownvotes: {snp_downvotes}\nRatio: {snp_ratio:.3g}\n\n"
+            f"**JuiceWRLD Now Playing (jnp)**:\n"
+            f"Upvotes: {jnp_upvotes}\nDownvotes: {jnp_downvotes}\nRatio: {jnp_ratio:.3g}"
         )
 
         await ctx.reply(embed=discord.Embed(title='Last.fm Vote Statistics', description=description, color=embed_color))
@@ -813,6 +818,245 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(embed=discord.Embed(
                 title='Error',
                 description='There was an error fetching the cover art for the currently playing song. This should not happen. Please try again later.',
+                color=0x36393E
+            ))
+
+    @commands.command(name='jnp')
+    async def juicewrld_now_playing(self, ctx: commands.Context, member: discord.Member = None) -> None:
+        """View what you are currently playing on JuiceWRLD API desktop app."""
+        member = member or ctx.author
+
+        try:
+            async with ctx.typing():
+                async with aiohttp.ClientSession() as session:
+                    async with session.get('https://m.juicewrldapi.com/analytics/now-playing/discord', params={'discord_user_id': member.id}) as response:
+                        if response.status != 200:
+                            await ctx.reply(embed=discord.Embed(
+                                title='Error',
+                                description='Failed to fetch now playing data from JuiceWRLD API.',
+                                color=0x36393E
+                            ))
+                            return
+
+                        data = await response.json()
+
+                        if not data.get('is_linked'):
+                            await ctx.reply(embed=discord.Embed(
+                                title='Error',
+                                description='Your Discord account is not linked to JuiceWRLD API.\n\nUse the link command to connect your account.',
+                                color=0x36393E
+                            ))
+                            return
+
+                        now_playing = data.get('now_playing')
+                        if not now_playing or not now_playing.get('is_playing'):
+                            await ctx.reply(embed=discord.Embed(
+                                title='Now Playing',
+                                description='No music currently playing.\n\nStart playing music on your desktop app to see it here!',
+                                color=0x808080
+                            ))
+                            return
+
+                        title = now_playing.get('track') or now_playing.get('title', 'Unknown Title')
+                        artist = now_playing.get('artist', 'Unknown Artist')
+                        album = now_playing.get('album', 'Unknown Album')
+                        cover_url = now_playing.get('album_art_url') or now_playing.get('cover_url') or now_playing.get('image_url')
+                        track_url = now_playing.get('track_url') or now_playing.get('url', '')
+                        duration_ms = now_playing.get('duration', 0)
+                        duration_seconds = duration_ms / 1000.0 if duration_ms > 100000 else duration_ms
+                        start_time_str = now_playing.get('timestamp') or now_playing.get('start_time')
+                        position = now_playing.get('position', 0)
+
+                        if cover_url:
+                            async with aiohttp.ClientSession() as cover_session:
+                                async with cover_session.get(cover_url) as cover_response:
+                                    cover_data = await cover_response.read()
+
+                            cover_image = Image.open(BytesIO(cover_data)).resize((200, 200))
+                            color_thief = ColorThief(BytesIO(cover_data))
+
+                            palette = color_thief.get_palette(color_count=2)
+                            if len(palette) < 2:
+                                palette = [color_thief.get_color(quality=10)] * 2
+                            color1, color2 = palette[0], palette[1]
+
+                            width, height = 800, 400
+                            gradient_bg = self.create_vertical_gradient(width, height, color1, color2)
+                            img = gradient_bg.convert("RGBA")
+                        else:
+                            width, height = 800, 400
+                            img = Image.new("RGBA", (800, 400), (30, 215, 96))
+                            color1 = (30, 215, 96)
+
+                        if cover_url:
+                            cover_image = Image.open(BytesIO(cover_data)).resize((200, 200))
+                            rounded_cover = Image.new("RGBA", cover_image.size, (0,0,0,0))
+                            mask = Image.new("L", cover_image.size, 0)
+                            ImageDraw.Draw(mask).rounded_rectangle(
+                                (0, 0, *cover_image.size),
+                                radius=20,
+                                fill=255
+                            )
+
+                            text_color = self.get_text_color(color1)
+                            glow_color = "white" if text_color == "black" else "black"
+                            rounded_cover.paste(cover_image, (0, 0), mask)
+
+                            img = self.glow_behind_image(
+                                base_image=img,
+                                cover_image=rounded_cover,
+                                cover_mask=mask,
+                                position=(50, 100),
+                                glow_color=glow_color,
+                                glow_radius=12
+                            )
+                        else:
+                            text_color = "white"
+
+                        max_text_width = width - 350
+
+                        title_font = self.dynamic_font(title, max_text_width, self.font_path, max_font_size=40)
+                        artist_font = self.dynamic_font(artist, max_text_width, self.font_path, max_font_size=30)
+                        album_font = self.dynamic_font(album, max_text_width, self.font_path, max_font_size=24)
+                        img = img.convert("RGBA")
+                        glow_color = "white" if text_color == "black" else "black"
+                        text_glow_radius = 6
+
+                        self.draw_glowing_text(
+                            base_image=img,
+                            text=title,
+                            position=(300, 100),
+                            font=title_font,
+                            text_color=text_color,
+                            glow_color=glow_color,
+                            glow_radius=text_glow_radius
+                        )
+                        self.draw_glowing_text(
+                            base_image=img,
+                            text=artist,
+                            position=(300, 150),
+                            font=artist_font,
+                            text_color=text_color,
+                            glow_color=glow_color,
+                            glow_radius=text_glow_radius
+                        )
+                        self.draw_glowing_text(
+                            base_image=img,
+                            text=album,
+                            position=(300, 200),
+                            font=album_font,
+                            text_color=text_color,
+                            glow_color=glow_color,
+                            glow_radius=text_glow_radius
+                        )
+
+                        elapsed_duration = 0
+                        if duration_seconds > 0:
+                            if position > 0:
+                                elapsed_duration = position / 1000.0
+                            elif start_time_str:
+                                try:
+                                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                                    elapsed_duration = (discord.utils.utcnow() - start_time.replace(tzinfo=None)).total_seconds()
+                                except:
+                                    elapsed_duration = 0
+                            progress = min(1, elapsed_duration / duration_seconds) if duration_seconds > 0 else 0
+                        else:
+                            progress = 0
+
+                        bar_x, bar_y, bar_width, bar_height = 300, 250, 400, 20
+                        rectangle_glow_radius = 8
+                        rectangle_radius = 10
+                        rectangle_width = 2
+
+                        self.draw_glowing_rectangle(
+                            base_image=img,
+                            xy=[bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
+                            radius=rectangle_radius,
+                            outline=text_color,
+                            fill=None,
+                            width=rectangle_width,
+                            glow_color=text_color,
+                            glow_radius=rectangle_glow_radius
+                        )
+
+                        filled_width = int(bar_width * progress)
+                        if filled_width < 0:
+                            filled_width = 0
+
+                        filled_x1 = bar_x + filled_width
+
+                        if filled_x1 > bar_x:
+                            self.draw_glowing_rectangle(
+                                base_image=img,
+                                xy=[bar_x, bar_y, filled_x1, bar_y + bar_height],
+                                radius=rectangle_radius,
+                                outline=text_color,
+                                fill=text_color,
+                                width=rectangle_width,
+                                glow_color=text_color,
+                                glow_radius=rectangle_glow_radius
+                            )
+
+                        if duration_seconds > 0:
+                            minutes_elapsed, seconds_elapsed = divmod(int(elapsed_duration), 60)
+                            minutes_total, seconds_total = divmod(int(duration_seconds), 60)
+                            duration_text = f"{minutes_elapsed}:{seconds_elapsed:02} / {minutes_total}:{seconds_total:02}"
+                        else:
+                            duration_text = "0:00 / 0:00"
+
+                        time_font = self.dynamic_font(duration_text, max_text_width, self.font_path, max_font_size=20)
+                        self.draw_glowing_text(
+                            base_image=img,
+                            text=duration_text,
+                            position=(300, 280),
+                            font=time_font,
+                            text_color=text_color,
+                            glow_color=glow_color,
+                            glow_radius=text_glow_radius
+                        )
+
+                        image_bytes = BytesIO()
+                        img.save(image_bytes, format='PNG')
+                        image_bytes.seek(0)
+                        file = discord.File(fp=image_bytes, filename='now_playing.png')
+                        embed = discord.Embed(
+                            title='Now Playing on JuiceWRLD API',
+                            description=f'[{title}]({track_url})' if track_url else title,
+                            color=discord.Color.green()
+                        )
+                        embed.set_image(url="attachment://now_playing.png")
+
+            message = await ctx.reply(embed=embed, file=file)
+            await message.add_reaction('👍')
+            await asyncio.sleep(0.5)
+            await message.add_reaction('👎')
+
+            def check(reaction, user):
+                return user == ctx.author and str(reaction.emoji) in ['👍', '👎']
+
+            try:
+                reaction, user = await self.bot.wait_for('reaction_add', timeout=15.0, check=check)
+                if str(reaction.emoji) == '👍':
+                    await self.bot.database.log_vote(user.id, 'jnp', 'up')
+                elif str(reaction.emoji) == '👎':
+                    await self.bot.database.log_vote(user.id, 'jnp', 'down')
+            except asyncio.TimeoutError:
+                logger.debug("No reaction received within the timeout period.")
+            except asyncio.CancelledError:
+                logger.debug("Reaction task was cancelled.")
+
+        except aiohttp.ClientError:
+            await ctx.reply(embed=discord.Embed(
+                title='Error',
+                description='There was an error fetching data from JuiceWRLD API. Please try again later.',
+                color=0x36393E
+            ))
+        except Exception as e:
+            logger.error(f"Error in jnp command: {e}")
+            await ctx.reply(embed=discord.Embed(
+                title='Error',
+                description='An unexpected error occurred. Please try again later.',
                 color=0x36393E
             ))
 
