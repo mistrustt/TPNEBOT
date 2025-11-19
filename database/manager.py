@@ -353,23 +353,23 @@ class DatabaseManager:
             logging.error(f"Error getting punishment history: {e}")
             return []
 
-    async def get_punishment_caseid(self, guild_id: int) -> int:
+    async def get_punishment(self, case_id: int, guild_id: int) -> Punishment:
+        """Retrieve a specific punishment by case ID in a guild."""
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(
-                    select(func.max(Punishment.case_id)).where(Punishment.guild_id == guild_id)
+                    select(Punishment).filter_by(case_id=case_id, guild_id=guild_id)
                 )
-                max_case_id = result.scalar_one_or_none()
-                return max_case_id + 1 if max_case_id is not None else 1
+                return result.scalar_one_or_none()
         except SQLAlchemyError as e:
-            logging.error(f"Error getting last case ID: {e}")
-            return 1
+            logging.error(f"Error retrieving punishment by ID: {str(e)}")
+            return None
 
-    async def get_punishments(self, case_id: int, guild_id: int) -> list:
+    async def get_user_punishments(self, user_id: int, guild_id: int) -> list:
         """Retrieve punishments for a specific case ID in a guild."""
         try:
             async with self.async_sessionmaker() as session:
-                query = select(Punishment).filter_by(case_id=case_id, guild_id=guild_id)
+                query = select(Punishment).filter_by(user_id=user_id, guild_id=guild_id)
                 result = await session.execute(
                     query.order_by(Punishment.created_at.desc())
                 )
