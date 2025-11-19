@@ -843,9 +843,6 @@ class Economy(commands.Cog):
     def cog_unload(self):
         self.validate_economy_task.cancel()
 
-    def to_usd(self, bot_amount: Decimal) -> Decimal:
-        return (bot_amount / self.exchange_rate).quantize(Decimal("0.01"))
-
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
         server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)  
         msg = f"{client_seed}:{nonce}:{tag}".encode()
@@ -2049,14 +2046,11 @@ class Economy(commands.Cog):
                 pnl = value - cost
                 pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal('0')
                 symbol = "📈" if pnl >= 0 else "📉"
-                usd_value = self.to_usd(value)
-                total_usd += usd_value
                 embed.add_field(
                     name=asset.symbol,
                     value=(
                         f"Amount: **{await self.short_formatter(asset.amount)}**\n"
                         f"Value: **{await self.short_formatter(value)} {self.currency_name}** "
-                        f"(~${usd_value})\n"
                         f"P/L: {symbol} **{await self.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
                     ),
                     inline=False
@@ -2093,10 +2087,9 @@ class Economy(commands.Cog):
         embed = discord.Embed(
             description=f"✅ Purchased **{await self.short_formatter(coins)} {symbol}** "
                         f"for **{self.currency_name} {await self.short_formatter(spend)}** "
-                        f"(~${self.to_usd(spend)})",
             color=discord.Color.green()
         )
-        await ctx.reply(embed=embed, delete_after=10)
+        await ctx.reply(embed=embed)
 
     @invest.command(name="sell", description="Sell cryptocurrency for your balance")
     async def invest_sell(self, ctx: commands.Context, amount: str, currency: str):
@@ -2124,10 +2117,9 @@ class Economy(commands.Cog):
         embed = discord.Embed(
             description=f"✅ Sold **{await self.short_formatter(sell_amt)} {symbol}** "
                         f"for **{self.currency_name} {await self.short_formatter(proceeds)}** "
-                        f"(~${self.to_usd(proceeds)})",
             color=discord.Color.red()
         )
-        await ctx.reply(embed=embed, delete_after=10)
+        await ctx.reply(embed=embed)
 
     async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:
         s = input_str.strip().lower()
