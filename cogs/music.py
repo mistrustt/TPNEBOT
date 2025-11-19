@@ -884,7 +884,7 @@ class Music(commands.Cog, name="Music"):
                     inline=False
                 )
 
-                download_url = f'{JUICEWRLD_API}/files/{path}'
+                download_url = quote(f'{JUICEWRLD_API}/files/{path}')
                 view = SongView(download_url)
                 await ctx.reply(embed=embed, view=view)
 
