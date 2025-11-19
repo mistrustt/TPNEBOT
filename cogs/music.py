@@ -9,6 +9,7 @@ from colorthief import ColorThief
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import urlencode
+from urllib.parse import quote
 
 logger = logging.getLogger("discord_bot")
 
