@@ -855,7 +855,7 @@ class Music(commands.Cog, name="Music"):
                         inline=False
                         )
                 if len(image_url) > 0:
-                    embed.set_image(url=JUICEWRLD_API + image_url)
+                    embed.set_thumbnail(url=JUICEWRLD_API + image_url)
                 embed.add_field(
                     name='Producers',
                     value=producers,
