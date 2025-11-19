@@ -830,6 +830,19 @@ class Music(commands.Cog, name="Music"):
             async with ctx.typing():
                 async with aiohttp.ClientSession() as session:
                     async with session.get('https://m.juicewrldapi.com/analytics/now-playing/discord', params={'discord_user_id': member.id}) as response:
+                        if response.status == 404:
+                            try:
+                                error_data = await response.json()
+                                if not error_data.get('is_linked'):
+                                    await ctx.reply(embed=discord.Embed(
+                                        title='Account Not Linked',
+                                        description=f'{member.mention}\'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to account and generate a device pairing code\n3. Then use the link command with your code!',
+                                        color=0x36393E
+                                    ))
+                                    return
+                            except:
+                                pass
+                        
                         if response.status != 200:
                             await ctx.reply(embed=discord.Embed(
                                 title='Error',
@@ -1064,6 +1077,89 @@ class Music(commands.Cog, name="Music"):
                 title='Error',
                 description='An unexpected error occurred. Please try again later.',
                 color=0x36393E
+            ))
+
+    @commands.command(name='jlink')
+    async def juicewrld_link(self, ctx: commands.Context, code: str = None) -> None:
+        """Link your Discord account to JuiceWRLD API using a pairing code."""
+        prefix = await self.bot.database.get_prefix(ctx.guild.id) if ctx.guild else "!"
+
+        if code and code.lower() == 'help':
+            embed = discord.Embed(
+                title='Link Account Command',
+                description='Link your Discord account to your JuiceWRLDAPI account using a pairing code',
+                color=0x5865f2
+            )
+            embed.add_field(name='Usage', value=f'`{prefix}jlink <code>` - Link account with pairing code', inline=False)
+            embed.add_field(name='Examples', value=f'`{prefix}jlink ABC12345` - Link using code ABC12345', inline=False)
+            embed.add_field(
+                name='How to get a code',
+                value='Generate a pairing code from your JuiceWRLDAPI desktop app\nCodes expire after 10 minutes',
+                inline=False
+            )
+            await ctx.reply(embed=embed)
+            return
+
+        if not code:
+            await ctx.reply(embed=discord.Embed(
+                title='Missing Code',
+                description='Please provide a pairing code.',
+                color=discord.Color.red()
+            ))
+            return
+
+        pairing_code = code.upper()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    'https://m.juicewrldapi.com/auth/discord/bot-link',
+                    json={'code': pairing_code, 'discord_user_id': ctx.author.id}
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data and data.get('user'):
+                            user_data = data['user']
+                            embed = discord.Embed(
+                                title='Account Linked Successfully',
+                                description=f'Your Discord account has been linked to **{user_data.get("username", "Unknown")}**',
+                                color=0x00ff00
+                            )
+                            embed.add_field(name='Username', value=user_data.get('username', 'Unknown'), inline=True)
+                            embed.add_field(name='Status', value='Active ✓', inline=True)
+                            embed.set_footer(text=f'You can now use {prefix}jnp to show your currently playing song!')
+                            await ctx.reply(embed=embed)
+                            return
+
+                    error_data = await response.json()
+                    error_message = 'Invalid or expired pairing code'
+                    if error_data and error_data.get('error'):
+                        error_message = error_data['error']
+
+                    embed = discord.Embed(
+                        title='Link Failed',
+                        description=error_message,
+                        color=discord.Color.red()
+                    )
+                    embed.add_field(
+                        name='Troubleshooting',
+                        value='• Make sure the code is correct\n• Codes expire after 10 minutes\n• Generate a new code from your desktop app',
+                        inline=False
+                    )
+                    await ctx.reply(embed=embed)
+
+        except aiohttp.ClientError:
+            await ctx.reply(embed=discord.Embed(
+                title='Link Failed',
+                description='There was an error connecting to JuiceWRLD API. Please try again later.',
+                color=discord.Color.red()
+            ))
+        except Exception as e:
+            logger.error(f"Error in jlink command: {e}")
+            await ctx.reply(embed=discord.Embed(
+                title='Link Failed',
+                description='An unexpected error occurred. Please try again later.',
+                color=discord.Color.red()
             ))
 
     @commands.command(aliases=['rleak'])
