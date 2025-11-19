@@ -565,28 +565,29 @@ class DatabaseManager:
         """Add a note to a punishment case. Returns True if successful."""
         try:
             async with self.async_sessionmaker() as session:
-                result = await session.execute(
-                    select(Punishment).where(
-                        Punishment.case_id == case_id,
-                        Punishment.guild_id == guild_id
+                async with session.begin():
+                    result = await session.execute(
+                        select(Punishment).where(
+                            Punishment.case_id == case_id,
+                            Punishment.guild_id == guild_id
+                        )
                     )
-                )
-                punishment = result.scalar_one_or_none()
+                    punishment = result.scalar_one_or_none()
 
-                if not punishment:
-                    logging.warning(f"Punishment case {case_id} not found in guild {guild_id}")
-                    return False
+                    if not punishment:
+                        logging.warning(f"Punishment case {case_id} not found in guild {guild_id}")
+                        return False
 
-                case_note = CaseNote(
-                    case_id=punishment.id,  # Use the database ID
-                    moderator_id=moderator_id,
-                    note=note,
-                    created_at=datetime.now(timezone.utc)
-                )
-                session.add(case_note)
-                await session.commit()
-                logger.info(f"Added note to case {case_id} by moderator {moderator_id}")
-                return True
+                    case_note = CaseNote(
+                        punishment_id=punishment.id,
+                        moderator_id=moderator_id,
+                        note=note,
+                        created_at=datetime.now(timezone.utc)
+                    )
+                    session.add(case_note)
+                    await session.commit()
+                    logger.info(f"Added note to case {case_id} by moderator {moderator_id}")
+                    return True
         except SQLAlchemyError as e:
             logging.error(f"Error adding note to case {case_id}: {e}")
             return False
