@@ -864,8 +864,7 @@ class Music(commands.Cog, name="Music"):
                     description=f'**{song_name}**',
                     color=discord.Color(value=color_int)
                 )
-                embed.author.name = "🎵 Random Juice WRLD Leak"
-                embed.author.icon_url = ctx.guild.icon.url if ctx.guild.icon else None
+                embed.set_author(name=f'🎵 Random Juice WRLD Song', icon_url=ctx.guild.icon.url)
                 if len(alt_names) > 0:
                     embed.add_field(
                         name='Alternative Name(s)',
