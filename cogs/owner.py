@@ -2115,7 +2115,7 @@ class Owner(commands.Cog, name="Owner"):
             1198831682174853142: self.is_whitelisted_infohub,
             1216776903629869058: self.is_whitelisted_wrld,
             1336128367166095380: self.is_whitelisted_private,
-            1383378350025871422: self.is_whitelisted_tpne_unbans,
+            1440419546396758078: self.is_whitelisted_tpne_unbans,
         }
 
         if ctx.guild.id not in allowed_guilds:
