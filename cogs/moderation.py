@@ -837,14 +837,13 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.send("Invalid duration format. Use like `15m`, `2h`, `1d`, etc.")
 
         await member.ban(reason=reason)
-        case_id = await self.bot.database.get_next_case_id(ctx.guild.id)
 
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
             guild_id=ctx.guild.id,
             command_name=PunishmentType.TEMPBAN
         )
-        await self.bot.database.add_punishment(
+        case_id = await self.bot.database.add_punishment(
             user_id=member.id,
             guild_id=ctx.guild.id,
             moderator_id=ctx.author.id,
@@ -1185,7 +1184,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 guild_id=ctx.guild.id,
                 command_name="TIMEOUT"
             )
-            await self.bot.database.add_punishment(
+            case_id = await self.bot.database.add_punishment(
                 user_id=member.id,
                 guild_id=ctx.guild.id,
                 moderator_id=ctx.author.id,
@@ -2503,11 +2502,13 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send("Please provide a valid case ID.")
             return
 
-        punishments = await self.bot.database.get_punishment_history(case_id, guild_id)
+        punishment = await self.bot.database.get_punishment(case_id, guild_id)
 
-        if not punishments:
-            await ctx.send("No punishments found for this case.")
+        if not punishment:
+            await ctx.send("No punishment found for this case.")
             return
+
+        punishments = [punishment]
 
         embed = discord.Embed(
             title=f"Case ID: {case_id}",
