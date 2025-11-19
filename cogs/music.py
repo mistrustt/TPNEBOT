@@ -853,13 +853,13 @@ class Music(commands.Cog, name="Music"):
                         name='Alternative Names',
                         value=', '.join(alt_names) if alt_names else 'N/A',
                         inline=False
+                        )
                 if len(image_url) > 0:
                     embed.set_image(url=JUICEWRLD_API + image_url)
                 embed.add_field(
                     name='Producers',
                     value=', '.join(producers) if producers else 'N/A',
                     inline=False
-                )
                 )
                 embed.add_field(
                     name='Length',
