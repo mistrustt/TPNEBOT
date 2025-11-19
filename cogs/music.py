@@ -887,7 +887,10 @@ class Music(commands.Cog, name="Music"):
                 def special_url_encode(str):
                     return quote(str).replace("/", "%2F").replace("%28", "(").replace("%29", ")")
 
-                file_name = path.split("/")[-1]
+                last_slash_index = path.rfind('/')
+                file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
+                path = path[:last_slash_index] if last_slash_index != -1 else path
+
                 download_url = f'{JUICEWRLD_API}/files/{special_url_encode(path)}?highlight={special_url_encode(file_name)}'
                 view = SongView(download_url)
                 await ctx.reply(embed=embed, view=view)
