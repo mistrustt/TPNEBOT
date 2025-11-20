@@ -1470,6 +1470,7 @@ class Music(commands.Cog, name="Music"):
         self.ongoing_heardle = []
 
         num_file_deleted = 0
+        self.assert_download_cache()
         for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
             if file.endswith("_heardle.mp3"):
                 file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
