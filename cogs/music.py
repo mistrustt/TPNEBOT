@@ -1151,10 +1151,16 @@ class Music(commands.Cog, name="Music"):
                             await ctx.reply(embed=embed)
                             return
 
-                    error_data = await response.json()
                     error_message = 'Invalid or expired pairing code'
-                    if error_data and error_data.get('error'):
-                        error_message = error_data['error']
+                    try:
+                        error_data = await response.json()
+                        if error_data and error_data.get('error'):
+                            error_message = error_data['error']
+                    except:
+                        if response.status == 400:
+                            error_message = 'Bad request. Please check your pairing code and try again.'
+                        elif response.status >= 500:
+                            error_message = 'Server error. Please try again later.'
 
                     embed = discord.Embed(
                         title='Link Failed',
