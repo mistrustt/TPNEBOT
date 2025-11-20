@@ -64,7 +64,8 @@ class Music(commands.Cog, name="Music"):
             # TODO: IM NOT DOING THE REST
         }
         self.testing_ids = [
-            1095747082599530627 # ENVY
+            1095747082599530627, # ENVY
+            1219090700407279656 # DUMB IDIOT
         ]
         self.ongoing_heardle = []
 
@@ -1683,7 +1684,7 @@ class Music(commands.Cog, name="Music"):
                     final_clip.duration = duration
                     final_clip.fps = 1
                     final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
-                    message = await ctx.channel.send(f"🎵 {ctx.author.mention}: (this clip is {duration} seconds). Here's your clip:", file=discord.File(output_path), delete_after=30)
+                    message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have 50 seconds to guess. Here's your clip:", file=discord.File(output_path), delete_after=30)
                     
                     utils.Embeds.send_info_embed(
                         ctx.channel,
@@ -1698,8 +1699,6 @@ class Music(commands.Cog, name="Music"):
                             return (
                                 m.author == ctx.author
                                 and m.channel == ctx.channel
-                                and m.reference
-                                and m.reference.message_id == message.id
                             )
                         
                         try:
@@ -1723,7 +1722,6 @@ class Music(commands.Cog, name="Music"):
                             has_guessed = True
                         else:
                             attempt += 1
-                            await utils.Embeds.send_error_embed(ctx.channel, ctx.author, f'Incorrect! it is not `{guess}`.')
                     await utils.Embeds.send_success_embed(
                         ctx.channel,
                         ctx.author,
