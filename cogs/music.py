@@ -1721,7 +1721,7 @@ class Music(commands.Cog, name="Music"):
                         final_clip.duration = duration
                         final_clip.fps = 1
                         final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
-                        message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have 50 seconds to guess. Here's your clip:", file=discord.File(output_path), delete_after=30)
+                        message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have 50 seconds to guess. Here's your clip:", file=discord.File(output_path))
                         
                         await utils.Embeds.send_info_embed(
                             ctx.channel,
