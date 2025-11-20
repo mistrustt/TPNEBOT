@@ -1617,7 +1617,7 @@ class Music(commands.Cog, name="Music"):
         member = member or ctx.author
         
         embed = discord.Embed(
-            description=f"Heardle Stats for {member.display_name}",
+            description=f"Heardle Stats for {member.display_name}"
         )
         embed.add_field(
             name="Wins",
@@ -1634,7 +1634,7 @@ class Music(commands.Cog, name="Music"):
             value=999 / 1400, # shoutout juice wrld x trippie redd freestyle
             inline=True
         )
-        embed.set_author(name=member.display_name, icon_url=member.display_icon.url)
+        embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
 
         await ctx.reply(embed=embed)
 
