@@ -73,7 +73,7 @@ class Music(commands.Cog, name="Music"):
         if cog is None:
             cog = ctx.cog
 
-        return ctx.author.id in cog.testing_ids or ctx.author.guild_permissions.manage_guild
+        return ctx.author.id in cog.testing_ids
 
     def assert_download_cache(self):
         if not os.path.exists(DOWNLOAD_CACHE_FOLDER_NAME):
@@ -1516,7 +1516,7 @@ class Music(commands.Cog, name="Music"):
                 await message.add_reaction("👎")
 
     @commands.command(name="hcc")
-    @commands.check(can_test)
+    @commands.check_any(commands.has_permissions(manage_guild=True), can_test)
     async def heardleclearcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
 
@@ -1588,7 +1588,8 @@ class Music(commands.Cog, name="Music"):
         return sorted(results)
 
     def handle_user_done_heardle(self, user_id: int):
-        self.ongoing_heardle.remove(user_id)
+        if user_id in self.ongoing_heardle:
+            self.ongoing_heardle.remove(user_id)
 
         # Delete user related files
         self.assert_download_cache()
@@ -1601,7 +1602,6 @@ class Music(commands.Cog, name="Music"):
                     logger.error(f"Error deleting file {file_path}: {e}")
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
-    @commands.check(can_test)
     async def heardle(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_heardle:
             await utils.Embeds.send_warning_embed(
@@ -1610,6 +1610,9 @@ class Music(commands.Cog, name="Music"):
                 "You already have an ongoing game of Heardle!"
             )
             return
+        
+        # clear existing files
+        self.handle_user_done_heardle(ctx.author.id)
         
         async with aiohttp.ClientSession() as session:
             async with session.get(f'{JUICEWRLD_API}/juicewrld/radio/random/') as response:
@@ -1639,7 +1642,6 @@ class Music(commands.Cog, name="Music"):
 
                 # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
                 download_url = f"{JUICEWRLD_API}/juicewrld/files/download/?path={self.special_url_encode(path)}"
-                await ctx.reply(f"Heardle is currently under development. Download the song here: {download_url}")
                 async with session.get(download_url) as download_response:
                     if download_response.status != 200:
                         await handle_request_failed(ctx, download_response.status)
@@ -1725,7 +1727,7 @@ class Music(commands.Cog, name="Music"):
                     await utils.Embeds.send_success_embed(
                         ctx.channel,
                         ctx.author,
-                        f'Congratulations! You guessed the song correctly: **{song_data.get("name", "Unknown Title")}** in {attempt} attempt(s)!'
+                        f'Congratulations! You guessed the song correctly: **{song_data.get("name", "Unknown Title")}**!'
                     )
                     try:
                         await message.delete()
