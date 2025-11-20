@@ -1734,9 +1734,6 @@ class Music(commands.Cog, name="Music"):
                                 with open(image_file_name, 'wb') as img_file:
                                     img_file.write(image_data)
 
-                        has_guessed = False
-                        attempt = 1
-
                         acceptable_answers = []
                         for title in track_tiles:
                             acceptable_answers.extend(self.get_acceptable_track_names(title))
@@ -1763,52 +1760,54 @@ class Music(commands.Cog, name="Music"):
                             f"Please reply to the message above to guess the song title or type `exit` to quit the game.",
                         )
 
-                        while has_guessed == False:
-                            # wait for guess
-                            def check_guess(m):
-                                return (
-                                    m.author == ctx.author
-                                    and m.channel == ctx.channel
-                                )
-                            
-                            try:
-                                guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=HEARDLE_GAME_DURATION)
-                            except TimeoutError:
-                                await utils.Embeds.send_warning_embed(
-                                    ctx.channel,
-                                    ctx.author,
-                                    f"Time's up! You didn't guess the song in time."
-                                )
-                                try:
-                                    await message.delete()
-                                except:
-                                    pass
-                                self.handle_user_done_heardle(ctx.author.id)
-                                return
-                            
-                            guess = guess_msg.content.strip().lower()
-                            if guess == 'exit':
-                                await guess_msg.add_reaction('👋')
-                                try:
-                                    await message.delete()
-                                except:
-                                    pass
-                                self.handle_user_done_heardle(ctx.author.id)
-                                return
-                            elif guess in acceptable_answers:
-                                has_guessed = True
-                            else:
-                                attempt += 1
-                        await utils.Embeds.send_success_embed(
+                has_guessed = False
+                attempt = 1
+
+                while has_guessed == False:
+                    def check_guess(m):
+                        return (
+                            m.author == ctx.author
+                            and m.channel == ctx.channel
+                        )
+                    
+                    try:
+                        guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=HEARDLE_GAME_DURATION)
+                    except TimeoutError:
+                        await utils.Embeds.send_warning_embed(
                             ctx.channel,
                             ctx.author,
-                            f'Congratulations! You guessed the song correctly: **{song_data.get("name", "Unknown Title")}**!'
+                            f"Time's up! You didn't guess the song in time."
                         )
                         try:
                             await message.delete()
                         except:
                             pass
                         self.handle_user_done_heardle(ctx.author.id)
+                        return
+                    
+                    guess = guess_msg.content.strip().lower()
+                    if guess == 'exit':
+                        await guess_msg.add_reaction('👋')
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        self.handle_user_done_heardle(ctx.author.id)
+                        return
+                    elif guess in acceptable_answers:
+                        has_guessed = True
+                    else:
+                        attempt += 1
+                await utils.Embeds.send_success_embed(
+                    ctx.channel,
+                    ctx.author,
+                    f'Congratulations! You guessed the song correctly: **{song_data.get("name", "Unknown Title")}**!'
+                )
+                try:
+                    await message.delete()
+                except:
+                    pass
+                self.handle_user_done_heardle(ctx.author.id)
 
 
 async def setup(bot: commands.Bot) -> None:
