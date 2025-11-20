@@ -559,7 +559,7 @@ class Fun(commands.Cog, name="Fun"):
         await message.add_reaction("⏰")
 
         await asyncio.sleep(15)
-        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 30)
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
 
         message = await ctx.fetch_message(message.id)
         users = set()
@@ -596,10 +596,26 @@ class Fun(commands.Cog, name="Fun"):
             "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", "Envy is a Chud",
             "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
             "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
-            "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk",   # if you have something funny then add it pls,
+            "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
+            "We almost level 10 daddy",                         # if you have something funny then add it pls,
                                                                 # not you though envy you're a fkn chud AF
         ]
-        chosen_nickname = random.choice(nickname_list)
+        
+        if not hasattr(self.bot, 'recent_nicknames'):
+            self.bot.recent_nicknames = []
+        
+        available_nicknames = [nick for nick in nickname_list if nick not in self.bot.recent_nicknames]
+        
+        if not available_nicknames:
+            self.bot.recent_nicknames = []
+            available_nicknames = nickname_list
+        
+        chosen_nickname = random.choice(available_nicknames)
+        
+
+        self.bot.recent_nicknames.append(chosen_nickname)
+        if len(self.bot.recent_nicknames) > 5:
+            self.bot.recent_nicknames.pop(0)
 
         try:
             original_nickname = victim.display_name
