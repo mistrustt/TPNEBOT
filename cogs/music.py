@@ -1214,9 +1214,19 @@ class Music(commands.Cog, name="Music"):
 
                 count = data.get('count', 0)
                 if count == 0:
+                    await utils.Embeds.send_warning_embed(
+                        ctx.channel,
+                        ctx.author,
+                        "No results found for your query."
+                    )
                     return
                 
                 if count > MAX_SEARCH_COUNT:
+                    await utils.Embeds.send_warning_embed(
+                        ctx.channel,
+                        ctx.author,
+                        f"Your query returned too many results ({count}). Please be more specific."
+                    )
                     return
                 
                 class InformationView(discord.ui.LayoutView):
