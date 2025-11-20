@@ -826,7 +826,7 @@ class General(commands.Cog, name="General"):
         else:
             color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
         embed = discord.Embed(
-            description=f"Developed by `mistrusttt` and `chaosokay`",
+            description=f"Developed and maintained by `mistrusttt`, `chaosokay`, `cqllmetoxicc`, `juicewrldapi`, `yvngxenvy`, `flow`",
             color=color,
         )
         embed.set_author(name="TPNE Bot")
