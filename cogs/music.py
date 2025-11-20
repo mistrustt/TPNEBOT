@@ -62,7 +62,7 @@ class Music(commands.Cog, name="Music"):
             114: "#EA00FF", # PRE PARTY EP EXTENDED
             115: "#2E2E2E", # FIGHTING DEMONS
             116: "#2E2E2E", # FIGHTING DEMONS DELUXE
-            117: "#CC00FF", # THE PARTY NEVER ENDS
+            117: "#CC01FF", # THE PARTY NEVER ENDS
             # TODO: IM NOT DOING THE REST
         }
         self.testing_ids = [
@@ -76,7 +76,7 @@ class Music(commands.Cog, name="Music"):
             cog = ctx.cog
 
         return ctx.author.id in cog.testing_ids
-
+ 
     def assert_download_cache(self):
         if not os.path.exists(DOWNLOAD_CACHE_FOLDER_NAME):
             os.makedirs(DOWNLOAD_CACHE_FOLDER_NAME)
@@ -1656,6 +1656,7 @@ class Music(commands.Cog, name="Music"):
         await ctx.reply(embed=embed)
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
+    @commands.check_any(commands.has_permissions(manage_guild=True), commands.check(can_test), commands.has_role(1414742766386413590))
     async def heardle(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_heardle:
             await utils.Embeds.send_warning_embed(
