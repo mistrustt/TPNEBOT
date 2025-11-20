@@ -10,10 +10,13 @@ from colorthief import ColorThief
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
+import utils.embeds as utils
 
 logger = logging.getLogger("discord_bot")
 
 JUICEWRLD_API = 'https://juicewrldapi.com'
+MAX_SEARCH_COUNT = 10 # Max number of search results for user to choose from. If more than this command fails
+DOWNLOAD_CACHE_FOLDER_NAME = '__download_cache'
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -56,6 +59,19 @@ class Music(commands.Cog, name="Music"):
             117: "#CC00FF", # THE PARTY NEVER ENDS
             # TODO: IM NOT DOING THE REST
         }
+        self.testing_ids = [
+            1095747082599530627 # ENVY
+        ]
+
+    def can_test(self, ctx: commands.Context):
+        return ctx.author.id in self.testing_ids or ctx.author.guild_permissions.manage_guild
+
+    def assert_download_cache(self):
+        if not os.path.exists(DOWNLOAD_CACHE_FOLDER_NAME):
+            os.makedirs(DOWNLOAD_CACHE_FOLDER_NAME)
+
+    def special_url_encode(self, str):
+        return quote(str).replace("/", "%2F").replace("%28", "(").replace("%29", ")")
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -1162,20 +1178,210 @@ class Music(commands.Cog, name="Music"):
                 color=discord.Color.red()
             ))
 
-    @commands.command(aliases=['rleak'])
-    async def randomleak(self, ctx: commands.Context) -> None:
+    @commands.command(name='leak', description="Search for a Juice WRLD leak by name")
+    async def leak(self, ctx: commands.Context, *, query: str) -> None:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f'{JUICEWRLD_API}/juicewrld/radio/random/') as response:
-                async def handle_request_failed(ctx):
+            async with session.get(f'{JUICEWRLD_API}/juicewrld/songs/?search={self.special_url_encode(query)}') as response:
+                async def handle_request_failed(ctx, code=None):
                     embed = discord.Embed(
                         description="Request failed. Please try again later.",
                         color=discord.Color.red()
                     )
-                    embed.set_image(url="https://http.cat/429")
+                    if code:
+                        embed.set_image(url=f"https://http.cat/{code}")
                     await ctx.reply(embed=embed, delete_after=5)
 
                 if response.status != 200:
-                    await handle_request_failed(ctx)
+                    await handle_request_failed(ctx, response.status)
+                    return
+
+                data = await response.json()
+
+                count = data.get('count', 0)
+                if count == 0:
+                    await utils.Embeds.send_warning_embed(
+                        ctx.channel,
+                        ctx.author,
+                        "No results found for your query."
+                    )
+                    return
+                
+                if count > MAX_SEARCH_COUNT:
+                    await utils.Embeds.send_warning_embed(
+                        ctx.channel,
+                        ctx.author,
+                        f"Your query returned too many results ({count}). Please be more specific."
+                    )
+                    return
+                
+                def make_embed(song_data, author: discord.User, current_view=None):
+                    song_name = song_data.get('name', None)
+                    file_names = song_data.get('file_names', 'No file names available.')
+                    if not song_name:
+                        return discord.Embed(
+                            description="Song data is incomplete.",
+                            color=discord.Color.red()
+                        )
+
+                    embed = discord.Embed(
+                        title=f'**{song_name}**',
+                        color=discord.Color.blue(),
+                        description="File name: " + file_names
+                    )
+                    embed.set_author(name=f'{author.display_name} - Juice WRLD Leak Search Result', icon_url=author.display_avatar.url)
+
+                    alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
+                    if len(alt_names) > 0:
+                        embed.add_field(
+                            name='Alternative Name(s)',
+                            value=', '.join(alt_names) if alt_names else 'N/A',
+                            inline=False
+                            )
+                        
+                    leak_type = song_data.get('leak_type', "Unknown Leak Type").replace("\n", " ")
+                    embed.add_field(
+                        name='Leak Type',
+                        value=leak_type,
+                        inline=False
+                    )
+
+                    era = song_data.get('era', {})
+                    era_name = era.get('name', 'Unknown Era')
+                    era_id = era.get('id', 0)
+                    embed.add_field(
+                        name='Era',
+                        value=era_name,
+                        inline=False
+                    )
+
+                    producers = song_data.get('producers', "N/A")
+                    embed.add_field(
+                        name='Producer(s)',
+                        value=producers,
+                        inline=False
+                    )
+
+                    engineers = song_data.get('engineers', "N/A")
+                    embed.add_field(
+                        name='Engineer(s)',
+                        value=engineers,
+                        inline=False
+                    )
+
+                    color = self.album_colors.get(era_id, "#FFFFFF")
+                    color_int = int(color.replace("#", "0x"), 16)
+                    embed.color = discord.Color(value=color_int)
+
+                    preview_date = song_data.get('preview_date', '')
+                    if len(preview_date) == 0:
+                        preview_date = "No preview date available."
+
+                    embed.add_field(
+                        name='Preview Date',
+                        value=preview_date,
+                        inline=False
+                    )
+
+                    release_date = song_data.get('release_date', '')
+                    if len(release_date) > 0:
+                        embed.add_field(
+                            name='Release Date',
+                            value=release_date,
+                            inline=False
+                        )
+                    
+                    surface_date = song_data.get('surface_date', '')
+                    if len(surface_date) > 0:
+                        embed.add_field(
+                            name='Surface Date',
+                            value=surface_date,
+                            inline=False
+                        )
+
+                    image_url = song_data.get('image_url', '')
+                    if len(image_url) > 0:
+                        embed.set_thumbnail(url=JUICEWRLD_API + image_url)
+
+                    length = song_data.get('length', 0)
+                    if len(length) > 0:
+                        embed.add_field(
+                            name='Length',
+                            value=f"{length}",
+                            inline=False
+                        )
+
+                    class SongView(discord.ui.View):
+                        def __init__(self, download_url):
+                            super().__init__()
+                            self.add_item(discord.ui.Button(label="Download", url=download_url))
+
+                    # TODO: FOR SOME REASON API DOESNT RETURN THE FUKN PATH WTF???
+                    path = song_data.get('path', '')
+                    last_slash_index = path.rfind('/')
+                    file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
+                    path = path[:last_slash_index] if last_slash_index != -1 else path
+
+                    download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
+                    if current_view:
+                        found = False
+                        for item in current_view.children:
+                            if isinstance(item, discord.ui.Button):
+                                item.url = download_url
+                                found = True
+                                break
+
+                        if not found:
+                            current_view.add_item(discord.ui.Button(label="Download", url=download_url))
+                        
+                        return embed, current_view
+                        
+                    view = SongView(download_url)
+                    return embed, view
+                    
+
+                results = data.get('results', [])
+                song = None
+                if count != 1:
+                    class SongSelect(discord.ui.Select):
+                        def __init__(self, bot, songs, author):
+                            self.bot = bot
+                            self.songs = songs
+                            self.author = author
+                            options = [discord.SelectOption(label=song['name'], description=f"{song['era']['description']}") for song in songs]
+                            super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
+
+                        async def callback(self, interaction: discord.Interaction):
+                            selected_song_data = next((song for song in self.songs if song['name'] == self.values[0]), None)
+                            if selected_song_data:
+                                embed, new_view = make_embed(selected_song_data, self.author, view)
+                                print(new_view)
+                                view.message = await interaction.response.edit_message(content="", embed=embed, view=view)
+
+                    menu = SongSelect(self.bot, results, ctx.author)
+                    view = discord.ui.View(timeout=120)
+                    view.add_item(menu)
+                    await ctx.reply("Please select a song:", view=view)    
+                    
+                else:
+                    song = results[0]
+                    embed, view = make_embed(song, ctx.author)
+                    await ctx.reply(embed=embed, view=view)
+
+    @commands.command(aliases=['rleak'], description="Get a random Juice WRLD leak")
+    async def randomleak(self, ctx: commands.Context) -> None:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f'{JUICEWRLD_API}/juicewrld/radio/random/') as response:
+                async def handle_request_failed(ctx, code=None):
+                    embed = discord.Embed(
+                        description="Request failed. Please try again later.",
+                        color=discord.Color.red()
+                    )
+                    if code:
+                        embed.set_image(url=f"https://http.cat/{code}")
+                    await ctx.reply(embed=embed, delete_after=5)
+
+                if response.status != 200:
+                    await handle_request_failed(ctx, response.status)
                     return
 
                 data = await response.json()
@@ -1209,7 +1415,7 @@ class Music(commands.Cog, name="Music"):
                     title=f'**{song_name}**',
                     color=discord.Color(value=color_int)
                 )
-                embed.set_author(name=f'{ctx.author.display_name} - Random Juice WRLD Song', icon_url=ctx.author.display_avatar.url)
+                embed.set_author(name=f'{ctx.author.display_name} - Random Juice WRLD Leak', icon_url=ctx.author.display_avatar.url)
                 if len(alt_names) > 0:
                     embed.add_field(
                         name='Alternative Name(s)',
@@ -1229,24 +1435,75 @@ class Music(commands.Cog, name="Music"):
                     value=producers,
                     inline=False
                 )
-                embed.add_field(
-                    name='Length',
-                    value=f'{length}',
-                    inline=False
-                )
-
-                def special_url_encode(str):
-                    return quote(str).replace("/", "%2F").replace("%28", "(").replace("%29", ")")
+                if len(length) > 0:
+                    embed.add_field(
+                        name='Length',
+                        value=f"{length}",
+                        inline=False
+                    )
 
                 last_slash_index = path.rfind('/')
                 file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
                 path = path[:last_slash_index] if last_slash_index != -1 else path
 
-                download_url = f'{JUICEWRLD_API}/files/{special_url_encode(path)}?highlight={special_url_encode(file_name)}'
+                download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
                 view = SongView(download_url)
                 message = await ctx.reply(embed=embed, view=view)
                 await message.add_reaction("👍")
                 await message.add_reaction("👎")
+
+    @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
+    @commands.can_test()
+    async def heardle(self, ctx: commands.Context):
+        if ctx.author.id in self.ongoing_heardle:
+            await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                "You already have an ongoing game of Heardle!"
+            )
+            return
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f'{JUICEWRLD_API}/juicewrld/radio/random/') as response:
+                async def handle_request_failed(ctx, code=None):
+                    embed = discord.Embed(
+                        description="Request failed. Please try again later.",
+                        color=discord.Color.red()
+                    )
+                    if code:
+                        embed.set_image(url=f"https://http.cat/{code}")
+                    await ctx.reply(embed=embed, delete_after=5)
+
+                if response.status != 200:
+                    await handle_request_failed(ctx, response.status)
+                    return
+
+                data = await response.json()
+
+                song_data = data.get('song', None)
+                if not song_data:
+                    await handle_request_failed(ctx)
+                    return
+                
+                self.ongoing_heardle.append(ctx.author.id)
+                song_data = data.get('song', {})
+                path = data.get('path', '')
+
+                download_url = f"{JUICEWRLD_API}/files/download/?path={self.special_url_encode(path)}"
+                await ctx.reply(f"Heardle is currently under development. Download the song here: {download_url}")
+                # async with session.get(download_url) as download_response:
+                #     if download_response.status != 200:
+                #         await handle_request_failed(ctx, download_response.status)
+                #         self.ongoing_heardle.remove(ctx.author.id)
+                #         return
+
+                #     self.assert_download_cache()
+                #     song_bytes = await download_response.read()
+                #     temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{ctx.author.id}_heardle.mp3"
+                #     with open(temp_file_path, 'wb') as f:
+                #         f.write(song_bytes)
+
+                #     await ctx.reply(file=discord.File(temp_file_path), content="Guess the song! You have 30 seconds to answer.")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
