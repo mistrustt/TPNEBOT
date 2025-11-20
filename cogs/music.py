@@ -63,7 +63,7 @@ class Music(commands.Cog, name="Music"):
             1095747082599530627 # ENVY
         ]
 
-    def can_test(self, ctx: commands.Context):
+    def can_test(ctx: commands.Context):
         return ctx.author.id in self.testing_ids or ctx.author.guild_permissions.manage_guild
 
     def assert_download_cache(self):
