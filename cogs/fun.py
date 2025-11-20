@@ -545,6 +545,118 @@ class Fun(commands.Cog, name="Fun"):
         
         await ctx.send(embed=embed)
 
+
+    @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
+    @commands.has_guild_permissions(manage_nicknames=True)
+    async def nicknameroulette(self, ctx: Context):
+        """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
+        embed = discord.Embed(
+            title="Nickname Roulette",
+            description="React with ⏰ to join the game! You have 15 seconds.",
+            color=discord.Color.blurple()
+        )
+        message = await ctx.reply(embed=embed)
+        await message.add_reaction("⏰")
+
+        await asyncio.sleep(15)
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 30)
+
+        message = await ctx.fetch_message(message.id)
+        users = set()
+        for reaction in message.reactions:
+            if str(reaction.emoji) == "⏰":
+                async for user in reaction.users():
+                    if not user.bot:
+                        users.add(user)
+
+        if len(users) < 2:
+            embed = discord.Embed(
+                title="Nickname Roulette",
+                description="Not enough players joined the game. Need at least 2 players.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        nickname_user = random.choice(list(users))
+
+        victim = await ctx.guild.fetch_member(nickname_user.id)
+        if not victim:
+            embed = discord.Embed(
+                title="Nickname Roulette",
+                description="Could not find the selected user in the guild.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        nickname_duration = random.randint(300, 3600)  # 5 minutes to 1 hour
+        
+        nickname_list = [
+            "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", # we can add more later
+        ]
+        chosen_nickname = random.choice(nickname_list)
+
+        try:
+            original_nickname = victim.display_name
+            await victim.edit(nick=chosen_nickname, reason="Lost Nickname Roulette")
+            
+            if not hasattr(self.bot, 'nickname_force'):
+                self.bot.nickname_force = {}
+        
+            end_time = datetime.now() + timedelta(seconds=nickname_duration)
+            self.bot.nickname_force[victim.id] = {
+                'nickname': chosen_nickname,
+                'original_nickname': original_nickname,
+                'end_time': end_time,
+                'guild_id': ctx.guild.id
+            }
+            
+            embed = discord.Embed(
+                title="Nickname Roulette",
+                description=f"{victim.mention} has been given the nickname '{chosen_nickname}' for {nickname_duration // 60} minutes and {nickname_duration % 60} seconds! ⏰",
+                color=discord.Color.orange()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="Nickname Roulette",
+                description=f"{victim.mention} would have gotten a nickname, but I don't have permission! ⏰",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="Nickname Roulette",
+                description=f"Failed to change nickname for {victim.mention}: {str(e)}",
+                color=discord.Color.red()
+            )
+        
+        await ctx.send(embed=embed)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """Monitor nickname changes and forcenicks from Nick Roulette."""
+        if not hasattr(self.bot, 'nickname_force'):
+            return
+
+        if after.id not in self.bot.nickname_force:
+            return
+
+        force_info = self.bot.nickname_force[after.id]
+
+        if datetime.now() > force_info['end_time']:
+            try:
+                await after.edit(nick=force_info.get('original_nickname'), reason="Nick Roulette expired")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            del self.bot.nickname_force[after.id]
+            return
+
+        if before.nick != after.nick and after.nick != force_info['nickname']:
+            try:
+                await after.edit(nick=force_info['nickname'], reason="Forcenicked from Nick Roulette")
+            except discord.Forbidden:
+                del self.bot.nickname_force[after.id]
+
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))
     logger.debug('Fun cog initialized successfully')
