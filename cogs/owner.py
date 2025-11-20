@@ -139,7 +139,8 @@ class Owner(commands.Cog, name="Owner"):
             657182369240973312, #chaos 
             425724124057436160, #pop 
             1142836406255890586, #pop alt
-            1166141915297743010 # dennis
+            1166141915297743010, # dennis
+            857702737500569650, # aether
         ]
         self.whitelisted_users_tpne_unbans = [
             567401702190350347, # problems
