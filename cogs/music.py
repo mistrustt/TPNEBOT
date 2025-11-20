@@ -1730,8 +1730,19 @@ class Music(commands.Cog, name="Music"):
                                 return
                             
                             guess = guess_msg.content.strip().lower()
-
-                            if guess in acceptable_answers:
+                            if guess == 'exit':
+                                await utils.Embeds.send_info_embed(
+                                    ctx.channel,
+                                    ctx.author,
+                                    f"You have exited the game. The correct answer was **{song_data.get('name', 'Unknown Title')}**."
+                                )
+                                try:
+                                    await message.delete()
+                                except:
+                                    pass
+                                self.handle_user_done_heardle(ctx.author.id)
+                                return
+                            elif guess in acceptable_answers:
                                 has_guessed = True
                             else:
                                 attempt += 1
