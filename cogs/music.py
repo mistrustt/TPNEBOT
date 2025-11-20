@@ -1610,7 +1610,7 @@ class Music(commands.Cog, name="Music"):
                     # TODO: make this a constant
                     CLIP_DURATION = 10
 
-                    print(f'{ctx.author.mention} (@{ctx.author.name}) is playing Heardle. Answer: {correct_answer}')
+                    #print(f'{ctx.author.mention} (@{ctx.author.name}) is playing Heardle. Answer: {correct_answer}')
                     orig_clip = AudioFileClip(temp_file_path)
                     random_start_point = random.randint(0, int(orig_clip.duration) - CLIP_DURATION*2)
                     duration = CLIP_DURATION
