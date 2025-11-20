@@ -1454,6 +1454,18 @@ class Music(commands.Cog, name="Music"):
                 await message.add_reaction("👍")
                 await message.add_reaction("👎")
 
+    @commands.command(name="hcc")
+    @commands.check(can_test)
+    async def heardleclearcache(self, ctx: commands.Context):
+        self.ongoing_heardle = []
+        for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
+            if file.endswith("_heardle.mp3"):
+                file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logger.error(f"Error deleting file {file_path}: {e}")
+
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     @commands.check(can_test)
     async def heardle(self, ctx: commands.Context):
