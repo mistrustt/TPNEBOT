@@ -863,7 +863,7 @@ class Music(commands.Cog, name="Music"):
                                 if not error_data.get('is_linked'):
                                     await ctx.reply(embed=discord.Embed(
                                         title='Account Not Linked',
-                                        description=f'{member.mention}\'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to account and generate a device pairing code\n3. Then use the link command with your code!',
+                                        description=f'{member.mention}\'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to account and generate a device pairing code\n3. Then use the jlink command with your code!',
                                         color=0x36393E
                                     ))
                                     return
