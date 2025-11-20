@@ -693,15 +693,12 @@ class Owner(commands.Cog, name="Owner"):
                 failed.append(f"`{name}` (already loaded)")
                 continue
 
-            try:
-                await self.bot.load_extension(cog_path)
-                ok, db_msg = await _safe_db_call(getattr(self.bot, "database", None), "load_cog", name)
-                if not ok:
-                    failed.append(f"`{name}` (loaded; DB error: {db_msg})")
-                else:
-                    succeeded.append(name)
-            except Exception as e:
-                failed.append(f"`{name}` ({type(e).__name__}: {e})")
+            await self.bot.load_extension(cog_path)
+            ok, db_msg = await _safe_db_call(getattr(self.bot, "database", None), "load_cog", name)
+            if not ok:
+                failed.append(f"`{name}` (loaded; DB error: {db_msg})")
+            else:
+                succeeded.append(name)
 
         embed = discord.Embed(color=discord.Color.blurple(), title="Cog Load Results")
         if succeeded:
@@ -727,15 +724,12 @@ class Owner(commands.Cog, name="Owner"):
                 failed.append(f"`{name}` (not loaded)")
                 continue
 
-            try:
-                await self.bot.unload_extension(cog_path)
-                ok, db_msg = await _safe_db_call(getattr(self.bot, "database", None), "unload_cog", name)
-                if not ok:
-                    failed.append(f"`{name}` (unloaded; DB error: {db_msg})")
-                else:
-                    succeeded.append(name)
-            except Exception as e:
-                failed.append(f"`{name}` ({type(e).__name__}: {e})")
+            await self.bot.unload_extension(cog_path)
+            ok, db_msg = await _safe_db_call(getattr(self.bot, "database", None), "unload_cog", name)
+            if not ok:
+                failed.append(f"`{name}` (unloaded; DB error: {db_msg})")
+            else:
+                succeeded.append(name)
 
         embed = discord.Embed(color=discord.Color.blurple(), title="Cog Unload Results")
         if succeeded:
