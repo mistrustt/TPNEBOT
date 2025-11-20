@@ -62,6 +62,7 @@ class Music(commands.Cog, name="Music"):
         self.testing_ids = [
             1095747082599530627 # ENVY
         ]
+        self.ongoing_heardle = []
 
     def can_test(ctx: commands.Context, cog=None):
         if cog is None:
@@ -1461,13 +1462,22 @@ class Music(commands.Cog, name="Music"):
     @commands.check(can_test)
     async def heardleclearcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
+
+        num_file_deleted = 0
         for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
             if file.endswith("_heardle.mp3"):
                 file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
                 try:
+                    num_file_deleted += 1
                     os.remove(file_path)
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
+
+        await utils.Embeds.send_success_embed(
+            ctx.channel,
+            ctx.author,
+            f"Cleared {num_file_deleted} cached Heardle files and reset ongoing games."
+        )
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     @commands.check(can_test)
