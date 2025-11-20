@@ -1620,7 +1620,7 @@ class Music(commands.Cog, name="Music"):
 
                     final_clip = ImageClip(image_file_name).with_audio(sub_clip)
 
-                    output_path = f"temp/{ctx.author.id}_heardle_attempt{attempt}.mp4"
+                    output_path = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_mp4_heardle.mp4"
                     final_clip.duration = duration
                     final_clip.fps = 1
                     final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
