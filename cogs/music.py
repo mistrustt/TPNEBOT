@@ -1483,7 +1483,7 @@ class Music(commands.Cog, name="Music"):
         await utils.Embeds.send_success_embed(
             ctx.channel,
             ctx.author,
-            f"Cleared {num_file_deleted} cached Heardle files and reset ongoing games."
+            f"Deleted {num_file_deleted} file(s)."
         )
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
@@ -1523,21 +1523,21 @@ class Music(commands.Cog, name="Music"):
                 song_data = data.get('song', {})
                 path = data.get('path', '')
 
-                download_url = f"{JUICEWRLD_API}/files/download/?path={self.special_url_encode(path)}"
+                download_url = f"{JUICEWRLD_API}/juicewrld/files/download/?path={self.special_url_encode(path)}"
                 await ctx.reply(f"Heardle is currently under development. Download the song here: {download_url}")
-                # async with session.get(download_url) as download_response:
-                #     if download_response.status != 200:
-                #         await handle_request_failed(ctx, download_response.status)
-                #         self.ongoing_heardle.remove(ctx.author.id)
-                #         return
+                async with session.get(download_url) as download_response:
+                    if download_response.status != 200:
+                        await handle_request_failed(ctx, download_response.status)
+                        self.ongoing_heardle.remove(ctx.author.id)
+                        return
 
-                #     self.assert_download_cache()
-                #     song_bytes = await download_response.read()
-                #     temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{ctx.author.id}_heardle.mp3"
-                #     with open(temp_file_path, 'wb') as f:
-                #         f.write(song_bytes)
+                    self.assert_download_cache()
+                    song_bytes = await download_response.read()
+                    temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{ctx.author.id}_heardle.mp3"
+                    with open(temp_file_path, 'wb') as f:
+                        f.write(song_bytes)
 
-                #     await ctx.reply(file=discord.File(temp_file_path), content="Guess the song! You have 30 seconds to answer.")
+                    await ctx.reply(file=discord.File(temp_file_path), content="Guess the song! You have 30 seconds to answer.")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
