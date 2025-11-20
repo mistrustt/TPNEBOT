@@ -1693,7 +1693,7 @@ class Music(commands.Cog, name="Music"):
                             f.write(song_bytes)
 
                         image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png'
-                        image_url = ctx.author.avatar.url
+                        image_url = ctx.author.display_avatar.url
                         async with session.get(image_url) as image_response:
                             if image_response.status == 200:
                                 image_data = await image_response.read()
