@@ -1540,6 +1540,19 @@ class Music(commands.Cog, name="Music"):
         
         return sorted(results)
 
+    def handle_user_done_heardle(self, user_id: int):
+        self.ongoing_heardle.remove(user_id)
+
+        # Delete user related files
+        self.assert_download_cache()
+        for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
+            if f"{user_id}_" in file and "_heardle" in file:
+                file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logger.error(f"Error deleting file {file_path}: {e}")
+
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     @commands.check(can_test)
     async def heardle(self, ctx: commands.Context):
@@ -1583,7 +1596,7 @@ class Music(commands.Cog, name="Music"):
                 async with session.get(download_url) as download_response:
                     if download_response.status != 200:
                         await handle_request_failed(ctx, download_response.status)
-                        self.ongoing_heardle.remove(ctx.author.id)
+                        self.handle_user_done_heardle(ctx.author.id)
                         return
 
                     self.assert_download_cache()
@@ -1592,7 +1605,7 @@ class Music(commands.Cog, name="Music"):
                     with open(temp_file_path, 'wb') as f:
                         f.write(song_bytes)
 
-                    image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/temp_image_{ctx.author.id}_heardle.png'
+                    image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png'
                     image_url = ctx.author.avatar.url
                     async with session.get(image_url) as image_response:
                         if image_response.status == 200:
@@ -1626,6 +1639,56 @@ class Music(commands.Cog, name="Music"):
                     final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
                     message = await ctx.channel.send(f"🎵 {ctx.author.mention}: (this clip is {duration} seconds). Here's your clip:", file=discord.File(output_path), delete_after=30)
                     
+                    utils.Embeds.send_info_embed(
+                        ctx.channel,
+                        ctx.author,
+                        f"Please reply to the message above to guess the song title or type `exit` to quit the game.",
+                        delete_after=10
+                    )
+
+                    while has_guessed == False:
+                        # wait for guess
+                        def check_guess(m):
+                            return (
+                                m.author == ctx.author
+                                and m.channel == ctx.channel
+                                and m.reference
+                                and m.reference.message_id == message.id
+                            )
+                        
+                        try:
+                            guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=50)
+                        except TimeoutError:
+                            await utils.Embeds.send_warning_embed(
+                                ctx.channel,
+                                ctx.author,
+                                f"Time's up! You didn't guess the song in time."
+                            )
+                            try:
+                                await message.delete()
+                            except:
+                                pass
+                            self.handle_user_done_heardle(ctx.author.id)
+                            return
+                        
+                        guess = guess_msg.content.strip().lower()
+
+                        if guess in acceptable_answers:
+                            has_guessed = True
+                        else:
+                            attempt += 1
+                            await utils.Embeds.send_error_embed(ctx.channel, ctx.author, f'Incorrect! it is not `{guess}`.')
+                    await utils.Embeds.send_success_embed(
+                        ctx.channel,
+                        ctx.author,
+                        f'Congratulations! You guessed the song correctly: **{song_data.get("name", "Unknown Title")}** in {attempt} attempt(s)!'
+                    )
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+                    self.handle_user_done_heardle(ctx.author.id)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
