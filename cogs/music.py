@@ -1526,7 +1526,7 @@ class Music(commands.Cog, name="Music"):
                 await message.add_reaction("👎")
 
     @commands.command(name="hcc")
-    @commands.check_any(commands.has_permissions(manage_guild=True), can_test)
+    @commands.check_any(commands.has_permissions(manage_guild=True), commands.check(can_test))
     async def heardleclearcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
 
