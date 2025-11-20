@@ -1213,20 +1213,14 @@ class Music(commands.Cog, name="Music"):
 
                 data = await response.json()
 
-                count = data.get('count', 0)
+                results = data.get("results", [])
+                count = data.get("count", 0)
+
                 if count == 0:
                     await utils.Embeds.send_warning_embed(
                         ctx.channel,
                         ctx.author,
                         "No results found for your query."
-                    )
-                    return
-                
-                if count > MAX_SEARCH_COUNT:
-                    await utils.Embeds.send_warning_embed(
-                        ctx.channel,
-                        ctx.author,
-                        f"Your query returned too many results ({count}). Please be more specific."
                     )
                     return
                 
@@ -1248,7 +1242,7 @@ class Music(commands.Cog, name="Music"):
                             if title != main_title:
                                 titles.append(f"**{title}**")
 
-                        com_names = "\n".join(titles)
+                        com_names = ", ".join(titles)
 
                         title = "\n".join(song.get("track_titles", []))
                         producers = song.get('producers')
@@ -1414,31 +1408,53 @@ class Music(commands.Cog, name="Music"):
                         return int(float(duration))
                     except:
                         return -1
-    
+
                 if count != 1:
+                    options = []
+                    bullshit_map = {}
+
+                    sorted_songs = sorted(results, key=lambda s: (s.get("track_titles") or ["Untitled"])[0].lower())
+
+                    for song in sorted_songs[:25]:
+
+                        track_titles = song.get("track_titles", [])
+
+                        first_track = track_titles[0] if track_titles else "Untitled"
+                        aliases = track_titles[1:]
+
+                        if aliases:
+                            label = f"{first_track} ({', '.join(aliases)})"
+                        else:
+                            label = first_track
+
+                        if len(label) > 100:
+                            label = label[:97] + "..."
+
+                        song_id = str(song["id"])
+
+                        options.append(discord.SelectOption(label=label, value=song_id))
+                        bullshit_map[song_id] = [(None, song)]
+
                     class SongSelect(discord.ui.Select):
-                        def __init__(self, bot, songs, author):
-                            self.bot = bot
-                            self.songs = songs
-                            self.author = author
-                            options = [discord.SelectOption(label=song['name'], description=f"{song['era']['description']}") for song in songs]
+                        def __init__(self, options, annoying_dogshit):
+                            self.bullshit_map = annoying_dogshit
                             super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
 
                         async def callback(self, interaction: discord.Interaction):
-                            selected_song_data = next((song for song in self.songs if song['name'] == self.values[0]), None)
-                            if selected_song_data:
-                                downloads = await checkFileName(selected_song_data)
-                                view.message = await interaction.response.edit_message(embed=None, view=InformationView(selected_song_data, downloads))
+                            song_id = self.values[0]
+                            song = self.bullshit_map[song_id][0][1]
+                            downloads = await checkFileName(song)
+                            view = InformationView(song, downloads)
+                            return await interaction.response.edit_message(embed=None, view=view)
 
-                    menu = SongSelect(self.bot, results, ctx.author)
-                    view = discord.ui.View(timeout=120)
-                    view.add_item(menu)
-                    await ctx.reply("Please select a song:", view=view)    
-                    
+                    view = discord.ui.View(timeout=None)
+                    view.add_item(SongSelect(options, bullshit_map))
+
+                    embed = discord.Embed(description=f"{ctx.author.mention}: Multiple **selections** found with your **search**")
+                    return await ctx.reply(embed=embed, view=view)
                 else:
-                    song = results[0]
-                    downloads = await checkFileName(song)
-                    await ctx.reply(view=InformationView(song, downloads))
+                    downloads = await checkFileName(results[0])
+                    await ctx.reply(view=InformationView(results[0], downloads))
 
     @commands.command(aliases=['rleak'], description="Get a random Juice WRLD leak")
     async def randomleak(self, ctx: commands.Context) -> None:
