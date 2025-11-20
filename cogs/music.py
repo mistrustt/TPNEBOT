@@ -1247,10 +1247,11 @@ class Music(commands.Cog, name="Music"):
 
                     era = song_data.get('era', {})
                     era_name = era.get('name', 'Unknown Era')
+                    era_description = era.get('description', '')
                     era_id = era.get('id', 0)
                     embed.add_field(
                         name='Era',
-                        value=era_name,
+                        value=f'{era_description} ({era_name})',
                         inline=False
                     )
 
@@ -1396,6 +1397,7 @@ class Music(commands.Cog, name="Music"):
                 era = song_data.get('era', {})
                 era_id = era.get('id', 0)
                 era_name = era.get('name', 'Unknown Era')
+                era_description = era.get('description', '')
                 alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
                 image_url = song_data.get('image_url', '')
                 producers = song_data.get('producers', "N/A")
@@ -1427,7 +1429,7 @@ class Music(commands.Cog, name="Music"):
 
                 embed.add_field(
                     name='Era',
-                    value=era_name,
+                    value=f'{era_description} ({era_name})',
                     inline=False
                 )
                 embed.add_field(
