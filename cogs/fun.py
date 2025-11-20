@@ -593,7 +593,11 @@ class Fun(commands.Cog, name="Fun"):
         nickname_duration = random.randint(300, 3600)  # 5 minutes to 1 hour
         
         nickname_list = [
-            "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", # we can add more later
+            "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", "Envy is a Chud",
+            "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
+            "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
+            "Albo", "gummy", "d4vd", "P Diddy",  # if you have something funny then add it pls,
+                                                # not you though envy you're a fkn chud AF
         ]
         chosen_nickname = random.choice(nickname_list)
 
