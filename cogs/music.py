@@ -63,8 +63,11 @@ class Music(commands.Cog, name="Music"):
             1095747082599530627 # ENVY
         ]
 
-    def can_test(ctx: commands.Context):
-        return ctx.author.id in self.testing_ids or ctx.author.guild_permissions.manage_guild
+    def can_test(ctx: commands.Context, cog=None):
+        if cog is None:
+            cog = ctx.cog
+
+        return ctx.author.id in cog.testing_ids or ctx.author.guild_permissions.manage_guild
 
     def assert_download_cache(self):
         if not os.path.exists(DOWNLOAD_CACHE_FOLDER_NAME):
