@@ -1699,7 +1699,7 @@ class Music(commands.Cog, name="Music"):
                         final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
                         message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have 50 seconds to guess. Here's your clip:", file=discord.File(output_path), delete_after=30)
                         
-                        utils.Embeds.send_info_embed(
+                        await utils.Embeds.send_info_embed(
                             ctx.channel,
                             ctx.author,
                             f"Please reply to the message above to guess the song title or type `exit` to quit the game.",
