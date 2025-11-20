@@ -1453,7 +1453,7 @@ class Music(commands.Cog, name="Music"):
                 await message.add_reaction("👎")
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
-    @commands.can_test()
+    @commands.check(can_test)
     async def heardle(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_heardle:
             await utils.Embeds.send_warning_embed(
