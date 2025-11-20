@@ -1234,7 +1234,6 @@ class Music(commands.Cog, name="Music"):
 
                 class Information(discord.ui.Container):
                     def __init__(self, song: dict, downloads = None):
-                        super().__init__(accent_color=0x2B2D31)
                         all_titles = song.get('track_titles', [])
 
                         titles = []
@@ -1275,10 +1274,45 @@ class Music(commands.Cog, name="Music"):
                         era = song.get('era', {})
                         era_name = era.get('name', 'Unknown Era')
 
+                        albums = {
+                            "JUTE": {"name": "JUICED UP THE EP", "color": "#FFE602"},
+                            "LND": {"name": "Legends Never Die", "color": "#F700FF"},
+                            "AFF": {"name": "affliction", "color": "#000000"},
+                            "HIH 9 9 9": {"name": "Heartbroken In Hollywood 9 9 9", "color": "#FF653E"},
+                            "JW 9 9 9": {"name": "JuiceWRLD 9 9 9", "color": "#FF2C2C"},
+                            "ND </3": {"name": "NOTHING'S DIFFERENT </3", "color": "#FF8800"},
+                            "GB&GR": {"name": "Goodbye & Good Riddance", "color": "#008CFF"},
+                            "GB&GR (AE)": {"name": "Goodbye & Good Riddance (Anniversary Edition)", "color": "#008CFF"},
+                            "GB&GR (5YAE)": {"name": "Goodbye & Good Riddance (5 Year Anniversary Edition)", "color": "#008CFF"},
+                            "WOD": {"name": "WRLD ON DRUGS", "color": "#00FF94"},
+                            "DRFL": {"name": "Death Race For Love", "color": "#FF9900"},
+                            "DRFL (BTV)": {"name": "Death Race For Love (Bonus Track Version)", "color": "#FF9900"},
+                            "OUT": {"name": "Outsiders", "color": "#2B2B2B"},
+                            "POST": {"name": "Posthumous", "color": "#00CCFF"},
+                            "TPP": {"name": "The Pre-Party", "color": "#EA00FF"},
+                            "TPP (EE)": {"name": "The Pre-Party (Extended Edition)", "color": "#EA00FF"},
+                            "FD": {"name": "Fighting Demons", "color": "#2E2E2E"},
+                            "FD (CE)": {"name": "Fighting Demons (Complete Edition)", "color": "#2E2E2E"},
+                            "FD (EE)": {"name": "Fighting Demons (Extended Edition)", "color": "#2E2E2E"},
+                            "FD (DDE)": {"name": "Fighting Demons (Digital Deluxe Edition)", "color": "#2E2E2E"},
+                            "TPNE": {"name": "The Party Never Ends", "color": "#CC00FF"},
+                        }
+
+                        def getAlbum(era: str):
+                            album = albums.get(era)
+                            if album is None:
+                                return None, era
+                            return album["color"], album["name"]
+
+                        color, era_formatted = getAlbum(era_name)
+
+                        accent_color = int(color.lstrip("#"), 16) if color else 0x2B2D31
+                        super().__init__(accent_color=accent_color)
+
                         if not era:
-                            Thumb.add_item(discord.ui.TextDisplay(f"**Project**\n{era_name}"))
+                            Thumb.add_item(discord.ui.TextDisplay(f"**Project**\n{era_formatted}"))
                         else:
-                            Thumb.add_item(discord.ui.TextDisplay(f"**Era**\n{era_name}"))
+                            Thumb.add_item(discord.ui.TextDisplay(f"**Era**\n{era_formatted}"))
 
                         FileName = discord.ui.TextDisplay(f"**File Name**\n{fileName}")
                         SessionTitle = discord.ui.TextDisplay(f"**Session Title**\n{sessionTitle}")
