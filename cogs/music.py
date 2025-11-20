@@ -1213,149 +1213,196 @@ class Music(commands.Cog, name="Music"):
 
                 count = data.get('count', 0)
                 if count == 0:
-                    await utils.Embeds.send_warning_embed(
-                        ctx.channel,
-                        ctx.author,
-                        "No results found for your query."
-                    )
                     return
                 
                 if count > MAX_SEARCH_COUNT:
-                    await utils.Embeds.send_warning_embed(
-                        ctx.channel,
-                        ctx.author,
-                        f"Your query returned too many results ({count}). Please be more specific."
-                    )
                     return
                 
-                def make_embed(song_data, author: discord.User, current_view=None):
-                    song_name = song_data.get('name', None)
-                    file_names = song_data.get('file_names', 'No file names available.')
-                    if not song_name:
-                        return discord.Embed(
-                            description="Song data is incomplete.",
-                            color=discord.Color.red()
-                        )
+                class InformationView(discord.ui.LayoutView):
+                    def __init__(self, song: dict, downloads = None):
+                        super().__init__(timeout=None)
+                        self.persistent = True
+                        self.container = Information(song, downloads)
+                        self.add_item(self.container)
 
-                    embed = discord.Embed(
-                        title=f'**{song_name}**',
-                        color=discord.Color.blue(),
-                        description="File name: " + file_names
-                    )
-                    embed.set_author(name=f'{author.display_name} - Juice WRLD Leak Search Result', icon_url=author.display_avatar.url)
+                class Information(discord.ui.Container):
+                    def __init__(self, song: dict, downloads = None):
+                        super().__init__(accent_color=0x2B2D31)
+                        all_titles = song.get('track_titles', [])
 
-                    alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
-                    if len(alt_names) > 0:
-                        embed.add_field(
-                            name='Alternative Name(s)',
-                            value=', '.join(alt_names) if alt_names else 'N/A',
-                            inline=False
-                            )
+                        titles = []
+                        main_title = song.get('name')
+                        for title in all_titles:
+                            if title != main_title:
+                                titles.append(f"**{title}**")
+
+                        com_names = "\n".join(titles)
+
+                        title = "\n".join(song.get("track_titles", []))
+                        producers = song.get('producers')
+                        engineers = song.get('engineers')
+                        era = song.get('era')
+                        fileName = song.get('file_names')
+                        sessionTitle = song.get('session_titles')
+                        sessionTrack = song.get('session_tracking')
+                        album = song.get('project')
+                        instrumentals = song.get('instrumentals')
+                        location = song.get('recording_locations')
+                        recorded = song.get('record_dates').replace("Recorded", "").strip() if song.get('record_dates') else None
+                        previewed = song.get('preview_date').replace("First Previewed", "").strip() if song.get('preview_date') else None
+                        surfaced = song.get('dates').replace("Surfaced", "").strip() if song.get('dates') else None
+                        released = song.get('release_date').replace("Released", "").strip() if song.get('release_date') else None
+                        length = song.get('length')
+                        category = song.get('leak_type')
+                        image_url = song.get('image_url')
+                        # bitrate = song.get('_3')
+
+                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Spreadsheet", url="https://docs.google.com/spreadsheets/d/1sEGQ3fdYwNriE9YDJX2qMXb0SRFJDutEGLQIYQMP2O0/edit?gid=0#gid=0"))
+                        Header.add_item(discord.ui.TextDisplay(f"### {main_title}\n{com_names}"))
+
+                        Separate = discord.ui.Separator()
                         
-                    leak_type = song_data.get('leak_type', "Unknown Leak Type").replace("\n", " ")
-                    embed.add_field(
-                        name='Leak Type',
-                        value=leak_type,
-                        inline=False
-                    )
+                        Thumb = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
+                        Thumb.add_item(discord.ui.TextDisplay(f"Producer(s): **{producers}**\nEngineer(s): **{engineers}**"))
 
-                    era = song_data.get('era', {})
-                    era_name = era.get('name', 'Unknown Era')
-                    era_description = era.get('description', '')
-                    era_id = era.get('id', 0)
-                    embed.add_field(
-                        name='Era',
-                        value=f'{era_description} ({era_name})',
-                        inline=False
-                    )
+                        era = song.get('era', {})
+                        era_name = era.get('name', 'Unknown Era')
 
-                    producers = song_data.get('producers', "N/A")
-                    embed.add_field(
-                        name='Producer(s)',
-                        value=producers,
-                        inline=False
-                    )
+                        if not era:
+                            Thumb.add_item(discord.ui.TextDisplay(f"**Project**\n{era_name}"))
+                        else:
+                            Thumb.add_item(discord.ui.TextDisplay(f"**Era**\n{era_name}"))
 
-                    engineers = song_data.get('engineers', "N/A")
-                    embed.add_field(
-                        name='Engineer(s)',
-                        value=engineers,
-                        inline=False
-                    )
+                        FileName = discord.ui.TextDisplay(f"**File Name**\n{fileName}")
+                        SessionTitle = discord.ui.TextDisplay(f"**Session Title**\n{sessionTitle}")
+                        SessionTrack = discord.ui.TextDisplay(f"**Session Tracking**\n{sessionTrack}")
+                        Instrumental = discord.ui.TextDisplay(f"**Instrumentals**\n{instrumentals}")
+                        Location = discord.ui.TextDisplay(f"**Recording Location**\n{location}")
+                        Recorded = discord.ui.TextDisplay(f"**Recorded**\n{recorded}")
+                        Previewed = discord.ui.TextDisplay(f"**Previewed**\n{previewed}")
+                        Surfaced = discord.ui.TextDisplay(f"**Surfaced**\n{surfaced}")
+                        Released = discord.ui.TextDisplay(f"**Released**\n{released}")
+                        Length = discord.ui.TextDisplay(f"**Length**\n{length}")
+                        Category = discord.ui.TextDisplay(f"**Category**\n{category}")
+                        # Bitrate = discord.ui.TextDisplay(f"**True Bitrate**\n{bitrate}")
 
-                    color = self.album_colors.get(era_id, "#FFFFFF")
-                    color_int = int(color.replace("#", "0x"), 16)
-                    embed.color = discord.Color(value=color_int)
+                        self.add_item(Header)
+                        self.add_item(Separate)
+                        self.add_item(Thumb)
 
-                    preview_date = song_data.get('preview_date', '')
-                    if len(preview_date) == 0:
-                        preview_date = "No preview date available."
+                        if fileName and "N/A" not in str(fileName):
+                            self.add_item(FileName)
+                        if sessionTitle and "N/A" not in str(sessionTitle):
+                            self.add_item(SessionTitle)
+                        if sessionTrack and "N/A" not in str(sessionTrack):
+                            self.add_item(SessionTrack)
+                        if instrumentals and "N/A" not in str(instrumentals):
+                            self.add_item(Instrumental)
+                        if location:
+                            self.add_item(Location)
+                        if recorded:
+                            self.add_item(Recorded)
+                        if previewed:
+                            self.add_item(Previewed)
+                        if surfaced:
+                            self.add_item(Surfaced)
+                        if released:
+                            self.add_item(Released)
+                        if length:
+                            self.add_item(Length)
+                        if category:
+                            self.add_item(Category)
+                        # if bitrate and "Unavailable" not in bitrate:
+                        #     self.add_item(Bitrate)
 
-                    embed.add_field(
-                        name='Preview Date',
-                        value=preview_date,
-                        inline=False
-                    )
+                        if downloads:
+                            main = "https://juicewrldapi.com/juicewrld/files/download/?path="
+                            action_rows = []
+                            current_row = discord.ui.ActionRow()
 
-                    release_date = song_data.get('release_date', '')
-                    if len(release_date) > 0:
-                        embed.add_field(
-                            name='Release Date',
-                            value=release_date,
-                            inline=False
-                        )
-                    
-                    surface_date = song_data.get('surface_date', '')
-                    if len(surface_date) > 0:
-                        embed.add_field(
-                            name='Surface Date',
-                            value=surface_date,
-                            inline=False
-                        )
+                            if length:
+                                target_seconds = duration_to_seconds(length)
 
-                    image_url = song_data.get('image_url', '')
-                    if len(image_url) > 0:
-                        embed.set_thumbnail(url=JUICEWRLD_API + image_url)
+                                for i, file in enumerate(downloads):
+                                    file_duration = duration_to_seconds(file.get("duration", "0"))
 
-                    length = song_data.get('length', 0)
-                    if len(length) > 0:
-                        embed.add_field(
-                            name='Length',
-                            value=f"{length}",
-                            inline=False
-                        )
+                                    if fileName and "N/A" not in fileName:
+                                        if "Unreleased Discography" in file.get('path', ''):
+                                            continue
+                                    else:
+                                        if "Original Files" in file.get('path', ''):
+                                            continue
 
-                    class SongView(discord.ui.View):
-                        def __init__(self, download_url):
-                            super().__init__()
-                            self.add_item(discord.ui.Button(label="Download", url=download_url))
+                                    if abs(file_duration - target_seconds) > 1:
+                                        continue
 
-                    # TODO: FOR SOME REASON API DOESNT RETURN THE FUKN PATH WTF???
-                    path = song_data.get('path', '')
-                    last_slash_index = path.rfind('/')
-                    file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
-                    path = path[:last_slash_index] if last_slash_index != -1 else path
+                                    path = file["path"]
+                                    ext = path.split('.')[-1].upper()
+                                    encoded_path = quote(path)
+                                    url = main + encoded_path
+                                    button = discord.ui.Button(label=ext, url=url)
+                                    current_row.add_item(button)
 
-                    download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
-                    if current_view:
-                        found = False
-                        for item in current_view.children:
-                            if isinstance(item, discord.ui.Button):
-                                item.url = download_url
-                                found = True
-                                break
+                                    if (i + 1) % 5 == 0:
+                                        action_rows.append(current_row)
+                                        current_row = discord.ui.ActionRow()
 
-                        if not found:
-                            current_view.add_item(discord.ui.Button(label="Download", url=download_url))
-                        
-                        return embed, current_view
-                        
-                    view = SongView(download_url)
-                    return embed, view
-                    
+                                if len(current_row.children) > 0:
+                                    action_rows.append(current_row)
+
+                                for row in action_rows:
+                                    self.add_item(row)
 
                 results = data.get('results', [])
                 song = None
+                def extract_file_name(text: str) -> str | None:
+                    match = re.search(r"File Name:\s*(.+?)(?:\n|$)", text)
+                    return match.group(1).strip() if match else None
+
+                async def checkFileName(song: dict):
+                    fileName = song.get('file_names')
+                    if "File Name:" in fileName:
+                        fileName = extract_file_name(fileName)
+                    if fileName == "N/A" or not fileName:
+                        fileNames = song.get('track_titles', [])
+                        fileName = str(fileNames[0]).replace('*', '')
+                    fileName += "."
+                    downloads = await request_filename(fileName)
+                    return downloads if downloads else None
+
+                async def request_filename(filename: str) -> list[dict[str, str]] | None:
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(f"https://juicewrldapi.com/juicewrld/files/browse/?search={filename}") as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    
+                                    paths = []
+                                    for item in data.get('items', []):
+                                        path = item.get('path')
+                                        duration = item.get('duration')
+                                        if path and duration:
+                                            paths.append({'path': path, 'duration': duration})
+                                    return paths
+                                else:
+                                    return None
+                    except Exception:
+                        return None
+
+                def duration_to_seconds(duration: str) -> int:
+                    if ":" in duration:
+                        parts = duration.strip().split(":")
+                        if len(parts) == 2:
+                            minutes, seconds = map(int, parts)
+                            return minutes * 60 + seconds
+                        elif len(parts) == 3:
+                            hours, minutes, seconds = map(int, parts)
+                            return hours * 3600 + minutes * 60 + seconds
+                    try:
+                        return int(float(duration))
+                    except:
+                        return -1
+    
                 if count != 1:
                     class SongSelect(discord.ui.Select):
                         def __init__(self, bot, songs, author):
@@ -1368,9 +1415,8 @@ class Music(commands.Cog, name="Music"):
                         async def callback(self, interaction: discord.Interaction):
                             selected_song_data = next((song for song in self.songs if song['name'] == self.values[0]), None)
                             if selected_song_data:
-                                embed, new_view = make_embed(selected_song_data, self.author, view)
-                                print(new_view)
-                                view.message = await interaction.response.edit_message(content="", embed=embed, view=view)
+                                downloads = await checkFileName(selected_song_data)
+                                view.message = await interaction.response.edit_message(embed=None, view=InformationView(selected_song_data, downloads))
 
                     menu = SongSelect(self.bot, results, ctx.author)
                     view = discord.ui.View(timeout=120)
@@ -1379,8 +1425,8 @@ class Music(commands.Cog, name="Music"):
                     
                 else:
                     song = results[0]
-                    embed, view = make_embed(song, ctx.author)
-                    await ctx.reply(embed=embed, view=view)
+                    downloads = await checkFileName(song)
+                    await ctx.reply(view=InformationView(song, downloads))
 
     @commands.command(aliases=['rleak'], description="Get a random Juice WRLD leak")
     async def randomleak(self, ctx: commands.Context) -> None:
