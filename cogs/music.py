@@ -1246,7 +1246,8 @@ class Music(commands.Cog, name="Music"):
                         bitrate = song.get('bitrate')
 
                         Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", url="https://juicewrldapi.com/"))
-                        Header.add_item(discord.ui.TextDisplay(f"### {name}\n{", ".join([t for t in song.get('track_titles', []) if t != name])}"))
+                        track_titles = [t for t in song.get('track_titles', []) if t != name]
+                        Header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
 
                         Separate = discord.ui.Separator()
                         
