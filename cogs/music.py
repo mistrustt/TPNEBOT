@@ -21,6 +21,7 @@ logger = logging.getLogger("discord_bot")
 JUICEWRLD_API = 'https://juicewrldapi.com'
 MAX_SEARCH_COUNT = 10 # Max number of search results for user to choose from. If more than this command fails
 DOWNLOAD_CACHE_FOLDER_NAME = '__download_cache'
+HEARDLE_GAME_DURATION = 20
 HEARDLE_CLIP_DURATION = 10
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 class Music(commands.Cog, name="Music"):
@@ -1737,13 +1738,12 @@ class Music(commands.Cog, name="Music"):
                         final_clip.duration = duration
                         final_clip.fps = 1
                         final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
-                        message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have 50 seconds to guess. Here's your clip:", file=discord.File(output_path))
+                        message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have {HEARDLE_GAME_DURATION} seconds to guess. Here's your clip:", file=discord.File(output_path))
                         
                         await utils.Embeds.send_info_embed(
                             ctx.channel,
                             ctx.author,
                             f"Please reply to the message above to guess the song title or type `exit` to quit the game.",
-                            delete_after=10
                         )
 
                         while has_guessed == False:
@@ -1755,7 +1755,7 @@ class Music(commands.Cog, name="Music"):
                                 )
                             
                             try:
-                                guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=50)
+                                guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=HEARDLE_GAME_DURATION)
                             except TimeoutError:
                                 await utils.Embeds.send_warning_embed(
                                     ctx.channel,
