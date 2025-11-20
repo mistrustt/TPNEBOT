@@ -1268,7 +1268,7 @@ class Music(commands.Cog, name="Music"):
                         image_url = song.get('image_url')
                         # bitrate = song.get('_3')
 
-                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Spreadsheet", url="https://docs.google.com/spreadsheets/d/1sEGQ3fdYwNriE9YDJX2qMXb0SRFJDutEGLQIYQMP2O0/edit?gid=0#gid=0"))
+                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", url="https://juicewrldapi.com/"))
                         Header.add_item(discord.ui.TextDisplay(f"### {main_title}\n{com_names}"))
 
                         Separate = discord.ui.Separator()
