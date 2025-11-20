@@ -11,6 +11,10 @@ from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
 import utils.embeds as utils
+from itertools import product
+from moviepy import *
+import re
+import random
 
 logger = logging.getLogger("discord_bot")
 
@@ -1472,7 +1476,7 @@ class Music(commands.Cog, name="Music"):
         num_file_deleted = 0
         self.assert_download_cache()
         for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
-            if file.endswith("_heardle.mp3"):
+            if "_heardle" in file:
                 file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
                 try:
                     num_file_deleted += 1
@@ -1485,6 +1489,56 @@ class Music(commands.Cog, name="Music"):
             ctx.author,
             f"Deleted {num_file_deleted} file(s)."
         )
+
+    def get_acceptable_track_names(self, orig_name: str):
+        name = orig_name.lower().strip()
+        
+        def remove_parentheses(s):
+            return re.sub(r'\(.*?\)', '', s).strip()
+        
+        def remove_brackets(s):
+            return re.sub(r'\[.*?\]', '', s).strip()
+        
+        def remove_apostrophes(s):
+            return s.replace("'", "")
+        
+        def apostrophes_to_spaces(s):
+            return s.replace("'", " ")
+        
+        def remove_periods(s):
+            return s.replace(".", "")
+
+        def period_to_spaces(s):
+            return s.replace(".", " ")
+        
+        def remove_commas(s):
+            return s.replace(",", "")
+
+        def comma_to_spaces(s):
+            return s.replace(",", " ")
+
+        transformations = [
+            lambda x: x,
+            remove_parentheses,
+            remove_brackets,
+            remove_apostrophes,
+            #apostrophes_to_spaces,
+            remove_periods,
+            period_to_spaces,
+            remove_commas,
+            #comma_to_spaces
+        ]
+
+        # try all combos
+        results = set()
+        for r in range(1, len(transformations)+1):
+            for combo in product(transformations, repeat=r):
+                temp = name
+                for func in combo:
+                    temp = func(temp)
+                results.add(temp.strip())
+        
+        return sorted(results)
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     @commands.check(can_test)
@@ -1520,9 +1574,10 @@ class Music(commands.Cog, name="Music"):
                     return
                 
                 self.ongoing_heardle.append(ctx.author.id)
-                song_data = data.get('song', {})
+                track_tiles = song_data.get('track_titles', [])
                 path = data.get('path', '')
 
+                # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
                 download_url = f"{JUICEWRLD_API}/juicewrld/files/download/?path={self.special_url_encode(path)}"
                 await ctx.reply(f"Heardle is currently under development. Download the song here: {download_url}")
                 async with session.get(download_url) as download_response:
@@ -1533,11 +1588,44 @@ class Music(commands.Cog, name="Music"):
 
                     self.assert_download_cache()
                     song_bytes = await download_response.read()
-                    temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{ctx.author.id}_heardle.mp3"
+                    temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{ctx.author.id}_mp3_heardle.mp3"
                     with open(temp_file_path, 'wb') as f:
                         f.write(song_bytes)
 
-                    await ctx.reply(file=discord.File(temp_file_path), content="Guess the song! You have 30 seconds to answer.")
+                    image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/temp_image_{ctx.author.id}_heardle.png'
+                    image_url = ctx.author.avatar.url
+                    async with session.get(image_url) as image_response:
+                        if image_response.status == 200:
+                            image_data = await image_response.read()
+                            with open(image_file_name, 'wb') as img_file:
+                                img_file.write(image_data)
+
+                    has_guessed = False
+                    attempt = 1
+
+                    acceptable_answers = []
+                    for title in track_tiles:
+                        acceptable_answers.extend(self.get_acceptable_track_names(title))
+
+                    # TODO: make this a constant
+                    CLIP_DURATION = 10
+
+                    print(f'{ctx.author.mention} (@{ctx.author.name}) is playing Heardle. Answer: {correct_answer}')
+                    orig_clip = AudioFileClip(temp_file_path)
+                    random_start_point = random.randint(0, int(orig_clip.duration) - CLIP_DURATION*2)
+                    duration = CLIP_DURATION
+
+                    orig_clip = AudioFileClip(temp_file_path)
+                    sub_clip = orig_clip.subclipped(random_start_point, random_start_point + duration)
+
+                    final_clip = ImageClip(image_file_name).with_audio(sub_clip)
+
+                    output_path = f"temp/{ctx.author.id}_heardle_attempt{attempt}.mp4"
+                    final_clip.duration = duration
+                    final_clip.fps = 1
+                    final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
+                    message = await ctx.channel.send(f"🎵 {ctx.author.mention}: (this clip is {duration} seconds). Here's your clip:", file=discord.File(output_path), delete_after=30)
+                    
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
