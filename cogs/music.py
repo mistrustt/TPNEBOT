@@ -1200,10 +1200,7 @@ class Music(commands.Cog, name="Music"):
         async with aiohttp.ClientSession() as session:
             async with session.get(f'{JUICEWRLD_API}/juicewrld/songs/?search={self.special_url_encode(query)}') as response:
                 async def handle_request_failed(ctx, code=None):
-                    embed = discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red()
-                    )
+                    embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
                     if code:
                         embed.set_image(url=f"https://http.cat/{code}")
                     await ctx.reply(embed=embed, delete_after=5)
@@ -1218,11 +1215,7 @@ class Music(commands.Cog, name="Music"):
                 count = data.get("count", 0)
 
                 if count == 0:
-                    await utils.Embeds.send_warning_embed(
-                        ctx.channel,
-                        ctx.author,
-                        "No results found for your query."
-                    )
+                    await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f"I couldnt find a song with the name: `{query}`")
                     return
                 
                 class InformationView(discord.ui.LayoutView):
@@ -1234,24 +1227,13 @@ class Music(commands.Cog, name="Music"):
 
                 class Information(discord.ui.Container):
                     def __init__(self, song: dict, downloads = None):
-                        all_titles = song.get('track_titles', [])
-
-                        titles = []
-                        main_title = song.get('name')
-                        for title in all_titles:
-                            if title != main_title:
-                                titles.append(f"**{title}**")
-
-                        com_names = ", ".join(titles)
-
-                        title = "\n".join(song.get("track_titles", []))
+                        name = song.get('name')
                         producers = song.get('producers')
                         engineers = song.get('engineers')
                         era = song.get('era')
                         fileName = song.get('file_names')
                         sessionTitle = song.get('session_titles')
                         sessionTrack = song.get('session_tracking')
-                        album = song.get('project')
                         instrumentals = song.get('instrumentals')
                         location = song.get('recording_locations')
                         recorded = song.get('record_dates').replace("Recorded", "").strip() if song.get('record_dates') else None
@@ -1261,10 +1243,10 @@ class Music(commands.Cog, name="Music"):
                         length = song.get('length')
                         category = song.get('leak_type')
                         image_url = song.get('image_url')
-                        # bitrate = song.get('_3')
+                        bitrate = song.get('bitrate')
 
                         Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", url="https://juicewrldapi.com/"))
-                        Header.add_item(discord.ui.TextDisplay(f"### {main_title}\n{com_names}"))
+                        Header.add_item(discord.ui.TextDisplay(f"### {name}\n{", ".join([t for t in song.get('track_titles', []) if t != name])}"))
 
                         Separate = discord.ui.Separator()
                         
@@ -1272,7 +1254,7 @@ class Music(commands.Cog, name="Music"):
                         Thumb.add_item(discord.ui.TextDisplay(f"Producer(s): **{producers}**\nEngineer(s): **{engineers}**"))
 
                         era = song.get('era', {})
-                        era_name = era.get('name', 'Unknown Era')
+                        era_name = era.get('name', 'N/A')
 
                         albums = {
                             "JUTE": {"name": "JUICED UP THE EP", "color": "#FFE602"},
@@ -1325,7 +1307,7 @@ class Music(commands.Cog, name="Music"):
                         Released = discord.ui.TextDisplay(f"**Released**\n{released}")
                         Length = discord.ui.TextDisplay(f"**Length**\n{length}")
                         Category = discord.ui.TextDisplay(f"**Category**\n{category}")
-                        # Bitrate = discord.ui.TextDisplay(f"**True Bitrate**\n{bitrate}")
+                        Bitrate = discord.ui.TextDisplay(f"**True Bitrate**\n{bitrate}")
 
                         self.add_item(Header)
                         self.add_item(Separate)
@@ -1353,8 +1335,8 @@ class Music(commands.Cog, name="Music"):
                             self.add_item(Length)
                         if category:
                             self.add_item(Category)
-                        # if bitrate and "Unavailable" not in bitrate:
-                        #     self.add_item(Bitrate)
+                        if bitrate and "Unavailable" not in bitrate:
+                            self.add_item(Bitrate)
 
                         if downloads:
                             main = "https://juicewrldapi.com/juicewrld/files/download/?path="
@@ -1395,7 +1377,7 @@ class Music(commands.Cog, name="Music"):
                                     self.add_item(row)
 
                 results = data.get('results', [])
-                song = None
+
                 def extract_file_name(text: str) -> str | None:
                     match = re.search(r"File Name:\s*(.+?)(?:\n|$)", text)
                     return match.group(1).strip() if match else None
