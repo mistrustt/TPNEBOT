@@ -21,6 +21,7 @@ logger = logging.getLogger("discord_bot")
 JUICEWRLD_API = 'https://juicewrldapi.com'
 MAX_SEARCH_COUNT = 10 # Max number of search results for user to choose from. If more than this command fails
 DOWNLOAD_CACHE_FOLDER_NAME = '__download_cache'
+HEARDLE_CLIP_DURATION = 10
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -1680,13 +1681,10 @@ class Music(commands.Cog, name="Music"):
                         for title in track_tiles:
                             acceptable_answers.extend(self.get_acceptable_track_names(title))
 
-                        # TODO: make this a constant
-                        CLIP_DURATION = 10
-
                         #print(f'{ctx.author.mention} (@{ctx.author.name}) is playing Heardle. Answer: {correct_answer}')
                         orig_clip = AudioFileClip(temp_file_path)
-                        random_start_point = random.randint(0, int(orig_clip.duration) - CLIP_DURATION*2)
-                        duration = CLIP_DURATION
+                        random_start_point = random.randint(0, int(orig_clip.duration) - HEARDLE_CLIP_DURATION*2)
+                        duration = HEARDLE_CLIP_DURATION
 
                         orig_clip = AudioFileClip(temp_file_path)
                         sub_clip = orig_clip.subclipped(random_start_point, random_start_point + duration)
@@ -1731,11 +1729,7 @@ class Music(commands.Cog, name="Music"):
                             
                             guess = guess_msg.content.strip().lower()
                             if guess == 'exit':
-                                await utils.Embeds.send_info_embed(
-                                    ctx.channel,
-                                    ctx.author,
-                                    f"You have exited the game. The correct answer was **{song_data.get('name', 'Unknown Title')}**."
-                                )
+                                await ctx.message.add_reaction('👋')
                                 try:
                                     await message.delete()
                                 except:
