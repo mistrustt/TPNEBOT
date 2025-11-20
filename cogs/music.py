@@ -1612,6 +1612,32 @@ class Music(commands.Cog, name="Music"):
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
 
+    @commands.command(aliases=["hstats"])
+    async def heardlestats(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+        
+        embed = discord.Embed(
+            description=f"Heardle Stats for {member.display_name}",
+        )
+        embed.add_field(
+            name="Wins",
+            value=999, # RIP JUICE WRLD
+            inline=True
+        )
+        embed.add_field(
+            name="Losses",
+            value=999, # RIP JUICE WRLD
+            inline=True
+        )
+        embed.add_field(
+            name="W/L Ratio",
+            value=999 / 1400, # shoutout juice wrld x trippie redd freestyle
+            inline=True
+        )
+        embed.set_author(name=member.display_name, icon_url=member.display_icon.url)
+
+        await ctx.reply(embed=embed)
+
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_heardle:
