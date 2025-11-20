@@ -1650,7 +1650,7 @@ class Music(commands.Cog, name="Music"):
                 track_tiles = song_data.get('track_titles', [])
                 path = data.get('path', '')
 
-                async with ctx.channel.typing():
+                async with ctx.typing():
                     # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
                     download_url = f"{JUICEWRLD_API}/juicewrld/files/download/?path={self.special_url_encode(path)}"
                     async with session.get(download_url) as download_response:
