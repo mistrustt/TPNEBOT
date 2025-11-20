@@ -1755,7 +1755,7 @@ class Music(commands.Cog, name="Music"):
                             
                             guess = guess_msg.content.strip().lower()
                             if guess == 'exit':
-                                await ctx.message.add_reaction('👋')
+                                await guess_msg.add_reaction('👋')
                                 try:
                                     await message.delete()
                                 except:
