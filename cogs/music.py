@@ -1636,6 +1636,14 @@ class Music(commands.Cog, name="Music"):
                     os.remove(file_path)
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
+            await confirm_message.edit(
+                embed=discord.Embed(
+                    title="Deletion Complete",
+                    description=f"Deleted {count} file(s) from the download cache.",
+                    color=discord.Color.green()
+                ),
+                view=None
+            )
         else:
             await confirm_message.edit(
                 embed=discord.Embed(
