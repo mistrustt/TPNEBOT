@@ -635,7 +635,7 @@ class Fun(commands.Cog, name="Fun"):
         # }
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_nicknames=True))
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
     async def nicknameroulette(self, ctx: Context):
         """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
         embed = discord.Embed(
