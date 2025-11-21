@@ -569,7 +569,7 @@ class Fun(commands.Cog, name="Fun"):
         await message.add_reaction("⏰")
 
         await asyncio.sleep(15)
-        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 15)
 
         message = await ctx.fetch_message(message.id)
         users = set()
