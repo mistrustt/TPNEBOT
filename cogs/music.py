@@ -1618,7 +1618,6 @@ class Music(commands.Cog, name="Music"):
             @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
             async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
                 self.value = False
-                await interaction.response.send_message("Operation cancelled.", ephemeral=True)
                 self.stop()
 
         confirm_view = ConfirmView(ctx.author.id)
@@ -1637,6 +1636,16 @@ class Music(commands.Cog, name="Music"):
                     os.remove(file_path)
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
+        else:
+            await confirm_message.edit(
+                embed=discord.Embed(
+                    title="Operation Cancelled",
+                    description="No files were deleted from the download cache.",
+                    color=discord.Color.yellow()
+                ),
+                view=None
+            )
+            return
 
     def get_acceptable_track_names(self, orig_name: str):
         name = orig_name.lower().strip()
