@@ -1572,27 +1572,71 @@ class Music(commands.Cog, name="Music"):
                         is_valid = False
                         break
 
-    @commands.command(name="hcc")
+    @commands.command(name="cdc")
     @commands.check_any(commands.is_owner(), commands.check(can_test))
-    async def heardleclearcache(self, ctx: commands.Context):
+    async def cleardownloadcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
 
-        num_file_deleted = 0
+        files = []
         self.assert_download_cache()
         for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
-            if "_heardle" in file:
-                file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
+            file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
+            try:
+                files.append(file_path)
+            except Exception as e:
+                logger.error(f"Error deleting file {file_path}: {e}")
+
+        count = len(files)
+        if count == 0:
+            await utils.Embeds.send_info_embed(
+                ctx.channel,
+                ctx.author,
+                "No files found in the download cache."
+            )
+            return
+
+        class ConfirmView(discord.ui.View):
+            def __init__(self, author_id):
+                super().__init__(timeout=60)
+                self.author_id = author_id
+                self.value = None
+
+            async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message(
+                        "You can't use this.", 
+                        ephemeral=True
+                    )
+                    return False
+                return True
+
+            @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+            async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                self.value = True
+                self.stop()
+
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+            async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                self.value = False
+                await interaction.response.send_message("Operation cancelled.", ephemeral=True)
+                self.stop()
+
+        confirm_view = ConfirmView()
+        confirm_message = await ctx.reply(
+            embed=discord.Embed(
+                title="Confirm Deletion",
+                description=f"Are you sure you want to delete {count} file(s) from the download cache?",
+                color=discord.Color.red()
+            ),
+            view=confirm_view
+        )
+        await confirm_view.wait()
+        if confirm_view.value:
+            for file_path in files:
                 try:
-                    num_file_deleted += 1
                     os.remove(file_path)
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
-
-        await utils.Embeds.send_success_embed(
-            ctx.channel,
-            ctx.author,
-            f"Deleted {num_file_deleted} file(s)."
-        )
 
     def get_acceptable_track_names(self, orig_name: str):
         name = orig_name.lower().strip()
