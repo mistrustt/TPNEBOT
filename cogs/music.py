@@ -23,6 +23,7 @@ MAX_SEARCH_COUNT = 10 # Max number of search results for user to choose from. If
 DOWNLOAD_CACHE_FOLDER_NAME = '__download_cache'
 HEARDLE_GAME_DURATION = 20
 HEARDLE_CLIP_DURATION = 10
+DEFAULT_SNIPPET_DURATION = 15
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -70,6 +71,7 @@ class Music(commands.Cog, name="Music"):
             1219090700407279656 # DUMB IDIOT
         ]
         self.ongoing_heardle = []
+        self.snippet_debounce = {}
 
     def can_test(ctx: commands.Context, cog=None):
         if cog is None:
@@ -1560,6 +1562,16 @@ class Music(commands.Cog, name="Music"):
                 await message.add_reaction("👍")
                 await message.add_reaction("👎")
 
+    def clear_user_cache(self, user_id: int, identifiers: list[str] = []):
+        self.assert_download_cache()
+        for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
+            is_valid = str(user_id) in file
+            if is_valid:
+                for identifier in identifiers:
+                    if identifier.lower() not in file.lower():
+                        is_valid = False
+                        break
+
     @commands.command(name="hcc")
     @commands.check_any(commands.is_owner(), commands.check(can_test))
     async def heardleclearcache(self, ctx: commands.Context):
@@ -1637,14 +1649,40 @@ class Music(commands.Cog, name="Music"):
             self.ongoing_heardle.remove(user_id)
 
         # Delete user related files
-        self.assert_download_cache()
-        for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
-            if f"{user_id}_" in file and "_heardle" in file:
-                file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
-                try:
-                    os.remove(file_path)
-                except Exception as e:
-                    logger.error(f"Error deleting file {file_path}: {e}")
+        self.clear_user_cache(user_id, ["_heardle"])
+    
+    def handle_user_done_snippet(self, user_id: int):
+        self.snippet_debounce[user_id] = False
+
+        # Delete user related files
+        self.clear_user_cache(user_id, ["_snippet"])
+
+    async def make_snippet(self, image_path: str, download_url: str, file_name: str, duration: int, start_point: int = None):
+        async with aiohttp.ClientSession() as session:
+            async with session.get(download_url) as download_response:
+                if download_response.status != 200:
+                    return False, download_response.status
+
+                self.assert_download_cache()
+                song_bytes = await download_response.read()
+                temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{file_name}.mp3"
+                with open(temp_file_path, 'wb') as f:
+                    f.write(song_bytes)
+                
+                orig_clip = AudioFileClip(temp_file_path)
+                if start_point == None:
+                    start_point = random.randint(0, int(orig_clip.duration) - duration*2)
+
+                orig_clip = AudioFileClip(temp_file_path)
+                sub_clip = orig_clip.subclipped(start_point, start_point + duration)
+                final_clip = ImageClip(image_path).with_audio(sub_clip)
+
+                output_path = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{file_name}.mp4"
+                final_clip.duration = duration
+                final_clip.fps = 1
+                final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
+
+                return True, output_path
 
     @commands.command(aliases=["hstats"])
     async def heardlestats(self, ctx: commands.Context, member: discord.Member = None):
@@ -1674,7 +1712,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
-        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.roles.get(1414742766386413590) is None:
+        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.get_role(1414742766386413590) is None:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
@@ -1722,51 +1760,30 @@ class Music(commands.Cog, name="Music"):
                 async with ctx.typing():
                     # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
                     download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
-                    async with session.get(download_url) as download_response:
-                        if download_response.status != 200:
-                            await handle_request_failed(ctx, download_response.status)
-                            self.handle_user_done_heardle(ctx.author.id)
-                            return
+                    image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png'
+                    image_url = ctx.author.display_avatar.url
+                    async with session.get(image_url) as image_response:
+                        if image_response.status == 200:
+                            image_data = await image_response.read()
+                            with open(image_file_name, 'wb') as img_file:
+                                img_file.write(image_data)
 
-                        self.assert_download_cache()
-                        song_bytes = await download_response.read()
-                        temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{ctx.author.id}_mp3_heardle.mp3"
-                        with open(temp_file_path, 'wb') as f:
-                            f.write(song_bytes)
-
-                        image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png'
-                        image_url = ctx.author.display_avatar.url
-                        async with session.get(image_url) as image_response:
-                            if image_response.status == 200:
-                                image_data = await image_response.read()
-                                with open(image_file_name, 'wb') as img_file:
-                                    img_file.write(image_data)
-
-                        acceptable_answers = []
-                        for title in track_tiles:
-                            acceptable_answers.extend(self.get_acceptable_track_names(title))
-
-                        #print(f'{ctx.author.mention} (@{ctx.author.name}) is playing Heardle. Answer: {correct_answer}')
-                        orig_clip = AudioFileClip(temp_file_path)
-                        random_start_point = random.randint(0, int(orig_clip.duration) - HEARDLE_CLIP_DURATION*2)
-                        duration = HEARDLE_CLIP_DURATION
-
-                        orig_clip = AudioFileClip(temp_file_path)
-                        sub_clip = orig_clip.subclipped(random_start_point, random_start_point + duration)
-
-                        final_clip = ImageClip(image_file_name).with_audio(sub_clip)
-
-                        output_path = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_mp4_heardle.mp4"
-                        final_clip.duration = duration
-                        final_clip.fps = 1
-                        final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
-                        embed = discord.Embed(
-                            description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please reply to the message above to guess the song title or type `exit` to quit the game."
-                        )
-                        message = await ctx.channel.send(file=discord.File(output_path), embed=embed)
+                    result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_heardle", HEARDLE_CLIP_DURATION)
+                    if result == False:
+                        await handle_request_failed(ctx, payload)
+                        self.handle_user_done_heardle(ctx.author.id)
+                        return
+                    
+                    embed = discord.Embed(
+                        description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please reply to the message above to guess the song title or type `exit` to quit the game."
+                    )
+                    message = await ctx.channel.send(file=discord.File(payload), embed=embed)
 
                 has_guessed = False
                 attempt = 1
+                acceptable_answers = []
+                for title in track_tiles:
+                    acceptable_answers.extend(self.get_acceptable_track_names(title))
 
                 while has_guessed == False:
                     def check_guess(m):
@@ -1814,6 +1831,78 @@ class Music(commands.Cog, name="Music"):
                     pass
                 self.handle_user_done_heardle(ctx.author.id)
 
+    @commands.command(aliases=["makesnip"])
+    async def makesnippet(self, ctx: commands.Context, *, query: str):
+        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.roles.get(1414742766386413590) is None:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                "Heardle is currently in beta and only available to testers."
+            )
+            return
+    
+        debounce = self.snippet_debounce.get(ctx.author.id, False)
+        if debounce:
+            await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                "Please wait a bit before making another snippet."
+            )
+            return
+        self.snippet_debounce[ctx.author.id] = True
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f'{JUICEWRLD_API}/juicewrld/files/browse/?search={self.special_url_encode(query)}') as response:
+                async def handle_request_failed(ctx, code=None):
+                    embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
+                    if code:
+                        embed.set_image(url=f"https://http.cat/{code}")
+                    await ctx.reply(embed=embed, delete_after=5)
+
+                if response.status != 200:
+                    await handle_request_failed(ctx, response.status)
+                    self.handle_user_done_snippet(ctx.author.id)
+                    return
+
+                data = await response.json()
+
+                items = data.get("items", [])
+                safe_items = []
+                for item in items:
+                    mime_type = item.get('mime_type', None)
+                    if mime_type.startswith('audio/'):
+                        safe_items.append(item)
+                        
+                count = len(safe_items)
+
+                if count == 0:
+                    await utils.Embeds.send_error_embed(ctx.channel, ctx.author, f"I couldnt find a song with the name: `{query}`")
+                    self.handle_user_done_snippet(ctx.author.id)
+                    return
+                if count > 1:
+                    await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f"Multiple songs found with the name: `{query}`. Defaulting to first song.")
+                    
+                song = safe_items[0]
+                path = song.get("path", "")
+                download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
+
+                # TODO: Make the image something else
+                image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_snippet.png'
+                image_url = ctx.author.display_avatar.url
+                async with session.get(image_url) as image_response:
+                    if image_response.status == 200:
+                        image_data = await image_response.read()
+                        with open(image_file_name, 'wb') as img_file:
+                            img_file.write(image_data)
+
+                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_heardle", HEARDLE_CLIP_DURATION)
+                if result == False:
+                    await handle_request_failed(ctx, payload)
+                    self.handle_user_done_snippet(ctx.author.id)
+                    return
+                
+                message = await ctx.channel.send(file=discord.File(payload))
+                self.handle_user_done_snippet(ctx.author.id)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
