@@ -13,20 +13,33 @@ from utils.misc import MiscUtils
 
 logger = logging.getLogger("discord_bot")
 
-def nickroulette_whitelist():
-    """Check if user has manage_nicknames permission or is whitelisted for using the nick roulette command."""
-    async def predicate(ctx: Context):
-        whitelisted_users = [1219090700407279656, 1095747082599530627]
-        if ctx.author.id in whitelisted_users:
-            return True
-        return ctx.author.guild_permissions.manage_nicknames
-    return commands.check(predicate)
+JAIL_ROLE_ID = 1276782857590935583
 
 class Fun(commands.Cog, name="Fun"):
 
     def __init__(self, bot) -> None:
         self.bot = bot
         self.utils = MiscUtils(self)
+        self.cool_commands_whitelist = [
+            1219090700407279656, # TOXIC
+            1095747082599530627 # THE KING AKA GOAT AKA ENVY
+        ]
+        self.nickname_list = [
+            "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", "Envy is a Chud",
+            "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
+            "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
+            "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
+            "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69" # <-- only good envy contribution to the list
+                                                                
+                                                                # if you have something funny then add it pls,
+                                                                # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
+        ]
+
+    def is_cool(ctx: commands.Context, cog = None):
+        if not cog:
+            cog = ctx.cog
+
+        return ctx.author.id in cog.cool_commands_whitelist
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -555,9 +568,31 @@ class Fun(commands.Cog, name="Fun"):
         
         await ctx.send(embed=embed)
 
+    @commands.command(aliases=["rnick"], help="Gives a random nickname to a user")
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_nicknames=True))
+    async def rnick(self, ctx: Context, member: discord.Member=None):
+        if member is None:
+            member = ctx.author
+
+        chosen_nickname = random.choice(self.nickname_list)
+
+        await member.edit(nick=chosen_nickname, reason="Random Nickname Command")
+        embed = discord.Embed(
+            title="Random Nickname",
+            description=f"{member.mention}'s nickname has been changed to '{chosen_nickname}'!",
+            color=discord.Color.green()
+        )
+
+        # TODO: maybe force if eli allows it or wtv
+        # self.bot.nickname_force[victim.id] = {
+        #     'nickname': chosen_nickname,
+        #     'original_nickname': original_nickname,
+        #     'end_time': end_time,
+        #     'guild_id': ctx.guild.id
+        # }
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
-    @nickroulette_whitelist()
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_nicknames=True))
     async def nicknameroulette(self, ctx: Context):
         """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
         embed = discord.Embed(
@@ -601,26 +636,15 @@ class Fun(commands.Cog, name="Fun"):
             return
 
         nickname_duration = random.randint(300, 3600)  # 5 minutes to 1 hour
-        
-        nickname_list = [
-            "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", "Envy is a Chud",
-            "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
-            "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
-            "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
-            "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69" # <-- only good envy contribution to the list
-                                                                
-                                                                # if you have something funny then add it pls,
-                                                                # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
-        ]
-        
+                
         if not hasattr(self.bot, 'recent_nicknames'):
             self.bot.recent_nicknames = []
         
-        available_nicknames = [nick for nick in nickname_list if nick not in self.bot.recent_nicknames]
+        available_nicknames = [nick for nick in self.nickname_list if nick not in self.bot.recent_nicknames]
         
         if not available_nicknames:
             self.bot.recent_nicknames = []
-            available_nicknames = nickname_list
+            available_nicknames = self.nickname_list
         
         chosen_nickname = random.choice(available_nicknames)
         
@@ -659,6 +683,126 @@ class Fun(commands.Cog, name="Fun"):
             embed = discord.Embed(
                 title="Nickname Roulette",
                 description=f"Failed to change nickname for {victim.mention}: {str(e)}",
+                color=discord.Color.red()
+            )
+        
+        await ctx.send(embed=embed)
+
+    @commands.command(name="jailrouletteundo", aliases=["jru"], help="Unjails a user but u have to be in the array of cool peopl")
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_messages=True))
+    async def jailrouletteundo(self, ctx: Context, member: discord.Member):
+        """Unjails a user from Jail Roulette."""
+        jail_role = ctx.guild.get_role(JAIL_ROLE_ID)
+        if not jail_role:
+            embed = discord.Embed(
+                title="Jail Roulette Undo",
+                description="Jail role not found in the guild.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if jail_role not in member.roles:
+            embed = discord.Embed(
+                title="Jail Roulette Undo",
+                description=f"{member.mention} is not jailed.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
+
+        try:
+            await member.remove_roles(jail_role, reason="Unjailed from Jail Roulette Undo")
+            embed = discord.Embed(
+                title="Jail Roulette Undo",
+                description=f"{member.mention} has been unjailed!",
+                color=discord.Color.green()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="Jail Roulette Undo",
+                description=f"Could not unjail {member.mention}, I don't have permission!",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="Jail Roulette Undo",
+                description=f"Failed to unjail {member.mention}: {str(e)}",
+                color=discord.Color.red()
+            )
+
+        await ctx.send(embed=embed)
+
+    @commands.command(name="jailroulette", aliases=["jr"], help="Play a game of jail roulette")
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_messages=True))
+    async def jailroulette(self, ctx: Context):
+        """Play a game of jail roulette. Players react to join the game and one player is randomly selected to get jailed."""
+        embed = discord.Embed(
+            title="Jail Roulette",
+            description="React with 👮 to join the game! You have 15 seconds.",
+            color=discord.Color.blurple()
+        )
+        message = await ctx.reply(embed=embed)
+        await message.add_reaction("👮")
+        await asyncio.sleep(15)
+        await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 15)
+
+        message = await ctx.fetch_message(message.id)
+        users = set()
+        for reaction in message.reactions:
+            if str(reaction.emoji) == "👮":
+                async for user in reaction.users():
+                    if not user.bot:
+                        users.add(user)
+
+        if len(users) < 2:
+            embed = discord.Embed(
+                title="Jail Roulette",
+                description="Not enough players joined the game. Need at least 2 players.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+
+        nickname_user = random.choice(list(users))
+
+        victim = await ctx.guild.fetch_member(nickname_user.id)
+        if not victim:
+            embed = discord.Embed(
+                title="Jail Roulette",
+                description="Could not find the selected user in the guild.",
+                color=discord.Color.red()
+            )
+            await message.edit(embed=embed)
+            return
+                        
+        try:
+            jail_role = ctx.guild.get_role(JAIL_ROLE_ID)
+            if not jail_role:
+                embed = discord.Embed(
+                    title="Jail Roulette",
+                    description="Jail role not found in the guild.",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                return
+            await victim.add_roles(jail_role, reason="Lost Jail Roulette")
+            
+            embed = discord.Embed(
+                title="Jail Roulette",
+                description=f"{victim.mention} has been jailed 👮",
+                color=discord.Color.orange()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="Jail Roulette",
+                description=f"{victim.mention} would have gotten a nickname, but I don't have permission! 👮",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="Jail Roulette",
+                description=f"Failed to jail {victim.mention}: {str(e)}",
                 color=discord.Color.red()
             )
         
