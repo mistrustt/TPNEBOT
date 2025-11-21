@@ -1975,42 +1975,6 @@ class Music(commands.Cog, name="Music"):
                 message = await ctx.channel.send(file=discord.File(payload))
                 self.handle_user_done_snippet(ctx.author.id)
 
-    @commands.command("ogfiles")
-    async def ogfiles(self, ctx: Context):
-        if ctx.author.id != 1382196396190470215:
-            return
-        
-        class InformationView(discord.ui.LayoutView):
-            def __init__(self):
-                super().__init__(timeout=None)
-                self.persistent = True
-                self.container = Information()
-                self.add_item(self.container)
-
-        class Information(discord.ui.Container):
-            def __init__(self):
-                super().__init__(accent_color=0x2B2D31)
-
-                self.add_item(discord.ui.TextDisplay("## Jarad Og file compositions"))
-                self.add_item(discord.ui.Separator())
-
-                Header = discord.ui.Section(accessory=discord.ui.Button(label="Select Era", url="https://juicewrldapi.com/"))
-                Header.add_item(discord.ui.TextDisplay(f"Good Bye and Good riddance"))
-
-                Header2 = discord.ui.Section(accessory=discord.ui.Button(label="Death Reace?", url="https://juicewrldapi.com/"))
-                Header2.add_item(discord.ui.TextDisplay(f"Death Reace"))
-
-                Header3 = discord.ui.Section(accessory=discord.ui.Button(label="ju Word 3", url="https://juicewrldapi.com/"))
-                Header3.add_item(discord.ui.TextDisplay(f"Ju Word 3"))
-
-                self.add_item(Header)
-                self.add_item(Header2)
-                self.add_item(Header3)
-
-        await ctx.send(view=InformationView())
-
-
-
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
     logger.debug('Music cog initialized successfully')
