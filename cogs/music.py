@@ -1621,7 +1621,7 @@ class Music(commands.Cog, name="Music"):
                 await interaction.response.send_message("Operation cancelled.", ephemeral=True)
                 self.stop()
 
-        confirm_view = ConfirmView()
+        confirm_view = ConfirmView(ctx.author.id)
         confirm_message = await ctx.reply(
             embed=discord.Embed(
                 title="Confirm Deletion",
