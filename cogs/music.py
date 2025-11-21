@@ -1571,6 +1571,13 @@ class Music(commands.Cog, name="Music"):
                     if identifier.lower() not in file.lower():
                         is_valid = False
                         break
+            
+            if is_valid:
+                file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logger.error(f"Error deleting file {file_path}: {e}")
 
     @commands.command(name="cdc")
     @commands.check_any(commands.is_owner(), commands.check(can_test))
@@ -1934,7 +1941,7 @@ class Music(commands.Cog, name="Music"):
                 safe_items = []
                 for item in items:
                     mime_type = item.get('mime_type', None)
-                    if mime_type.startswith('audio/'):
+                    if mime_type and mime_type.startswith('audio/'):
                         safe_items.append(item)
                         
                 count = len(safe_items)
