@@ -32,7 +32,7 @@ class Fun(commands.Cog, name="Fun"):
             "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
             "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
             "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69",
-            "Bill Putemtosleep Cosby"
+            "Bill Putemtosleep Cosby, temp237"
                                                                 
                                     # if you have something funny then add it pls,
                                     # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
