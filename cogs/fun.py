@@ -610,7 +610,7 @@ class Fun(commands.Cog, name="Fun"):
             "We almost level 10 daddy", "That one chud", # <-- only good envy contribution to the list
                                                                 
                                                                 # if you have something funny then add it pls,
-                                                                # not you though eli you're a fkn chud AF
+                                                                # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
         ]
         
         if not hasattr(self.bot, 'recent_nicknames'):
