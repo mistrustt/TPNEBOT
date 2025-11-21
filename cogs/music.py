@@ -1576,6 +1576,7 @@ class Music(commands.Cog, name="Music"):
     @commands.check_any(commands.is_owner(), commands.check(can_test))
     async def cleardownloadcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
+        self.snippet_debounce = {}
 
         files = []
         self.assert_download_cache()
@@ -1624,7 +1625,7 @@ class Music(commands.Cog, name="Music"):
         confirm_message = await ctx.reply(
             embed=discord.Embed(
                 title="Confirm Deletion",
-                description=f"Are you sure you want to delete {count} file(s) from the download cache?",
+                description=f"Are you sure you want to delete {count} file(s)?",
                 color=discord.Color.red()
             ),
             view=confirm_view
