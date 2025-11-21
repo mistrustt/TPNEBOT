@@ -12,6 +12,16 @@ import logging
 from utils.misc import MiscUtils
 
 logger = logging.getLogger("discord_bot")
+
+def nickroulette_whitelist():
+    """Check if user has manage_nicknames permission or is whitelisted for using the nick roulette command."""
+    async def predicate(ctx: Context):
+        whitelisted_users = [1219090700407279656, 1095747082599530627]
+        if ctx.author.id in whitelisted_users:
+            return True
+        return ctx.author.guild_permissions.manage_nicknames
+    return commands.check(predicate)
+
 class Fun(commands.Cog, name="Fun"):
 
     def __init__(self, bot) -> None:
@@ -547,7 +557,7 @@ class Fun(commands.Cog, name="Fun"):
 
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
-    @commands.has_guild_permissions(manage_nicknames=True)
+    @nickroulette_whitelist()
     async def nicknameroulette(self, ctx: Context):
         """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
         embed = discord.Embed(
