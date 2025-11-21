@@ -1991,17 +1991,21 @@ class Music(commands.Cog, name="Music"):
             def __init__(self):
                 super().__init__(accent_color=0x2B2D31)
 
-                self.add_item(discord.ui.TextDisplay("## Jarad Compositioner"))
+                self.add_item(discord.ui.TextDisplay("## Jarad Og file compositions"))
                 self.add_item(discord.ui.Separator())
 
-                Header = discord.ui.Section(accessory=discord.ui.Button(label="Leaks G?", url="https://juicewrldapi.com/"))
-                Header.add_item(discord.ui.TextDisplay(f"Juice World Leak Comp"))
+                Header = discord.ui.Section(accessory=discord.ui.Button(label="Select Era", url="https://juicewrldapi.com/"))
+                Header.add_item(discord.ui.TextDisplay(f"Good Bye and Good riddance"))
 
-                Header2 = discord.ui.Section(accessory=discord.ui.Button(label="OG files G?", url="https://juicewrldapi.com/"))
-                Header2.add_item(discord.ui.TextDisplay(f"Juice World OG File Comp"))
+                Header2 = discord.ui.Section(accessory=discord.ui.Button(label="Death Reace?", url="https://juicewrldapi.com/"))
+                Header2.add_item(discord.ui.TextDisplay(f"Death Reace"))
+
+                Header3 = discord.ui.Section(accessory=discord.ui.Button(label="ju Word 3", url="https://juicewrldapi.com/"))
+                Header3.add_item(discord.ui.TextDisplay(f"Ju Word 3"))
 
                 self.add_item(Header)
                 self.add_item(Header2)
+                self.add_item(Header3)
 
         await ctx.send(view=InformationView())
 
