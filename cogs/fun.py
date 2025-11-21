@@ -607,9 +607,8 @@ class Fun(commands.Cog, name="Fun"):
             "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
             "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
             "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
-            "We almost level 10 daddy", "TAYLOR ✡️", "YeetMaster3000", "Sir Licksalot",
-            "GUCCI ✡️✡️", "ENVY THE GOAT"*5, "chaosK", "eliK", "The Chud Formerly Known As Eli",
-            "That one chud", "Big Chungus", "Yeetus Deletus", "9507"
+            "We almost level 10 daddy", "That one chud", # <-- only good envy contribution to the list
+                                                                
                                                                 # if you have something funny then add it pls,
                                                                 # not you though eli you're a fkn chud AF
         ]
