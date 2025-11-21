@@ -10,6 +10,7 @@ from discord.ext.commands import Context
 from datetime import datetime
 import logging
 from utils.misc import MiscUtils
+import utils.embeds as utils
 
 logger = logging.getLogger("discord_bot")
 
@@ -578,10 +579,10 @@ class Fun(commands.Cog, name="Fun"):
         chosen_nickname = random.choice(self.nickname_list)
 
         await member.edit(nick=chosen_nickname, reason="Random Nickname Command")
-        embed = discord.Embed(
-            title="Random Nickname",
-            description=f"{member.mention}'s nickname has been changed to '{chosen_nickname}'!",
-            color=discord.Color.green()
+        await utils.Embeds.send_success_embed(
+            ctx,
+            ctx.author,
+            f"{member.mention}'s nickname has been changed to '{chosen_nickname}'!"
         )
 
         # TODO: maybe force if eli allows it or wtv
