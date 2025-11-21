@@ -582,7 +582,7 @@ class Fun(commands.Cog, name="Fun"):
         await utils.Embeds.send_success_embed(
             ctx,
             ctx.author,
-            f"{member.mention}'s nickname has been changed to '{chosen_nickname}'!"
+            f"{member.mention}'s nickname has been changed to `{chosen_nickname}`!"
         )
 
         # TODO: maybe force if eli allows it or wtv
