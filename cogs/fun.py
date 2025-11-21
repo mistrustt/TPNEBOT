@@ -571,7 +571,7 @@ class Fun(commands.Cog, name="Fun"):
 
     @commands.command(aliases=["rnick"], help="Gives a random nickname to a user")
     @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_nicknames=True))
-    async def rnick(self, ctx: Context, member: discord.Member=None):
+    async def randomnick(self, ctx: Context, member: discord.Member=None):
         if member is None:
             member = ctx.author
 
