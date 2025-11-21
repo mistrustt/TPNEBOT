@@ -562,11 +562,11 @@ class Fun(commands.Cog, name="Fun"):
         """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
         embed = discord.Embed(
             title="Nickname Roulette",
-            description="React with ⏰ to join the game! You have 15 seconds.",
+            description="React with 🏷️ to join the game! You have 15 seconds.",
             color=discord.Color.blurple()
         )
         message = await ctx.reply(embed=embed)
-        await message.add_reaction("⏰")
+        await message.add_reaction("🏷️")
 
         await asyncio.sleep(15)
         await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 15)
@@ -574,7 +574,7 @@ class Fun(commands.Cog, name="Fun"):
         message = await ctx.fetch_message(message.id)
         users = set()
         for reaction in message.reactions:
-            if str(reaction.emoji) == "⏰":
+            if str(reaction.emoji) == "🏷️":
                 async for user in reaction.users():
                     if not user.bot:
                         users.add(user)
@@ -607,7 +607,7 @@ class Fun(commands.Cog, name="Fun"):
             "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
             "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
             "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
-            "We almost level 10 daddy", "That one chud", # <-- only good envy contribution to the list
+            "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69" # <-- only good envy contribution to the list
                                                                 
                                                                 # if you have something funny then add it pls,
                                                                 # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
