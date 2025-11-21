@@ -25,6 +25,7 @@ class Fun(commands.Cog, name="Fun"):
             1219090700407279656, # TOXIC
             1095747082599530627 # THE KING AKA GOAT AKA ENVY
         ]
+        self.ban_roulette_history = {}
         self.nickname_list = [
             "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", "Envy is a Chud",
             "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
@@ -436,6 +437,45 @@ class Fun(commands.Cog, name="Fun"):
         embed.set_author(name=member.display_name, icon_url=self.utils.get_avatar_url(member))
         await ctx.reply(embed=embed)
     
+    @commands.command(aliases=["bru"], help="Unbans the last person that you banned from Ban Roulette")
+    @commands.check_any(commands.has_guild_permissions(ban_members=True))
+    async def banrouletteundo(self, ctx: Context):
+        """Unjails a user from Ban Roulette."""
+        last_banned_id = self.ban_roulette_history.get(ctx.author.id)
+        if not last_banned_id:
+            embed = discord.Embed(
+                title="Ban Roulette Undo",
+                description="You have not banned anyone using Ban Roulette.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
+        
+        try:
+            await ctx.guild.unban(discord.Object(id=last_banned_id), reason="Unbanned from Ban Roulette Undo")
+            embed = discord.Embed(
+                title="Ban Roulette Undo",
+                description=f"<@{last_banned_id}> has been unbanned!",
+                color=discord.Color.green()
+            )
+            del self.ban_roulette_history[ctx.author.id]
+            await ctx.send(embed=embed)
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="Ban Roulette Undo",
+                description="I don't have permission to unban this user.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(
+                title="Ban Roulette Undo",
+                description=f"Failed to unban user: {str(e)}",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+
+
     @commands.command(name="banroulette", aliases=["br"], help="Play a game of banroulette")
     @commands.has_guild_permissions(ban_members=True)
     async def banroulette(self, ctx: Context):
@@ -482,6 +522,7 @@ class Fun(commands.Cog, name="Fun"):
 
         try:
             await victim.ban(reason="Lost Ban Roulette")
+            self.ban_roulette_history[ctx.author.id] = victim.id
             embed = discord.Embed(
                 title="Ban Roulette",
                 description=f"{victim.mention} has been banned! :hammer:",
