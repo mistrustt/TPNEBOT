@@ -1957,7 +1957,7 @@ class Music(commands.Cog, name="Music"):
                         with open(image_file_name, 'wb') as img_file:
                             img_file.write(image_data)
 
-                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_heardle", HEARDLE_CLIP_DURATION)
+                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet", HEARDLE_CLIP_DURATION)
                 if result == False:
                     await handle_request_failed(ctx, payload)
                     self.handle_user_done_snippet(ctx.author.id)
