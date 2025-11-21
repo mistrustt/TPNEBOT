@@ -1632,6 +1632,8 @@ class Music(commands.Cog, name="Music"):
         )
         await confirm_view.wait()
         if confirm_view.value:
+            files_string_fmt = ", ".join(files)
+
             for file_path in files:
                 try:
                     os.remove(file_path)
@@ -1640,7 +1642,7 @@ class Music(commands.Cog, name="Music"):
             await confirm_message.edit(
                 embed=discord.Embed(
                     title="Deletion Complete",
-                    description=f"Deleted {count} file(s) from the download cache.",
+                    description=f"Deleted {count} file(s) from the download cache: \nFiles: `{files_string_fmt}`.",
                     color=discord.Color.green()
                 ),
                 view=None
