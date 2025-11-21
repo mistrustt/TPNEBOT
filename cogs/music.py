@@ -1561,7 +1561,7 @@ class Music(commands.Cog, name="Music"):
                 await message.add_reaction("👎")
 
     @commands.command(name="hcc")
-    @commands.check_any(commands.has_permissions(manage_guild=True), commands.check(can_test))
+    @commands.check_any(commands.is_owner(), commands.check(can_test))
     async def heardleclearcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
 
@@ -1673,10 +1673,17 @@ class Music(commands.Cog, name="Music"):
         await ctx.reply(embed=embed)
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
-    @commands.check_any(commands.has_permissions(manage_guild=True), commands.check(can_test), commands.has_role(1414742766386413590))
     async def heardle(self, ctx: commands.Context):
+        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.roles.get(1414742766386413590) is None:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                "Heardle is currently in beta and only available to testers."
+            )
+            return
+
         if ctx.author.id in self.ongoing_heardle:
-            await utils.Embeds.send_warning_embed(
+            await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
                 "You already have an ongoing game of Heardle!"
@@ -1714,7 +1721,7 @@ class Music(commands.Cog, name="Music"):
 
                 async with ctx.typing():
                     # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
-                    download_url = f"{JUICEWRLD_API}/juicewrld/files/download/?path={self.special_url_encode(path)}"
+                    download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
                     async with session.get(download_url) as download_response:
                         if download_response.status != 200:
                             await handle_request_failed(ctx, download_response.status)
@@ -1753,13 +1760,10 @@ class Music(commands.Cog, name="Music"):
                         final_clip.duration = duration
                         final_clip.fps = 1
                         final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", logger=None)
-                        message = await ctx.channel.send(f"🎵 {ctx.author.mention}: you have {HEARDLE_GAME_DURATION} seconds to guess. Here's your clip:", file=discord.File(output_path))
-                        
-                        await utils.Embeds.send_info_embed(
-                            ctx.channel,
-                            ctx.author,
-                            f"Please reply to the message above to guess the song title or type `exit` to quit the game.",
+                        embed = discord.Embed(
+                            description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please reply to the message above to guess the song title or type `exit` to quit the game."
                         )
+                        message = await ctx.channel.send(file=discord.File(output_path), embed=embed)
 
                 has_guessed = False
                 attempt = 1
