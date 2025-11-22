@@ -1916,7 +1916,7 @@ class Music(commands.Cog, name="Music"):
                                     hint += " "
                                 else:
                                     hint += "?"
-                            await message.edit(content=f"Hint ({hint_chars}/3): {hint}")
+                            await message.edit(content=f"Hint ({round(hint_chars)}/3): {hint}")
         
                             if hint_chars >= 3:
                                 raise asyncio.CancelledError
