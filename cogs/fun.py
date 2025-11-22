@@ -32,7 +32,7 @@ class Fun(commands.Cog, name="Fun"):
             "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
             "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
             "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69",
-            "Bill Putemtosleep Cosby", "temp237", "JoeJoe"
+            "Bill Putemtosleep Cosby", "temp237",
                                                                 
                                     # if you have something funny then add it pls,
                                     # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
@@ -321,6 +321,7 @@ class Fun(commands.Cog, name="Fun"):
                 )
                 embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
                 await ctx.reply(embed=embed)
+
 
     @commands.command(name="penis", aliases=["dih"], help="Find out how large your penis is.")
     async def size(self, ctx: Context, member: discord.Member=None):
@@ -635,7 +636,7 @@ class Fun(commands.Cog, name="Fun"):
         # }
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_nicknames=True))
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
     async def nicknameroulette(self, ctx: Context):
         """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
         embed = discord.Embed(

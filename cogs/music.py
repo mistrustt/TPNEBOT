@@ -71,6 +71,7 @@ class Music(commands.Cog, name="Music"):
             1219090700407279656 # DUMB IDIOT
         ]
         self.ongoing_heardle = []
+        self.heardle_answers = {}
         self.snippet_debounce = {}
 
     def can_test(ctx: commands.Context, cog=None):
@@ -1716,6 +1717,7 @@ class Music(commands.Cog, name="Music"):
         return sorted(results)
 
     def handle_user_done_heardle(self, user_id: int):
+        self.heardle_answers[user_id] = None 
         if user_id in self.ongoing_heardle:
             self.ongoing_heardle.remove(user_id)
 
@@ -1728,7 +1730,7 @@ class Music(commands.Cog, name="Music"):
         # Delete user related files
         self.clear_user_cache(user_id, ["_snippet"])
 
-    async def make_snippet(self, image_path: str, download_url: str, file_name: str, duration: int, start_point: int = None):
+    async def make_snippet(self, image_path: str, download_url: str, file_name: str, duration: int = DEFAULT_SNIPPET_DURATION, start_point: int = None):
         async with aiohttp.ClientSession() as session:
             async with session.get(download_url) as download_response:
                 if download_response.status != 200:
@@ -1781,13 +1783,59 @@ class Music(commands.Cog, name="Music"):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
-    async def heardle(self, ctx: commands.Context):
-        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.get_role(1414742766386413590) is None:
+    @commands.command(name="shhheardle", help="Shows the heardle answer for the given user")
+    async def shhheardle(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+
+        if Music.can_test(ctx, self) == False and ctx.author.guild_permissions.manage_guild == False:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
-                "Heardle is currently in beta and only available to testers."
+                "You do not have permission to use this command."
+            )
+            return
+
+        if member.id not in self.heardle_answers or self.heardle_answers[member.id] is None:
+            await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f"{member.display_name} does not have an ongoing Heardle game."
+            )
+            return
+        
+        answer = self.heardle_answers[member.id]
+        await utils.Embeds.send_info_embed(
+            ctx.channel,
+            ctx.author,
+            f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**"
+        )
+
+
+    @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
+    async def heardle(self, ctx: commands.Context):
+        whitelisted_roles = [1290365010542854155, 1440159576044343346, 1414742766386413590]
+                        #        ^ goat role            kinnon role ^           dev role ^
+        has_role = any(role.id in whitelisted_roles for role in ctx.author.roles)
+        
+        has_permission = (
+            ctx.author.guild_permissions.manage_guild or
+            Music.can_test(ctx, self) or
+            has_role
+        )
+        
+        if ctx.author.id == 567401702190350347 and random.random() < 0.5:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                f"You are too old for this command. Age detected: {random.randint(30, 40)}"
+            )
+            return
+
+        if not has_permission:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                "Heardle is currently in beta and only available to goats. Reach $100 total donated in groupbuys and ask a staff member for <@&1290365010542854155> to play."
             )
             return
 
@@ -1853,9 +1901,27 @@ class Music(commands.Cog, name="Music"):
                 has_guessed = False
                 attempt = 1
                 acceptable_answers = []
+                self.heardle_answers[ctx.author.id] = song_data.get("name", "Unknown Title")
                 for title in track_tiles:
-                    acceptable_answers.extend(self.get_acceptable_track_names(title))
+                    acceptable_answers.extend(self.get_acceptable_track_names(title))                
 
+                async def update_timer_message(self, message : discord.Message, full_name, start_time):
+                    try:
+                        while True:
+                            elapsed = asyncio.get_event_loop().time() - start_time
+                            hint_chars = min(elapsed // 3, 3) # reveal a character every 3 seconds, max 3 as curteousy of silmar
+                            hint = full_name[:int(hint_chars)] + "x" * (len(full_name) - int(hint_chars))
+                            message.edit(content=f"Hint ({hint_chars}/3): {hint}")
+
+                            if hint_chars >= 3:
+                                raise asyncio.CancelledError
+                    except asyncio.CancelledError:
+                        # Task cancelled normally when game ends
+                        return
+
+                update_task = asyncio.create_task(update_timer_message(message, start_time, HEARDLE_GAME_DURATION))
+
+                start_time = asyncio.get_event_loop().time()
                 while has_guessed == False:
                     def check_guess(m):
                         return (
@@ -1864,7 +1930,12 @@ class Music(commands.Cog, name="Music"):
                         )
                     
                     try:
-                        guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=HEARDLE_GAME_DURATION)
+                        elapsed = asyncio.get_event_loop().time() - start_time
+                        remaining_time = HEARDLE_GAME_DURATION - elapsed
+                        if remaining_time <= 0:
+                            raise TimeoutError
+
+                        guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=remaining_time)
                     except TimeoutError:
                         await utils.Embeds.send_warning_embed(
                             ctx.channel,
@@ -1876,6 +1947,7 @@ class Music(commands.Cog, name="Music"):
                         except:
                             pass
                         self.handle_user_done_heardle(ctx.author.id)
+                        update_task.cancel()
                         return
                     
                     guess = guess_msg.content.strip().lower()
@@ -1901,6 +1973,7 @@ class Music(commands.Cog, name="Music"):
                 except:
                     pass
                 self.handle_user_done_heardle(ctx.author.id)
+                update_task.cancel()
 
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
@@ -1966,7 +2039,7 @@ class Music(commands.Cog, name="Music"):
                         with open(image_file_name, 'wb') as img_file:
                             img_file.write(image_data)
 
-                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet", HEARDLE_CLIP_DURATION)
+                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet")
                 if result == False:
                     await handle_request_failed(ctx, payload)
                     self.handle_user_done_snippet(ctx.author.id)
@@ -1976,5 +2049,6 @@ class Music(commands.Cog, name="Music"):
                 self.handle_user_done_snippet(ctx.author.id)
 
 async def setup(bot: commands.Bot) -> None:
+
     await bot.add_cog(Music(bot))
     logger.debug('Music cog initialized successfully')
