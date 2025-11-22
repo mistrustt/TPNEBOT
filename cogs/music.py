@@ -1809,7 +1809,7 @@ class Music(commands.Cog, name="Music"):
             ctx.author,
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**"
         )
-
+    
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
@@ -1905,7 +1905,7 @@ class Music(commands.Cog, name="Music"):
                 for title in track_tiles:
                     acceptable_answers.extend(self.get_acceptable_track_names(title))                
 
-                async def update_timer_message(self, message : discord.Message, full_name, start_time):
+                async def update_timer_message(message : discord.Message, full_name, start_time):
                     try:
                         while True:
                             elapsed = asyncio.get_event_loop().time() - start_time
