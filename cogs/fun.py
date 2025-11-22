@@ -322,6 +322,49 @@ class Fun(commands.Cog, name="Fun"):
                 embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
                 await ctx.reply(embed=embed)
 
+    @commands.command(name="race", aliases=["ethnicity", "ethics"], help="Find out your ethnic background.")
+    async def race(self, ctx: Context, member: discord.Member=None):
+        member = member or ctx.author
+
+        races = [
+            "Jewish ✡️",
+            "Indian 🇮🇳",
+            "Beaner 🌮",
+            "Nigar 🐈‍⬛",
+            "WHITE (BETTER) 🤍🤍🤍🤍🤍",
+            "German (shoutout adri)",
+            "French 🍟🍟",
+            "Russian 🧑‍💻",
+            "Chinese 🐈🐕",
+            "Native American (RIP BELSON) 🪶",
+            "Arab 🕌",
+            "Hispanic 🌮",
+            "Italian 🍝",
+            "African 🦁",
+            "chaos"
+            
+            # TODO: bro there has to be more races i just cant think of them
+        ]
+        num_races = random.randint(1, 3)
+        used_races = []
+        percentages = []
+        total_percent = 0
+        for i in range(num_races):
+            available = [r for r in races if r not in used_races]
+            if not available:
+                break
+            choice = random.choice(available)
+            used_races.append(choice)
+            if i == num_races - 1:
+                percent = 100 - total_percent
+            percent = random.randint(0, 100 - total_percent)
+            percentages.append(percent)
+            total_percent += percent
+        
+        embed=discord.Embed(description="\n".join([f"{used_races[i]}: {percentages[i]}%" for i in range(len(used_races))]))
+        embed.set_author(name=f'{member.display_name}\'s Races', icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
+
     @commands.command(name="penis", aliases=["dih"], help="Find out how large your penis is.")
     async def size(self, ctx: Context, member: discord.Member=None):
         member = member or ctx.author
