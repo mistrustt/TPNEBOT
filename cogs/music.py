@@ -71,6 +71,7 @@ class Music(commands.Cog, name="Music"):
             1219090700407279656 # DUMB IDIOT
         ]
         self.ongoing_heardle = []
+        self.heardle_answers = {}
         self.snippet_debounce = {}
 
     def can_test(ctx: commands.Context, cog=None):
@@ -1716,6 +1717,7 @@ class Music(commands.Cog, name="Music"):
         return sorted(results)
 
     def handle_user_done_heardle(self, user_id: int):
+        self.heardle_answers[user_id] = None 
         if user_id in self.ongoing_heardle:
             self.ongoing_heardle.remove(user_id)
 
@@ -1780,6 +1782,34 @@ class Music(commands.Cog, name="Music"):
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
 
         await ctx.reply(embed=embed)
+
+    @commands.command(name="shhheardle", help="Shows the heardle answer for the given user")
+    async def shhheardle(self, ctx: commands.Context, member: discord.Member = None):
+        member = member or ctx.author
+
+        if Music.can_test(ctx, self) == False and ctx.author.guild_permissions.manage_guild == False:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                "You do not have permission to use this command."
+            )
+            return
+
+        if member.id not in self.heardle_answers or self.heardle_answers[member.id] is None:
+            await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f"{member.display_name} does not have an ongoing Heardle game."
+            )
+            return
+        
+        answer = self.heardle_answers[member.id]
+        await utils.Embeds.send_info_embed(
+            ctx.channel,
+            ctx.author,
+            f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**"
+        )
+
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
@@ -1863,6 +1893,7 @@ class Music(commands.Cog, name="Music"):
                 has_guessed = False
                 attempt = 1
                 acceptable_answers = []
+                self.heardle_answers[ctx.author.id] = song_data.get("name", "Unknown Title")
                 for title in track_tiles:
                     acceptable_answers.extend(self.get_acceptable_track_names(title))
 
