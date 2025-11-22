@@ -1827,7 +1827,7 @@ class Music(commands.Cog, name="Music"):
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
-                "Heardle is currently in beta and only available to donators. If you want to play donate to the GB."
+                "Heardle is currently in beta and only available to goats. Reach $100 total donated and ask a staff member for <@&1290365010542854155> to play."
             )
             return
 
