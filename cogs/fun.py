@@ -323,7 +323,7 @@ class Fun(commands.Cog, name="Fun"):
                 await ctx.reply(embed=embed)
 
     @commands.command(name="age", help="Find out your true age.")
-    async def size(self, ctx: Context, member: discord.Member=None):
+    async def age(self, ctx: Context, member: discord.Member=None):
         member = member or ctx.author
 
         max_range = -1

@@ -1910,7 +1910,12 @@ class Music(commands.Cog, name="Music"):
                         while True:
                             elapsed = asyncio.get_event_loop().time() - start_time
                             hint_chars = min(elapsed // 3, 3) # reveal a character every 3 seconds, max 3 as curteousy of silmar
-                            hint = full_name[:int(hint_chars)] + "x" * (len(full_name) - int(hint_chars))
+                            hint = full_name[:hint_chars]
+                            for i in range(len(full_name) - hint_chars):
+                                if full_name[i + hint_chars] == " ":
+                                    hint += " "
+                                else:
+                                    hint += "?"
                             await message.edit(content=f"Hint ({hint_chars}/3): {hint}")
         
                             if hint_chars >= 3:
@@ -1937,7 +1942,6 @@ class Music(commands.Cog, name="Music"):
                         if remaining_time <= 0:
                             raise TimeoutError
                         
-                        await ctx.message.reply("Time remaining: {:.1f} seconds".format(remaining_time))
                         guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=remaining_time)
                     except TimeoutError:
                         await utils.Embeds.send_warning_embed(
