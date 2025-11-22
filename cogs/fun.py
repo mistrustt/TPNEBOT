@@ -322,6 +322,34 @@ class Fun(commands.Cog, name="Fun"):
                 embed.set_author(name=f'{member.display_name}', icon_url=self.utils.get_avatar_url(member))
                 await ctx.reply(embed=embed)
 
+    @commands.command(name="age", help="Find out your true age.")
+    async def size(self, ctx: Context, member: discord.Member=None):
+        member = member or ctx.author
+
+        max_range = -1
+        min_range = 13 # Lets not get niggas banned
+
+        rand_percent = random.randint(1, 100)
+        if rand_percent < 70:
+            max_range = 30
+        elif rand_percent < 90:
+            max_range = 49
+        else:
+            max_range = 99
+        age = random.randint(min_range, max_range)
+
+        note = ""
+        if age < 18:
+            note = "You young as hell twin 👶"
+        elif age > 30 and age < 50:
+            note = "Damn you old as hell. Shoutout eli and problem 💪💪"
+        else:
+            note = "Duke dennis 🧓"
+
+        final_messagge = f"You are {age} years old. {note}".strip()
+        embed=discord.Embed(description=final_messagge)
+        embed.set_author(name=f'{member.display_name}\'s Age', icon_url=self.utils.get_avatar_url(member))
+        await ctx.reply(embed=embed)
 
     @commands.command(name="penis", aliases=["dih"], help="Find out how large your penis is.")
     async def size(self, ctx: Context, member: discord.Member=None):
