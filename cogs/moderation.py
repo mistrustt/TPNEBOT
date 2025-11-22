@@ -2648,6 +2648,8 @@ class Moderation(commands.Cog, name="Moderation"):
                             except Exception:
                                 pass
                             return
+                        await countdown_message.edit(content="# brace for impact twin")
+                        await asyncio.sleep(1)
                         await countdown_message.edit(content="https://tenor.com/view/nuke-gif-8044239")
                         await asyncio.sleep(3)
                     except (discord.HTTPException, discord.Forbidden):
