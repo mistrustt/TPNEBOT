@@ -1730,7 +1730,7 @@ class Music(commands.Cog, name="Music"):
         # Delete user related files
         self.clear_user_cache(user_id, ["_snippet"])
 
-    async def make_snippet(self, image_path: str, download_url: str, file_name: str, duration: int, start_point: int = None):
+    async def make_snippet(self, image_path: str, download_url: str, file_name: str, duration: int = DEFAULT_SNIPPET_DURATION, start_point: int = None):
         async with aiohttp.ClientSession() as session:
             async with session.get(download_url) as download_response:
                 if download_response.status != 200:
@@ -1897,6 +1897,7 @@ class Music(commands.Cog, name="Music"):
                 for title in track_tiles:
                     acceptable_answers.extend(self.get_acceptable_track_names(title))
 
+                start_time = asyncio.get_event_loop().time()
                 while has_guessed == False:
                     def check_guess(m):
                         return (
@@ -1905,7 +1906,12 @@ class Music(commands.Cog, name="Music"):
                         )
                     
                     try:
-                        guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=HEARDLE_GAME_DURATION)
+                        elapsed = asyncio.get_event_loop().time() - start_time
+                        remaining_time = HEARDLE_GAME_DURATION - elapsed
+                        if remaining_time <= 0:
+                            raise TimeoutError
+
+                        guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=remaining_time)
                     except TimeoutError:
                         await utils.Embeds.send_warning_embed(
                             ctx.channel,
@@ -2007,7 +2013,7 @@ class Music(commands.Cog, name="Music"):
                         with open(image_file_name, 'wb') as img_file:
                             img_file.write(image_data)
 
-                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet", HEARDLE_CLIP_DURATION)
+                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet")
                 if result == False:
                     await handle_request_failed(ctx, payload)
                     self.handle_user_done_snippet(ctx.author.id)
