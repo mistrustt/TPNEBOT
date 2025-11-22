@@ -1783,7 +1783,16 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
-        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.get_role(1414742766386413590) is None:
+        whitelisted_roles = [1290365010542854155, 1440159576044343346]
+                        #   ^ kinnon thanksgiving role         goat role ^
+        has_permission = (
+            ctx.author.guild_permissions.manage_guild or
+            Music.can_test(ctx, self) or
+            ctx.author.id in whitelisted_roles or
+            ctx.author.get_role(1414742766386413590) is not None
+        )
+        
+        if not has_permission:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
