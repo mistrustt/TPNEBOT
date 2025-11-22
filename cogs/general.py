@@ -863,7 +863,7 @@ class General(commands.Cog, name="General"):
             await ctx.send(f"An error occurred while setting the prefix. Please try again later.")
             logger.error(f"Error setting prefix: {e}")
 
-    @commands.command(name="userinfo", description="Displays information about a user.")
+    @commands.command(name="userinfo", aliases=["ui"], description="Displays information about a user.")
     async def userinfo(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
 
