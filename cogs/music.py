@@ -1919,7 +1919,7 @@ class Music(commands.Cog, name="Music"):
                         # Task cancelled normally when game ends
                         return
 
-                update_task = asyncio.create_task(update_timer_message(message, start_time, HEARDLE_GAME_DURATION))
+                update_task = asyncio.create_task(update_timer_message(message, song_data.get("name", "Unknown Title"), asyncio.get_event_loop().time()))
 
                 start_time = asyncio.get_event_loop().time()
                 while has_guessed == False:
