@@ -1823,6 +1823,14 @@ class Music(commands.Cog, name="Music"):
             has_role
         )
         
+        if ctx.author.id == 567401702190350347 and random.random() < 0.5:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                f"You are too old for this command. Age detected: {random.randint(30, 40)}"
+            )
+            return
+
         if not has_permission:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
@@ -1895,7 +1903,23 @@ class Music(commands.Cog, name="Music"):
                 acceptable_answers = []
                 self.heardle_answers[ctx.author.id] = song_data.get("name", "Unknown Title")
                 for title in track_tiles:
-                    acceptable_answers.extend(self.get_acceptable_track_names(title))
+                    acceptable_answers.extend(self.get_acceptable_track_names(title))                
+
+                async def update_timer_message(self, message : discord.Message, full_name, start_time):
+                    try:
+                        while True:
+                            elapsed = asyncio.get_event_loop().time() - start_time
+                            hint_chars = min(elapsed // 3, 3) # reveal a character every 3 seconds, max 3 as curteousy of silmar
+                            hint = full_name[:int(hint_chars)] + "x" * (len(full_name) - int(hint_chars))
+                            message.edit(content=f"Hint ({hint_chars}/3): {hint}")
+
+                            if hint_chars >= 3:
+                                raise asyncio.CancelledError
+                    except asyncio.CancelledError:
+                        # Task cancelled normally when game ends
+                        return
+
+                update_task = asyncio.create_task(update_timer_message(message, start_time, HEARDLE_GAME_DURATION))
 
                 start_time = asyncio.get_event_loop().time()
                 while has_guessed == False:
@@ -1923,6 +1947,7 @@ class Music(commands.Cog, name="Music"):
                         except:
                             pass
                         self.handle_user_done_heardle(ctx.author.id)
+                        update_task.cancel()
                         return
                     
                     guess = guess_msg.content.strip().lower()
@@ -1948,6 +1973,7 @@ class Music(commands.Cog, name="Music"):
                 except:
                     pass
                 self.handle_user_done_heardle(ctx.author.id)
+                update_task.cancel()
 
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
@@ -2023,5 +2049,6 @@ class Music(commands.Cog, name="Music"):
                 self.handle_user_done_snippet(ctx.author.id)
 
 async def setup(bot: commands.Bot) -> None:
+
     await bot.add_cog(Music(bot))
     logger.debug('Music cog initialized successfully')
