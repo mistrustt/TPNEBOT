@@ -1894,7 +1894,7 @@ class Music(commands.Cog, name="Music"):
                         return
                     
                     embed = discord.Embed(
-                        description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please reply to the message above to guess the song title or type `exit` to quit the game."
+                        description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please send a message of a song title to guess the song or type `exit` to quit the game."
                     )
                     message = await ctx.channel.send(file=discord.File(payload), embed=embed)
 
@@ -1911,17 +1911,19 @@ class Music(commands.Cog, name="Music"):
                             elapsed = asyncio.get_event_loop().time() - start_time
                             hint_chars = min(elapsed // 3, 3) # reveal a character every 3 seconds, max 3 as curteousy of silmar
                             hint = full_name[:int(hint_chars)] + "x" * (len(full_name) - int(hint_chars))
-                            message.edit(content=f"Hint ({hint_chars}/3): {hint}")
-
+                            await message.edit(content=f"Hint ({hint_chars}/3): {hint}")
+        
                             if hint_chars >= 3:
                                 raise asyncio.CancelledError
+
+                            await asyncio.sleep(1)
                     except asyncio.CancelledError:
                         # Task cancelled normally when game ends
                         return
 
-                update_task = asyncio.create_task(update_timer_message(message, song_data.get("name", "Unknown Title"), asyncio.get_event_loop().time()))
-
                 start_time = asyncio.get_event_loop().time()
+                update_task = asyncio.create_task(update_timer_message(message, song_data.get("name", "Unknown Title"), start_time))
+
                 while has_guessed == False:
                     def check_guess(m):
                         return (
@@ -1934,7 +1936,8 @@ class Music(commands.Cog, name="Music"):
                         remaining_time = HEARDLE_GAME_DURATION - elapsed
                         if remaining_time <= 0:
                             raise TimeoutError
-
+                        
+                        await ctx.message.reply("Time remaining: {:.1f} seconds".format(remaining_time))
                         guess_msg = await self.bot.wait_for('message', check=check_guess, timeout=remaining_time)
                     except TimeoutError:
                         await utils.Embeds.send_warning_embed(
