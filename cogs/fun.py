@@ -941,6 +941,7 @@ class Fun(commands.Cog, name="Fun"):
                 await victim.remove_roles(*to_remove, reason="Lost Jail Roulette")
             await victim.add_roles(jail_role, reason="Lost Jail Roulette")
             
+            self.jail_roulette_history[ctx.author.id] = victim.id
             embed = discord.Embed(
                 title="Jail Roulette",
                 description=f"{victim.mention} has been jailed 👮",
