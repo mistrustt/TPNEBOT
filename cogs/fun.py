@@ -955,7 +955,7 @@ class Fun(commands.Cog, name="Fun"):
         except discord.Forbidden:
             embed = discord.Embed(
                 title="Jail Roulette",
-                description=f"{victim.mention} would have gotten a nickname, but I don't have permission! 👮",
+                description=f"{victim.mention} would have gotten jailed, but I don't have permission! 👮",
                 color=discord.Color.red()
             )
         except Exception as e:
