@@ -1688,7 +1688,7 @@ class Music(commands.Cog, name="Music"):
             return
 
     def get_most_acceptable_track_name(self, orig_name: str):
-        name = orig_name.lower().strip()
+        name = orig_name.strip()
         for func in self.track_name_transformations:
             name = func(name)
         return name
