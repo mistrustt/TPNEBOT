@@ -1,4 +1,5 @@
 import asyncio
+from enum import member
 import os
 import random
 from datetime import timedelta
@@ -11,6 +12,7 @@ from datetime import datetime
 import logging
 from utils.misc import MiscUtils
 import utils.embeds as utils
+from database.models import PunishmentType
 
 logger = logging.getLogger("discord_bot")
 
@@ -26,6 +28,7 @@ class Fun(commands.Cog, name="Fun"):
             1095747082599530627 # THE KING AKA GOAT AKA ENVY
         ]
         self.ban_roulette_history = {}
+        self.jail_roulette_history = {}
         self.nickname_list = [
             "FeelsBrettMan", "WorkedWinner", "FrivolingMango_7374788", "Envy is a Chud",
             "KeeNola", "TortaPounder43", "ChudMaster28", "LabubuLover25", "imNateHiggers",
@@ -470,8 +473,8 @@ class Fun(commands.Cog, name="Fun"):
     @commands.check_any(commands.has_guild_permissions(ban_members=True))
     async def banrouletteundo(self, ctx: Context):
         """Unjails a user from Ban Roulette."""
-        last_banned_id = self.ban_roulette_history.get(ctx.author.id)
-        if not last_banned_id:
+        last_victim_id = self.ban_roulette_history.get(ctx.author.id)
+        if not last_victim_id:
             embed = discord.Embed(
                 title="Ban Roulette Undo",
                 description="You have not banned anyone using Ban Roulette.",
@@ -481,10 +484,10 @@ class Fun(commands.Cog, name="Fun"):
             return
         
         try:
-            await ctx.guild.unban(discord.Object(id=last_banned_id), reason="Unbanned from Ban Roulette Undo")
+            await ctx.guild.unban(discord.Object(id=last_victim_id), reason="Unbanned from Ban Roulette Undo")
             embed = discord.Embed(
                 title="Ban Roulette Undo",
-                description=f"<@{last_banned_id}> has been unbanned!",
+                description=f"<@{last_victim_id}> has been unbanned!",
                 color=discord.Color.green()
             )
             del self.ban_roulette_history[ctx.author.id]
@@ -762,48 +765,99 @@ class Fun(commands.Cog, name="Fun"):
 
     @commands.command(name="jailrouletteundo", aliases=["jru"], help="Unjails a user but u have to be in the array of cool peopl")
     @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_messages=True))
-    async def jailrouletteundo(self, ctx: Context, member: discord.Member):
+    async def jailrouletteundo(self, ctx: Context):
         """Unjails a user from Jail Roulette."""
-        jail_role = ctx.guild.get_role(JAIL_ROLE_ID)
-        if not jail_role:
-            embed = discord.Embed(
-                title="Jail Roulette Undo",
-                description="Jail role not found in the guild.",
-                color=discord.Color.red()
+        last_victim_id = self.jail_roulette_history.get(ctx.author.id)
+        if not last_victim_id:
+            return await utils.Embeds.send_error_embed(
+                ctx,
+                ctx.author,
+                "You have not jailed anyone using Jail Roulette.",
             )
-            await ctx.send(embed=embed)
-            return
 
-        if jail_role not in member.roles:
-            embed = discord.Embed(
-                title="Jail Roulette Undo",
-                description=f"{member.mention} is not jailed.",
-                color=discord.Color.red()
+        guild_id = ctx.guild.id
+        jail_settings = await self.bot.database.get_jail_settings(guild_id)
+        if not jail_settings or not jail_settings.jail_role_id:
+            return await utils.Embeds.send_error_embed(
+                ctx,
+                ctx.author,
+                "Jail system is not configured properly. Contact an admin."
             )
-            await ctx.send(embed=embed)
-            return
 
+        jail_role = ctx.guild.get_role(jail_settings.jail_role_id)
+        jail_channel = ctx.guild.get_channel(jail_settings.jail_channel_id) # we dont use jail channel but its jus good to check
+        if not jail_role or not jail_channel:
+            return await utils.Embeds.send_error_embed(
+                ctx,
+                ctx.author,
+                "Jail role or channel misconfigured. Contact an admin."
+            )
+        
         try:
-            await member.remove_roles(jail_role, reason="Unjailed from Jail Roulette Undo")
-            embed = discord.Embed(
-                title="Jail Roulette Undo",
-                description=f"{member.mention} has been unjailed!",
-                color=discord.Color.green()
-            )
+            victim = await ctx.guild.fetch_member(last_victim_id)
+            if not victim:
+                return await utils.Embeds.send_error_embed(
+                    ctx,
+                    ctx.author,
+                    "The jailed user is no longer in the guild.",
+                )
+            
+            if jail_role not in victim.roles:
+                return await utils.Embeds.send_error_embed(
+                    ctx,
+                    ctx.author,
+                    "The user is not currently jailed.",
+                )
+            
+            await victim.remove_roles(jail_role, reason="Jail roulette undo")
+            jailed_record = await self.bot.database.get_jailed_user(guild_id, victim.id)
+
+            roles_to_restore: list[discord.Role] = []
+            skipped_roles: list[str] = []
+            if jailed_record and jailed_record.roles:
+                for role_id in jailed_record.roles:
+                    role_obj = ctx.guild.get_role(role_id)
+                    if role_obj:
+
+                        if role_obj.position < ctx.guild.me.top_role.position:
+                            roles_to_restore.append(role_obj)
+                        else:
+                            skipped_roles.append(role_obj.name)
+
+                if roles_to_restore:
+                    try:
+                        await victim.add_roles(
+                            *roles_to_restore,
+                            reason="Restoring roles after unjail"
+                        )
+                    except discord.Forbidden:
+
+                        skipped_names = [r.name for r in roles_to_restore]
+                        return await ctx.send(
+                            embed=discord.Embed(
+                                description=(
+                                    "🚫 I could not restore the previous roles due to missing permissions. "
+                                    f"Roles that failed to reassign: {', '.join(skipped_names)}."
+                                ),
+                                color=discord.Color.red()
+                            )
+                        )
+
+            await self.bot.database.remove_jailed_user(guild_id, member.id)
+            
+            del self.jail_roulette_history[ctx.author.id]
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Jail Roulette Undo",
-                description=f"Could not unjail {member.mention}, I don't have permission!",
-                color=discord.Color.red()
+            await utils.Embeds.send_error_embed(
+                ctx,
+                ctx.author,
+                "I don't have permission to unjail this user.",
             )
         except Exception as e:
-            embed = discord.Embed(
-                title="Jail Roulette Undo",
-                description=f"Failed to unjail {member.mention}: {str(e)}",
-                color=discord.Color.red()
+            await utils.Embeds.send_error_embed(
+                ctx,
+                ctx.author,
+                f"Failed to unjail user: {str(e)}",
             )
-
-        await ctx.send(embed=embed)
 
     @commands.command(name="jailroulette", aliases=["jr"], help="Play a game of jail roulette")
     @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_messages=True))
@@ -836,9 +890,9 @@ class Fun(commands.Cog, name="Fun"):
             await message.edit(embed=embed)
             return
 
-        nickname_user = random.choice(list(users))
+        victim_user = random.choice(list(users))
 
-        victim = await ctx.guild.fetch_member(nickname_user.id)
+        victim = await ctx.guild.fetch_member(victim_user.id)
         if not victim:
             embed = discord.Embed(
                 title="Jail Roulette",
@@ -849,15 +903,44 @@ class Fun(commands.Cog, name="Fun"):
             return
                         
         try:
-            jail_role = ctx.guild.get_role(JAIL_ROLE_ID)
-            if not jail_role:
-                embed = discord.Embed(
-                    title="Jail Roulette",
-                    description="Jail role not found in the guild.",
-                    color=discord.Color.red()
+            guild_id = ctx.guild.id
+            jail_settings = await self.bot.database.get_jail_settings(guild_id)
+            if not jail_settings or not jail_settings.jail_role_id:
+                return await utils.Embeds.send_error_embed(
+                    ctx,
+                    ctx.author,
+                    "Jail system is not configured properly. Contact an admin."
                 )
-                await ctx.send(embed=embed)
-                return
+
+            jail_role = ctx.guild.get_role(jail_settings.jail_role_id)
+            jail_channel = ctx.guild.get_channel(jail_settings.jail_channel_id) # we dont use jail channel but its jus good to check
+            if not jail_role or not jail_channel:
+                return await utils.Embeds.send_error_embed(
+                    ctx,
+                    ctx.author,
+                    "Jail role or channel misconfigured. Contact an admin."
+                )
+            
+            to_remove = [r for r in victim.roles if r != ctx.guild.default_role and r != jail_role]
+            removed_ids = [r.id for r in to_remove]
+
+            await self.bot.database.add_jailed_user(guild_id, victim.id, None, removed_ids)
+            await self.bot.database.log_punishment_command(
+                moderator_id=ctx.author.id,
+                guild_id=guild_id,
+                command_name=PunishmentType.JAIL
+            )
+            await self.bot.database.add_punishment(
+                user_id=victim.id,
+                guild_id=guild_id,
+                moderator_id=ctx.author.id,
+                punishment_type=PunishmentType.JAIL,
+                reason="Lost Jail Roulette",
+                duration=None
+            )
+
+            if to_remove:
+                await victim.remove_roles(*to_remove, reason="Lost Jail Roulette")
             await victim.add_roles(jail_role, reason="Lost Jail Roulette")
             
             embed = discord.Embed(
