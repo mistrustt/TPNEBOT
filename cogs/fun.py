@@ -828,6 +828,11 @@ class Fun(commands.Cog, name="Fun"):
                             *roles_to_restore,
                             reason="Restoring roles after unjail"
                         )
+                        await utils.Embeds.send_success_embed(
+                            ctx,
+                            ctx.author,
+                            f"Successfully unjailed {victim.mention} and restored {len(roles_to_restore)} previous roles."
+                        )
                     except discord.Forbidden:
 
                         skipped_names = [r.name for r in roles_to_restore]
