@@ -841,7 +841,7 @@ class Fun(commands.Cog, name="Fun"):
                             )
                         )
 
-            await self.bot.database.remove_jailed_user(guild_id, member.id)
+            await self.bot.database.remove_jailed_user(guild_id, victim.id)
             
             del self.jail_roulette_history[ctx.author.id]
         except discord.Forbidden:
