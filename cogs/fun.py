@@ -16,8 +16,6 @@ from database.models import PunishmentType
 
 logger = logging.getLogger("discord_bot")
 
-JAIL_ROLE_ID = 1276782857590935583
-
 class Fun(commands.Cog, name="Fun"):
 
     def __init__(self, bot) -> None:
