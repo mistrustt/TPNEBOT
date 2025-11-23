@@ -551,7 +551,7 @@ class Fun(commands.Cog, name="Fun"):
             return
 
         try:
-            await victim.ban(reason="Lost Ban Roulette")
+            await victim.ban(reason="Lost Ban Roulette", delete_message_days=0)
             self.ban_roulette_history[ctx.author.id] = victim.id
             embed = discord.Embed(
                 title="Ban Roulette",
