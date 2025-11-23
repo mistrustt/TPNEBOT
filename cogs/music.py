@@ -73,6 +73,27 @@ class Music(commands.Cog, name="Music"):
         self.ongoing_heardle = []
         self.heardle_answers = {}
         self.snippet_debounce = {}
+        def remove_parentheses(s):
+            return re.sub(r'\(.*?\)', '', s).strip()
+        def remove_brackets(s):
+            return re.sub(r'\[.*?\]', '', s).strip()
+        def remove_apostrophes(s):
+            return s.replace("'", "")
+        def remove_periods(s):
+            return s.replace(".", "")
+        def period_to_spaces(s):
+            return s.replace(".", " ")
+        def remove_commas(s):
+            return s.replace(",", "")
+        self.track_name_transformations = [
+            lambda x: x,
+            remove_parentheses,
+            remove_brackets,
+            remove_apostrophes,
+            remove_periods,
+            period_to_spaces,
+            remove_commas,
+        ]
 
     def can_test(ctx: commands.Context, cog=None):
         if cog is None:
@@ -1666,49 +1687,19 @@ class Music(commands.Cog, name="Music"):
             )
             return
 
+    def get_most_acceptable_track_name(self, orig_name: str):
+        name = orig_name.lower().strip()
+        for func in self.track_name_transformations:
+            name = func(name)
+        return name
+
     def get_acceptable_track_names(self, orig_name: str):
         name = orig_name.lower().strip()
-        
-        def remove_parentheses(s):
-            return re.sub(r'\(.*?\)', '', s).strip()
-        
-        def remove_brackets(s):
-            return re.sub(r'\[.*?\]', '', s).strip()
-        
-        def remove_apostrophes(s):
-            return s.replace("'", "")
-        
-        def apostrophes_to_spaces(s):
-            return s.replace("'", " ")
-        
-        def remove_periods(s):
-            return s.replace(".", "")
-
-        def period_to_spaces(s):
-            return s.replace(".", " ")
-        
-        def remove_commas(s):
-            return s.replace(",", "")
-
-        def comma_to_spaces(s):
-            return s.replace(",", " ")
-
-        transformations = [
-            lambda x: x,
-            remove_parentheses,
-            remove_brackets,
-            remove_apostrophes,
-            #apostrophes_to_spaces,
-            remove_periods,
-            period_to_spaces,
-            remove_commas,
-            #comma_to_spaces
-        ]
 
         # try all combos
         results = set()
-        for r in range(1, len(transformations)+1):
-            for combo in product(transformations, repeat=r):
+        for r in range(1, len(self.track_name_transformations)+1):
+            for combo in product(self.track_name_transformations, repeat=r):
                 temp = name
                 for func in combo:
                     temp = func(temp)
@@ -1898,10 +1889,12 @@ class Music(commands.Cog, name="Music"):
                     )
                     message = await ctx.channel.send(file=discord.File(payload), embed=embed)
 
+                best_track_title = self.get_most_acceptable_track_name(song_data.get("name", "Unknown Title")) 
+
                 has_guessed = False
                 attempt = 1
                 acceptable_answers = []
-                self.heardle_answers[ctx.author.id] = song_data.get("name", "Unknown Title")
+                self.heardle_answers[ctx.author.id] = best_track_title
                 for title in track_tiles:
                     acceptable_answers.extend(self.get_acceptable_track_names(title))                
 
@@ -1927,7 +1920,7 @@ class Music(commands.Cog, name="Music"):
                         return
 
                 start_time = asyncio.get_event_loop().time()
-                update_task = asyncio.create_task(update_timer_message(message, song_data.get("name", "Unknown Title"), start_time))
+                update_task = asyncio.create_task(update_timer_message(message, best_track_title, start_time))
 
                 while has_guessed == False:
                     def check_guess(m):
@@ -1947,7 +1940,7 @@ class Music(commands.Cog, name="Music"):
                         await utils.Embeds.send_warning_embed(
                             ctx.channel,
                             ctx.author,
-                            f"Time's up! You didn't guess the song ({song_data.get('name', 'Unknown Title')}) in time."
+                            f"Time's up! You didn't guess the song ({best_track_title}) in time."
                         )
                         try:
                             await message.delete()
@@ -1973,7 +1966,7 @@ class Music(commands.Cog, name="Music"):
                 await utils.Embeds.send_success_embed(
                     ctx.channel,
                     ctx.author,
-                    f'Congratulations! You guessed the song correctly: **{song_data.get("name", "Unknown Title")}**!'
+                    f'Congratulations! You guessed the song correctly: **{best_track_title}**!'
                 )
                 try:
                     await message.delete()
