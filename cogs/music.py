@@ -1947,7 +1947,7 @@ class Music(commands.Cog, name="Music"):
                         await utils.Embeds.send_warning_embed(
                             ctx.channel,
                             ctx.author,
-                            f"Time's up! You didn't guess the song in time."
+                            f"Time's up! You didn't guess the song ({song_data.get('name', 'Unknown Title')}) in time."
                         )
                         try:
                             await message.delete()
