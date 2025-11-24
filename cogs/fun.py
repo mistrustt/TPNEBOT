@@ -702,7 +702,12 @@ class Fun(commands.Cog, name="Fun"):
                 self.stop()
 
         confirmView = ConfirmView(ctx.author.id)
-        await ctx.send("Are you sure you want to force this nickname?", view=confirmView)
+        embed = discord.Embed(
+            title="Force Random Nickname Confirmation",
+            description=f"Are you sure you want to forcefully change {member.mention}'s nickname to `{chosen_nickname}` for 5 minutes?",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed, view=confirmView)
         await confirmView.wait()
 
         if confirmView.value is None:
