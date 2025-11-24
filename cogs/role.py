@@ -236,7 +236,7 @@ class RoleTools(commands.Cog, name="Roles"):
                 )
                 return await ctx.reply(embed=embed, delete_after=5)
             
-            roles_to_remove = [role.id for role in member.roles if role != ctx.guild.default_role and not role.managed]
+            roles_to_remove = [role for role in member.roles if role != ctx.guild.default_role and not role.managed]
 
             class ConfirmView(discord.ui.View):
                 def __init__(self, author_id):
@@ -264,7 +264,7 @@ class RoleTools(commands.Cog, name="Roles"):
                     self.stop()
 
             confirm_view = ConfirmView(ctx.author.id)
-            confirm_message = await ctx.reply(
+            await ctx.reply(
                 embed=discord.Embed(
                     title="Confirm Role Strip",
                     description=f"Are you sure you want to remove {len(roles_to_remove)} roles from {member.mention}?",
