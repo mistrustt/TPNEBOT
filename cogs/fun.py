@@ -643,7 +643,7 @@ class Fun(commands.Cog, name="Fun"):
         await ctx.send(embed=embed)
 
     @commands.command(aliases=["rnick"], help="Gives a random nickname to a user")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_nicknames=True))
+    @commands.has_guild_permissions(manage_nicknames=True)
     async def randomnick(self, ctx: Context, member: discord.Member=None):
         if member is None:
             member = ctx.author
@@ -656,80 +656,6 @@ class Fun(commands.Cog, name="Fun"):
             ctx.author,
             f"{member.mention}'s nickname has been changed to `{chosen_nickname}`!"
         )
-
-    @commands.command(aliases=["frnick", "frandomnick", "forcernick"], help="Forces a random nickname to a user")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
-    async def forcerandomnick(self, ctx: Context, member: discord.Member=None):
-        if member is None:
-            member = ctx.author
-
-        chosen_nickname = random.choice(self.nickname_list)
-
-        class ConfirmView(discord.ui.View):
-            def __init__(self, author_id):
-                super().__init__()
-                self.author_id = author_id
-                self.value = None
-
-            @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green)
-            async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if interaction.user.id != self.author_id:
-                    await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
-                    return
-                
-                await interaction.response.defer()
-                self.value = True
-                self.stop()
-
-            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
-            async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if interaction.user.id != self.author_id:
-                    await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
-                    return
-                
-                await interaction.response.defer()
-                self.value = False
-                self.stop()
-
-        confirmView = ConfirmView(ctx.author.id)
-        embed = discord.Embed(
-            title="Force Random Nickname Confirmation",
-            description=f"Are you sure you want to forcefully change {member.mention}'s nickname to `{chosen_nickname}` for 5 minutes?",
-            color=discord.Color.orange()
-        )
-        await ctx.send(embed=embed, view=confirmView)
-        await confirmView.wait()
-
-        if confirmView.value is None:
-            return await utils.Embeds.send_error_embed(
-                ctx,
-                ctx.author,
-                "You did not respond in time."
-            )
-        elif not confirmView.value:
-            await utils.Embeds.send_success_embed(
-                ctx,
-                ctx.author,
-                "Nickname change cancelled."
-            )
-            return
-
-        await member.edit(nick=chosen_nickname, reason="Random Nickname Command")
-        await utils.Embeds.send_success_embed(
-            ctx,
-            ctx.author,
-            f"{member.mention}'s nickname has been forcefully changed to `{chosen_nickname}` for 5 minutes!"
-        )
-
-        original_nickname = member.display_name
-
-        end_time = datetime.now() + timedelta(seconds=300)  # 5 minutes
-        self.bot.nickname_force[member.id] = {
-            'nickname': chosen_nickname,
-            'original_nickname': original_nickname,
-            'end_time': end_time,
-            'guild_id': ctx.guild.id
-        }
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
     @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
