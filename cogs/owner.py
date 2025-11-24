@@ -132,36 +132,34 @@ class Owner(commands.Cog, name="Owner"):
         self._last_result: Optional[Any] = None
         self.start_time = datetime.now()
         self.whitelisted_users_tpne = [
-            284439598422163476, #me 
-            1166140569861496853, #voj
-            736148885055078431, #daniel 
-            538773310704582666, #chaos banned
-            657182369240973312, #chaos 
-            425724124057436160, #pop 
-            1142836406255890586, #pop alt
+            284439598422163476, # E
+            1166140569861496853, # voj
+            736148885055078431, # daniel 
+            657182369240973312, # chaos 
+            425724124057436160, # pop 
+            1142836406255890586, # pop alt
             1166141915297743010, # dennis
             857702737500569650, # aether
         ]
         self.whitelisted_users_tpne_unbans = [
             567401702190350347, # problems
-            284439598422163476, #me
-            657182369240973312, #chaos
-            1290501613311496206, #joejoe
+            284439598422163476, # E
+            657182369240973312, # chaos
+            1290501613311496206, # joejoe
         ]
         self.whitelisted_users_wrld = [
-            284439598422163476, #me
-            1166140569861496853, #voj
-            736148885055078431, #daniel
+            284439598422163476, # E
+            1166140569861496853, # voj
+            736148885055078431, # daniel
             1166141915297743010 # dennis 
         ]
         self.whitelisted_users_infohub = [
-            284439598422163476, # me
+            284439598422163476, # E
             1166140569861496853, #voj
-            736148885055078431, #daniel
+            736148885055078431, # daniel
         ]
         self.whitelisted_users_private = [
-            284439598422163476, # me
-            194233626492272641,
+            284439598422163476, # E
         ]
         self.shh_emoji = "🤫"
 
