@@ -33,7 +33,18 @@ class Fun(commands.Cog, name="Fun"):
             "Proud Indian 🇮🇳", "Proud Jew ✡️", "Proud Homosexual 🏳️‍🌈", "lncr", "Daniel Goon",
             "Albo", "gummy", "d4vd", "P Diddy", "Charlie Kirk", "Cuck", "Noob Tube Nigga",
             "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69",
-            "Bill Putemtosleep Cosby", "temp237", "Eli Butthole", "Chaos 🤓🤓", "JustinSlave"
+            "Bill Putemtosleep Cosby", "temp237", "Eli Butthole", "Chaos 🤓🤓", "JustinSlave",
+            "Nah leak the vault googly 😭😭", "Vices is a real song bro", "Nah trust me bro",
+
+            # COPILOT MADE THESE
+            "Duke Dennis", "Big Chungus", "Sus", "Among Us Impostor", "The Real Slim Shady",
+            "Area 51 Raider", "Keyboard Warrior", "Meme Lord", "Captain Obvious", "The Chudfather",
+            "Lord of the Memes", "Doge Enthusiast", "Cat Video Critic", "Doggo Admirer",
+            "Professional Procrastinator", "Snack Connoisseur", "Nap Champion", "Couch Potato",
+            "Serial Chiller", "Master of None", "Chief Meme Officer", "Supreme Overlord of Fun",
+            "Duke Nukem", "The Notorious RBG", "Punny Guy", "Jester of Jokes", "Sultan of Silly",
+            "Baron of Banter", "Duke of Drollery", "Viscount of Vibes", "Count of Comedy",
+            "Earl of Entertainment", "Marquis of Mirth", "Prince of Pranks", "King of Kicks",
                                                                 
                                     # if you have something funny then add it pls,
                                     # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
@@ -656,13 +667,74 @@ class Fun(commands.Cog, name="Fun"):
             f"{member.mention}'s nickname has been changed to `{chosen_nickname}`!"
         )
 
-        # TODO: maybe force if eli allows it or wtv
-        # self.bot.nickname_force[victim.id] = {
-        #     'nickname': chosen_nickname,
-        #     'original_nickname': original_nickname,
-        #     'end_time': end_time,
-        #     'guild_id': ctx.guild.id
-        # }
+    @commands.command(aliases=["frnick", "frandomnick", "frandomnick"], help="Forces a random nickname to a user")
+    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
+    async def forcerandomnick(self, ctx: Context, member: discord.Member=None):
+        if member is None:
+            member = ctx.author
+
+        chosen_nickname = random.choice(self.nickname_list)
+
+        class ConfirmView(discord.ui.View):
+            def __init__(self, author_id):
+                super().__init__()
+                self.author_id = author_id
+                self.value = None
+
+            @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green)
+            async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
+                    return
+                
+                await interaction.response.defer()
+                self.value = True
+                self.stop()
+
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
+            async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message("You are not authorized to use these buttons.", ephemeral=True)
+                    return
+                
+                await interaction.response.defer()
+                self.value = False
+                self.stop()
+
+        confirmView = ConfirmView(ctx.author.id)
+        await ctx.send("Are you sure you want to force this nickname?", view=confirmView)
+        await confirmView.wait()
+
+        if confirmView.value is None:
+            return await utils.Embeds.send_error_embed(
+                ctx,
+                ctx.author,
+                "You did not respond in time."
+            )
+        elif not confirmView.value:
+            await utils.Embeds.send_success_embed(
+                ctx,
+                ctx.author,
+                "Nickname change cancelled."
+            )
+            return
+
+        await member.edit(nick=chosen_nickname, reason="Random Nickname Command")
+        await utils.Embeds.send_success_embed(
+            ctx,
+            ctx.author,
+            f"{member.mention}'s nickname has been forcefully changed to `{chosen_nickname}` for 5 minutes!"
+        )
+
+        original_nickname = member.display_name
+
+        end_time = datetime.now() + timedelta(seconds=300)  # 5 minutes
+        self.bot.nickname_force[member.id] = {
+            'nickname': chosen_nickname,
+            'original_nickname': original_nickname,
+            'end_time': end_time,
+            'guild_id': ctx.guild.id
+        }
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
     @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
