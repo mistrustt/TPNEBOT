@@ -239,42 +239,48 @@ class RoleTools(commands.Cog, name="Roles"):
             roles_to_remove = [role.id for role in member.roles if role != ctx.guild.default_role and not role.managed]
 
             class ConfirmView(discord.ui.View):
-                def __init__(self, author_id: int):
-                    super().__init__(timeout=30)
-                    self.value = None
+                def __init__(self, author_id):
+                    super().__init__(timeout=60)
                     self.author_id = author_id
+                    self.value = None
+
+                async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                    if interaction.user.id != self.author_id:
+                        await interaction.response.send_message(
+                            "You can't use this.", 
+                            ephemeral=True
+                        )
+                        return False
+                    return True
 
                 @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
                 async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if interaction.user.id != self.author_id:
-                        return await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
-
                     self.value = True
                     self.stop()
 
                 @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
                 async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if interaction.user.id != self.author_id:
-                        return await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
                     self.value = False
                     self.stop()
 
-            embed = discord.Embed(
-                title="Confirm Role Strip",
-                description=f"Are you sure you want to remove {len(roles_to_remove)} roles from {member.mention}? You cannot reverse this",
-                color=discord.Color.orange()
+            confirm_view = ConfirmView(ctx.author.id)
+            confirm_message = await ctx.reply(
+                embed=discord.Embed(
+                    title="Confirm Role Strip",
+                    description=f"Are you sure you want to remove {len(roles_to_remove)} roles from {member.mention}?",
+                    color=discord.Color.red()
+                ),
+                view=confirm_view
             )
-            view = ConfirmView(ctx.author.id)
-            await ctx.send(embed=embed, view=view)
-            await view.wait()
-            if view.value is None:
+            await confirm_view.wait()
+            if confirm_view.value is None:
                 embed = discord.Embed(
                     description="🚫 Confirmation timed out. Role strip cancelled.",
                     color=discord.Color.red()
                 )
                 return await ctx.reply(embed=embed, delete_after=5)
             
-            if view.Value is False:
+            if confirm_view.value is False:
                 embed = discord.Embed(
                     description="❌ Role strip cancelled.",
                     color=discord.Color.red()
