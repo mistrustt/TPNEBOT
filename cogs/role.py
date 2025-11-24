@@ -239,20 +239,22 @@ class RoleTools(commands.Cog, name="Roles"):
             roles_to_remove = [role.id for role in member.roles if role != ctx.guild.default_role and not role.managed]
 
             class ConfirmView(discord.ui.View):
-                def __init__(self):
+                def __init__(self, author_id: int):
                     super().__init__(timeout=30)
                     self.value = None
+                    self.author_id = author_id
 
                 @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
                 async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if interaction.user != ctx.author:
+                    if interaction.user.id != self.author_id:
                         return await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
+
                     self.value = True
                     self.stop()
 
                 @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
                 async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if interaction.user != ctx.author:
+                    if interaction.user.id != self.author_id:
                         return await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
                     self.value = False
                     self.stop()
@@ -262,7 +264,7 @@ class RoleTools(commands.Cog, name="Roles"):
                 description=f"Are you sure you want to remove {len(roles_to_remove)} roles from {member.mention}? You cannot reverse this",
                 color=discord.Color.orange()
             )
-            view = ConfirmView()
+            view = ConfirmView(ctx.author.id)
             await ctx.send(embed=embed, view=view)
             await view.wait()
             if view.value is None:
