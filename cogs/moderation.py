@@ -1557,7 +1557,7 @@ class Moderation(commands.Cog, name="Moderation"):
         else:
             reason_text = f"{raw_dur} {raw_reason}".strip() if raw_dur else raw_reason
 
-        to_remove = [r for r in member.roles if r != ctx.guild.default_role and r != jail_role]
+        to_remove = [r for r in member.roles if r != ctx.guild.default_role and r != jail_role and not r.managed]
         removed_ids = [r.id for r in to_remove]
 
         if jail_role.position >= ctx.guild.me.top_role.position:

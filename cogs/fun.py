@@ -907,7 +907,7 @@ class Fun(commands.Cog, name="Fun"):
                     "Jail role or channel misconfigured. Contact an admin."
                 )
             
-            to_remove = [r for r in victim.roles if r != ctx.guild.default_role and r != jail_role]
+            to_remove = [r for r in victim.roles if r != ctx.guild.default_role and r != jail_role and not r.managed]
             removed_ids = [r.id for r in to_remove]
 
             await self.bot.database.add_jailed_user(guild_id, victim.id, None, removed_ids)
