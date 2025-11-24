@@ -1902,7 +1902,7 @@ class Music(commands.Cog, name="Music"):
                     try:
                         while True:
                             elapsed = asyncio.get_event_loop().time() - start_time
-                            hint_chars = min(elapsed // 3, 3) # reveal a character every 3 seconds, max 3 as curteousy of silmar
+                            hint_chars = int(elapsed // 3) # reveal a character every 3 seconds, max 3 as curteousy of silmar
                             hint = full_name[:hint_chars]
                             for i in range(len(full_name) - hint_chars):
                                 if full_name[i + hint_chars] == " ":
