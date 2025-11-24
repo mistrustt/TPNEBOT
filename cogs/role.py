@@ -216,6 +216,85 @@ class RoleTools(commands.Cog, name="Roles"):
                 description=f"🚫 An error occurred while creating the role."
             )
             return await ctx.reply(embed=embed)
+        
+    @role.command(name='strip', description='Removes all roles from a member')
+    @commands.has_permissions(manage_roles=True)
+    async def create_role(self, ctx: commands.Context, member: discord.Member = None):
+        try:
+            member = member or ctx.author
+            if member.top_role >= ctx.me.top_role:
+                embed = discord.Embed(
+                    description="🚫 I cannot strip roles from this member because their top role is higher or equal to mine.",
+                    color=discord.Color.red()
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+            
+            if member.top_role >= ctx.author.top_role and ctx.author != ctx.guild.owner:
+                embed = discord.Embed(
+                    description="🚫 You cannot strip roles from this member because their top role is higher or equal to yours.",
+                    color=discord.Color.red()
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+            
+            roles_to_remove = [role for role in member.roles if role != ctx.guild.default_role and not role.managed]
+            role_ids = [role.id for role in roles_to_remove]
+
+            class ConfirmView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=30)
+                    self.value = None
+
+                @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+                async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    if interaction.user != ctx.author:
+                        return await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
+                    self.value = True
+                    self.stop()
+
+                @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+                async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    if interaction.user != ctx.author:
+                        return await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
+                    self.value = False
+                    self.stop()
+
+            embed = discord.Embed(
+                title="Confirm Role Strip",
+                description=f"Are you sure you want to remove {len(roles_to_remove)} roles from {member.mention}? You cannot reverse this",
+                color=discord.Color.orange()
+            )
+            view = ConfirmView()
+            await ctx.send(embed=embed, view=view)
+            await view.wait()
+            if view.value is None:
+                embed = discord.Embed(
+                    description="🚫 Confirmation timed out. Role strip cancelled.",
+                    color=discord.Color.red()
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+            
+            if view.Value is False:
+                embed = discord.Embed(
+                    description="❌ Role strip cancelled.",
+                    color=discord.Color.red()
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+            await member.remove_roles(*roles_to_remove, reason=f"Roles stripped by {ctx.author}")
+
+            embed = discord.Embed(description=f"✅ Removed {len(roles_to_remove)} roles from {member.mention}")
+            await ctx.send(embed=embed)
+
+
+        except discord.Forbidden:
+            embed = discord.Embed(
+                description="🚫 I do not have permission to create roles."
+            )
+            return await ctx.reply(embed=embed)
+        except discord.HTTPException as e:
+            embed = discord.Embed(
+                description=f"🚫 An error occurred while creating the role."
+            )
+            return await ctx.reply(embed=embed)
 
     @role.command(name='rename', description='Rename a role.')
     @commands.has_permissions(manage_roles=True)

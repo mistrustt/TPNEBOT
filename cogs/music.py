@@ -1814,7 +1814,7 @@ class Music(commands.Cog, name="Music"):
             has_role
         )
         
-        if ctx.author.id == 567401702190350347 and random.random() < 0.2:
+        if ctx.author.id == 567401702190350347 and random.random() < 0.01:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
