@@ -667,7 +667,7 @@ class Fun(commands.Cog, name="Fun"):
             f"{member.mention}'s nickname has been changed to `{chosen_nickname}`!"
         )
 
-    @commands.command(aliases=["frnick", "frandomnick", "frandomnick"], help="Forces a random nickname to a user")
+    @commands.command(aliases=["frnick", "frandomnick", "forcernick"], help="Forces a random nickname to a user")
     @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
     async def forcerandomnick(self, ctx: Context, member: discord.Member=None):
         if member is None:
