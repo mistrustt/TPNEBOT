@@ -35,16 +35,6 @@ class Fun(commands.Cog, name="Fun"):
             "We almost level 10 daddy", "That one chud", "Chiev", "NigarGod69",
             "Bill Putemtosleep Cosby", "temp237", "Eli Butthole", "Chaos 🤓🤓", "JustinSlave",
             "Nah leak the vault googly 😭😭", "Vices is a real song bro", "Nah trust me bro",
-
-            # COPILOT MADE THESE
-            "Duke Dennis", "Big Chungus", "Sus", "Among Us Impostor", "The Real Slim Shady",
-            "Area 51 Raider", "Keyboard Warrior", "Meme Lord", "Captain Obvious", "The Chudfather",
-            "Lord of the Memes", "Doge Enthusiast", "Cat Video Critic", "Doggo Admirer",
-            "Professional Procrastinator", "Snack Connoisseur", "Nap Champion", "Couch Potato",
-            "Serial Chiller", "Master of None", "Chief Meme Officer", "Supreme Overlord of Fun",
-            "Duke Nukem", "The Notorious RBG", "Punny Guy", "Jester of Jokes", "Sultan of Silly",
-            "Baron of Banter", "Duke of Drollery", "Viscount of Vibes", "Count of Comedy",
-            "Earl of Entertainment", "Marquis of Mirth", "Prince of Pranks", "King of Kicks",
                                                                 
                                     # if you have something funny then add it pls,
                                     # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
