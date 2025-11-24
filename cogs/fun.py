@@ -21,10 +21,6 @@ class Fun(commands.Cog, name="Fun"):
     def __init__(self, bot) -> None:
         self.bot = bot
         self.utils = MiscUtils(self)
-        self.cool_commands_whitelist = [
-            1219090700407279656, # TOXIC
-            1095747082599530627 # THE KING AKA GOAT AKA ENVY
-        ]
         self.ban_roulette_history = {}
         self.jail_roulette_history = {}
         self.nickname_list = [
@@ -39,12 +35,6 @@ class Fun(commands.Cog, name="Fun"):
                                     # if you have something funny then add it pls,
                                     # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
         ]
-
-    def is_cool(ctx: commands.Context, cog = None):
-        if not cog:
-            cog = ctx.cog
-
-        return ctx.author.id in cog.cool_commands_whitelist
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -658,7 +648,7 @@ class Fun(commands.Cog, name="Fun"):
         )
 
     @commands.command(name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_guild=True))
+    @commands.has_guild_permissions(manage_nicknames=True)
     async def nicknameroulette(self, ctx: Context):
         """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
         embed = discord.Embed(
@@ -755,7 +745,7 @@ class Fun(commands.Cog, name="Fun"):
         await ctx.send(embed=embed)
 
     @commands.command(name="jailrouletteundo", aliases=["jru"], help="Unjails a user but u have to be in the array of cool peopl")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_messages=True))
+    @commands.has_guild_permissions(manage_messages=True)
     async def jailrouletteundo(self, ctx: Context):
         """Unjails a user from Jail Roulette."""
         last_victim_id = self.jail_roulette_history.get(ctx.author.id)
@@ -856,7 +846,7 @@ class Fun(commands.Cog, name="Fun"):
             )
 
     @commands.command(name="jailroulette", aliases=["jr"], help="Play a game of jail roulette")
-    @commands.check_any(commands.check(is_cool), commands.has_guild_permissions(manage_messages=True))
+    @commands.has_guild_permissions(manage_messages=True)
     async def jailroulette(self, ctx: Context):
         """Play a game of jail roulette. Players react to join the game and one player is randomly selected to get jailed."""
         embed = discord.Embed(

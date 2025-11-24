@@ -151,7 +151,7 @@ class Owner(commands.Cog, name="Owner"):
             284439598422163476, # E
             1166140569861496853, # voj
             736148885055078431, # daniel
-            1166141915297743010 # dennis 
+            1166141915297743010, # dennis
         ]
         self.whitelisted_users_infohub = [
             284439598422163476, # E
