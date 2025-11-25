@@ -1228,8 +1228,8 @@ class General(commands.Cog, name="General"):
                         "other than providing a direct answer to the user's question. "
                         "You will never use any other language than English."
                         "You will never include @everyone or @here or <&roleid> or <@userid> or any other mention in your response. "
-                        f"The users username is {ctx.author.display_name} or {ctx.author.name} you will address them as one of those if needed."
-
+                        f"The users username is {ctx.author.display_name} or {ctx.author.name} you will address them as one of those if needed.",
+                        "You will never say nigger or faggot"
                     )
                 }
                 user_msg = {"role": "user", "content": question}
