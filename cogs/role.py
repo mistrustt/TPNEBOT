@@ -275,7 +275,10 @@ class RoleTools(commands.Cog, name="Roles"):
                     self.value = False
                     self.stop()
 
-                    await 
+                    new_embed = discord.Embed(
+                        title="Role Strip Confirmed",
+                    )
+                    await self.orig_message.edit(embed=new_embed, view=None)
 
             confirm_view = ConfirmView(ctx.author.id)
             await ctx.reply(
