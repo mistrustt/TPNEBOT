@@ -47,6 +47,7 @@ from .models import (
     Sobs,
     ReactionSettings,
     GameStats,
+    HeardleGameStats,
     GameHistory,
     UserRoleHistory,
     Streak,
@@ -3007,6 +3008,63 @@ class DatabaseManager:
             logging.error(f"Error incrementing reputation: {str(e)}")
             return 0
 
+    async def get_heardle_stats(self, discord_id: int) -> int:
+        try:
+            async with self.async_sessionmaker() as session:
+                result = await session.execute(select(HeardleGameStats).filter_by(user_id=discord_id))
+                stats = result.all()
+                return stats
+        except SQLAlchemyError as e:
+            return 0
+
+    async def add_heardle_win(self, discord_id: int, amount: int = 1) -> int:
+        try:
+            async with self.async_sessionmaker() as session:
+                async with session.begin():
+                    stmt = (
+                        update(HeardleGameStats)
+                        .where(HeardleGameStats.user_id == discord_id)
+                        .values(
+                            wins=HeardleGameStats.wins + amount,
+                            streak=HeardleGameStats.streak + amount
+                        )
+                    )
+                    result = await session.execute(stmt)
+
+                    if result.rowcount == 0:
+                        new_user = HeardleGameStats(user_id=discord_id, wins=amount, losses=0, streak=amount)
+                        session.add(new_user)
+
+                    await session.commit()
+                    return await self.get_heardle_stats(discord_id)
+        except SQLAlchemyError as e:
+            logging.error(f"Error incrementing reputation: {str(e)}")
+            return 0
+        
+    async def add_heardle_loss(self, discord_id: int, amount: int = 1) -> int:
+        try:
+            async with self.async_sessionmaker() as session:
+                async with session.begin():
+                    stmt = (
+                        update(HeardleGameStats)
+                        .where(HeardleGameStats.user_id == discord_id)
+                        .values(
+                            losses=HeardleGameStats.losses + amount,
+                            streak=0
+                        )
+                    )
+                    result = await session.execute(stmt)
+
+                    if result.rowcount == 0:
+                        new_user = HeardleGameStats(user_id=discord_id, wins=0, losses=amount, streak=0)
+                        session.add(new_user)
+
+                    await session.commit()
+                    return await self.get_heardle_stats(discord_id)
+        except SQLAlchemyError as e:
+            logging.error(f"Error incrementing reputation: {str(e)}")
+            return 0
+
     async def get_top_reputation_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -4477,6 +4535,7 @@ class DatabaseManager:
                 await session.execute(delete(Reputation).where(Reputation.discord_id == user_id))
                 await session.execute(delete(UserLocation).where(UserLocation.user_id == user_id))
                 await session.execute(delete(GameStats).where(GameStats.user_id == user_id))
+                await session.execute(delete(HeardleGameStats).where(HeardleGameStats.user_id == user_id))
                 await session.execute(delete(Task).where(Task.user_id == user_id))
                 await session.execute(delete(Item).where(Item.user_id == user_id))
                 await session.execute(delete(LastFMusers).where(LastFMusers.discord_id == user_id))

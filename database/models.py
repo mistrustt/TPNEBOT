@@ -433,6 +433,14 @@ class GameStats(Base):
     losses = Column(Integer, default=0)
     total_wagered = Column(Numeric(precision=38, scale=2), default=Decimal('0.00'))
 
+class HeardleGameStats(Base):
+    __tablename__ = 'heardle_game_stats'
+
+    user_id = Column(BigInteger, primary_key=True)
+    wins = Column(Integer, default=0)
+    losses = Column(Integer, default=0)
+    streak = Column(Integer, default=0)
+
 class GameHistory(Base):
     __tablename__ = 'game_history'
 

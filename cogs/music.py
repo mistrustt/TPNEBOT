@@ -1752,22 +1752,36 @@ class Music(commands.Cog, name="Music"):
     async def heardlestats(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
         
+        stats = await self.bot.db.get_heardle_stats(member.id)
+        if stats is None:
+            return await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                f"{member.display_name} stats data is null"
+            )
+
         embed = discord.Embed(
             description=f"Heardle Stats for {member.display_name}"
         )
         embed.add_field(
             name="Wins",
-            value=999, # RIP JUICE WRLD
+            value=stats.wins,
             inline=True
         )
         embed.add_field(
             name="Losses",
-            value=999, # RIP JUICE WRLD
+            value=stats.losses,
             inline=True
         )
         embed.add_field(
-            name="W/L Ratio",
-            value=999 / 1400, # shoutout juice wrld x trippie redd freestyle
+            name="Winstreak",
+            value=stats.streak,
+            inline=True
+        )
+        wl = round(stats.wins / (stats.wins + stats.losses) * 100, 2) if (stats.wins + stats.losses) > 0 else 0.0
+        embed.add_field(
+            name="Win Rate",
+            value=f'{wl} %',
             inline=True
         )
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
@@ -1948,6 +1962,7 @@ class Music(commands.Cog, name="Music"):
                             pass
                         self.handle_user_done_heardle(ctx.author.id)
                         update_task.cancel()
+                        await self.bot.db.add_heardle_loss(ctx.author.id)
                         return
                     
                     guess = guess_msg.content.strip().lower()
@@ -1957,6 +1972,7 @@ class Music(commands.Cog, name="Music"):
                             await message.delete()
                         except:
                             pass
+                        await self.bot.db.add_heardle_loss(ctx.author.id)
                         self.handle_user_done_heardle(ctx.author.id)
                         return
                     elif guess in acceptable_answers:
@@ -1968,6 +1984,7 @@ class Music(commands.Cog, name="Music"):
                     ctx.author,
                     f'Congratulations! You guessed the song correctly: **{best_track_title}**!'
                 )
+                await self.bot.db.add_heardle_win(ctx.author.id)
                 try:
                     await message.delete()
                 except:
