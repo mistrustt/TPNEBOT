@@ -3015,7 +3015,7 @@ class DatabaseManager:
                 stats = result.scalar_one_or_none()
                 return stats
         except SQLAlchemyError as e:
-            return 0
+            return HeardleGameStats()
 
     async def add_heardle_win(self, discord_id: int, amount: int = 1) -> int:
         try:
