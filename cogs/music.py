@@ -1760,6 +1760,8 @@ class Music(commands.Cog, name="Music"):
                 f"{member.display_name} stats data is null"
             )
 
+        await ctx.send(f"stats {stats}")
+    
         embed = discord.Embed(
             description=f"Heardle Stats for {member.display_name}"
         )
