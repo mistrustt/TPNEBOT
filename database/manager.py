@@ -3012,7 +3012,7 @@ class DatabaseManager:
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(select(HeardleGameStats).filter_by(user_id=discord_id))
-                stats = result.all()
+                stats = result.scalar_one_or_none()
                 return stats
         except SQLAlchemyError as e:
             return 0

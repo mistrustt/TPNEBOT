@@ -1760,12 +1760,9 @@ class Music(commands.Cog, name="Music"):
                 f"{member.display_name} stats data is null"
             )
 
-        user_stats = stats[0]
-        print(user_stats)
-        await ctx.reply(f"Debug: {type(user_stats)}")
-        wins = user_stats.wins or 0
-        losses = user_stats.losses or 0
-        streak = user_stats.streak or 0
+        wins = stats.wins or 0
+        losses = stats.losses or 0
+        streak = stats.streak or 0
         embed = discord.Embed(
             description=f"Heardle Stats for {member.display_name}"
         )
