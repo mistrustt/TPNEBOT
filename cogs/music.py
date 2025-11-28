@@ -1760,14 +1760,10 @@ class Music(commands.Cog, name="Music"):
                 f"{member.display_name} stats data is null"
             )
 
-        print(stats)
-        await ctx.send(f"stats {stats}")
-        for field in stats:
-            await ctx.send(f"field {field}")
-
-        wins = stats.wins or 0
-        losses = stats.losses or 0
-        streak = stats.streak or 0
+        user_stats = stats[0] or None
+        wins = user_stats.wins or 0
+        losses = user_stats.losses or 0
+        streak = user_stats.streak or 0
         embed = discord.Embed(
             description=f"Heardle Stats for {member.display_name}"
         )
