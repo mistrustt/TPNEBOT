@@ -1753,18 +1753,13 @@ class Music(commands.Cog, name="Music"):
         member = member or ctx.author
         
         stats = await self.bot.database.get_heardle_stats(member.id)
-        if stats is None:
-            return await utils.Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                f"{member.display_name} stats data is null"
-            )
-
-        wins = stats.wins or 0
-        losses = stats.losses or 0
-        streak = stats.streak or 0
+        
+        wins = stats.wins if stats else 0
+        losses = stats.losses if stats else 0
+        streak = stats.streak if stats else  0
         embed = discord.Embed(
-            description=f"Heardle Stats for {member.display_name}"
+            description=f"Heardle Stats for {member.display_name}",
+            color=member.color
         )
         embed.add_field(
             name="Wins",
@@ -1784,7 +1779,7 @@ class Music(commands.Cog, name="Music"):
         wl = round(wins / (wins + losses) * 100, 2) if (wins + losses) > 0 else 0.0
         embed.add_field(
             name="Win Rate",
-            value=f'{wl} %',
+            value=f'{wl} %' if stats else 'N/A',
             inline=True
         )
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
