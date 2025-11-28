@@ -1761,8 +1761,8 @@ class Music(commands.Cog, name="Music"):
             )
 
         await ctx.send(f"stats {stats}")
-        for field in vars(stats):
-            await ctx.send(f"{field}: {getattr(stats, field)}")
+        for field in stats:
+            await ctx.send(f"field {field}: {getattr(stats, field)}")
 
         wins = stats.wins or 0
         losses = stats.losses or 0
