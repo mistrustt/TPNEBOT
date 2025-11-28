@@ -1761,26 +1761,31 @@ class Music(commands.Cog, name="Music"):
             )
 
         await ctx.send(f"stats {stats}")
-    
+        for field in vars(stats):
+            await ctx.send(f"{field}: {getattr(stats, field)}")
+
+        wins = stats.wins or 0
+        losses = stats.losses or 0
+        streak = stats.streak or 0
         embed = discord.Embed(
             description=f"Heardle Stats for {member.display_name}"
         )
         embed.add_field(
             name="Wins",
-            value=stats.wins,
+            value=wins,
             inline=True
         )
         embed.add_field(
             name="Losses",
-            value=stats.losses,
+            value=losses,
             inline=True
         )
         embed.add_field(
             name="Winstreak",
-            value=stats.streak,
+            value=streak,
             inline=True
         )
-        wl = round(stats.wins / (stats.wins + stats.losses) * 100, 2) if (stats.wins + stats.losses) > 0 else 0.0
+        wl = round(wins / (wins + losses) * 100, 2) if (wins + losses) > 0 else 0.0
         embed.add_field(
             name="Win Rate",
             value=f'{wl} %',
