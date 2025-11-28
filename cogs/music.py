@@ -1760,9 +1760,10 @@ class Music(commands.Cog, name="Music"):
                 f"{member.display_name} stats data is null"
             )
 
+        print(stats)
         await ctx.send(f"stats {stats}")
         for field in stats:
-            await ctx.send(f"field {field}: {getattr(stats, field)}")
+            await ctx.send(f"field {field}}")
 
         wins = stats.wins or 0
         losses = stats.losses or 0
