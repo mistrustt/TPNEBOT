@@ -67,8 +67,9 @@ class Music(commands.Cog, name="Music"):
             # TODO: IM NOT DOING THE REST
         }
         self.testing_ids = [
-            1095747082599530627, # ENVY
-            1219090700407279656 # DUMB IDIOT
+            1095747082599530627, # ENVY (DUMB IDIOT)
+            1219090700407279656, # TOXIC (GOAT ASF)
+            1120028461713608834, # WARITH
         ]
         self.ongoing_heardle = []
         self.heardle_answers = {}
