@@ -1773,7 +1773,7 @@ class Music(commands.Cog, name="Music"):
         )
         embed.add_field(
             name="Winstreak",
-            value=streak,
+            value=streak if streak < 5 else f"**{streak}** 🔥",
             inline=True
         )
         wl = round(wins / (wins + losses) * 100, 2) if (wins + losses) > 0 else 0.0
