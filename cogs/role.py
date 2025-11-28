@@ -239,10 +239,9 @@ class RoleTools(commands.Cog, name="Roles"):
             roles_to_remove = [role for role in member.roles if role != ctx.guild.default_role and not role.managed]
 
             class ConfirmView(discord.ui.View):
-                def __init__(self, author_id, orig_message: discord.Message):
+                def __init__(self, author_id):
                     super().__init__(timeout=60)
                     self.author_id = author_id
-                    self.orig_message = orig_message
                     self.value = None
 
                 async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -262,11 +261,6 @@ class RoleTools(commands.Cog, name="Roles"):
                     self.value = True
                     self.stop()
 
-                    new_embed = discord.Embed(
-                        title="Role Strip Confirmed",
-                    )
-                    await self.orig_message.edit(embed=new_embed, view=None)
-
                 @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
                 async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
                     if not await self.interaction_check(interaction):
@@ -275,13 +269,8 @@ class RoleTools(commands.Cog, name="Roles"):
                     self.value = False
                     self.stop()
 
-                    new_embed = discord.Embed(
-                        title="Role Strip Confirmed",
-                    )
-                    await self.orig_message.edit(embed=new_embed, view=None)
-
             confirm_view = ConfirmView(ctx.author.id)
-            await ctx.reply(
+            orig_message = await ctx.reply(
                 embed=discord.Embed(
                     title="Confirm Role Strip",
                     description=f"Are you sure you want to remove {len(roles_to_remove)} roles from {member.mention}?",
@@ -290,6 +279,19 @@ class RoleTools(commands.Cog, name="Roles"):
                 view=confirm_view
             )
             await confirm_view.wait()
+            if confirm_view.value:
+                new_embed = discord.Embed(
+                    description=f"✅ Stripping roles from {member.mention}...",
+                    color=discord.Color.green()
+                )
+                await orig_message.edit(embed=new_embed, view=None)
+            else:
+                new_embed = discord.Embed(
+                    description="❌ Role strip cancelled.",
+                    color=discord.Color.red()
+                )
+                await orig_message.edit(embed=new_embed, view=None)
+
             if confirm_view.value is None:
                 embed = discord.Embed(
                     description="🚫 Confirmation timed out. Role strip cancelled.",
