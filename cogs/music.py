@@ -1763,7 +1763,7 @@ class Music(commands.Cog, name="Music"):
         print(stats)
         await ctx.send(f"stats {stats}")
         for field in stats:
-            await ctx.send(f"field {field}}")
+            await ctx.send(f"field {field}")
 
         wins = stats.wins or 0
         losses = stats.losses or 0
