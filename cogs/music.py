@@ -1410,13 +1410,16 @@ class Music(commands.Cog, name="Music"):
 
                 async def checkFileName(song: dict):
                     fileName = song.get('file_names')
+                    mainTitles = song.get('track_titles', [])
+                    mainTitle = str(mainTitles[0]).replace('*', '')
                     if "File Name:" in fileName:
                         fileName = extract_file_name(fileName)
                     if fileName == "N/A" or not fileName:
-                        fileNames = song.get('track_titles', [])
-                        fileName = str(fileNames[0]).replace('*', '')
+                        fileName = mainTitle
                     fileName += "."
                     downloads = await request_filename(fileName)
+                    if not downloads:
+                        downloads = await request_filename(mainTitle)
                     return downloads if downloads else None
 
                 async def request_filename(filename: str) -> list[dict[str, str]] | None:
