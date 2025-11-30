@@ -1364,7 +1364,7 @@ class Music(commands.Cog, name="Music"):
                         if bitrate and "Unavailable" not in bitrate:
                             self.add_item(Bitrate)
 
-                        if downloads:
+                        if downloads and "session" not in str(category).lower():
                             main = "https://juicewrldapi.com/juicewrld/files/download/?path="
                             action_rows = []
                             current_row = discord.ui.ActionRow()
