@@ -1398,11 +1398,11 @@ class Music(commands.Cog, name="Music"):
                                     action_rows.append(current_row)
                                     current_row = discord.ui.ActionRow()
 
-                                if len(current_row.children) > 0:
-                                    action_rows.append(current_row)
+                            if len(current_row.children) > 0:
+                                action_rows.append(current_row)
 
-                                for row in action_rows:
-                                    self.add_item(row)
+                            for row in action_rows:
+                                self.add_item(row)
 
                 results = data.get('results', [])
 
