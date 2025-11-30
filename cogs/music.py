@@ -1371,12 +1371,12 @@ class Music(commands.Cog, name="Music"):
 
                             for i, file in enumerate(downloads):
 
-                                if fileName and "N/A" not in fileName:
-                                    if "Unreleased Discography" in file.get('path', ''):
-                                        continue
-                                else:
-                                    if "Original Files" in file.get('path', ''):
-                                        continue
+                                # if fileName and "N/A" not in fileName:
+                                #     if "Unreleased Discography" in file.get('path', ''):
+                                #         continue
+                                # else:
+                                #     if "Original Files" in file.get('path', ''):
+                                #         continue
 
                                 if length:
 
