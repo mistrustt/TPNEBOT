@@ -73,7 +73,10 @@ class Music(commands.Cog, name="Music"):
         self.heardle_whitelist = [
             1120028461713608834, # WARITH
         ]
-        self.shh = False
+        self.heardle_blacklist = [
+            657182369240973312 # chaos
+        ]
+        self.shh = True
         self.ongoing_heardle = []
         self.heardle_answers = {}
         self.snippet_debounce = {}
@@ -1882,6 +1885,10 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
+        if any(member.id in self.heardle_blacklist for member in ctx.message.mentions):
+            await ctx.reply("nah nigga stick to your shitty heardle")
+            return 
+
         whitelisted_roles = [1290365010542854155, 1440159576044343346, 1414742766386413590]
                         #        ^ goat role            kinnon role ^           dev role ^
         has_role = any(role.id in whitelisted_roles for role in ctx.author.roles)
@@ -2142,11 +2149,15 @@ class Music(commands.Cog, name="Music"):
             except:
                 return False
 
-        if message.author.id == 1290501613311496206 and self.shh: #joseph
+        message_check_ids = [
+            1290501613311496206, # joe
+            1095747082599530627 #envy
+        ]
+        if any(message.author.id == user_id for user_id in message_check_ids) and self.shh: #joseph
             allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
-                user = self.bot.get_user(501936342431694848) # belson
+                user = await self.bot.fetch_user(501936342431694848) # belson
                 if user:
                     if await is_banned(message.guild, user.id):
                         await asyncio.sleep(10)
