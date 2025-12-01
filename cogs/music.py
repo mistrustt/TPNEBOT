@@ -1635,46 +1635,13 @@ class Music(commands.Cog, name="Music"):
                         button = discord.ui.Button(label="Download", url=download_url)
                         self.add_item(discord.ui.ActionRow().add_item(button))
 
-                song_data = data.get('song', {})
-                song_name = song_data.get('name', 'Unknown Title')
-                era = song_data.get('era', {})
-                era_id = era.get('id', 0)
-                era_name = era.get('name', 'Unknown Era')
-                era_description = era.get('description', '')
-                alt_names = [name for name in song_data.get('track_titles', []) if name != song_name]
-                image_url = song_data.get('image_url', '')
-                producers = song_data.get('producers', "N/A")
-                length = song_data.get('length', 0)
                 path = data.get('path', '')
-
-                color = self.album_colors.get(era_id, "#FFFFFF")
-                color_int = int(color.replace("#", "0x"), 16)
-
-                # TODO: make this somewhere else
-                class SongView(discord.ui.View):
-                    def __init__(self, download_url):
-                        super().__init__()
-                        self.add_item(discord.ui.Button(label="Download", url=download_url))
-
-                embed = discord.Embed(title=f'**{song_name}**', color=discord.Color(value=color_int))
-                embed.set_author(name=f'{ctx.author.display_name} - Random Juice WRLD Leak', icon_url=ctx.author.display_avatar.url)
-                if len(alt_names) > 0:
-                    embed.add_field(name='Alternative Name(s)', value=', '.join(alt_names) if alt_names else 'N/A', inline=False)
-                if len(image_url) > 0:
-                    embed.set_thumbnail(url=JUICEWRLD_API + image_url)
-
-                embed.add_field(name='Era', value=f'{era_description} ({era_name})', inline=False)
-                embed.add_field(name='Producer(s)', value=producers, inline=False)
-                if len(length) > 0:
-                    embed.add_field(name='Length', value=f"{length}", inline=False)
 
                 last_slash_index = path.rfind('/')
                 file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
                 path = path[:last_slash_index] if last_slash_index != -1 else path
 
                 download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
-                view = SongView(download_url)
-                # message = await ctx.reply(embed=embed, view=view)
                 message = await ctx.reply(view=InformationView(data, download_url))
                 await message.add_reaction("👍")
                 await message.add_reaction("👎")
