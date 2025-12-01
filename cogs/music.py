@@ -1253,14 +1253,14 @@ class Music(commands.Cog, name="Music"):
                     return
                 
                 class InformationView(discord.ui.LayoutView):
-                    def __init__(self, song: dict, downloads = None):
+                    def __init__(self, song: dict, downloads = None, og: bool = False):
                         super().__init__(timeout=None)
                         self.persistent = True
-                        self.container = Information(song, downloads)
+                        self.container = Information(song, downloads, og)
                         self.add_item(self.container)
 
                 class Information(discord.ui.Container):
-                    def __init__(self, song: dict, downloads = None):
+                    def __init__(self, song: dict, downloads = None, og: bool = False):
                         name = song.get('name')
                         producers = song.get('producers')
                         engineers = song.get('engineers')
@@ -1380,12 +1380,12 @@ class Music(commands.Cog, name="Music"):
 
                             for i, file in enumerate(downloads):
 
-                                # if fileName and "N/A" not in fileName:
-                                #     if "Unreleased Discography" in file.get('path', ''):
-                                #         continue
-                                # else:
-                                #     if "Original Files" in file.get('path', ''):
-                                #         continue
+                                if og:
+                                    if "Unreleased Discography" in file.get('path', ''):
+                                        continue
+                                else:
+                                    if "Original Files" in file.get('path', ''):
+                                        continue
 
                                 if length:
 
@@ -1420,18 +1420,26 @@ class Music(commands.Cog, name="Music"):
                     return match.group(1).strip() if match else None
 
                 async def checkFileName(song: dict):
-                    fileName = song.get('file_names')
-                    mainTitles = song.get('track_titles', [])
-                    mainTitle = str(mainTitles[0]).replace('*', '')
-                    if "File Name:" in fileName:
-                        fileName = extract_file_name(fileName)
-                    if fileName == "N/A" or not fileName:
-                        fileName = mainTitle
+                    realFileName = song.get('file_names')
+                    mainTitle = song.get('name', "").replace('*', '')
+
+                    haveOGName = realFileName not in (None, "", "N/A")
+
+                    if haveOGName and "File Name:" in realFileName:
+                        realFileName = extract_file_name(realFileName)
+
+                    fileName = realFileName if haveOGName else mainTitle
                     fileName += "."
+
                     downloads = await request_filename(fileName)
+
+                    og = haveOGName and downloads is not None
+
                     if not downloads:
                         downloads = await request_filename(mainTitle)
-                    return downloads if downloads else None
+                        og = False
+
+                    return downloads, og
 
                 async def request_filename(filename: str) -> list[dict[str, str]] | None:
                     try:
@@ -1500,8 +1508,8 @@ class Music(commands.Cog, name="Music"):
                         async def callback(self, interaction: discord.Interaction):
                             song_id = self.values[0]
                             song = self.bullshit_map[song_id][0][1]
-                            downloads = await checkFileName(song)
-                            view = InformationView(song, downloads)
+                            downloads, og = await checkFileName(song)
+                            view = InformationView(song, downloads, og)
                             return await interaction.response.edit_message(embed=None, view=view)
 
                     view = discord.ui.View(timeout=None)
@@ -1510,8 +1518,8 @@ class Music(commands.Cog, name="Music"):
                     embed = discord.Embed(description=f"{ctx.author.mention}: Multiple **selections** found with your **search**")
                     return await ctx.reply(embed=embed, view=view)
                 else:
-                    downloads = await checkFileName(results[0])
-                    await ctx.reply(view=InformationView(results[0], downloads))
+                    downloads, og = await checkFileName(results[0])
+                    await ctx.reply(view=InformationView(results[0], downloads, og))
 
     @commands.command(aliases=['rleak'], description="Get a random Juice WRLD leak")
     async def randomleak(self, ctx: commands.Context) -> None:
