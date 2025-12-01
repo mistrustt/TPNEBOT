@@ -1542,14 +1542,14 @@ class Music(commands.Cog, name="Music"):
                     return
 
                 class InformationView(discord.ui.LayoutView):
-                    def __init__(self, data: dict):
+                    def __init__(self, data: dict, download_url: str):
                         super().__init__(timeout=None)
                         self.persistent = True
-                        self.container = Information(data)
+                        self.container = Information(data, download_url)
                         self.add_item(self.container)
 
                 class Information(discord.ui.Container):
-                    def __init__(self, data: dict):
+                    def __init__(self, data: dict, download_url: str):
                         song = data.get('song', {})
                         name = song.get('name')
                         producers = song.get('producers')
@@ -1632,12 +1632,6 @@ class Music(commands.Cog, name="Music"):
                         if category:
                             self.add_item(Category)
 
-                        last_slash_index = path.rfind('/')
-                        file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
-                        path = path[:last_slash_index] if last_slash_index != -1 else path
-
-                        download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
-                        
                         button = discord.ui.Button(label="Download", url=download_url)
                         self.add_item(discord.ui.ActionRow().add_item(button))
 
@@ -1681,7 +1675,7 @@ class Music(commands.Cog, name="Music"):
                 download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
                 view = SongView(download_url)
                 # message = await ctx.reply(embed=embed, view=view)
-                message = await ctx.reply(view=InformationView(data))
+                message = await ctx.reply(view=InformationView(data, download_url))
                 await message.add_reaction("👍")
                 await message.add_reaction("👎")
 
