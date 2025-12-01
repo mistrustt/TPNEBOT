@@ -1670,7 +1670,8 @@ class Music(commands.Cog, name="Music"):
         self.snippet_debounce = {}
         self.shh = not self.shh
 
-        await ctx.author.send(f"Shh mode is now {'enabled' if self.shh else 'disabled'}.")
+        msg = await ctx.author.send(f"Shh mode is now {'enabled' if self.shh else 'disabled'}.")
+        await msg.delete(delay=3)
 
         files = []
         self.assert_download_cache()
