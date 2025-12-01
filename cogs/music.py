@@ -1378,39 +1378,39 @@ class Music(commands.Cog, name="Music"):
                             action_rows = []
                             current_row = discord.ui.ActionRow()
 
-                            for i, file in enumerate(downloads):
+                            if length:
+                                    
+                                for i, file in enumerate(downloads):
 
-                                if og:
-                                    if "Unreleased Discography" in file.get('path', ''):
-                                        continue
-                                else:
-                                    if "Original Files" in file.get('path', ''):
-                                        continue
+                                    if og:
+                                        if "Unreleased Discography" in file.get('path', ''):
+                                            continue
+                                    else:
+                                        if "Original Files" in file.get('path', ''):
+                                            continue
 
-                                if length:
+                                        file_duration = duration_to_seconds(file.get("duration", "0"))
+                                        target_seconds = duration_to_seconds(length)
 
-                                    file_duration = duration_to_seconds(file.get("duration", "0"))
-                                    target_seconds = duration_to_seconds(length)
+                                        if abs(file_duration - target_seconds) > 1.5:
+                                            continue
 
-                                    if abs(file_duration - target_seconds) > 1.5:
-                                        continue
+                                    path = file["path"]
+                                    ext = "OG " + path.split('.')[-1].upper() if "Original Files" in file.get('path', '') else path.split('.')[-1].upper()
+                                    encoded_path = quote(path)
+                                    url = main + encoded_path
+                                    button = discord.ui.Button(label=ext, url=url)
+                                    current_row.add_item(button)
 
-                                path = file["path"]
-                                ext = "OG " + path.split('.')[-1].upper() if "Original Files" in file.get('path', '') else path.split('.')[-1].upper()
-                                encoded_path = quote(path)
-                                url = main + encoded_path
-                                button = discord.ui.Button(label=ext, url=url)
-                                current_row.add_item(button)
+                                    if (i + 1) % 5 == 0:
+                                        action_rows.append(current_row)
+                                        current_row = discord.ui.ActionRow()
 
-                                if (i + 1) % 5 == 0:
+                                if len(current_row.children) > 0:
                                     action_rows.append(current_row)
-                                    current_row = discord.ui.ActionRow()
 
-                            if len(current_row.children) > 0:
-                                action_rows.append(current_row)
-
-                            for row in action_rows:
-                                self.add_item(row)
+                                for row in action_rows:
+                                    self.add_item(row)
 
                 results = data.get('results', [])
 
