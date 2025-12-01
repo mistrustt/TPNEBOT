@@ -1638,7 +1638,8 @@ class Music(commands.Cog, name="Music"):
 
                         download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
                         
-                        self.add_item(discord.ui.ActionRow().add_item(button = discord.ui.Button(label="Download", url=download_url)))
+                        button = discord.ui.Button(label="Download", url=download_url)
+                        self.add_item(discord.ui.ActionRow().add_item(button))
 
                 song_data = data.get('song', {})
                 song_name = song_data.get('name', 'Unknown Title')
