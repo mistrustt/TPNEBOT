@@ -1373,22 +1373,21 @@ class Music(commands.Cog, name="Music"):
                         if bitrate and "Unavailable" not in bitrate:
                             self.add_item(Bitrate)
 
-                        if downloads:
+                        if downloads and "session" not in str(category).lower():
                             main = "https://juicewrldapi.com/juicewrld/files/download/?path="
                             action_rows = []
                             current_row = discord.ui.ActionRow()
 
-                            if length:
+                            for i, file in enumerate(downloads):
 
-                                for i, file in enumerate(downloads):
+                                if og:
+                                    if "Unreleased Discography" in file.get('path', ''):
+                                        continue
+                                else:
+                                    if "Original Files" in file.get('path', ''):
+                                        continue
 
-                                    if og:
-                                        if "Unreleased Discography" in file.get('path', ''):
-                                            continue
-                                    else:
-                                        if "Original Files" in file.get('path', ''):
-                                            continue
-
+                                if length:
 
                                     file_duration = duration_to_seconds(file.get("duration", "0"))
                                     target_seconds = duration_to_seconds(length)
