@@ -1525,10 +1525,7 @@ class Music(commands.Cog, name="Music"):
         async with aiohttp.ClientSession() as session:
             async with session.get(f'{JUICEWRLD_API}/juicewrld/radio/random/') as response:
                 async def handle_request_failed(ctx, code=None):
-                    embed = discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red()
-                    )
+                    embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
                     if code:
                         embed.set_image(url=f"https://http.cat/{code}")
                     await ctx.reply(embed=embed, delete_after=5)
@@ -1543,6 +1540,105 @@ class Music(commands.Cog, name="Music"):
                 if not song_data:
                     await handle_request_failed(ctx)
                     return
+
+                class InformationView(discord.ui.LayoutView):
+                    def __init__(self, data: dict):
+                        super().__init__(timeout=None)
+                        self.persistent = True
+                        self.container = Information(data)
+                        self.add_item(self.container)
+
+                class Information(discord.ui.Container):
+                    def __init__(self, data: dict):
+                        song = data.get('song', {})
+                        name = song.get('name')
+                        producers = song.get('producers')
+                        engineers = song.get('engineers')
+                        era = song.get('era')
+                        surfaced = song.get('date_leaked').replace("Surfaced", "").strip() if song.get('date_leaked') else None
+                        released = song.get('release_date').replace("Released", "").strip() if song.get('release_date') else None
+                        length = song.get('length')
+                        category = song.get('leak_type')
+                        image_url = song.get('image_url')
+                        path = data.get('path')
+
+                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", url="https://juicewrldapi.com/"))
+                        track_titles = [t for t in song.get('track_titles', []) if t != name]
+                        Header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
+
+                        Separate = discord.ui.Separator()
+                        
+                        Thumb = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
+                        Thumb.add_item(discord.ui.TextDisplay(f"Producer(s): **{producers}**\nEngineer(s): **{engineers}**"))
+
+                        era = song.get('era', {})
+                        era_name = era.get('name', 'N/A')
+
+                        albums = {
+                            "JUTE": {"name": "JUICED UP THE EP", "color": "#FFE602"},
+                            "LND": {"name": "Legends Never Die", "color": "#F700FF"},
+                            "AFF": {"name": "affliction", "color": "#000000"},
+                            "HIH 9 9 9": {"name": "Heartbroken In Hollywood 9 9 9", "color": "#FF653E"},
+                            "JW 9 9 9": {"name": "JuiceWRLD 9 9 9", "color": "#FF2C2C"},
+                            "ND </3": {"name": "NOTHING'S DIFFERENT </3", "color": "#FF8800"},
+                            "GB&GR": {"name": "Goodbye & Good Riddance", "color": "#008CFF"},
+                            "GB&GR (AE)": {"name": "Goodbye & Good Riddance (Anniversary Edition)", "color": "#008CFF"},
+                            "GB&GR (5YAE)": {"name": "Goodbye & Good Riddance (5 Year Anniversary Edition)", "color": "#008CFF"},
+                            "WOD": {"name": "WRLD ON DRUGS", "color": "#00FF94"},
+                            "DRFL": {"name": "Death Race For Love", "color": "#FF9900"},
+                            "DRFL (BTV)": {"name": "Death Race For Love (Bonus Track Version)", "color": "#FF9900"},
+                            "OUT": {"name": "Outsiders", "color": "#2B2B2B"},
+                            "POST": {"name": "Posthumous", "color": "#00CCFF"},
+                            "TPP": {"name": "The Pre-Party", "color": "#EA00FF"},
+                            "TPP (EE)": {"name": "The Pre-Party (Extended Edition)", "color": "#EA00FF"},
+                            "FD": {"name": "Fighting Demons", "color": "#2E2E2E"},
+                            "FD (CE)": {"name": "Fighting Demons (Complete Edition)", "color": "#2E2E2E"},
+                            "FD (EE)": {"name": "Fighting Demons (Extended Edition)", "color": "#2E2E2E"},
+                            "FD (DDE)": {"name": "Fighting Demons (Digital Deluxe Edition)", "color": "#2E2E2E"},
+                            "TPNE": {"name": "The Party Never Ends", "color": "#CC00FF"},
+                        }
+
+                        def getAlbum(era: str):
+                            album = albums.get(era)
+                            if album is None:
+                                return None, era
+                            return album["color"], album["name"]
+
+                        color, era_formatted = getAlbum(era_name)
+
+                        accent_color = int(color.lstrip("#"), 16) if color else 0x2B2D31
+                        super().__init__(accent_color=accent_color)
+
+                        if not era:
+                            Thumb.add_item(discord.ui.TextDisplay(f"**Project**\n{era_formatted}"))
+                        else:
+                            Thumb.add_item(discord.ui.TextDisplay(f"**Era**\n{era_formatted}"))
+
+                        Surfaced = discord.ui.TextDisplay(f"**Surfaced**\n{surfaced}")
+                        Released = discord.ui.TextDisplay(f"**Released**\n{released}")
+                        Length = discord.ui.TextDisplay(f"**Length**\n{length}")
+                        Category = discord.ui.TextDisplay(f"**Category**\n{category}")
+
+                        self.add_item(Header)
+                        self.add_item(Separate)
+                        self.add_item(Thumb)
+
+                        if surfaced:
+                            self.add_item(Surfaced)
+                        if released:
+                            self.add_item(Released)
+                        if length:
+                            self.add_item(Length)
+                        if category:
+                            self.add_item(Category)
+
+                        last_slash_index = path.rfind('/')
+                        file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
+                        path = path[:last_slash_index] if last_slash_index != -1 else path
+
+                        download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
+                        
+                        self.add_item(discord.ui.ActionRow().add_item(button = discord.ui.Button(label="Download", url=download_url)))
 
                 song_data = data.get('song', {})
                 song_name = song_data.get('name', 'Unknown Title')
@@ -1565,36 +1661,17 @@ class Music(commands.Cog, name="Music"):
                         super().__init__()
                         self.add_item(discord.ui.Button(label="Download", url=download_url))
 
-                embed = discord.Embed(
-                    title=f'**{song_name}**',
-                    color=discord.Color(value=color_int)
-                )
+                embed = discord.Embed(title=f'**{song_name}**', color=discord.Color(value=color_int))
                 embed.set_author(name=f'{ctx.author.display_name} - Random Juice WRLD Leak', icon_url=ctx.author.display_avatar.url)
                 if len(alt_names) > 0:
-                    embed.add_field(
-                        name='Alternative Name(s)',
-                        value=', '.join(alt_names) if alt_names else 'N/A',
-                        inline=False
-                        )
+                    embed.add_field(name='Alternative Name(s)', value=', '.join(alt_names) if alt_names else 'N/A', inline=False)
                 if len(image_url) > 0:
                     embed.set_thumbnail(url=JUICEWRLD_API + image_url)
 
-                embed.add_field(
-                    name='Era',
-                    value=f'{era_description} ({era_name})',
-                    inline=False
-                )
-                embed.add_field(
-                    name='Producer(s)',
-                    value=producers,
-                    inline=False
-                )
+                embed.add_field(name='Era', value=f'{era_description} ({era_name})', inline=False)
+                embed.add_field(name='Producer(s)', value=producers, inline=False)
                 if len(length) > 0:
-                    embed.add_field(
-                        name='Length',
-                        value=f"{length}",
-                        inline=False
-                    )
+                    embed.add_field(name='Length', value=f"{length}", inline=False)
 
                 last_slash_index = path.rfind('/')
                 file_name = path[last_slash_index + 1:] if last_slash_index != -1 else path
@@ -1602,7 +1679,8 @@ class Music(commands.Cog, name="Music"):
 
                 download_url = f'{JUICEWRLD_API}/files/{self.special_url_encode(path)}?highlight={self.special_url_encode(file_name)}'
                 view = SongView(download_url)
-                message = await ctx.reply(embed=embed, view=view)
+                # message = await ctx.reply(embed=embed, view=view)
+                message = await ctx.reply(view=InformationView(data))
                 await message.add_reaction("👍")
                 await message.add_reaction("👎")
 
