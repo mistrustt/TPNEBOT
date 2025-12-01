@@ -1392,7 +1392,7 @@ class Music(commands.Cog, name="Music"):
                                     file_duration = duration_to_seconds(file.get("duration", "0"))
                                     target_seconds = duration_to_seconds(length)
 
-                                    if abs(file_duration - target_seconds) > 1:
+                                    if abs(file_duration - target_seconds) > 1.5:
                                         continue
 
                                 path = file["path"]
