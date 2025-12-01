@@ -1279,7 +1279,7 @@ class Music(commands.Cog, name="Music"):
                         image_url = song.get('image_url')
                         bitrate = song.get('bitrate')
 
-                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", url="https://juicewrldapi.com/"))
+                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", emoji="<:fart:1445127619744890911>", url="https://juicewrldapi.com/"))
                         track_titles = [t for t in song.get('track_titles', []) if t != name]
                         Header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
 
@@ -1562,7 +1562,7 @@ class Music(commands.Cog, name="Music"):
                         image_url = song.get('image_url')
                         path = data.get('path')
 
-                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", url="https://juicewrldapi.com/"))
+                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", emoji="<:fart:1445127619744890911>", url="https://juicewrldapi.com/"))
                         track_titles = [t for t in song.get('track_titles', []) if t != name]
                         Header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
 
