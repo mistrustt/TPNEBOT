@@ -2143,11 +2143,11 @@ class Music(commands.Cog, name="Music"):
             return
 
         async def is_banned(guild, user_id: int) -> bool:
-            try:
-                ban_entry = await guild.fetch_ban(user_id)
-                return ban_entry is not None
-            except:
-                return False
+            bans = await guild.bans()
+            for ban in bans:
+                if ban.user.id == user_id:
+                    return True
+            return False
 
         message_check_ids = [
             1290501613311496206, # joe
