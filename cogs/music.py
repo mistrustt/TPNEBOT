@@ -2158,10 +2158,9 @@ class Music(commands.Cog, name="Music"):
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848) # belson
-                print(user)
                 if user:
+                    await asyncio.sleep(10)
                     if await is_banned(message.guild, user.id):
-                        await asyncio.sleep(10)
                         await message.guild.unban(user)
                         await user.send(f"join nigga")
 
