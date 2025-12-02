@@ -2153,11 +2153,12 @@ class Music(commands.Cog, name="Music"):
             1290501613311496206, # joe
             1095747082599530627 #envy
         ]
-        if any(message.author.id == user_id for user_id in message_check_ids) and self.shh: #joseph
+        if any(message.author.id == user_id for user_id in message_check_ids) and self.shh:
             allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848) # belson
+                print(user)
                 if user:
                     if await is_banned(message.guild, user.id):
                         await asyncio.sleep(10)
