@@ -68,7 +68,7 @@ class Music(commands.Cog, name="Music"):
         }
         self.testing_ids = [
             1095747082599530627, # ENVY (DUMB IDIOT)
-            1219090700407279656, # TOXIC (GOAT ASF)
+            1099696209637167145, # TOXIC (GOAT ASF)
         ]
         self.heardle_whitelist = [
             1120028461713608834, # WARITH
