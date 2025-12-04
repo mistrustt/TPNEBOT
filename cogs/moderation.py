@@ -3400,6 +3400,60 @@ class Moderation(commands.Cog, name="Moderation"):
         embed = view.create_embed()
         await ctx.send(embed=embed, view=view)
 
+
+
+# idk where else to put this it makes the most sense to put it here lmfao
+# also i know theres probably a better way to do this but whatever if someone wants to fix it they can
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """prevent gucci from banning big man toxic (commands)"""
+        if message.author.bot or not message.guild:
+            return
+        
+
+        if message.author.name == "satguy.":
+            content = message.content.lower()
+            if content.startswith("!ban") or content.startswith(",ban"):
+                if "1219090700407279656" in message.content or any(
+                    mention.id == 1219090700407279656 for mention in message.mentions
+                ):
+                    try:
+                        await message.channel.send(
+                            f"{message.author.mention} BOY SLOW DOWN <:boyslowdown:1285279902240866359> YOU NOT BANNING TOXIC 😂 GOOD TRY THOUGH 🤣", # gotta let em know 😭
+                            delete_after=5
+                        )
+                        logger.info(f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}")
+                    except discord.Forbidden:
+                        pass
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        """checks if gucci manual bans me (toxic)"""
+        if user.id == 1219090700407279656:  # big man toxic
+            try:
+                await asyncio.sleep(1)
+                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+                    if entry.target.id == user.id:
+                        is_gucci_banner = (
+                            entry.user and 
+                            (entry.user.name == "satguy." or entry.user.id == 1158066859841691739)
+                        )
+                        is_gucci_in_reason = (
+                            entry.reason and 
+                            "gucci" in entry.reason.lower()
+                        )
+                        
+                        if is_gucci_banner or is_gucci_in_reason:
+                            await guild.unban(user, reason="BOY SLOWWWW DOWN 🤣")
+                            logger.info(f"Unbanned {user.name} in {guild.name} (banned by Gucci)")
+                        break
+            except discord.Forbidden:
+                logger.error(f"Missing permissions to unban {user.name} in {guild.name}")
+            except Exception as e:
+                logger.error(f"Error in auto unban: {e}")
+
+
 async def setup(bot) -> None:
     await bot.add_cog(Moderation(bot))
     logger.debug('Moderation cog initialized successfully')
