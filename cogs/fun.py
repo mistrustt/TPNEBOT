@@ -255,11 +255,6 @@ class Fun(commands.Cog, name="Fun"):
         await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
         await ctx.reply("pow :boom:")
 
-    @commands.command("quickpoll", aliases=["qp"])
-    async def quickpoll(self, ctx: Context):
-        await ctx.message.add_reaction("⬆️")
-        await ctx.message.add_reaction("⬇️")
-
     @commands.command(name='gay', aliases=['gayrate'], help='Estimates how homosexual a user is')
     async def random_percentage(self, ctx: Context, member: discord.Member = None):
         """Estimates how homosexual a user is"""
