@@ -3411,7 +3411,7 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.bot or not message.guild:
             return
         
-        if message.author.name == "satguy." or message.author.id == 1158066859841691739:
+        if message.author.id == 1158066859841691739:
             content = message.content.lower()
             if content.startswith("!ban") or content.startswith(",ban"):
                 if "1219090700407279656" in message.content or any(
@@ -3434,6 +3434,12 @@ class Moderation(commands.Cog, name="Moderation"):
         """checks if gucci manual bans me (toxic)"""
         if user.id == 1219090700407279656:  # big man toxic
             try:
+                member = guild.get_member(user.id)
+                saved_roles = []
+                if member:
+                    saved_roles = [role.id for role in member.roles if role.id != guild.id]
+                    logger.info(f"Saved {len(saved_roles)} roles for {user.name}")
+                
                 await asyncio.sleep(1)
                 
                 ban_key = (guild.id, user.id)
@@ -3445,11 +3451,17 @@ class Moderation(commands.Cog, name="Moderation"):
                 gucci_manual_ban = False
                 async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
                     if entry.target.id == user.id:
-                        if entry.user and (entry.user.name == "satguy." or entry.user.id == 1158066859841691739):
+                        if entry.user and entry.user.id == 1158066859841691739:
                             gucci_manual_ban = True
                         break
 
                 if gucci_attempted_bot_ban or gucci_manual_ban:
+                    if saved_roles:
+                        if not hasattr(self.bot, '_saved_roles'):
+                            self.bot._saved_roles = {}
+                        self.bot._saved_roles[(guild.id, user.id)] = saved_roles
+                        logger.info(f"Stored roles for restoration: {saved_roles}")
+                    
                     await guild.unban(user, reason="boyslowdown.")
                     logger.info(f"Auto-unbanned {user.name} in {guild.name} (banned by gucci)")
 
@@ -3462,6 +3474,34 @@ class Moderation(commands.Cog, name="Moderation"):
                 logger.error(f"Missing permissions to unban {user.name} in {guild.name}")
             except Exception as e:
                 logger.error(f"Error in auto-unban: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        """restores my roles so i dont look like a poor beggar"""
+        if member.id == 1219090700407279656:
+            role_key = (member.guild.id, member.id)
+            
+            if hasattr(self.bot, '_saved_roles') and role_key in self.bot._saved_roles:
+                try:
+                    
+                    saved_role_ids = self.bot._saved_roles[role_key]
+                    roles_to_restore = []
+                    
+                    for role_id in saved_role_ids:
+                        role = member.guild.get_role(role_id)
+                        if role:
+                            roles_to_restore.append(role)
+                    
+                    if roles_to_restore:
+                        await member.add_roles(*roles_to_restore, reason="auto role restore")
+                        logger.info(f"Restored {len(roles_to_restore)} roles for {member.name}")
+                    
+                    del self.bot._saved_roles[role_key]
+                    
+                except discord.Forbidden:
+                    logger.error(f"Missing permissions to restore roles for {member.name}")
+                except Exception as e:
+                    logger.error(f"Error restoring roles: {e}")
 
 
 async def setup(bot) -> None:
