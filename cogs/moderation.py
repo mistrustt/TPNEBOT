@@ -3411,17 +3411,19 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.bot or not message.guild:
             return
         
-
-        if message.author.name == "satguy.":
+        if message.author.name == "satguy." or message.author.id == 1158066859841691739:
             content = message.content.lower()
             if content.startswith("!ban") or content.startswith(",ban"):
                 if "1219090700407279656" in message.content or any(
                     mention.id == 1219090700407279656 for mention in message.mentions
                 ):
+                    if not hasattr(self.bot, '_gucci_ban_attempts'):
+                        self.bot._gucci_ban_attempts = set()
+                    self.bot._gucci_ban_attempts.add((message.guild.id, 1219090700407279656))
+
                     try:
                         await message.channel.send(
-                            f"{message.author.mention} BOY SLOW DOWN <:boyslowdown:1285279902240866359> YOU NOT BANNING TOXIC 😂 GOOD TRY THOUGH 🤣", # gotta let em know 😭
-                            delete_after=5
+                            f"yea i dont think so bro",
                         )
                         logger.info(f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}")
                     except discord.Forbidden:
@@ -3433,25 +3435,33 @@ class Moderation(commands.Cog, name="Moderation"):
         if user.id == 1219090700407279656:  # big man toxic
             try:
                 await asyncio.sleep(1)
+                
+                ban_key = (guild.id, user.id)
+                gucci_attempted_bot_ban = (
+                    hasattr(self.bot, '_gucci_ban_attempts') and
+                    ban_key in self.bot._gucci_ban_attempts
+                )
+
+                gucci_manual_ban = False
                 async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
                     if entry.target.id == user.id:
-                        is_gucci_banner = (
-                            entry.user and 
-                            (entry.user.name == "satguy." or entry.user.id == 1158066859841691739)
-                        )
-                        is_gucci_in_reason = (
-                            entry.reason and 
-                            "gucci" in entry.reason.lower()
-                        )
-                        
-                        if is_gucci_banner or is_gucci_in_reason:
-                            await guild.unban(user, reason="BOY SLOWWWW DOWN 🤣")
-                            logger.info(f"Unbanned {user.name} in {guild.name} (banned by Gucci)")
+                        if entry.user and (entry.user.name == "satguy." or entry.user.id == 1158066859841691739):
+                            gucci_manual_ban = True
                         break
+
+                if gucci_attempted_bot_ban or gucci_manual_ban:
+                    await guild.unban(user, reason="boyslowdown.")
+                    logger.info(f"Auto-unbanned {user.name} in {guild.name} (banned by gucci)")
+
+                    if gucci_attempted_bot_ban:
+                        self.bot._gucci_ban_attempts.discard(ban_key)
+
+            except discord.NotFound:
+                logger.warning(f"Tried to unban {user.name} but they weren't banned")
             except discord.Forbidden:
                 logger.error(f"Missing permissions to unban {user.name} in {guild.name}")
             except Exception as e:
-                logger.error(f"Error in auto unban: {e}")
+                logger.error(f"Error in auto-unban: {e}")
 
 
 async def setup(bot) -> None:
