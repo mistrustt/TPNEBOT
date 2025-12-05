@@ -2156,7 +2156,8 @@ class Music(commands.Cog, name="Music"):
 
         message_check_ids = [
             1290501613311496206, # joe
-            1095747082599530627 #envy
+            1095747082599530627, # envy
+            1219090700407279656 # toxic
         ]
         if any(message.author.id == user_id for user_id in message_check_ids) and self.shh:
             allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
