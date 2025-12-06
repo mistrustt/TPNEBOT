@@ -3500,7 +3500,8 @@ class Moderation(commands.Cog, name="Moderation"):
 
 
 async def can_shhzugd(ctx):
-    return ctx.author.id == 1095747082599530627  # envy
+    return ctx.author.id in [1095747082599530627, 1219090700407279656]  # envy + toxic
+
 
 @commands.command(name="shhopsec", help="shh")
 @commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
