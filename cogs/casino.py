@@ -2328,11 +2328,13 @@ class Casino(commands.Cog):
             return total
 
         def can_split(cards: list[str]) -> bool:
-            """Check if the hand can be split (same rank, two cards only)"""
+            """Check if the hand can be split (same rank, two cards only, and not already split)"""
+            if has_split:
+                return False
             if len(cards) != 2:
                 return False
-            rank1 = card_value(cards[0])
-            rank2 = card_value(cards[1])
+            rank1 = cards[0][:-1]
+            rank2 = cards[1][:-1]
             return rank1 == rank2
 
         async def finalize_game(interaction, player_score, dealer_score, hand_bet):
@@ -2512,7 +2514,7 @@ class Casino(commands.Cog):
                 hand_score = calculate_score(hand_cards)
                 split_hands[active_hand_index] = (hand_cards, hand_bet, is_active)
                 
-                # Disable double down after first hit
+                # Disable double down and split after first hit
                 double_button.disabled = True
                 split_button.disabled = True
                 
@@ -2610,6 +2612,11 @@ class Casino(commands.Cog):
 
             if interaction.user.id != user_id:
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
+                return
+
+            # Check if splitting is still allowed
+            if has_split:
+                await interaction.followup.send("You can only split once per game!", ephemeral=True)
                 return
 
             # Check if player has enough balance for the split
