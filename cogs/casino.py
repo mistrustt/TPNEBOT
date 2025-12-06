@@ -2251,6 +2251,7 @@ class Casino(commands.Cog):
     async def blackjack(self, ctx: Context, bet_amount: str):
         """
         Play Blackjack with a fresh deck for each game.
+        Supports Hit, Stay, Double Down, and Split.
         """
         user_id = ctx.author.id
 
@@ -2302,6 +2303,9 @@ class Casino(commands.Cog):
 
         current_bet = amount
         has_doubled = False
+        has_split = False
+        split_hands = []  # List of split hands: [(cards, bet, is_active), ...]
+        active_hand_index = 0
 
         def draw_card():
             return deck.pop()
@@ -2323,18 +2327,26 @@ class Casino(commands.Cog):
                 aces  -= 1
             return total
 
-        async def finalize_game(interaction, player_score, dealer_score):
+        def can_split(cards: list[str]) -> bool:
+            """Check if the hand can be split (same rank, two cards only)"""
+            if len(cards) != 2:
+                return False
+            rank1 = card_value(cards[0])
+            rank2 = card_value(cards[1])
+            return rank1 == rank2
+
+        async def finalize_game(interaction, player_score, dealer_score, hand_bet):
             nonlocal dealer_cards
             winnings = Decimal(0)
 
             if player_score > 21:
                 outcome = "loss"
-                result = f"Bust! You lost {self.currency_name} **{await self.formatter(current_bet)}**."
-                revealed_seed, new_hash = await self.bot.database.increment_loss(user_id, "blackjack", current_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
+                result = f"Bust! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
+                revealed_seed, new_hash = await self.bot.database.increment_loss(user_id, "blackjack", hand_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
             elif dealer_score > 21 or player_score > dealer_score or player_score == 21:
                 outcome = "win"
-                revealed_seed, new_hash = await self.bot.database.increment_win(user_id, "blackjack", current_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
-                winnings = Decimal(current_bet) * Decimal(2.5)
+                revealed_seed, new_hash = await self.bot.database.increment_win(user_id, "blackjack", hand_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
+                winnings = Decimal(hand_bet) * Decimal(2.5)
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,
@@ -2348,9 +2360,9 @@ class Casino(commands.Cog):
                 result = f"You win {self.currency_name} **{await self.formatter(winnings)}**!"
             elif player_score == dealer_score:
                 outcome = "tie"
-                winnings = Decimal(current_bet)
+                winnings = Decimal(hand_bet)
                 try:
-                    revealed_seed, new_hash = await self.bot.database.increment_win(user_id, "blackjack", current_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
+                    revealed_seed, new_hash = await self.bot.database.increment_win(user_id, "blackjack", hand_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,
                         amount=winnings,
@@ -2361,11 +2373,36 @@ class Casino(commands.Cog):
                     await ctx.reply(embed=embed, delete_after=5)
                     return
                 result = (f"It's a tie! Your bet of {self.currency_name} "
-                          f"**{await self.formatter(current_bet)}** has been returned.")
+                          f"**{await self.formatter(hand_bet)}** has been returned.")
             else:
                 outcome = "loss"
-                revealed_seed, new_hash = await self.bot.database.increment_loss(user_id, "blackjack", current_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
-                result = f"Dealer wins! You lost {self.currency_name} **{await self.formatter(current_bet)}**."
+                revealed_seed, new_hash = await self.bot.database.increment_loss(user_id, "blackjack", hand_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
+                result = f"Dealer wins! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
+
+            return outcome, result, winnings
+
+        async def finalize_all_hands(interaction):
+            nonlocal dealer_score
+            
+            # Dealer plays
+            while dealer_score < 17:
+                dealer_cards.append(draw_card())
+                dealer_score = calculate_score(dealer_cards)
+
+            results = []
+            total_winnings = Decimal(0)
+
+            if has_split:
+                for idx, (hand_cards, hand_bet, _) in enumerate(split_hands):
+                    hand_score = calculate_score(hand_cards)
+                    outcome, result, winnings = await finalize_game(interaction, hand_score, dealer_score, hand_bet)
+                    total_winnings += winnings
+                    results.append(f"**Hand {idx + 1}:** {', '.join(hand_cards)} (Total: **{hand_score}**)\n{result}")
+            else:
+                player_score = calculate_score(player_cards)
+                outcome, result, winnings = await finalize_game(interaction, player_score, dealer_score, current_bet)
+                total_winnings += winnings
+                results.append(f"**Your cards:** {', '.join(player_cards)} (Total: **{player_score}**)\n{result}")
 
             for item in view.children:
                 item.disabled = True
@@ -2377,23 +2414,71 @@ class Casino(commands.Cog):
             else:
                 hits_text = dealer_initial
 
-            if outcome == "win":
+            if total_winnings > 0:
                 embed_color = discord.Color.green()
-            elif outcome == "tie":
-                embed_color = discord.Color.orange()
             else:
                 embed_color = discord.Color.red()
 
             embed = discord.Embed(
                 title="Blackjack Result",
                 description=(
-                    f"Your final cards: {', '.join(player_cards)} (Total: **{player_score}**)\n"
+                    f"{chr(10).join(results)}\n\n"
                     f"Bots cards: {hits_text} (Total: **{dealer_score}**)\n\n"
-                    f"{result}"
+                    f"**Total Winnings:** {self.currency_name} **{await self.formatter(total_winnings)}**"
                 ),
                 color=embed_color
             )
             await interaction.edit_original_response(embed=embed, view=view)
+
+        async def update_embed(interaction):
+            if has_split:
+                hand_cards, hand_bet, is_active = split_hands[active_hand_index]
+                hand_score = calculate_score(hand_cards)
+                status = "▶️ Playing" if is_active else "✅ Complete"
+                
+                hands_display = []
+                for idx, (h_cards, h_bet, h_active) in enumerate(split_hands):
+                    h_score = calculate_score(h_cards)
+                    marker = "▶️" if idx == active_hand_index and h_active else "✅"
+                    hands_display.append(
+                        f"{marker} **Hand {idx + 1}:** {', '.join(h_cards)} (Total: **{h_score}**) "
+                        f"Bet: {self.currency_name} **{await self.formatter(h_bet)}**"
+                    )
+                
+                embed.description = (
+                    f"{chr(10).join(hands_display)}\n\n"
+                    f"Bots visible card: {dealer_cards[0]}"
+                )
+            else:
+                player_score = calculate_score(player_cards)
+                embed.description = (
+                    f"Your cards: {', '.join(player_cards)} (Total: **{player_score}**)\n"
+                    f"Bots visible card: {dealer_cards[0]}\n"
+                    f"Current bet: {self.currency_name} **{await self.formatter(current_bet)}**"
+                )
+            
+            await interaction.edit_original_response(embed=embed, view=view)
+
+        async def move_to_next_hand(interaction):
+            nonlocal active_hand_index
+            
+            # Mark current hand as inactive
+            if has_split and active_hand_index < len(split_hands):
+                hand_cards, hand_bet, _ = split_hands[active_hand_index]
+                split_hands[active_hand_index] = (hand_cards, hand_bet, False)
+            
+            # Find next active hand
+            active_hand_index += 1
+            if active_hand_index >= len(split_hands):
+                # All hands done, finalize
+                await finalize_all_hands(interaction)
+                return True
+            
+            # Update buttons for next hand
+            split_button.disabled = True
+            double_button.disabled = False
+            
+            return False
 
         player_cards = [draw_card(), draw_card()]
         dealer_cards = [draw_card()]
@@ -2413,7 +2498,7 @@ class Casino(commands.Cog):
         view = ui.View(timeout=120)
 
         async def hit_callback(interaction: Interaction):
-            nonlocal player_score, dealer_score
+            nonlocal player_score, dealer_score, active_hand_index
             if not interaction.response.is_done():
                 await interaction.response.defer(thinking=False)
 
@@ -2421,29 +2506,41 @@ class Casino(commands.Cog):
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
                 return
 
-            player_cards.append(draw_card())
-            player_score = calculate_score(player_cards)
-
-            # Disable double down after first hit
-            if double_button in view.children:
+            if has_split:
+                hand_cards, hand_bet, is_active = split_hands[active_hand_index]
+                hand_cards.append(draw_card())
+                hand_score = calculate_score(hand_cards)
+                split_hands[active_hand_index] = (hand_cards, hand_bet, is_active)
+                
+                # Disable double down after first hit
                 double_button.disabled = True
-
-            if player_score == 21:
-                while dealer_score < 17:
-                    dealer_cards.append(draw_card())
-                    dealer_score = calculate_score(dealer_cards)
-                await finalize_game(interaction, player_score, dealer_score)
-                return
-            elif player_score > 21:
-                await finalize_game(interaction, player_score, dealer_score)
-                return
+                split_button.disabled = True
+                
+                if hand_score >= 21:
+                    finished = await move_to_next_hand(interaction)
+                    if not finished:
+                        await update_embed(interaction)
+                else:
+                    await update_embed(interaction)
             else:
-                embed.description = (
-                    f"Your cards: {', '.join(player_cards)} (Total: **{player_score}**)\n"
-                    f"Bots visible card: {dealer_cards[0]}\n"
-                    f"Current bet: {self.currency_name} **{await self.formatter(current_bet)}**"
-                )
-                await interaction.edit_original_response(embed=embed, view=view)
+                player_cards.append(draw_card())
+                player_score = calculate_score(player_cards)
+
+                # Disable actions after first hit
+                double_button.disabled = True
+                split_button.disabled = True
+
+                if player_score == 21:
+                    while dealer_score < 17:
+                        dealer_cards.append(draw_card())
+                        dealer_score = calculate_score(dealer_cards)
+                    await finalize_all_hands(interaction)
+                    return
+                elif player_score > 21:
+                    await finalize_all_hands(interaction)
+                    return
+                else:
+                    await update_embed(interaction)
 
         async def stay_callback(interaction: Interaction):
             nonlocal dealer_score
@@ -2454,14 +2551,15 @@ class Casino(commands.Cog):
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
                 return
 
-            while dealer_score < 17:
-                dealer_cards.append(draw_card())
-                dealer_score = calculate_score(dealer_cards)
-
-            await finalize_game(interaction, player_score, dealer_score)
+            if has_split:
+                finished = await move_to_next_hand(interaction)
+                if not finished:
+                    await update_embed(interaction)
+            else:
+                await finalize_all_hands(interaction)
 
         async def double_callback(interaction: Interaction):
-            nonlocal player_score, dealer_score, current_bet, has_doubled
+            nonlocal player_score, dealer_score, current_bet, has_doubled, active_hand_index
             if not interaction.response.is_done():
                 await interaction.response.defer(thinking=False)
 
@@ -2469,9 +2567,11 @@ class Casino(commands.Cog):
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
                 return
 
+            bet_to_double = current_bet if not has_split else split_hands[active_hand_index][1]
+
             # Check if player has enough balance to double
             current_balance = await self.bot.database.get_wallet_balance(wallet_id)
-            if current_bet > Decimal(str(current_balance)):
+            if bet_to_double > Decimal(str(current_balance)):
                 await interaction.followup.send("Insufficient balance to double down!", ephemeral=True)
                 return
 
@@ -2479,26 +2579,74 @@ class Casino(commands.Cog):
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id,
-                    amount=-current_bet,
+                    amount=-bet_to_double,
                     description="Blackjack Double Down"
                 )
             except ValueError as e:
                 await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
                 return
 
-            current_bet *= Decimal(2)
             has_doubled = True
 
-            # Draw one card and automatically stand
-            player_cards.append(draw_card())
-            player_score = calculate_score(player_cards)
+            if has_split:
+                hand_cards, hand_bet, is_active = split_hands[active_hand_index]
+                hand_bet *= Decimal(2)
+                hand_cards.append(draw_card())
+                split_hands[active_hand_index] = (hand_cards, hand_bet, is_active)
+                
+                finished = await move_to_next_hand(interaction)
+                if not finished:
+                    await update_embed(interaction)
+            else:
+                current_bet *= Decimal(2)
+                player_cards.append(draw_card())
+                player_score = calculate_score(player_cards)
+                await finalize_all_hands(interaction)
 
-            # Dealer plays
-            while dealer_score < 17:
-                dealer_cards.append(draw_card())
-                dealer_score = calculate_score(dealer_cards)
+        async def split_callback(interaction: Interaction):
+            nonlocal has_split, split_hands, current_bet
+            if not interaction.response.is_done():
+                await interaction.response.defer(thinking=False)
 
-            await finalize_game(interaction, player_score, dealer_score)
+            if interaction.user.id != user_id:
+                await interaction.response.send_message("This is not your game!", ephemeral=True)
+                return
+
+            # Check if player has enough balance for the split
+            current_balance = await self.bot.database.get_wallet_balance(wallet_id)
+            if current_bet > Decimal(str(current_balance)):
+                await interaction.followup.send("Insufficient balance to split!", ephemeral=True)
+                return
+
+            # Deduct additional bet for second hand
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=-current_bet,
+                    description="Blackjack Split"
+                )
+            except ValueError as e:
+                await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
+                return
+
+            has_split = True
+            
+            # Create two hands from the split
+            card1 = player_cards[0]
+            card2 = player_cards[1]
+            
+            hand1 = [card1, draw_card()]
+            hand2 = [card2, draw_card()]
+            
+            split_hands = [
+                (hand1, current_bet, True),
+                (hand2, current_bet, False)
+            ]
+            
+            # Disable split button after splitting
+            split_button.disabled = True
+            
+            await update_embed(interaction)
 
         hit_button = Button(label="Hit", style=discord.ButtonStyle.primary)
         hit_button.callback = hit_callback
@@ -2506,10 +2654,13 @@ class Casino(commands.Cog):
         stay_button.callback = stay_callback
         double_button = Button(label="Double Down", style=discord.ButtonStyle.success)
         double_button.callback = double_callback
+        split_button = Button(label="Split", style=discord.ButtonStyle.success, disabled=not can_split(player_cards))
+        split_button.callback = split_callback
 
         view.add_item(hit_button)
         view.add_item(stay_button)
         view.add_item(double_button)
+        view.add_item(split_button)
         
         await self.bot.database.set_cooldown(ctx.author.id, ctx.command.qualified_name, 5)
         await ctx.reply(embed=embed, view=view)
