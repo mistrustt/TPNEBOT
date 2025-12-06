@@ -3502,12 +3502,11 @@ class Moderation(commands.Cog, name="Moderation"):
 async def can_shhzugd(ctx):
     return ctx.author.id in [1095747082599530627, 1219090700407279656]  # envy + toxic
 
-
-@commands.command(name="shhopsec", help="shh")
+@commands.command(name="zugd")
 @commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
-async def shhopsec(self, ctx: commands.Context):
+async def zugd(self, ctx: commands.Context):
     self.shh = not self.shh
-    msg = await ctx.send(f"Shh mode is now {'enabled' if self.shh else 'disabled'}.")
+    msg = await ctx.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
     await msg.delete(delay=5)
 
 @commands.Cog.listener()
