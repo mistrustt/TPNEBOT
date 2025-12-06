@@ -3516,18 +3516,6 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.guild is None:
             return
 
-        async def is_banned(guild, user) -> bool:
-            try:
-                ban = await guild.fetch_ban(user)
-                return True
-            except discord.NotFound:
-                return False
-            except discord.Forbidden:
-                return False
-            except Exception as e:
-                print(f"Error checking ban status: {e}")
-                return False
-
         message_check_ids = [
             1290501613311496206, # joe
             1095747082599530627, # envy
@@ -3540,9 +3528,12 @@ class Moderation(commands.Cog, name="Moderation"):
                 user = await self.bot.fetch_user(501936342431694848) # belson
                 if user:
                     await asyncio.sleep(10)
-                    if await is_banned(message.guild, user):
+                    try:
                         await message.guild.unban(user)
                         await user.send(f"join nigga")
+                    except Exception as e:
+                        logger.error(f"Error unbanning user: {e}")
+
 
 
 async def setup(bot) -> None:
