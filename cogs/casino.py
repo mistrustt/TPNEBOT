@@ -2336,8 +2336,12 @@ class Casino(commands.Cog):
             rank1 = cards[0][:-1]
             rank2 = cards[1][:-1]
             return rank1 == rank2
+        
+        def is_blackjack(cards: list[str]) -> bool:
+            """Check if the hand is a natural blackjack (21 with exactly 2 cards)"""
+            return len(cards) == 2 and calculate_score(cards) == 21
 
-        async def finalize_game(interaction, player_score, dealer_score, hand_bet):
+        async def finalize_game(interaction, player_score, dealer_score, hand_bet, player_hand=None):
             nonlocal dealer_cards
             winnings = Decimal(0)
 
@@ -2345,10 +2349,18 @@ class Casino(commands.Cog):
                 outcome = "loss"
                 result = f"Bust! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
                 revealed_seed, new_hash = await self.bot.database.increment_loss(user_id, "blackjack", hand_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
-            elif dealer_score > 21 or player_score > dealer_score or player_score == 21:
+            elif dealer_score > 21 or player_score > dealer_score:
                 outcome = "win"
                 revealed_seed, new_hash = await self.bot.database.increment_win(user_id, "blackjack", hand_bet, client_seed=PF['client_seed'], seed_used=None, nonce=PF['nonce'], hash_hex=PF['server_seed_hash'])
-                winnings = Decimal(hand_bet) * Decimal(2.5)
+                
+                # Check if it's a natural blackjack (21 with 2 cards) for 3:2 payout
+                if player_hand and is_blackjack(player_hand):
+                    winnings = Decimal(hand_bet) * Decimal(2.5)  # Natural blackjack: 3:2 (2.5x total)
+                    result = f"🎉 Blackjack! You win {self.currency_name} **{await self.formatter(winnings)}**!"
+                else:
+                    winnings = Decimal(hand_bet) * Decimal(2)  # Regular win: 1:1 (2x total)
+                    result = f"You win {self.currency_name} **{await self.formatter(winnings)}**!"
+                
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,
@@ -2359,7 +2371,6 @@ class Casino(commands.Cog):
                     embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
                     await ctx.reply(embed=embed, delete_after=5)
                     return
-                result = f"You win {self.currency_name} **{await self.formatter(winnings)}**!"
             elif player_score == dealer_score:
                 outcome = "tie"
                 winnings = Decimal(hand_bet)
@@ -2397,12 +2408,12 @@ class Casino(commands.Cog):
             if has_split:
                 for idx, (hand_cards, hand_bet, _) in enumerate(split_hands):
                     hand_score = calculate_score(hand_cards)
-                    outcome, result, winnings = await finalize_game(interaction, hand_score, dealer_score, hand_bet)
+                    outcome, result, winnings = await finalize_game(interaction, hand_score, dealer_score, hand_bet, hand_cards)
                     total_winnings += winnings
                     results.append(f"**Hand {idx + 1}:** {', '.join(hand_cards)} (Total: **{hand_score}**)\n{result}")
             else:
                 player_score = calculate_score(player_cards)
-                outcome, result, winnings = await finalize_game(interaction, player_score, dealer_score, current_bet)
+                outcome, result, winnings = await finalize_game(interaction, player_score, dealer_score, current_bet, player_cards)
                 total_winnings += winnings
                 results.append(f"**Your cards:** {', '.join(player_cards)} (Total: **{player_score}**)\n{result}")
 
