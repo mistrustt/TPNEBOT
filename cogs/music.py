@@ -2115,10 +2115,10 @@ class Music(commands.Cog, name="Music"):
                     return
                 if count > 1:
                     class SongSelect(discord.ui.Select):
-                        def __init__(self, songs):
+                        def __init__(self, cog, songs):
                             options = []
                             for song in songs:
-                                best_name = self.get_most_acceptable_track_name(song.get("name", ""))
+                                best_name = cog.get_most_acceptable_track_name(song.get("name", ""))
                                 options.append(discord.SelectOption(label=best_name))
                             super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
                             self.songs = songs
@@ -2128,14 +2128,14 @@ class Music(commands.Cog, name="Music"):
                             self.stop()
                     
                     class SongView(discord.ui.View):
-                        def __init__(self, songs):
+                        def __init__(self, cog, songs):
                             super().__init__(timeout=30)
-                            self.add_item(SongSelect(songs))
+                            self.add_item(SongSelect(cog, songs))
 
                     embed = discord.Embed(
                         description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
                     )
-                    view = SongView(results)
+                    view = SongView(self, results)
                     message = await ctx.reply(embed=embed, view=view)
                     await view.wait()
                     if not view.chosen_song:
