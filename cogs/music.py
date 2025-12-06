@@ -76,7 +76,6 @@ class Music(commands.Cog, name="Music"):
         self.heardle_blacklist = [
             657182369240973312 # chaos
         ]
-        self.shh = True
         self.ongoing_heardle = []
         self.heardle_answers = {}
         self.snippet_debounce = {}

