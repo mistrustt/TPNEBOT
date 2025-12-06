@@ -2062,14 +2062,6 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
-        if ctx.author.guild_permissions.manage_guild == False and not Music.can_test(ctx, self) and ctx.author.roles.get(1414742766386413590) is None:
-            await utils.Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                "Heardle is currently in beta and only available to testers."
-            )
-            return
-    
         debounce = self.snippet_debounce.get(ctx.author.id, False)
         if debounce:
             await utils.Embeds.send_warning_embed(
@@ -2096,22 +2088,68 @@ class Music(commands.Cog, name="Music"):
                 data = await response.json()
 
                 items = data.get("items", [])
-                safe_items = []
+                safe_items = {}
                 for item in items:
                     mime_type = item.get('mime_type', None)
-                    if mime_type and mime_type.startswith('audio/'):
-                        safe_items.append(item)
-                        
-                count = len(safe_items)
+                    if mime_type and mime_type == 'audio/mpeg':
+                        best_name = self.get_most_acceptable_track_name(item.get("name", ""))
+                        existing = safe_items.get(best_name)
 
+                        good = True
+                        if existing:
+                            # this will remove duplicates and also get the lowest size for best performance
+                            existing_size = existing.get("size", 0)
+                            current_size = item.get("size", 0)
+                            if current_size >= existing_size:
+                                good = False
+                        
+                        if good:
+                            safe_items[best_name] = item
+
+                count = len(safe_items)
+                results = list(safe_items.values())
+
+                song = None
                 if count == 0:
                     await utils.Embeds.send_error_embed(ctx.channel, ctx.author, f"I couldnt find a song with the name: `{query}`")
                     self.handle_user_done_snippet(ctx.author.id)
                     return
                 if count > 1:
-                    await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f"Multiple songs found with the name: `{query}`. Defaulting to first song.")
+                    class SongSelect(discord.ui.Select):
+                        def __init__(self, songs):
+                            options = []
+                            for song in songs:
+                                best_name = self.get_most_acceptable_track_name(song.get("name", ""))
+                                options.append(discord.SelectOption(label=best_name))
+                            super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
+                            self.songs = songs
+
+                        async def callback(self, interaction: discord.Interaction):
+                            self.chosen_song = self.songs[self.values[0]]
+                            self.stop()
                     
-                song = safe_items[0]
+                    class SongView(discord.ui.View):
+                        def __init__(self, songs):
+                            super().__init__(timeout=30)
+                            self.add_item(SongSelect(songs))
+
+                    embed = discord.Embed(
+                        description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
+                    )
+                    view = SongView(results)
+                    message = await ctx.reply(embed=embed, view=view)
+                    await view.wait()
+                    if not view.chosen_song:
+                        self.handle_user_done_snippet(ctx.author.id)
+                        return
+                    song = view.chosen_song
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+                else:
+                    song = results[0]
+                    
                 path = song.get("path", "")
                 download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
 
@@ -2131,7 +2169,12 @@ class Music(commands.Cog, name="Music"):
                     return
                 
                 message = await ctx.channel.send(file=discord.File(payload))
-                self.handle_user_done_snippet(ctx.author.id)
+
+                async def debounce_delay(author_id: int):
+                    await asyncio.sleep(15) # default snippet debounce
+                    self.handle_user_done_snippet(author_id)
+
+                asyncio.create_task(debounce_delay(ctx.author.id))
 
 
 async def setup(bot: commands.Bot) -> None:
