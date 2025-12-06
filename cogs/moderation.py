@@ -3419,18 +3419,14 @@ class Moderation(commands.Cog, name="Moderation"):
                         self.bot._gucci_ban_attempts = set()
                     self.bot._gucci_ban_attempts.add((message.guild.id, 1219090700407279656))
 
-                    try:
-                        await message.channel.send(
-                            f"yea i dont think so bro",
-                        )
-                        logger.info(f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}")
-                    except discord.Forbidden:
-                        pass
+                    await message.channel.send(
+                        f"good shit bro",
+                    )
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         """checks if gucci manual bans me (toxic)"""
-        if user.id == 1219090700407279656:  # big man toxic
+        if user.id == 1219090700407279656 and False:  # big man toxic
             try:
                 member = guild.get_member(user.id)
                 saved_roles = []
