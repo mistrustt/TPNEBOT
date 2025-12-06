@@ -1752,7 +1752,7 @@ class Owner(commands.Cog, name="Owner"):
     async def mint(self, ctx: Context, amount: str):
         """Mint to currency supply."""
         try:
-            amount = await self.amount_handler(amount, 999999999999999999999)
+            amount = await self.amount_handler(amount, 999999999999999999999999)
             await self.bot.database.mint_currency(amount, f"Admin Audit - Burn by {ctx.author.name}")
             await self.bot.database.validate_economy()
 
