@@ -3427,7 +3427,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        """Checks if gucci manual bans me (toxic)"""
+        """checks if gucci manual bans me (toxic)"""
         if user.id == 1219090700407279656:  # big man toxic
             try:
                 member = guild.get_member(user.id)
@@ -3473,7 +3473,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        """Restores my roles so I don't look like a poor beggar"""
+        """restores my roles so i don't look like a poor beggar"""
         if member.id == 1219090700407279656:
             role_key = (member.guild.id, member.id)
             
@@ -3498,16 +3498,15 @@ class Moderation(commands.Cog, name="Moderation"):
                 except Exception as e:
                     logger.error(f"Error restoring roles: {e}")
 
+    def can_shhzugd(ctx):
+        return ctx.author.id in [1095747082599530627, 1219090700407279656]  # envy + toxic
 
-async def can_shhzugd(ctx):
-    return ctx.author.id in [1095747082599530627, 1219090700407279656]  # envy + toxic
-
-@commands.command(name="zugd")
-@commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
-async def zugd(self, ctx: commands.Context):
-    self.shh = not self.shh
-    msg = await ctx.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
-    await msg.delete(delay=5)
+    @commands.command(name="zugd")
+    @commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
+    async def zugd(self, ctx: commands.Context):
+        self.shh = not self.shh
+        msg = await ctx.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
+        await msg.delete(delay=5)
 
 @commands.Cog.listener()
 async def on_message(self, message: discord.Message):
@@ -3516,7 +3515,7 @@ async def on_message(self, message: discord.Message):
 
     async def is_banned(guild, user) -> bool:
         try:
-            ban = await guild.fetch_ban(user)
+            await guild.fetch_ban(user)
             return True
         except discord.NotFound:
             return False
