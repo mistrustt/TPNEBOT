@@ -3506,7 +3506,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
     async def zugd(self, ctx: commands.Context):
         self.shh = not self.shh
-        msg = await ctx.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
+        msg = await ctx.author.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
         await msg.delete(delay=5)
 
     @commands.Cog.listener()
