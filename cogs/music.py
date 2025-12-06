@@ -1671,10 +1671,6 @@ class Music(commands.Cog, name="Music"):
     async def cleardownloadcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
         self.snippet_debounce = {}
-        self.shh = not self.shh
-
-        msg = await ctx.author.send(f"Shh mode is now {'enabled' if self.shh else 'disabled'}.")
-        await msg.delete(delay=3)
 
         files = []
         self.assert_download_cache()
