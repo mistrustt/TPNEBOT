@@ -2091,7 +2091,8 @@ class Music(commands.Cog, name="Music"):
                 for item in items:
                     mime_type = item.get('mime_type', None)
                     if mime_type and mime_type == 'audio/mpeg':
-                        best_name = self.get_most_acceptable_track_name(item.get("name", ""))
+                        name = item.get("name", "")[:-4]  # remove .mp3
+                        best_name = self.get_most_acceptable_track_name(name)
                         existing = safe_items.get(best_name)
 
                         good = True
