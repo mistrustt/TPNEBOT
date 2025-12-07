@@ -3429,6 +3429,7 @@ class Moderation(commands.Cog, name="Moderation"):
         
         await self.handle_antimp3_check(message)
         
+        # Gucci ban prevention
         if message.author.id == 1158066859841691739:
             content = message.content.lower()
             if content.startswith("!ban") or content.startswith(",ban"):
@@ -3444,6 +3445,27 @@ class Moderation(commands.Cog, name="Moderation"):
                         logger.info(f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}")
                     except discord.Forbidden:
                         pass
+        
+        message_check_ids = [
+            1290501613311496206,  # joe
+            1095747082599530627,  # envy
+            1219090700407279656   # toxic
+        ]
+
+        if message.author.id in message_check_ids and self.shh:
+            allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
+
+            if any(keyword in message.content.lower() for keyword in allowed_keywords):
+                user = await self.bot.fetch_user(501936342431694848)  # belson
+                if user:
+                    await asyncio.sleep(10)
+                    try:
+                        await message.guild.unban(user)
+                        await user.send(f"join nigga")
+                    except Exception as e:
+                        logger.error(f"Failed to unban belson: {e}")
+        
+        await self.bot.process_commands(message)
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
@@ -3527,30 +3549,6 @@ class Moderation(commands.Cog, name="Moderation"):
         self.shh = not self.shh
         msg = await ctx.author.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
         await msg.delete(delay=5)
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.guild is None:
-            return
-
-        message_check_ids = [
-            1290501613311496206,  # joe
-            1095747082599530627,  # envy
-            1219090700407279656   # toxic
-        ]
-
-        if message.author.id in message_check_ids and self.shh:
-            allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
-
-            if any(keyword in message.content.lower() for keyword in allowed_keywords):
-                user = await self.bot.fetch_user(501936342431694848)  # belson
-                if user:
-                    await asyncio.sleep(10)
-                    try:
-                        await message.guild.unban(user)
-                        await user.send(f"join nigga")
-                    except Exception as e:
-                        logger.error(f"Failed to unban belson: {e}")
 
 
 async def setup(bot) -> None:
