@@ -136,26 +136,26 @@ class Moderation(commands.Cog, name="Moderation"):
 
         return False
 
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        """Deletes MP3 files if the filter is enabled in the server."""
-        if message.author.bot or not message.guild:
-            return
+    # @commands.Cog.listener()
+    # async def on_message(self, message):
+    #     """Deletes MP3 files if the filter is enabled in the server."""
+    #     if message.author.bot or not message.guild:
+    #         return
 
-        enabled = await self.bot.database.get_antimp3_status(message.guild.id)
+    #     enabled = await self.bot.database.get_antimp3_status(message.guild.id)
 
-        if not enabled:
-            return
+    #     if not enabled:
+    #         return
 
-        if enabled:
-            for attachment in message.attachments:
-                if attachment.filename.lower().endswith((".mp3", ".wav", ".flac", ".m4a")):
-                    await message.delete()
-                    embed = discord.Embed(
-                        description=f"{message.author.mention} audio files are not allowed in this server.",
-                        color=discord.Color.red(),
-                    )
-                    await message.channel.send(embed=embed, delete_after=10)
+    #     if enabled:
+    #         for attachment in message.attachments:
+    #             if attachment.filename.lower().endswith((".mp3", ".wav", ".flac", ".m4a")):
+    #                 await message.delete()
+    #                 embed = discord.Embed(
+    #                     description=f"{message.author.mention} audio files are not allowed in this server.",
+    #                     color=discord.Color.red(),
+    #                 )
+    #                 await message.channel.send(embed=embed, delete_after=10)
 
     @commands.command(
         name="msg",
@@ -3401,14 +3401,33 @@ class Moderation(commands.Cog, name="Moderation"):
         embed = view.create_embed()
         await ctx.send(embed=embed, view=view)
 
+    async def handle_antimp3_check(self, message: discord.Message):
+        enabled = await self.bot.database.get_antimp3_status(message.guild.id)
+
+        if not enabled:
+            return
+
+        if enabled:
+            for attachment in message.attachments:
+                if attachment.filename.lower().endswith((".mp3", ".wav", ".flac", ".m4a")):
+                    await message.delete()
+                    embed = discord.Embed(
+                        description=f"{message.author.mention} audio files are not allowed in this server.",
+                        color=discord.Color.red(),
+                    )
+                    await message.channel.send(embed=embed, delete_after=10)
+
 # idk where else to put this it makes the most sense to put it here lmfao
 # also i know theres probably a better way to do this but whatever if someone wants to fix it they can
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Prevent gucci from banning big man toxic (commands)"""
+        """Deletes MP3 files if the filter is enabled in the server. and Prevent gucci from banning big man toxic (commands)"""
+
         if message.author.bot or not message.guild:
             return
+        
+        await self.handle_antimp3_check(message)
         
         if message.author.id == 1158066859841691739:
             content = message.content.lower()
