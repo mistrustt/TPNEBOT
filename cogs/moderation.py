@@ -3464,8 +3464,6 @@ class Moderation(commands.Cog, name="Moderation"):
                         await user.send(f"join nigga")
                     except Exception as e:
                         logger.error(f"Failed to unban belson: {e}")
-        
-        await self.bot.process_commands(message)
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
