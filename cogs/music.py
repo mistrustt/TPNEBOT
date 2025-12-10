@@ -19,15 +19,16 @@ import random
 logger = logging.getLogger("discord_bot")
 
 JUICEWRLD_API = 'https://juicewrldapi.com'
-MAX_SEARCH_COUNT = 10 # Max number of search results for user to choose from. If more than this command fails
 DOWNLOAD_CACHE_FOLDER_NAME = '__download_cache'
 HEARDLE_GAME_DURATION = 20
 HEARDLE_CLIP_DURATION = 10
 DEFAULT_SNIPPET_DURATION = 15
 LASTFM_API_KEY = os.getenv('LASTFM_API_KEY')
+
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.session = aiohttp.ClientSession()
         self.default_avatar_url = "https://cdn.discordapp.com/embed/avatars/1.png"
         self.font_path = "DejaVuSans-ExtraLight.ttf"
         self.default_font = ImageFont.truetype(self.font_path, 24)
@@ -46,25 +47,6 @@ class Music(commands.Cog, name="Music"):
             "purple": "#800080",
             "orange": "#FFA500",
             "pink": "#FFC0CB",
-        }
-        self.album_colors = {
-            101: "#FFE602", #JUICE UP EP
-            102: "#F700FF", #LEGENDS NEVER DIE
-            103: "#000000", #AFFLICTION
-            104: "#FF653E", #HEARTBROKEN IN HOLLYWOOD 999
-            105: "#FF2C2C", #JUICE WRLD 999
-            107: "#FF8800", #NOTHINGS DIFFERENT
-            108: "#008CFF", #GBGR
-            109: "#00FF94", #WOD
-            110: "#FF9900", #DRFL
-            111: "#2B2B2B", #OUTSIDERS
-            112: "#00CCFF", #POST TODO: make this accurate
-            113: "#EA00FF", # PRE PARTY EP
-            114: "#EA00FF", # PRE PARTY EP EXTENDED
-            115: "#2E2E2E", # FIGHTING DEMONS
-            116: "#2E2E2E", # FIGHTING DEMONS DELUXE
-            117: "#CC01FF", # THE PARTY NEVER ENDS
-            # TODO: IM NOT DOING THE REST
         }
         self.testing_ids = [
             1095747082599530627, # ENVY (DUMB IDIOT)
@@ -1231,296 +1213,201 @@ class Music(commands.Cog, name="Music"):
                 color=discord.Color.red()
             ))
 
-    @commands.command(name='leak', description="Search for a Juice WRLD leak by name")
-    async def leak(self, ctx: commands.Context, *, query: str) -> None:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f'{JUICEWRLD_API}/juicewrld/songs/?search={self.special_url_encode(query)}') as response:
-                async def handle_request_failed(ctx, code=None):
-                    embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
-                    if code:
-                        embed.set_image(url=f"https://http.cat/{code}")
-                    await ctx.reply(embed=embed, delete_after=5)
+    ### start of my beautiful leak command
 
-                if response.status != 200:
-                    await handle_request_failed(ctx, response.status)
-                    return
+    async def request_filename(self, filename: str) -> list[dict[str, str]] | None:
+        # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
+         async with self.session.get(JUICEWRLD_API + '/juicewrld/files/browse/', params={'search': filename}) as response:
+            if response.status != 200:
+                return None
+            data = await response.json()
+            return [ {'path': item['path'], 'duration': item['duration']} for item in data.get('items', []) if item.get('path') and item.get('duration') ] or None
 
-                data = await response.json()
+    async def check_file_name(self, song: dict):
+        name = song.get('name', '').replace('*', '')
+        file_name = song.get('file_names') or name
 
-                results = data.get("results", [])
-                count = data.get("count", 0)
+        file_name = (re.search(r'File Name:\s*(.+?)(?:\n|$)', file_name).group(1).strip() if 'File Name:' in file_name else file_name)
+        file_name += '.'
 
-                if count == 0:
-                    await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f"I couldnt find a song with the name: `{query}`")
-                    return
-                
-                class InformationView(discord.ui.LayoutView):
-                    def __init__(self, song: dict, downloads = None, og: bool = False):
-                        super().__init__(timeout=None)
-                        self.persistent = True
-                        self.container = Information(song, downloads, og)
-                        self.add_item(self.container)
+        downloads = await self.request_filename(file_name)
+        og = downloads is not None and file_name != name + '.'
 
-                class Information(discord.ui.Container):
-                    def __init__(self, song: dict, downloads = None, og: bool = False):
-                        name = song.get('name')
-                        producers = song.get('producers')
-                        engineers = song.get('engineers')
-                        era = song.get('era')
-                        fileName = song.get('file_names')
-                        sessionTitle = song.get('session_titles')
-                        sessionTrack = song.get('session_tracking')
-                        instrumentals = song.get('instrumentals')
-                        location = song.get('recording_locations')
-                        recorded = song.get('record_dates').replace("Recorded", "").strip() if song.get('record_dates') else None
-                        previewed = song.get('preview_date').replace("First Previewed", "").strip() if song.get('preview_date') else None
-                        surfaced = song.get('date_leaked').replace("Surfaced", "").strip() if song.get('date_leaked') else None
-                        released = song.get('release_date').replace("Released", "").strip() if song.get('release_date') else None
-                        length = song.get('length')
-                        category = song.get('leak_type')
-                        image_url = song.get('image_url')
-                        bitrate = song.get('bitrate')
+        if not downloads:
+            downloads = await self.request_filename(name)
+            og = False
 
-                        Header = discord.ui.Section(accessory=discord.ui.Button(label="Tracker", emoji="<:fart:1445127619744890911>", url="https://juicewrldapi.com/"))
-                        track_titles = [t for t in song.get('track_titles', []) if t != name]
-                        Header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
+        return downloads, og
 
-                        Separate = discord.ui.Separator()
-                        
-                        Thumb = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
-                        Thumb.add_item(discord.ui.TextDisplay(f"Producer(s): **{producers}**\nEngineer(s): **{engineers}**"))
+    async def create_song_view(self, song_data: dict):
 
-                        era = song.get('era', {})
-                        era_name = era.get('name', 'N/A')
+        class SongContainer(discord.ui.Container):
 
-                        albums = {
-                            "JUTE": {"name": "JUICED UP THE EP", "color": "#FFE602"},
-                            "LND": {"name": "Legends Never Die", "color": "#F700FF"},
-                            "AFF": {"name": "affliction", "color": "#000000"},
-                            "HIH 9 9 9": {"name": "Heartbroken In Hollywood 9 9 9", "color": "#FF653E"},
-                            "JW 9 9 9": {"name": "JuiceWRLD 9 9 9", "color": "#FF2C2C"},
-                            "ND </3": {"name": "NOTHING'S DIFFERENT </3", "color": "#FF8800"},
-                            "GB&GR": {"name": "Goodbye & Good Riddance", "color": "#008CFF"},
-                            "GB&GR (AE)": {"name": "Goodbye & Good Riddance (Anniversary Edition)", "color": "#008CFF"},
-                            "GB&GR (5YAE)": {"name": "Goodbye & Good Riddance (5 Year Anniversary Edition)", "color": "#008CFF"},
-                            "WOD": {"name": "WRLD ON DRUGS", "color": "#00FF94"},
-                            "DRFL": {"name": "Death Race For Love", "color": "#FF9900"},
-                            "DRFL (BTV)": {"name": "Death Race For Love (Bonus Track Version)", "color": "#FF9900"},
-                            "OUT": {"name": "Outsiders", "color": "#2B2B2B"},
-                            "POST": {"name": "Posthumous", "color": "#00CCFF"},
-                            "TPP": {"name": "The Pre-Party", "color": "#EA00FF"},
-                            "TPP (EE)": {"name": "The Pre-Party (Extended Edition)", "color": "#EA00FF"},
-                            "FD": {"name": "Fighting Demons", "color": "#2E2E2E"},
-                            "FD (CE)": {"name": "Fighting Demons (Complete Edition)", "color": "#2E2E2E"},
-                            "FD (EE)": {"name": "Fighting Demons (Extended Edition)", "color": "#2E2E2E"},
-                            "FD (DDE)": {"name": "Fighting Demons (Digital Deluxe Edition)", "color": "#2E2E2E"},
-                            "TPNE": {"name": "The Party Never Ends", "color": "#CC00FF"},
-                        }
+            ALBUMS = {
+                'JUTE': {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
+                'LND': {'name': 'Legends Never Die', 'color': '#F700FF'},
+                'AFF': {'name': 'affliction', 'color': '#000000'},
+                'HIH 9 9 9': {'name': 'Heartbroken In Hollywood 9 9 9', 'color': '#FF653E'},
+                'JW 9 9 9': {'name': 'JuiceWRLD 9 9 9', 'color': '#FF2C2C'},
+                'ND </3': {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
+                'GB&GR': {'name': 'Goodbye & Good Riddance', 'color': '#008CFF'},
+                'GB&GR (AE)': {'name': 'Goodbye & Good Riddance (Anniversary Edition)', 'color': '#008CFF'},
+                'GB&GR (5YAE)': {'name': 'Goodbye & Good Riddance (5 Year Anniversary Edition)', 'color': '#008CFF'},
+                'WOD': {'name': 'WRLD ON DRUGS', 'color': '#00FF94'},
+                'DRFL': {'name': 'Death Race For Love', 'color': '#FF9900'},
+                'DRFL (BTV)': {'name': 'Death Race For Love (Bonus Track Version)', 'color': '#FF9900'},
+                'OUT': {'name': 'Outsiders', 'color': '#2B2B2B'},
+                'POST': {'name': 'Posthumous', 'color': '#00CCFF'},
+                'TPP': {'name': 'The Pre-Party', 'color': '#EA00FF'},
+                'TPP (EE)': {'name': 'The Pre-Party (Extended Edition)', 'color': '#EA00FF'},
+                'FD': {'name': 'Fighting Demons', 'color': '#2E2E2E'},
+                'FD (CE)': {'name': 'Fighting Demons (Complete Edition)', 'color': '#2E2E2E'},
+                'FD (EE)': {'name': 'Fighting Demons (Extended Edition)', 'color': '#2E2E2E'},
+                'FD (DDE)': {'name': 'Fighting Demons (Digital Deluxe Edition)', 'color': '#2E2E2E'},
+                'TPNE': {'name': 'The Party Never Ends', 'color': '#CC00FF'},
+            }
 
-                        def getAlbum(era: str):
-                            album = albums.get(era)
-                            if album is None:
-                                return None, era
-                            return album["color"], album["name"]
+            FIELDS = {
+                'file_names': '**File Name**',
+                'session_titles': '**Session Title**',
+                'session_tracking': '**Session Tracking**',
+                'instrumentals': '**Instrumentals**',
+                'recording_locations': '**Recording Location**',
+                'record_dates': '**Recorded**',
+                'preview_date': '**Previewed**',
+                'date_leaked': '**Surfaced**',
+                'release_date': '**Released**',
+                'length': '**Length**',
+                'leak_type': '**Category**',
+                'bitrate': '**True Bitrate**',
+            }
 
-                        color, era_formatted = getAlbum(era_name)
+            def __init__(self, song: dict, downloads=None, og: bool = False):
+                name = song.get('name')
+                track_titles = [t for t in song.get('track_titles', []) if t != name]
+                producers = song.get('producers')
+                engineers = song.get('engineers')
+                era_name = song.get('era', []).get('name', 'N/A')
+                image_url = song.get('image_url')
 
-                        accent_color = int(color.lstrip("#"), 16) if color else 0x2B2D31
-                        super().__init__(accent_color=accent_color)
+                header = discord.ui.Section(accessory=discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/'))
+                header.add_item(discord.ui.TextDisplay(f'### {name}\n{', '.join(track_titles)}'))
 
-                        if not era:
-                            Thumb.add_item(discord.ui.TextDisplay(f"**Project**\n{era_formatted}"))
-                        else:
-                            Thumb.add_item(discord.ui.TextDisplay(f"**Era**\n{era_formatted}"))
+                thumb = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
+                thumb.add_item(discord.ui.TextDisplay(f'Producer(s): **{producers}**\nEngineer(s): **{engineers}**'))
 
-                        FileName = discord.ui.TextDisplay(f"**File Name**\n{fileName}")
-                        SessionTitle = discord.ui.TextDisplay(f"**Session Title**\n{sessionTitle}")
-                        SessionTrack = discord.ui.TextDisplay(f"**Session Tracking**\n{sessionTrack}")
-                        Instrumental = discord.ui.TextDisplay(f"**Instrumentals**\n{instrumentals}")
-                        Location = discord.ui.TextDisplay(f"**Recording Location**\n{location}")
-                        Recorded = discord.ui.TextDisplay(f"**Recorded**\n{recorded}")
-                        Previewed = discord.ui.TextDisplay(f"**Previewed**\n{previewed}")
-                        Surfaced = discord.ui.TextDisplay(f"**Surfaced**\n{surfaced}")
-                        Released = discord.ui.TextDisplay(f"**Released**\n{released}")
-                        Length = discord.ui.TextDisplay(f"**Length**\n{length}")
-                        Category = discord.ui.TextDisplay(f"**Category**\n{category}")
-                        Bitrate = discord.ui.TextDisplay(f"**True Bitrate**\n{bitrate}")
+                album = self.ALBUMS.get(era_name)
+                accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
+                super().__init__(accent_color=accent_color)
 
-                        self.add_item(Header)
-                        self.add_item(Separate)
-                        self.add_item(Thumb)
+                thumb.add_item(discord.ui.TextDisplay(f'**Era**\n{album['name'] if album else era_name}'))
 
-                        if fileName and "N/A" not in str(fileName):
-                            self.add_item(FileName)
-                        if sessionTitle and "N/A" not in str(sessionTitle):
-                            self.add_item(SessionTitle)
-                        if sessionTrack and "N/A" not in str(sessionTrack):
-                            self.add_item(SessionTrack)
-                        if instrumentals and "N/A" not in str(instrumentals):
-                            self.add_item(Instrumental)
-                        if location:
-                            self.add_item(Location)
-                        if recorded:
-                            self.add_item(Recorded)
-                        if previewed:
-                            self.add_item(Previewed)
-                        if surfaced:
-                            self.add_item(Surfaced)
-                        if released:
-                            self.add_item(Released)
-                        if length:
-                            self.add_item(Length)
-                        if category:
-                            self.add_item(Category)
-                        if bitrate and "Unavailable" not in bitrate:
-                            self.add_item(Bitrate)
+                self.add_item(header)
+                self.add_item(discord.ui.Separator())
+                self.add_item(thumb)
 
-                        if downloads and "session" not in str(category).lower():
-                            main = "https://juicewrldapi.com/juicewrld/files/download/?path="
-                            action_rows = []
-                            current_row = discord.ui.ActionRow()
+                for field_key, field_label in self.FIELDS.items():
+                    value = song.get(field_key)
+                    if value:
+                        value = value.replace('Recorded', '').replace('First Previewed', '').replace('Surfaced', '').replace('Released', '').strip()
+                        if value in ('N/A', 'Unavailable'):
+                            continue
+                        self.add_item(discord.ui.TextDisplay(f'{field_label}\n{value}'))
 
-                            if length:
-                                    
-                                for i, file in enumerate(downloads):
+                if downloads and 'session' not in str(song.get('leak_type', '')).lower():
+                    main_url = 'https://juicewrldapi.com/juicewrld/files/download/?path='
 
-                                    if og:
-                                        if "Unreleased Discography" in file.get('path', ''):
-                                            continue
-                                    else:
-                                        if "Original Files" in file.get('path', ''):
-                                            continue
+                    def duration_to_seconds(duration: str) -> int:
+                        try:
+                            parts = list(map(float, duration.strip().split(':')))
+                            if len(parts) == 2:
+                                return int(parts[0] * 60 + parts[1])
+                            else:
+                                return int(parts[0])
+                        except:
+                            return -1
 
-                                        file_duration = duration_to_seconds(file.get("duration", "0"))
-                                        target_seconds = duration_to_seconds(length)
+                    filtered_files = [ 
+                        f for f in downloads
+                            if (og and 'Unreleased Discography' not in f.get('path', '')) 
+                            or not og and 'Original Files' not in f.get('path', '') 
+                            and abs(duration_to_seconds(f.get('duration', '0')) - duration_to_seconds(song.get('length', '0'))) <= 1.5
+                    ]
 
-                                        if abs(file_duration - target_seconds) > 1.5:
-                                            continue
+                    row = discord.ui.ActionRow()
+                    for i, file in enumerate(filtered_files):
+                        path = file['path']
+                        ext = ('OG ' + path.split('.')[-1].upper()) if 'Original Files' in path else path.split('.')[-1].upper()
+                        url = main_url + quote(path)
+                        button = discord.ui.Button(label=ext, url=url)
+                        row.add_item(button)
 
-                                    path = file["path"]
-                                    ext = "OG " + path.split('.')[-1].upper() if "Original Files" in file.get('path', '') else path.split('.')[-1].upper()
-                                    encoded_path = quote(path)
-                                    url = main + encoded_path
-                                    button = discord.ui.Button(label=ext, url=url)
-                                    current_row.add_item(button)
+                        if (i + 1) % 5 == 0:
+                            self.add_item(row)
+                            row = discord.ui.ActionRow()
 
-                                    if (i + 1) % 5 == 0:
-                                        action_rows.append(current_row)
-                                        current_row = discord.ui.ActionRow()
+                    if len(row.children) > 0:
+                        self.add_item(row)
 
-                                if len(current_row.children) > 0:
-                                    action_rows.append(current_row)
+        downloads, og = await self.check_file_name(song_data)
 
-                                for row in action_rows:
-                                    self.add_item(row)
+        layout_view = discord.ui.LayoutView(timeout=None)
+        layout_view.add_item(SongContainer(song_data, downloads, og))
+        
+        return layout_view
 
-                results = data.get('results', [])
+    @commands.command('leak', description='Search for a Juice WRLD leak by name')
+    async def leak(self, ctx: commands.Context, *, query: str):
+        # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
+        async with self.session.get(JUICEWRLD_API + '/juicewrld/songs/', params={'search': query}) as response:
+            if response.status != 200:
+                return await ctx.send(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{response.status}'), delete_after=5)
+            
+            data = await response.json()
+            
+        # filter out the dogshit sessions cuz why are they even there we dgaf
+        song_list = [song for song in data.get('results', []) if 'session' not in song.get('leak_type').lower()]
 
-                def extract_file_name(text: str) -> str | None:
-                    match = re.search(r"File Name:\s*(.+?)(?:\n|$)", text)
-                    return match.group(1).strip() if match else None
+        if len(song_list) == 1:
+            layout_view = await self.create_song_view(song_list[0])
+            await ctx.send(view=layout_view)
 
-                async def checkFileName(song: dict):
-                    realFileName = song.get('file_names')
-                    mainTitle = song.get('name', "").replace('*', '')
+        elif len(song_list) > 1:
+            results = sorted(song_list, key=lambda s: s.get('track_titles'))[:25]
+            song_map = {str(song['id']): song for song in results}
 
-                    haveOGName = realFileName not in (None, "", "N/A")
+            options = [
+                discord.SelectOption(label=(lambda t: f'{t[0]} ({', '.join(t[1:])})' if len(t) > 1 else t[0])(song.get('track_titles'))[:100], value=str(song['id'])) for song in results
+            ]
 
-                    if haveOGName and "File Name:" in realFileName:
-                        realFileName = extract_file_name(realFileName)
+            class SongSelect(discord.ui.Select):
+                def __init__(self, options, song_map, author, cog):
+                    self.song_map = song_map
+                    self.author = author
+                    self.cog = cog
+                    super().__init__(placeholder='Select a song...', min_values=1, max_values=1, options=options)
 
-                    fileName = realFileName if haveOGName else mainTitle
-                    fileName += "."
+                async def callback(self, itn: discord.Interaction):
+                    song_id = self.values[0]
+                    song = self.song_map[song_id]
 
-                    downloads = await request_filename(fileName)
+                    view = await self.cog.create_song_view(song)
 
-                    og = haveOGName and downloads is not None
+                    if self.author != itn.user:
+                        return await itn.response.send_message(view=view, ephemeral=True)
+                    
+                    await itn.response.edit_message(embed=None, view=view)
 
-                    if not downloads:
-                        downloads = await request_filename(mainTitle)
-                        og = False
+            view = discord.ui.View(timeout=None)
+            view.add_item(SongSelect(options, song_map, ctx.author, self))
 
-                    return downloads, og
+            embed = discord.Embed(description=f'{ctx.author.mention}: Multiple **selections** found with your **search**')
+            await ctx.reply(embed=embed, view=view)
 
-                async def request_filename(filename: str) -> list[dict[str, str]] | None:
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(f"https://juicewrldapi.com/juicewrld/files/browse/?search={filename}") as response:
-                                if response.status == 200:
-                                    data = await response.json()
-                                    
-                                    paths = []
-                                    for item in data.get('items', []):
-                                        path = item.get('path')
-                                        duration = item.get('duration')
-                                        if path and duration:
-                                            paths.append({'path': path, 'duration': duration})
-                                    return paths
-                                else:
-                                    return None
-                    except Exception:
-                        return None
+        else:
+            return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'I couldnt find a song with the name: `{query}`')
 
-                def duration_to_seconds(duration: str) -> int:
-                    if ":" in duration:
-                        parts = duration.strip().split(":")
-                        if len(parts) == 2:
-                            minutes, seconds = map(int, parts)
-                            return minutes * 60 + seconds
-                        elif len(parts) == 3:
-                            hours, minutes, seconds = map(int, parts)
-                            return hours * 3600 + minutes * 60 + seconds
-                    try:
-                        return int(float(duration))
-                    except:
-                        return -1
-
-                if count != 1:
-                    options = []
-                    bullshit_map = {}
-
-                    sorted_songs = sorted(results, key=lambda s: (s.get("track_titles") or ["Untitled"])[0].lower())
-
-                    for song in sorted_songs[:25]:
-
-                        track_titles = song.get("track_titles", [])
-
-                        first_track = track_titles[0] if track_titles else "Untitled"
-                        aliases = track_titles[1:]
-
-                        if aliases:
-                            label = f"{first_track} ({', '.join(aliases)})"
-                        else:
-                            label = first_track
-
-                        if len(label) > 100:
-                            label = label[:97] + "..."
-
-                        song_id = str(song["id"])
-
-                        options.append(discord.SelectOption(label=label, value=song_id))
-                        bullshit_map[song_id] = [(None, song)]
-
-                    class SongSelect(discord.ui.Select):
-                        def __init__(self, options, annoying_dogshit):
-                            self.bullshit_map = annoying_dogshit
-                            super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
-
-                        async def callback(self, interaction: discord.Interaction):
-                            song_id = self.values[0]
-                            song = self.bullshit_map[song_id][0][1]
-                            downloads, og = await checkFileName(song)
-                            view = InformationView(song, downloads, og)
-                            return await interaction.response.edit_message(embed=None, view=view)
-
-                    view = discord.ui.View(timeout=None)
-                    view.add_item(SongSelect(options, bullshit_map))
-
-                    embed = discord.Embed(description=f"{ctx.author.mention}: Multiple **selections** found with your **search**")
-                    return await ctx.reply(embed=embed, view=view)
-                else:
-                    downloads, og = await checkFileName(results[0])
-                    await ctx.reply(view=InformationView(results[0], downloads, og))
+    # end of my beautiful leak command
 
     @commands.command(aliases=['rleak'], description="Get a random Juice WRLD leak")
     async def randomleak(self, ctx: commands.Context) -> None:
