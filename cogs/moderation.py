@@ -3527,33 +3527,6 @@ class Moderation(commands.Cog, name="Moderation"):
             except Exception as e:
                 logger.error(f"Error in auto-unban: {e}")
 
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        """restores my roles so i don't look like a poor beggar"""
-        if member.id == 1219090700407279656:
-            role_key = (member.guild.id, member.id)
-            
-            if hasattr(self.bot, '_saved_roles') and role_key in self.bot._saved_roles:
-                try:
-                    saved_role_ids = self.bot._saved_roles[role_key]
-                    roles_to_restore = []
-                    
-                    for role_id in saved_role_ids:
-                        role = member.guild.get_role(role_id)
-                        if role:
-                            roles_to_restore.append(role)
-                    
-                    if roles_to_restore:
-                        await member.add_roles(*roles_to_restore, reason="auto role restore")
-                        logger.info(f"Restored {len(roles_to_restore)} roles for {member.name}")
-                    
-                    del self.bot._saved_roles[role_key]
-                    
-                except discord.Forbidden:
-                    logger.error(f"Missing permissions to restore roles for {member.name}")
-                except Exception as e:
-                    logger.error(f"Error restoring roles: {e}")
-
     def can_shhzugd(ctx):
         return ctx.author.id in [1095747082599530627, 1219090700407279656]  # envy + toxic
 
