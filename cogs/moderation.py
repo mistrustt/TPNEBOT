@@ -63,6 +63,19 @@ class Moderation(commands.Cog, name="Moderation"):
         self.new_members = []
         self.sync_counts.start()
         self.shh = True
+        self.allowed_mp3_bypass_ids = [ # every big name in com that we want to upload files
+            1202351653559488552, # tragic
+            1333280676119838821, # daniel
+            493432686694629376, # jowy
+            518362287233302531, # destroyer (he been leaking shit recently so might as well add him)
+            1164298738819411969, # kinnon
+            919718348894388256, # sillycat
+            897473098658484285, # goongod
+            1166140569861496853, # googly
+            1288160215241326674, # yo hello (daniel alt)
+            1085252140102062210, # dnd8
+            1333280676119838821, # wrld
+        ]
 
     def cog_unload(self):
         self.sync_counts.cancel()
@@ -3427,7 +3440,8 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.bot or not message.guild:
             return
         
-        await self.handle_antimp3_check(message)
+        if message.author.id not in self.allowed_mp3_bypass_ids:
+            await self.handle_antimp3_check(message)
         
         # Gucci ban prevention
         if message.author.id == 1158066859841691739:
@@ -3458,12 +3472,14 @@ class Moderation(commands.Cog, name="Moderation"):
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848)  # belson
                 if user:
-                    await asyncio.sleep(10)
-                    try:
-                        await message.guild.unban(user)
-                        await user.send(f"join nigga")
-                    except Exception as e:
-                        logger.error(f"Failed to unban belson: {e}")
+                    async def unban_lil_dude():
+                        await asyncio.sleep(10)
+                        try:
+                            await message.guild.unban(user)
+                            await user.send(f"join nigga")
+                        except Exception as e:
+                            logger.error(f"Failed to unban belson: {e}")
+                    asyncio.create_task(unban_lil_dude())
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
@@ -3541,11 +3557,11 @@ class Moderation(commands.Cog, name="Moderation"):
     def can_shhzugd(ctx):
         return ctx.author.id in [1095747082599530627, 1219090700407279656]  # envy + toxic
 
-    @commands.command(name="zugd")
+    @commands.command(name="yomud")
     @commands.check_any(commands.is_owner(), commands.check(can_shhzugd))
     async def zugd(self, ctx: commands.Context):
         self.shh = not self.shh
-        msg = await ctx.author.send(f"Belson Unbanner is now {'enabled' if self.shh else 'disabled'}.")
+        msg = await ctx.author.send(f"hello mud is now {'enabled' if self.shh else 'disabled'}.")
         await msg.delete(delay=5)
 
 
