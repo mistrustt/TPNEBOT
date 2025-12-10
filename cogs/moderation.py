@@ -3481,6 +3481,21 @@ class Moderation(commands.Cog, name="Moderation"):
                             logger.error(f"Failed to unban belson: {e}")
                     asyncio.create_task(unban_lil_dude())
 
+    @commands.command(name="dev-ban", description="let deviggas ban a normanigga")
+    @commands.cooldown(1, 604800, commands.BucketType.user)
+    @commands.has_role(1414742766386413590)
+    async def dev_ban(self, ctx: commands.Context, target: discord.Member):
+        async def ban_user(member: discord.Member, reason: str):
+            await member.ban(reason=reason)
+            return 1
+        
+        async def react_message(message: discord.Message, reaction: str):
+            await message.add_reaction(reaction)
+        
+        check = await ban_user(target, "master ordered this ban")
+        if check == 1:
+            await react_message(ctx.message, "👍")
+
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         """checks if gucci manual bans me (toxic)"""
