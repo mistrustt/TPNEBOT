@@ -1216,7 +1216,7 @@ class Music(commands.Cog, name="Music"):
                 color=discord.Color.red()
             ))
 
-    ### start of my beautiful leak command
+    ### start of my beautiful commands
 
     async def request_filename(self, filename: str) -> list[dict[str, str]] | None:
         # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
@@ -1237,12 +1237,12 @@ class Music(commands.Cog, name="Music"):
         og = downloads is not None and file_name != name + '.'
 
         if not downloads:
-            downloads = await self.request_filename(name)
+            downloads = await self.request_filename(name + '.')
             og = False
 
         return downloads, og
 
-    async def create_song_view(self, song_data: dict):
+    async def create_song_view(self, song_data: dict, random_leak: bool = False):
 
         class SongContainer(discord.ui.Container):
 
@@ -1285,7 +1285,16 @@ class Music(commands.Cog, name="Music"):
                 'bitrate': '**True Bitrate**',
             }
 
-            def __init__(self, song: dict, downloads=None, og: bool = False):
+            RANDOM_LEAK_FIELDS = {
+                'record_dates': '**Recorded**',
+                'preview_date': '**Previewed**',
+                'date_leaked': '**Surfaced**',
+                'release_date': '**Released**',
+                'length': '**Length**',
+                'bitrate': '**True Bitrate**',
+            }
+
+            def __init__(self, song: dict, downloads=None, og: bool = False, random_leak: bool = False):
                 name = song.get('name')
                 track_titles = [t for t in song.get('track_titles', []) if t != name]
                 producers = song.get('producers')
@@ -1309,7 +1318,9 @@ class Music(commands.Cog, name="Music"):
                 self.add_item(discord.ui.Separator())
                 self.add_item(thumb)
 
-                for field_key, field_label in self.FIELDS.items():
+                field = self.FIELDS if not random_leak else self.RANDOM_LEAK_FIELDS
+
+                for field_key, field_label in field.items():
                     value = song.get(field_key)
                     if value:
                         value = value.replace('Recorded', '').replace('First Previewed', '').replace('Surfaced', '').replace('Released', '').strip()
@@ -1355,7 +1366,7 @@ class Music(commands.Cog, name="Music"):
         downloads, og = await self.check_file_name(song_data)
 
         layout_view = discord.ui.LayoutView(timeout=None)
-        layout_view.add_item(SongContainer(song_data, downloads, og))
+        layout_view.add_item(SongContainer(song_data, downloads, og, random_leak))
         
         return layout_view
 
@@ -1418,14 +1429,16 @@ class Music(commands.Cog, name="Music"):
             
             data = await response.json()
             
-            song_data = data.get('song')
+        song_data = data.get('song')
 
-            layout_view = await self.create_song_view(song_data) # need to fix this shit so it has the simpler view with less info for rleak.
+        layout_view = await self.create_song_view(song_data, True)
 
-            message = await ctx.send(view=layout_view)
+        message = await ctx.send(view=layout_view)
 
-            await message.add_reaction("👍")
-            await message.add_reaction("👎")
+        await message.add_reaction("👍")
+        await message.add_reaction("👎")
+
+    # end of my beautiful commands
 
     def clear_user_cache(self, user_id: int, identifiers: list[str] = []):
         self.assert_download_cache()
