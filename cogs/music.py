@@ -1304,7 +1304,7 @@ class Music(commands.Cog, name="Music"):
                 image_url = song.get('image_url')
 
                 header = discord.ui.Section(accessory=discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/'))
-                header.add_item(discord.ui.TextDisplay(f'### {name}\n{', '.join(track_titles)}'))
+                header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
 
                 thumb = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
                 thumb.add_item(discord.ui.TextDisplay(f'Producer(s): **{producers}**\nEngineer(s): **{engineers}**'))
