@@ -1423,7 +1423,8 @@ class Music(commands.Cog, name="Music"):
         
     @commands.command("randomleak", aliases=['rleak'], description="Get a random Juice WRLD leak")
     async def randomleak(self, ctx: commands.Context):
-        async with self.session.get(f'{JUICEWRLD_API}/juicewrld/radio/random/') as response:
+        # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
+        async with self.session.get(JUICEWRLD_API + '/juicewrld/radio/random/') as response:
             if response.status != 200:
                 return await ctx.send(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{response.status}'), delete_after=5)
             
