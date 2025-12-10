@@ -19,6 +19,7 @@ import random
 logger = logging.getLogger("discord_bot")
 
 JUICEWRLD_API = 'https://juicewrldapi.com'
+
 DOWNLOAD_CACHE_FOLDER_NAME = '__download_cache'
 HEARDLE_GAME_DURATION = 20
 HEARDLE_CLIP_DURATION = 10
@@ -84,7 +85,7 @@ class Music(commands.Cog, name="Music"):
         ]
 
     async def cog_unload(self):
-        await self.session.close() # sorry i almost pulled an envy or a toxic
+        await self.session.close()
 
     def can_test(ctx: commands.Context, cog=None):
         if cog is None:
@@ -1216,7 +1217,7 @@ class Music(commands.Cog, name="Music"):
                 color=discord.Color.red()
             ))
 
-    ### start of my beautiful commands
+    # start of my beautiful commands
 
     async def request_filename(self, filename: str) -> list[dict[str, str]] | None:
         # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
