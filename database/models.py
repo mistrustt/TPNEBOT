@@ -581,3 +581,15 @@ class CommandRoleRestriction(Base):
     __table_args__ = (
         UniqueConstraint('guild_id', 'command_name', 'role_id', name='unique_guild_command_role'),
     )
+
+class ForceRole(Base):
+    __tablename__ = "force_roles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    guild_id = Column(BigInteger, nullable=False)
+    role_id = Column(BigInteger, nullable=False)
+    user_id = Column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('guild_id', 'role_id', name='unique_guild_role'),
+    )

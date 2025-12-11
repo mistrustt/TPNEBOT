@@ -494,7 +494,13 @@ class RoleTools(commands.Cog, name="Roles"):
 
         if ctx.guild.id in self.forced_roles and member.id in self.forced_roles[ctx.guild.id] and role.id in self.forced_roles[ctx.guild.id][member.id]:
             self.forced_roles[ctx.guild.id][member.id].remove(role.id)
-            await ctx.send(f"✅ Removed forced role {role.name} from {member.name}.")
+            try:
+                await member.remove_roles(role, reason="Forced role removed")
+                await ctx.send(f"✅ Removed forced role {role.name} from {member.name}.")
+            except discord.Forbidden:
+                await ctx.send(f"⚠️ Removed from forced roles list, but I don't have permission to remove the role.")
+            except discord.HTTPException:
+                await ctx.send(f"⚠️ Removed from forced roles list, but failed to remove the role from the user.")
         else:
             await ctx.send(f"{role.name} is not a forced role for {member.name}.")
 
