@@ -455,6 +455,31 @@ class RoleTools(commands.Cog, name="Roles"):
         else:
             await ctx.send(f"{role.name} is already a forced role for {member.name}.")
 
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """Re-applyforce roles if they are removed."""
+        if before.roles == after.roles:
+            return
+
+        guild_id = after.guild.id
+        member_id = after.id
+
+        if guild_id not in self.forced_roles or member_id not in self.forced_roles[guild_id]:
+            return
+
+        forced_role_ids = self.forced_roles[guild_id][member_id]
+        current_role_ids = [role.id for role in after.roles]
+
+        for role_id in forced_role_ids:
+            if role_id not in current_role_ids:
+                role = after.guild.get_role(role_id)
+                if role:
+                    try:
+                        await after.add_roles(role, reason="Forced role re-applied")
+                        logger.info(f"Re-applied forced role {role.name} to {after.name}")
+                    except (discord.Forbidden, discord.HTTPException) as e:
+                        logger.error(f"Failed to re-apply forced role: {e}")
+
     @role.command(name='unforce', description="Removes a forced role from a user.")
     @commands.has_permissions(administrator=True)
     async def unforce_role(self, ctx: Context, member: discord.Member, *, role_name: str):
