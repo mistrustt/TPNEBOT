@@ -1307,13 +1307,13 @@ class Music(commands.Cog, name="Music"):
                 header.add_item(discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}"))
 
                 thumb = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
-                thumb.add_item(discord.ui.TextDisplay(f'Producer(s): **{producers}**\nEngineer(s): **{engineers}**'))
 
                 album = self.ALBUMS.get(era_name)
                 accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
                 super().__init__(accent_color=accent_color)
 
                 thumb.add_item(discord.ui.TextDisplay(f'**Era**\n{album['name'] if album else era_name}'))
+                thumb.add_item(discord.ui.TextDisplay(f'Producer(s): **{producers}**\nEngineer(s): **{engineers}**'))
 
                 self.add_item(header)
                 self.add_item(discord.ui.Separator())
