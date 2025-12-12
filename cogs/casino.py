@@ -3881,7 +3881,7 @@ class TableUI(discord.ui.LayoutView):
         self.default_color = discord.ButtonStyle.gray # default tile color
         self.win_color = discord.ButtonStyle.green # winning tile color
 
-        self.container = TableUIContainer(self.default_color)
+        self.container = TableUIContainer(cog, self.default_color)
         self.add_item(self.container)
 
     def get_all_buttons(self):
@@ -3914,7 +3914,7 @@ class TableUIContainer(discord.ui.Container):
 
         number = 1
 
-        self.win_loss_text = discord.ui.TextDisplay(f'### Waiting for Bet')
+        self.win_loss_text = discord.ui.TextDisplay(f'###Waiting for Bet')
         self.add_item(self.win_loss_text)
         self.add_item(discord.ui.Separator())
 
@@ -4003,6 +4003,7 @@ class BetButton(discord.ui.Button):
 
         try:
             table_ui_container: TableUIContainer = table_ui_view.container
+            
             table_ui_container.win_loss_text.content = f'### You {'WON' if total_win > player_bet else 'Lost'} {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
 
             try:
