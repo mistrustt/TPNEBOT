@@ -3848,15 +3848,7 @@ class GameUIContainer(discord.ui.Container):
         self.player_bet = player_bet
         self.player_wallet = player_wallet
         self.player_formatted_bet = formatted_bet
-        self.game_title = discord.ui.TextDisplay('### Keno | Select your stake')
-
-        self.add_item(self.game_title)
-        self.add_item(discord.ui.Separator())
-
-        self.player_display = discord.ui.TextDisplay(f'Bet: {self.player_formatted_bet} {cog.currency_name}')
-
-        self.add_item(self.player_display)
-        self.add_item(discord.ui.Separator())
+        self.game_title = discord.ui.TextDisplay(f'### Keno | Select your stake | Bet: {cog.currency_name} {self.player_formatted_bet}')
 
         action_row = discord.ui.ActionRow()
         action_row.add_item(StakeSelect())
@@ -3866,8 +3858,12 @@ class GameUIContainer(discord.ui.Container):
         action_row2.add_item(RandomPickButton(cog))
         action_row2.add_item(ClearTableButton())
 
-        self.add_item(action_row)
-        self.add_item(action_row2)
+        self.add_item(self.game_title) # Header
+
+        self.add_item(discord.ui.Separator()) # Separator
+
+        self.add_item(action_row) # Stake Select
+        self.add_item(action_row2) # User Controls
 
 class TableUI(discord.ui.LayoutView):
     def __init__(self, cog: Casino):
@@ -3914,8 +3910,12 @@ class TableUI(discord.ui.LayoutView):
 class TableUIContainer(discord.ui.Container):
     def __init__(self, default_color: discord.ButtonStyle):
         super().__init__(accent_color=0x2B2D31)
+        self.default_color = default_color
 
         number = 1
+
+        self.win_loss_text = discord.ui.TextDisplay(f'Waiting for Bet')
+        self.add_item(self.win_loss_text)
         self.add_item(discord.ui.Separator())
 
         for _ in range(6):
@@ -3925,7 +3925,7 @@ class TableUIContainer(discord.ui.Container):
                 number += 1
             self.add_item(action_row)
 
-        self.add_item(discord.ui.Separator())
+        self.add_item(discord.ui.Separator())     
 
 class StakeSelect(discord.ui.Select):
     def __init__(self):
@@ -3944,7 +3944,7 @@ class StakeSelect(discord.ui.Select):
         
         game_ui_container: GameUIContainer = self.parent.parent
         label = next((option.label for option in self.options if option.value == self.values[0]), None)
-        game_ui_container.game_title.content = f'### Keno | {label}'
+        game_ui_container.game_title.content = f'### Keno | {label} | {table_ui_view.selected_emoji} {game_ui_container.player_formatted_bet}'
 
         await itn.response.edit_message(view=game_ui_container.view)
 
@@ -4001,10 +4001,11 @@ class BetButton(discord.ui.Button):
             embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
             return await itn.response.send_message(embed=embed, delete_after=5)
 
-        game_ui_container.player_display.content = f'Bet: {table_ui_view.selected_emoji} {game_ui_container.player_formatted_bet}\nWin: {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
+        table_ui_container: TableUIContainer = table_ui_view.children[0]
+        table_ui_container.win_loss_text.content = f'You {'WON' if total_win > player_bet else 'Lost'} {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
 
         try:
-            if total_win > 0:
+            if total_win > player_bet:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id,
                     amount=Decimal(total_win),
@@ -4019,7 +4020,7 @@ class BetButton(discord.ui.Button):
             return await itn.response.send_message(embed=embed, delete_after=5)
         
         await table_ui_view.message.edit(view=table_ui_view)
-        await itn.response.edit_message(view=game_ui_container.view)
+        await itn.response.defer()
 
 class RandomPickButton(discord.ui.Button):
     def __init__(self, cog: Casino):
