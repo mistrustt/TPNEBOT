@@ -3858,12 +3858,12 @@ class GameUIContainer(discord.ui.Container):
         action_row2.add_item(RandomPickButton(cog))
         action_row2.add_item(ClearTableButton())
 
-        self.add_item(self.game_title) # Header
+        self.add_item(self.game_title)            # Header
 
-        self.add_item(discord.ui.Separator()) # Separator
+        self.add_item(discord.ui.Separator())     # Separator
 
-        self.add_item(action_row) # Stake Select
-        self.add_item(action_row2) # User Controls
+        self.add_item(action_row)                 # Stake Select
+        self.add_item(action_row2)                # User Controls
 
 class TableUI(discord.ui.LayoutView):
     def __init__(self, cog: Casino):
@@ -3873,13 +3873,13 @@ class TableUI(discord.ui.LayoutView):
         # game details
 
         self.player = None
-        self.max_picks = 8 # maximum amount of tiles a user can select
+        self.max_picks = 8                                  # maximum amount of tiles a user can select
 
-        self.selected_emoji = cog.currency_name # emoji we use to identify user picks
+        self.selected_emoji = cog.currency_name             # emoji we use to identify user picks
         
-        self.selected_color = discord.ButtonStyle.blurple # user tile colors
-        self.default_color = discord.ButtonStyle.gray # default tile color
-        self.win_color = discord.ButtonStyle.green # winning tile color
+        self.selected_color = discord.ButtonStyle.blurple   # user tile colors
+        self.default_color = discord.ButtonStyle.gray       # default tile color
+        self.win_color = discord.ButtonStyle.green          # winning tile color
 
         self.container = TableUIContainer(cog, self.default_color)
         self.add_item(self.container)
@@ -3914,7 +3914,7 @@ class TableUIContainer(discord.ui.Container):
 
         number = 1
 
-        self.win_loss_text = discord.ui.TextDisplay(f'###Waiting for Bet')
+        self.win_loss_text = discord.ui.TextDisplay(f'### Waiting for Bet')
         self.add_item(self.win_loss_text)
         self.add_item(discord.ui.Separator())
 
@@ -3940,7 +3940,8 @@ class StakeSelect(discord.ui.Select):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            return await itn.response.send_message('Not ur Game G', ephemeral=True)
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
         
         game_ui_container: GameUIContainer = self.parent.parent
         label = next((option.label for option in self.options if option.value == self.values[0]), None)
@@ -3959,10 +3960,13 @@ class BetButton(discord.ui.Button):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            return await itn.response.send_message('Not ur Game G', ephemeral=True)
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
+            
         
         if not table_ui_view or not table_ui_view.message:
-            return await itn.response.send_message('Lowkey dont know what happened', ephemeral=True)
+            embed = discord.Embed(f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         all_buttons = table_ui_view.get_all_buttons()
         for button in all_buttons:
@@ -3981,7 +3985,8 @@ class BetButton(discord.ui.Button):
         selected_stake = game_ui_select.values
 
         if not selected_stake:
-            return await itn.response.send_message('U Didnt select ur stake g', ephemeral=True)
+            embed = discord.Embed(description=f'⚠️ {itn.user.mention}: You forgot to select the stakes', color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         bet_multiplier = await table_ui_view.get_multiplier(selected_stake[0])
 
@@ -3991,40 +3996,35 @@ class BetButton(discord.ui.Button):
 
         wallet_id = game_ui_container.player_wallet
 
+        balance = await self.bot.database.get_wallet_balance(wallet_id)
+        if balance < player_bet:
+            embed = discord.Embed(description=f'🚫 {itn.user.mention}: Insufficient Funds', color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
+        
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id,
-                amount=-Decimal(player_bet),
-                description="Keno Bet"
-            )
+            await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=-Decimal(player_bet), description="Keno Bet")
         except ValueError as e:
             embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
             return await itn.response.send_message(embed=embed, delete_after=5)
 
+        table_ui_container: TableUIContainer = table_ui_view.container
+        
+        table_ui_container.win_loss_text.content = f'### You {'WON' if total_win > player_bet else 'Lost'} {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
+        
+        await table_ui_view.message.edit(view=table_ui_view)
+
         try:
-            table_ui_container: TableUIContainer = table_ui_view.container
-            
-            table_ui_container.win_loss_text.content = f'### You {'WON' if total_win > player_bet else 'Lost'} {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
+            if total_win > player_bet:
+                await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=Decimal(total_win), description=f"Keno Win")
+                await self.bot.database.increment_win(table_ui_view.player.id, "keno", total_win, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
+            else:
+                await self.bot.database.increment_loss(table_ui_view.player.id, "keno", player_bet, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
 
-            try:
-                if total_win > player_bet:
-                    await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id,
-                        amount=Decimal(total_win),
-                        description=f"Keno Win"
-                    )
-                    await self.bot.database.increment_win(table_ui_view.player.id, "keno", total_win, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
-                else:
-                    await self.bot.database.increment_loss(table_ui_view.player.id, "keno", player_bet, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
-
-            except ValueError as e:
-                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
-                return await itn.response.send_message(embed=embed, delete_after=5)
-            
-            await table_ui_view.message.edit(view=table_ui_view)
-            await itn.response.defer()
-        except Exception as e:
-            await itn.channel.send(e)
+        except ValueError as e:
+            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, delete_after=5)
+        
+        await itn.response.defer()
 
 class RandomPickButton(discord.ui.Button):
     def __init__(self, cog: Casino):
@@ -4035,10 +4035,12 @@ class RandomPickButton(discord.ui.Button):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            return await itn.response.send_message('Not ur Game G', ephemeral=True)
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
         
         if not table_ui_view or not table_ui_view.message:
-            return await itn.response.send_message('Lowkey dont know what happened', ephemeral=True)
+            embed = discord.Embed(f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         all_buttons = table_ui_view.get_all_buttons()
 
@@ -4063,10 +4065,12 @@ class ClearTableButton(discord.ui.Button):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            return await itn.response.send_message('Not ur Game G', ephemeral=True)
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         if not table_ui_view or not table_ui_view.message:
-            return await itn.response.send_message('Lowkey dont know what happened', ephemeral=True)
+            embed = discord.Embed(f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         await table_ui_view.reset_buttons()
         await itn.response.defer()
@@ -4079,7 +4083,8 @@ class NumberButton(discord.ui.Button):
         table_ui_view: TableUI = self.view
 
         if table_ui_view.player != itn.user:
-            return await itn.response.send_message('Not ur Game G', ephemeral=True)
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         all_buttons = table_ui_view.get_all_buttons()
 
@@ -4092,7 +4097,8 @@ class NumberButton(discord.ui.Button):
                 button.style = table_ui_view.default_color
 
         if user_selects >= self.view.max_picks and self.emoji is None:
-            return await itn.response.send_message('U Selected the max G', ephemeral=True)
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: You selected the max amount of tiles: {self.view.max_picks}", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
 
         if self.style == table_ui_view.default_color:
             self.style = self.view.selected_color
