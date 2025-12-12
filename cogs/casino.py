@@ -3783,8 +3783,8 @@ class Casino(commands.Cog):
             game_ui_view = GameUI(self, amount, formatted_bet, wallet_id, PF)
             table_ui_view = TableUI(self)
 
-            await ctx.send(view=game_ui_view)
             grid_msg = await ctx.send(view=table_ui_view)
+            await ctx.send(view=game_ui_view)
 
             game_ui_view.container.table_ui_view = table_ui_view
             table_ui_view.message = grid_msg
