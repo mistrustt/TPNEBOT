@@ -3753,7 +3753,7 @@ class Casino(commands.Cog):
         
     @commands.command('keno')
     @commands.has_role(1414742766386413590)
-    async def keno(self, ctx: commands.Context, player_bet: int = 1000):
+    async def keno(self, ctx: commands.Context, player_bet: str):
         try:
             user_id = ctx.author.id
 
