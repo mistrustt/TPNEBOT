@@ -3837,7 +3837,6 @@ keno_payouts = {
 class GameUI(discord.ui.LayoutView):
     def __init__(self, cog, player_bet: int, formatted_bet, player_wallet, PF: ProvenFairness):
         super().__init__(timeout=None)
-        self.persistent = True
         self.container = GameUIContainer(cog, player_bet, formatted_bet, player_wallet, PF)
         self.add_item(self.container)
 
@@ -3847,7 +3846,7 @@ class GameUIContainer(discord.ui.Container):
         self.table_ui_view: TableUI = None
 
         self.player_bet = player_bet
-        self.player_wallet = player_bet
+        self.player_wallet = player_wallet
         self.player_formatted_bet = formatted_bet
         self.game_title = discord.ui.TextDisplay('### Keno | Select your stake')
 
@@ -3873,7 +3872,6 @@ class GameUIContainer(discord.ui.Container):
 class TableUI(discord.ui.LayoutView):
     def __init__(self, cog: Casino):
         super().__init__(timeout=None)
-        self.persistent = True
         self.message: discord.Message = None
 
         # game details
