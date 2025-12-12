@@ -1933,10 +1933,10 @@ class Music(commands.Cog, name="Music"):
                     view = SongView(self, results)
                     message = await ctx.reply(embed=embed, view=view)
                     await view.wait()
-                    if not view.chosen_song:
+                    if not view.children[0].chosen_song:
                         self.handle_user_done_snippet(ctx.author.id)
                         return
-                    song = view.chosen_song
+                    song = view.children[0].chosen_song
                     try:
                         await message.delete()
                     except:
