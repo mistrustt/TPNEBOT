@@ -1846,7 +1846,7 @@ class Music(commands.Cog, name="Music"):
             return
         self.snippet_debounce[ctx.author.id] = True
 
-        async with aiohttp.ClientSession() as session:
+        async with self.session as session:
             async with session.get(f'{JUICEWRLD_API}/juicewrld/files/browse/?search={self.special_url_encode(query)}') as response:
                 async def handle_request_failed(ctx, code=None):
                     embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
