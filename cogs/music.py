@@ -1877,8 +1877,7 @@ class Music(commands.Cog, name="Music"):
                             
         return None
 
-    @commands.command(name="lyric", aliases="lyrics", help="Find lyrics for a Juice WRLD song")
-    @commands.has_role(1414742766386413590)
+    @commands.command(name="lyric", aliases=["lyrics"], help="Find lyrics for a Juice WRLD song")
     async def lyric(self, ctx: commands.Context, *, query: str):
         results = await self.find_lyrics(query)
         if results:
@@ -1910,6 +1909,7 @@ class Music(commands.Cog, name="Music"):
                         if interaction.user.id != self.author:
                             return await interaction.response.send_message("You cannot use this select menu.", ephemeral=True)
                         
+                        await interaction.response.defer()
                         self.chosen_result = self.avail_options_map.get(self.values[0], None)
                         self.real_view.stop()
                 
@@ -1930,7 +1930,7 @@ class Music(commands.Cog, name="Music"):
                     pass
 
                 select = view.children[0]
-                if select or not select.chosen_result:
+                if not select or not select.chosen_result:
                     return
                 chosen_result = select.chosen_result
                 try:
