@@ -1911,8 +1911,9 @@ class Music(commands.Cog, name="Music"):
                     return
                 if count > 1:
                     class SongSelect(discord.ui.Select):
-                        def __init__(self, author, songs):
+                        def __init__(self, view, author, songs):
                             options = []
+                            self.view = view
                             self.author = author
                             self.avail_options_map = {}
                             for name, song in songs.items():
@@ -1926,17 +1927,12 @@ class Music(commands.Cog, name="Music"):
                                 return await interaction.response.send_message("You cannot use this select menu.", ephemeral=True)
                             
                             self.chosen_song = self.avail_options_map.get(self.values[0], None)
-                            await interaction.channel.send(self.chosen_song)
-                            await interaction.message.edit(embed=discord.Embed(description=f"{interaction.user.mention} Creating snippet..."), view=None)                            
-                            self.view.handle_finished()
+                            self.view.stop()
                     
                     class SongView(discord.ui.View):
                         def __init__(self, author, songs):
                             super().__init__(timeout=30)
-                            self.add_item(SongSelect(author, songs))
-                        
-                        async def handle_finished(self):
-                            self.stop()
+                            self.add_item(SongSelect(self, author, songs))
 
                     embed = discord.Embed(
                         description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
