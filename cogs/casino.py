@@ -3981,7 +3981,7 @@ class BetButton(discord.ui.Button):
                 button.style = table_ui_view.win_color
 
             game_ui_container: GameUIContainer = self.parent.parent
-            game_ui_action_row: discord.ui.ActionRow = game_ui_container.children[4]
+            game_ui_action_row: discord.ui.ActionRow = game_ui_container.children[2]
             game_ui_select: discord.ui.Select = game_ui_action_row.children[0]
             selected_stake = game_ui_select.values
 
