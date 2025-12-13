@@ -1911,8 +1911,9 @@ class Music(commands.Cog, name="Music"):
                     return
                 if count > 1:
                     class SongSelect(discord.ui.Select):
-                        def __init__(self, songs):
+                        def __init__(self, author, songs):
                             options = []
+                            self.author = author
                             self.avail_options_map = {}
                             for name, song in songs.items():
                                 self.avail_options_map[name] = song
@@ -1921,16 +1922,18 @@ class Music(commands.Cog, name="Music"):
                             self.songs = songs
 
                         async def callback(self, interaction: discord.Interaction):
-                            await interaction.response.defer()
-
+                            if interaction.user.id != self.author:
+                                return await interaction.response.send_message("You cannot use this select menu.", ephemeral=True)
+                            
                             self.chosen_song = self.avail_options_map.get(self.values[0], None)
-                            self.disabled = True
+                            await interaction.channel.send(self.chosen_song)
+                            await interaction.message.edit(embed=discord.Embed(description=f"{interaction.user.mention} Creating snippet..."), view=None)                            
                             self.view.handle_finished()
                     
                     class SongView(discord.ui.View):
-                        def __init__(self, songs):
+                        def __init__(self, author, songs):
                             super().__init__(timeout=30)
-                            self.add_item(SongSelect(songs))
+                            self.add_item(SongSelect(author, songs))
                         
                         async def handle_finished(self):
                             self.stop()
@@ -1938,7 +1941,7 @@ class Music(commands.Cog, name="Music"):
                     embed = discord.Embed(
                         description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
                     )
-                    view = SongView(safe_items)
+                    view = SongView(ctx.author.id, safe_items)
                     message = await ctx.reply(embed=embed, view=view)
                     await view.wait()
                     try:
