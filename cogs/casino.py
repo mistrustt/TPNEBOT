@@ -3957,77 +3957,73 @@ class BetButton(discord.ui.Button):
         self.PF = PF
         
     async def callback(self, itn: discord.Interaction):
+        table_ui_view: TableUI = self.parent.parent.table_ui_view
+
+        if table_ui_view.player != itn.user:
+            embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
+            
+        
+        if not table_ui_view or not table_ui_view.message:
+            embed = discord.Embed(f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
+
+        all_buttons = table_ui_view.get_all_buttons()
+        for button in all_buttons:
+            if button.emoji:
+                button.style = table_ui_view.selected_color
+            else:
+                button.style = table_ui_view.default_color
+
+        selected = await self.cog.fair_sample(table_ui_view.player.id, all_buttons, table_ui_view.max_picks)
+        for button in selected:
+            button.style = table_ui_view.win_color
+
+        game_ui_container: GameUIContainer = self.parent.parent
+        game_ui_action_row: discord.ui.ActionRow = game_ui_container.children[2]
+        game_ui_select: discord.ui.Select = game_ui_action_row.children[0]
+        selected_stake = game_ui_select.values
+
+        if not selected_stake:
+            embed = discord.Embed(description=f'⚠️ {itn.user.mention}: You forgot to select the stakes', color=discord.Color.yellow())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
+
+        bet_multiplier = await table_ui_view.get_multiplier(selected_stake[0])
+
+        player_bet = game_ui_container.player_bet
+        total_win = player_bet * Decimal(bet_multiplier)
+        total_win_formatted = await self.cog.formatter(total_win)
+
+        wallet_id = game_ui_container.player_wallet
+
+        balance = await self.bot.database.get_wallet_balance(wallet_id)
+        if balance < player_bet:
+            embed = discord.Embed(description=f'🚫 {itn.user.mention}: Insufficient Funds', color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, ephemeral=True)
+        
         try:
-            table_ui_view: TableUI = self.parent.parent.table_ui_view
+            await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=-Decimal(player_bet), description="Keno Bet")
+        except ValueError as e:
+            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, delete_after=5)
 
-            if table_ui_view.player != itn.user:
-                embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
-                return await itn.response.send_message(embed=embed, ephemeral=True)
-                
-            
-            if not table_ui_view or not table_ui_view.message:
-                embed = discord.Embed(f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", color=discord.Color.red())
-                return await itn.response.send_message(embed=embed, ephemeral=True)
+        table_ui_container: TableUIContainer = table_ui_view.container
+        table_ui_container.win_loss_text.content = f'### You {'WON' if total_win > player_bet else 'Lost'} {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
+        
+        await table_ui_view.message.edit(view=table_ui_view)
 
-            all_buttons = table_ui_view.get_all_buttons()
-            for button in all_buttons:
-                if button.emoji:
-                    button.style = table_ui_view.selected_color
-                else:
-                    button.style = table_ui_view.default_color
+        try:
+            if total_win > player_bet:
+                await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=Decimal(total_win), description=f"Keno Win")
+                await self.bot.database.increment_win(table_ui_view.player.id, "keno", total_win, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
+            else:
+                await self.bot.database.increment_loss(table_ui_view.player.id, "keno", player_bet, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
 
-            selected = await self.cog.fair_sample(table_ui_view.player.id, all_buttons, table_ui_view.max_picks)
-            for button in selected:
-                button.style = table_ui_view.win_color
-
-            game_ui_container: GameUIContainer = self.parent.parent
-            game_ui_action_row: discord.ui.ActionRow = game_ui_container.children[2]
-            game_ui_select: discord.ui.Select = game_ui_action_row.children[0]
-            selected_stake = game_ui_select.values
-
-            if not selected_stake:
-                embed = discord.Embed(description=f'⚠️ {itn.user.mention}: You forgot to select the stakes', color=discord.Color.yellow())
-                return await itn.response.send_message(embed=embed, ephemeral=True)
-
-            bet_multiplier = await table_ui_view.get_multiplier(selected_stake[0])
-
-            player_bet = game_ui_container.player_bet
-            total_win = player_bet * bet_multiplier
-            total_win_formatted = await self.cog.formatter(total_win)
-
-            wallet_id = game_ui_container.player_wallet
-
-            balance = await self.bot.database.get_wallet_balance(wallet_id)
-            if balance < player_bet:
-                embed = discord.Embed(description=f'🚫 {itn.user.mention}: Insufficient Funds', color=discord.Color.red())
-                return await itn.response.send_message(embed=embed, ephemeral=True)
-            
-            try:
-                await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=-Decimal(player_bet), description="Keno Bet")
-            except ValueError as e:
-                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
-                return await itn.response.send_message(embed=embed, delete_after=5)
-
-            table_ui_container: TableUIContainer = table_ui_view.container
-            
-            table_ui_container.win_loss_text.content = f'### You {'WON' if total_win > player_bet else 'Lost'} {table_ui_view.selected_emoji} {total_win_formatted} ({bet_multiplier}x)'
-            
-            await table_ui_view.message.edit(view=table_ui_view)
-
-            try:
-                if total_win > player_bet:
-                    await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=Decimal(total_win), description=f"Keno Win")
-                    await self.bot.database.increment_win(table_ui_view.player.id, "keno", total_win, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
-                else:
-                    await self.bot.database.increment_loss(table_ui_view.player.id, "keno", player_bet, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
-
-            except ValueError as e:
-                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
-                return await itn.response.send_message(embed=embed, delete_after=5)
-            
-            await itn.response.defer()
-        except Exception as e:
-            await itn.channel.send(str(e))
+        except ValueError as e:
+            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+            return await itn.response.send_message(embed=embed, delete_after=5)
+        
+        await itn.response.defer()
 
 class RandomPickButton(discord.ui.Button):
     def __init__(self, cog: Casino):
