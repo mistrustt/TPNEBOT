@@ -1911,28 +1911,34 @@ class Music(commands.Cog, name="Music"):
                     return
                 if count > 1:
                     class SongSelect(discord.ui.Select):
-                        def __init__(self, cog, songs):
+                        def __init__(self, songs):
                             options = []
+                            self.avail_options_map = {}
                             for name, song in songs.items():
+                                self.avail_options_map[name] = song
                                 options.append(discord.SelectOption(label=name))
                             super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
                             self.songs = songs
 
                         async def callback(self, interaction: discord.Interaction):
-                            await interaction.channel.send(f"hi {self.view}")
-                            self.chosen_song = self.songs[self.values[0]]
+                            await interaction.response.defer()
+
+                            self.chosen_song = self.avail_options_map.get(self.values[0], None)
                             self.disabled = True
-                            self.view.stop()
+                            self.view.handle_finished()
                     
                     class SongView(discord.ui.View):
-                        def __init__(self, cog, songs):
+                        def __init__(self, songs):
                             super().__init__(timeout=30)
-                            self.add_item(SongSelect(cog, songs))
+                            self.add_item(SongSelect(songs))
+                        
+                        async def handle_finished(self):
+                            self.stop()
 
                     embed = discord.Embed(
                         description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
                     )
-                    view = SongView(self, safe_items)
+                    view = SongView(safe_items)
                     message = await ctx.reply(embed=embed, view=view)
                     await view.wait()
                     try:
