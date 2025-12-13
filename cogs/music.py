@@ -1900,7 +1900,7 @@ class Music(commands.Cog, name="Music"):
         if count > 1:
             class SongSelect(discord.ui.Select):
                 def __init__(self, cog: Music, ctx, songs):
-                    options = [ cog.get_most_acceptable_track_name(song.get('name', '')) for song in songs ]
+                    options = [ song.get('name', '') for song in songs ]
 
                     super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
                     self.cog = cog
@@ -1909,7 +1909,7 @@ class Music(commands.Cog, name="Music"):
 
                 async def callback(self, interaction: discord.Interaction):
                     selected_song_name = self.values[0]
-                    selected_song = next(song for song in self.songs if song.get("name") == selected_song_name)
+                    selected_song = next(song for song in self.songs if song.get('name') == selected_song_name)
                     await interaction.response.defer()
                     await interaction.message.delete()
                     await self.cog.handle_envys_bullshit(self.ctx, selected_song)
