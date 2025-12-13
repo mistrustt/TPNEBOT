@@ -2045,7 +2045,7 @@ class Music(commands.Cog, name="Music"):
                     pass
 
                 select = view.children[0]
-                if select or not select.chosen_song:
+                if not select or not select.chosen_song:
                     self.handle_user_done_snippet(ctx.author.id)
                     return
                 song = select.chosen_song
