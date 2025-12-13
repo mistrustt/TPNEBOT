@@ -1678,30 +1678,11 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply("nah nigga stick to your shitty heardle")
             return 
 
-        whitelisted_roles = [1290365010542854155, 1440159576044343346, 1414742766386413590]
-                        #        ^ goat role            kinnon role ^           dev role ^
-        has_role = any(role.id in whitelisted_roles for role in ctx.author.roles)
-        
-        has_permission = (
-            ctx.author.guild_permissions.manage_guild or
-            Music.can_test(ctx, self) or
-            Music.can_heardle(ctx, self) or 
-            has_role
-        )
-        
         if ctx.author.id == 567401702190350347 and random.random() < 0.01:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
                 f"You are too old for this command. Age detected: {random.randint(30, 40)}"
-            )
-            return
-
-        if not has_permission:
-            await utils.Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                "Heardle is currently in beta and only available to goats. Reach $100 total donated in groupbuys and ask a staff member for <@&1290365010542854155> to play."
             )
             return
 
