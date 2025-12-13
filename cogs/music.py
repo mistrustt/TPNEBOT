@@ -1902,7 +1902,7 @@ class Music(commands.Cog, name="Music"):
                             safe_items[best_name] = item
 
                 count = len(safe_items)
-                results = list(safe_items.values())
+                safe_items_list = list(safe_items.values())
 
                 song = None
                 if count == 0:
@@ -1913,13 +1913,13 @@ class Music(commands.Cog, name="Music"):
                     class SongSelect(discord.ui.Select):
                         def __init__(self, cog, songs):
                             options = []
-                            for song in songs:
-                                best_name = cog.get_most_acceptable_track_name(song.get("name", ""))
-                                options.append(discord.SelectOption(label=best_name))
+                            for name, song in songs.items():
+                                options.append(discord.SelectOption(label=name))
                             super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
                             self.songs = songs
 
                         async def callback(self, interaction: discord.Interaction):
+                            await interaction.channel.send(f"hi {self.view}")
                             self.chosen_song = self.songs[self.values[0]]
                             self.disabled = True
                             self.view.stop()
@@ -1932,7 +1932,7 @@ class Music(commands.Cog, name="Music"):
                     embed = discord.Embed(
                         description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
                     )
-                    view = SongView(self, results)
+                    view = SongView(self, safe_items)
                     message = await ctx.reply(embed=embed, view=view)
                     await view.wait()
                     try:
@@ -1950,7 +1950,7 @@ class Music(commands.Cog, name="Music"):
                     except:
                         pass
                 else:
-                    song = results[0]
+                    song = safe_items_list[0]
                     
                 path = song.get("path", "")
                 download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
