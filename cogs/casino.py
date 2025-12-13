@@ -3991,6 +3991,12 @@ class BetButton(discord.ui.Button):
         bet_multiplier = await table_ui_view.get_multiplier(selected_stake[0])
 
         player_bet = game_ui_container.player_bet
+
+        max_allowed = await self.bot.database.get_max_gamble_amount(table_ui_view.player, False)
+        if player_bet > max_allowed:
+            player_bet = max_allowed
+            await itn.message.reply(embed=discord.Embed(description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: " f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange()), delete_after=5)
+
         total_win = player_bet * Decimal(bet_multiplier)
         total_win_formatted = await self.cog.formatter(total_win)
 
