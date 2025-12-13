@@ -1,4 +1,5 @@
 import os
+from bs4 import BeautifulSoup
 import discord
 import logging
 import aiohttp
@@ -9,7 +10,7 @@ from discord.ext import commands
 from colorthief import ColorThief
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, parse_qs, unquote
 import utils.embeds as utils
 from itertools import product
 from moviepy import *
@@ -1834,6 +1835,124 @@ class Music(commands.Cog, name="Music"):
                 self.handle_user_done_heardle(ctx.author.id)
                 update_task.cancel()
 
+    async def find_lyrics(self, query):
+        url = "https://duckduckgo.com/html/"
+        params = {"q": f"{query} juice wrld"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        async with self.session.get(url, params=params, headers=headers) as resp:
+            if resp.status != 200:
+                print(f"Error: Received status code {resp.status}")
+                return None
+            
+            html = await resp.text()
+            soup = BeautifulSoup(html, "html.parser")
+            main_div = soup.find("div", id="links")
+            results = main_div.find_all("div", class_="links_main links_deep result__body", limit=3)
+
+            cleaned_results = []
+            if results:
+                for result in results:
+                    result_title = result.find("h2", class_="result__title")
+                    if result_title:
+                        main = result_title.find("a", class_="result__a")
+                        url = main['href']
+                        parsed = urlparse(url)
+                        qs = parse_qs(parsed.query)
+                        if 'uddg' in qs:
+                            url = unquote(qs['uddg'][0])
+                        title_text = main.get_text(strip=True)
+                        
+                        # check if valid lyrics link
+                        if "genius.com" in url or "lyrics":
+                            cleaned_results.append({
+                                "title": title_text,
+                                "link": url
+                            })
+            return cleaned_results
+                            
+        return None
+
+    @commands.command(name="lyric", aliases="lyrics", help="Find lyrics for a Juice WRLD song")
+    @commands.has_role(1414742766386413590)
+    async def lyric(self, ctx: commands.Context, *, query: str):
+        results = await self.find_lyrics(query)
+        if results:
+            count = len(results)
+            chosen_result = None
+            if count == 0:
+                await utils.Embeds.send_warning_embed(
+                    ctx.channel,
+                    ctx.author,
+                    f"Could not find lyrics for '{query}'."
+                )
+                return
+            elif count == 1:
+                chosen_result = results[0]
+            else:
+                class LyricsSelect(discord.ui.Select):
+                    def __init__(self, view, author, results):
+                        options = []
+                        self.real_view = view
+                        self.author = author
+                        self.avail_options_map = {}
+                        for result in results:
+                            title = result.get("title", "Unknown Title")
+                            self.avail_options_map[title] = result
+                            options.append(discord.SelectOption(label=title[:100]))
+                        super().__init__(placeholder="Select a lyrics source...", min_values=1, max_values=1, options=options)
+
+                    async def callback(self, interaction: discord.Interaction):
+                        if interaction.user.id != self.author:
+                            return await interaction.response.send_message("You cannot use this select menu.", ephemeral=True)
+                        
+                        self.chosen_result = self.avail_options_map.get(self.values[0], None)
+                        self.real_view.stop()
+                
+                class LyricsView(discord.ui.View):
+                    def __init__(self, author, results):
+                        super().__init__(timeout=30)
+                        self.add_item(LyricsSelect(self, author, results))
+
+                embed = discord.Embed(
+                    description=f"{ctx.author.mention}: Multiple **lyrics sources** found with your **search**. Please select one from the dropdown below."
+                )
+                view = LyricsView(ctx.author.id, results)
+                message = await ctx.reply(embed=embed, view=view)
+                await view.wait()
+                try:
+                    await message.delete()
+                except:
+                    pass
+
+                select = view.children[0]
+                if select or not select.chosen_result:
+                    return
+                chosen_result = select.chosen_result
+                try:
+                    await message.delete()
+                except:
+                    pass
+            embed = discord.Embed(
+                title=f"{chosen_result['title']}",
+                url=chosen_result['link'],
+                description=f"[Click here to view the lyrics]({chosen_result['link']})",
+                color=discord.Color.blue()
+            )
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar.url)
+            embed.set_footer(text="Lyrics provided by Genius.com or other lyrics websites.")
+            await ctx.reply(embed=embed)
+        else:
+            await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f"Could not find lyrics for '{query}'."
+            )
+
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
         debounce = self.snippet_debounce.get(ctx.author.id, False)
@@ -1846,123 +1965,122 @@ class Music(commands.Cog, name="Music"):
             return
         self.snippet_debounce[ctx.author.id] = True
 
-        async with self.session as session:
-            async with session.get(f'{JUICEWRLD_API}/juicewrld/files/browse/?search={self.special_url_encode(query)}') as response:
-                async def handle_request_failed(ctx, code=None):
-                    embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
-                    if code:
-                        embed.set_image(url=f"https://http.cat/{code}")
-                    await ctx.reply(embed=embed, delete_after=5)
+        async with self.session.get(f'{JUICEWRLD_API}/juicewrld/files/browse/?search={self.special_url_encode(query)}') as response:
+            async def handle_request_failed(ctx, code=None):
+                embed = discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red())
+                if code:
+                    embed.set_image(url=f"https://http.cat/{code}")
+                await ctx.reply(embed=embed, delete_after=5)
 
-                if response.status != 200:
-                    await handle_request_failed(ctx, response.status)
-                    self.handle_user_done_snippet(ctx.author.id)
-                    return
+            if response.status != 200:
+                await handle_request_failed(ctx, response.status)
+                self.handle_user_done_snippet(ctx.author.id)
+                return
 
-                data = await response.json()
+            data = await response.json()
 
-                items = data.get("items", [])
-                safe_items = {}
-                for item in items:
-                    mime_type = item.get('mime_type', None)
-                    if mime_type and mime_type == 'audio/mpeg':
-                        name = item.get("name", "")
-                        name = name[:name.rfind('.')] if '.' in name else name
-                        best_name = self.get_most_acceptable_track_name(name)
-                        existing = safe_items.get(best_name)
+            items = data.get("items", [])
+            safe_items = {}
+            for item in items:
+                mime_type = item.get('mime_type', None)
+                if mime_type and mime_type == 'audio/mpeg':
+                    name = item.get("name", "")
+                    name = name[:name.rfind('.')] if '.' in name else name
+                    best_name = self.get_most_acceptable_track_name(name)
+                    existing = safe_items.get(best_name)
 
-                        good = True
-                        if existing:
-                            # this will remove duplicates and also get the lowest size for best performance
-                            existing_size = existing.get("size", 0)
-                            current_size = item.get("size", 0)
-                            if current_size >= existing_size:
-                                good = False
+                    good = True
+                    if existing:
+                        # this will remove duplicates and also get the lowest size for best performance
+                        existing_size = existing.get("size", 0)
+                        current_size = item.get("size", 0)
+                        if current_size >= existing_size:
+                            good = False
+                    
+                    if good:
+                        safe_items[best_name] = item
+
+            count = len(safe_items)
+            safe_items_list = list(safe_items.values())
+
+            song = None
+            if count == 0:
+                await utils.Embeds.send_error_embed(ctx.channel, ctx.author, f"I couldnt find a song with the name: `{query}`")
+                self.handle_user_done_snippet(ctx.author.id)
+                return
+            if count > 1:
+                class SongSelect(discord.ui.Select):
+                    def __init__(self, view, author, songs):
+                        options = []
+                        self.real_view = view
+                        self.author = author
+                        self.avail_options_map = {}
+                        for name, song in songs.items():
+                            self.avail_options_map[name] = song
+                            options.append(discord.SelectOption(label=name))
+                        super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
+                        self.songs = songs
+
+                    async def callback(self, interaction: discord.Interaction):
+                        if interaction.user.id != self.author:
+                            return await interaction.response.send_message("You cannot use this select menu.", ephemeral=True)
                         
-                        if good:
-                            safe_items[best_name] = item
-
-                count = len(safe_items)
-                safe_items_list = list(safe_items.values())
-
-                song = None
-                if count == 0:
-                    await utils.Embeds.send_error_embed(ctx.channel, ctx.author, f"I couldnt find a song with the name: `{query}`")
-                    self.handle_user_done_snippet(ctx.author.id)
-                    return
-                if count > 1:
-                    class SongSelect(discord.ui.Select):
-                        def __init__(self, view, author, songs):
-                            options = []
-                            self.view = view
-                            self.author = author
-                            self.avail_options_map = {}
-                            for name, song in songs.items():
-                                self.avail_options_map[name] = song
-                                options.append(discord.SelectOption(label=name))
-                            super().__init__(placeholder="Select a song...", min_values=1, max_values=1, options=options)
-                            self.songs = songs
-
-                        async def callback(self, interaction: discord.Interaction):
-                            if interaction.user.id != self.author:
-                                return await interaction.response.send_message("You cannot use this select menu.", ephemeral=True)
-                            
-                            self.chosen_song = self.avail_options_map.get(self.values[0], None)
-                            self.view.stop()
-                    
-                    class SongView(discord.ui.View):
-                        def __init__(self, author, songs):
-                            super().__init__(timeout=30)
-                            self.add_item(SongSelect(self, author, songs))
-
-                    embed = discord.Embed(
-                        description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
-                    )
-                    view = SongView(ctx.author.id, safe_items)
-                    message = await ctx.reply(embed=embed, view=view)
-                    await view.wait()
-                    try:
-                        await message.delete()
-                    except:
-                        pass
-
-                    select = view.children[0]
-                    if select or not select.chosen_song:
-                        self.handle_user_done_snippet(ctx.author.id)
-                        return
-                    song = select.chosen_song
-                    try:
-                        await message.delete()
-                    except:
-                        pass
-                else:
-                    song = safe_items_list[0]
-                    
-                path = song.get("path", "")
-                download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
-
-                # TODO: Make the image something else
-                image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_snippet.png'
-                image_url = ctx.author.display_avatar.url
-                async with session.get(image_url) as image_response:
-                    if image_response.status == 200:
-                        image_data = await image_response.read()
-                        with open(image_file_name, 'wb') as img_file:
-                            img_file.write(image_data)
-
-                result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet")
-                if result == False:
-                    await handle_request_failed(ctx, payload)
-                    self.handle_user_done_snippet(ctx.author.id)
-                    return
+                        self.chosen_song = self.avail_options_map.get(self.values[0], None)
+                        self.real_view.stop()
                 
-                message = await ctx.channel.send(file=discord.File(payload))
+                class SongView(discord.ui.View):
+                    def __init__(self, author, songs):
+                        super().__init__(timeout=30)
+                        self.add_item(SongSelect(self, author, songs))
 
-                async def debounce_delay(author_id: int):
-                    await asyncio.sleep(15) # default snippet debounce
-                    self.handle_user_done_snippet(author_id)
+                embed = discord.Embed(
+                    description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
+                )
+                view = SongView(ctx.author.id, safe_items)
+                message = await ctx.reply(embed=embed, view=view)
+                await view.wait()
+                try:
+                    await message.delete()
+                except:
+                    pass
 
-                asyncio.create_task(debounce_delay(ctx.author.id))
+                select = view.children[0]
+                if select or not select.chosen_song:
+                    self.handle_user_done_snippet(ctx.author.id)
+                    return
+                song = select.chosen_song
+                try:
+                    await message.delete()
+                except:
+                    pass
+            else:
+                song = safe_items_list[0]
+                
+            path = song.get("path", "")
+            download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
+
+            # TODO: Make the image something else
+            image_file_name = f'{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_snippet.png'
+            image_url = ctx.author.display_avatar.url
+            async with self.session.get(image_url) as image_response:
+                if image_response.status == 200:
+                    image_data = await image_response.read()
+                    with open(image_file_name, 'wb') as img_file:
+                        img_file.write(image_data)
+
+            result, payload = await self.make_snippet(image_file_name, download_url, f"{ctx.author.id}_snippet")
+            if result == False:
+                await handle_request_failed(ctx, payload)
+                self.handle_user_done_snippet(ctx.author.id)
+                return
+            
+            message = await ctx.channel.send(file=discord.File(payload))
+
+            async def debounce_delay(author_id: int):
+                await asyncio.sleep(15) # default snippet debounce
+                self.handle_user_done_snippet(author_id)
+
+            asyncio.create_task(debounce_delay(ctx.author.id))
 
 
 async def setup(bot: commands.Bot) -> None:
