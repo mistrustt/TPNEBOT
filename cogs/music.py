@@ -1,5 +1,4 @@
 import os
-from bs4 import BeautifulSoup
 import discord
 import logging
 import aiohttp
@@ -10,7 +9,7 @@ from discord.ext import commands
 from colorthief import ColorThief
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from urllib.parse import quote, urlparse, parse_qs, unquote
+from urllib.parse import quote
 import utils.embeds as utils
 from itertools import product
 from moviepy import *
