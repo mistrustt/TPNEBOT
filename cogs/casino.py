@@ -3957,7 +3957,7 @@ class BetButton(discord.ui.Button):
         self.PF = PF
     
     async def handle_bullshit(self, table_ui_view: TableUI, itn: discord.Interaction):
-
+        
         if table_ui_view.player != itn.user:
             embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
             return await itn.response.send_message(embed=embed, ephemeral=True)
@@ -4001,7 +4001,7 @@ class BetButton(discord.ui.Button):
         max_allowed = await self.bot.database.get_max_gamble_amount(table_ui_view.player, False)
         if player_bet > max_allowed:
             player_bet = max_allowed
-            await itn.message.reply(embed=discord.Embed(description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: " f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange()), delete_after=5)
+            await itn.message.reply(embed=discord.Embed(description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: " f"**{await self.formatter(player_bet)} {self.currency_name}**.", color=discord.Color.orange()), delete_after=5)
 
         total_win = player_bet * Decimal(bet_multiplier)
         total_win_formatted = await self.cog.formatter(total_win)
