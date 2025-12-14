@@ -3957,7 +3957,7 @@ class BetButton(discord.ui.Button):
         self.PF = PF
     
     async def handle_bullshit(self, table_ui_view: TableUI, itn: discord.Interaction):
-
+        
         if table_ui_view.player != itn.user:
             embed = discord.Embed(f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow())
             return await itn.response.send_message(embed=embed, ephemeral=True)
@@ -3994,53 +3994,56 @@ class BetButton(discord.ui.Button):
         return bet_multiplier, player_bet, wallet_id
 
     async def callback(self, itn: discord.Interaction):
-        table_ui_view: TableUI = self.parent.parent.table_ui_view
-
-        bet_multiplier, player_bet, wallet_id = await self.handle_bullshit(table_ui_view, itn)
-
-        max_allowed = await self.bot.database.get_max_gamble_amount(table_ui_view.player, False)
-        if player_bet > max_allowed:
-            player_bet = max_allowed
-            await itn.message.reply(embed=discord.Embed(description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: " f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange()), delete_after=5)
-
-        total_win = player_bet * Decimal(bet_multiplier)
-        total_win_formatted = await self.cog.formatter(total_win)
-
-        balance = await self.bot.database.get_wallet_balance(wallet_id)
-        if balance < player_bet:
-            embed = discord.Embed(description=f'🚫 {itn.user.mention}: Insufficient Funds', color=discord.Color.red())
-            return await itn.response.send_message(embed=embed, ephemeral=True)
-        
         try:
-            await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=-Decimal(player_bet), description="Keno Bet")
-        except ValueError as e:
-            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
-            return await itn.response.send_message(embed=embed, delete_after=5)
-        
-        if total_win == player_bet:
-            table_ui_view.container.win_loss_text.content = f'### You broke even {table_ui_view.selected_emoji} {total_win_formatted}'
+            table_ui_view: TableUI = self.parent.parent.table_ui_view
 
-        elif total_win < player_bet:
-            loss_formatted = await self.cog.formatter(player_bet - total_win)
-            table_ui_view.container.win_loss_text.content = f'### You Lost {table_ui_view.selected_emoji} {loss_formatted}'
+            bet_multiplier, player_bet, wallet_id = await self.handle_bullshit(table_ui_view, itn)
 
-        else:
-            table_ui_view.container.win_loss_text.content = f'### You WON {table_ui_view.selected_emoji} {total_win_formatted}'
-        
-        await table_ui_view.message.edit(view=table_ui_view)
+            max_allowed = await self.bot.database.get_max_gamble_amount(table_ui_view.player.id, False)
+            if player_bet > max_allowed:
+                player_bet = max_allowed
+                await itn.message.reply(embed=discord.Embed(description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: " f"**{await self.cog.formatter(player_bet)} {self.cog.currency_name}**.", color=discord.Color.orange()), delete_after=5)
 
-        try:
-            if total_win >= player_bet:
-                await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=Decimal(total_win), description=f"Keno Win")
-                await self.bot.database.increment_win(table_ui_view.player.id, "keno", total_win, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
+            total_win = player_bet * Decimal(bet_multiplier)
+            total_win_formatted = await self.cog.formatter(total_win)
+
+            balance = await self.bot.database.get_wallet_balance(wallet_id)
+            if balance < player_bet:
+                embed = discord.Embed(description=f'🚫 {itn.user.mention}: Insufficient Funds', color=discord.Color.red())
+                return await itn.response.send_message(embed=embed, ephemeral=True)
+            
+            try:
+                await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=-Decimal(player_bet), description="Keno Bet")
+            except ValueError as e:
+                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                return await itn.response.send_message(embed=embed, delete_after=5)
+            
+            if total_win == player_bet:
+                table_ui_view.container.win_loss_text.content = f'### You broke even {table_ui_view.selected_emoji} {total_win_formatted}'
+
+            elif total_win < player_bet:
+                loss_formatted = await self.cog.formatter(player_bet - total_win)
+                table_ui_view.container.win_loss_text.content = f'### You Lost {table_ui_view.selected_emoji} {loss_formatted}'
+
             else:
-                await self.bot.database.increment_loss(table_ui_view.player.id, "keno", player_bet, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
+                table_ui_view.container.win_loss_text.content = f'### You WON {table_ui_view.selected_emoji} {total_win_formatted}'
+            
+            await table_ui_view.message.edit(view=table_ui_view)
 
-        except ValueError as e:
-            embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
-            return await itn.response.send_message(embed=embed, delete_after=5)
-        
-        await itn.response.defer()
+            try:
+                if total_win >= player_bet:
+                    await self.bot.database.process_treasury_transaction(wallet_id=wallet_id, amount=Decimal(total_win), description=f"Keno Win")
+                    await self.bot.database.increment_win(table_ui_view.player.id, "keno", total_win, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
+                else:
+                    await self.bot.database.increment_loss(table_ui_view.player.id, "keno", player_bet, client_seed=self.PF['client_seed'], seed_used=None, nonce=self.PF['nonce'], hash_hex=self.PF['server_seed_hash'])
+
+            except ValueError as e:
+                embed = discord.Embed(description=f"🚫 Transaction failed: {e}", color=discord.Color.red())
+                return await itn.response.send_message(embed=embed, delete_after=5)
+            
+            await itn.response.defer()
+        except Exception as e:
+            await itn.channel.send(f'{e}')
 
 class RandomPickButton(discord.ui.Button):
     def __init__(self, cog: Casino):
