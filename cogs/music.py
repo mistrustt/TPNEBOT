@@ -1220,29 +1220,46 @@ class Music(commands.Cog, name="Music"):
 
     # start of my beautiful commands
 
-    async def request_filename(self, filename: str) -> list[dict[str, str]] | None:
-        # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
-         async with self.session.get(JUICEWRLD_API + '/juicewrld/files/browse/', params={'search': filename}) as response:
+    async def request_filename(self, file_name: str, length: str):
+        async with self.session.get(JUICEWRLD_API + '/juicewrld/files/browse/', params={'search': file_name}) as response:
             if response.status != 200:
                 return None
             data = await response.json()
-            return [ {'path': item['path'], 'duration': item['duration']} for item in data.get('items', []) if item.get('path') and item.get('duration') ] or None
+
+        target_seconds = self.duration_to_seconds(length)
+        if target_seconds == 0:
+            return None
+
+        return [
+            song['path']
+            for song in data.get('items', [])
+            if abs(self.duration_to_seconds(song.get('duration')) - target_seconds) <= 1
+        ]
 
     async def check_file_name(self, song: dict):
         name = song.get('name', 'Untitled').replace('*', '')
-        file_name = song.get('file_names') or name
+        raw_file_name = song.get('file_names') or name
 
-        file_name = (re.search(r'File Name:\s*(.+?)(?:\n|$)', file_name).group(1).strip() if 'File Name:' in file_name else file_name)
-        file_name += '.'
+        match = re.search(r'File Name:\s*(.+?)(?:\n|$)', raw_file_name)
+        file_name = (match.group(1) if match else raw_file_name) + '.'
 
-        downloads = await self.request_filename(file_name)
-        og = downloads is not None and file_name != name + '.'
+        length = song.get('length', '0:00')
+
+        downloads = await self.request_filename(file_name, length)
+        og = bool(downloads) and file_name != name + '.'
 
         if not downloads:
-            downloads = await self.request_filename(name + '.')
+            downloads = await self.request_filename(name + '.', length)
             og = False
 
         return downloads, og
+
+    def duration_to_seconds(self, duration: str):
+        try:
+            m, s = duration.split(':')
+            return int(m) * 60 + int(s)
+        except Exception:
+            return 0
 
     async def create_song_view(self, song_data: dict, random_leak: bool = False):
 
@@ -1254,7 +1271,7 @@ class Music(commands.Cog, name="Music"):
                 'AFF': {'name': 'affliction', 'color': '#000000'},
                 'HIH 9 9 9': {'name': 'Heartbroken In Hollywood 9 9 9', 'color': '#FF653E'},
                 'JW 9 9 9': {'name': 'JuiceWRLD 9 9 9', 'color': '#FF2C2C'},
-                'ND </3': {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
+                'ND': {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
                 'GB&GR': {'name': 'Goodbye & Good Riddance', 'color': '#008CFF'},
                 'GB&GR (AE)': {'name': 'Goodbye & Good Riddance (Anniversary Edition)', 'color': '#008CFF'},
                 'GB&GR (5YAE)': {'name': 'Goodbye & Good Riddance (5 Year Anniversary Edition)', 'color': '#008CFF'},
@@ -1313,8 +1330,8 @@ class Music(commands.Cog, name="Music"):
                 accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
                 super().__init__(accent_color=accent_color)
 
-                thumb.add_item(discord.ui.TextDisplay(f'**Era**\n{album['name'] if album else era_name}'))
                 thumb.add_item(discord.ui.TextDisplay(f'Producer(s): **{producers}**\nEngineer(s): **{engineers}**'))
+                thumb.add_item(discord.ui.TextDisplay(f'**Era**\n{album['name'] if album else era_name}\n'))
 
                 self.add_item(header)
                 self.add_item(discord.ui.Separator())
@@ -1333,27 +1350,17 @@ class Music(commands.Cog, name="Music"):
                 if downloads and 'session' not in str(song.get('leak_type', '')).lower():
                     main_url = 'https://juicewrldapi.com/juicewrld/files/download/?path='
 
-                    def duration_to_seconds(duration: str) -> int:
-                        try:
-                            parts = list(map(float, duration.strip().split(':')))
-                            if len(parts) == 2:
-                                return int(parts[0] * 60 + parts[1])
-                            else:
-                                return int(parts[0])
-                        except:
-                            return -1
-
                     filtered_files = [ 
                         f for f in downloads
-                            if (og and 'Unreleased Discography' not in f.get('path', '')) 
-                            or not og and 'Original Files' not in f.get('path', '') 
-                            and abs(duration_to_seconds(f.get('duration', '0')) - duration_to_seconds(song.get('length', '0'))) <= 1.5
+                        if og and 'Unreleased Discography' not in f 
+                        or not og and 'Original Files' not in f 
                     ]
 
                     row = discord.ui.ActionRow()
-                    for i, file in enumerate(filtered_files):
-                        path = file['path']
-                        ext = ('OG ' + path.split('.')[-1].upper()) if 'Original Files' in path else path.split('.')[-1].upper()
+
+                    for i, path in enumerate(filtered_files):
+                        ext = 'OG ' + path.split('.')[-1].upper() if 'Original Files' in path else path.split('.')[-1].upper()
+
                         url = main_url + quote(path)
                         button = discord.ui.Button(label=ext, url=url)
                         row.add_item(button)
