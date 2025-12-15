@@ -15,6 +15,7 @@ from utils.cooldown import CooldownUtils
 from database.manager import DatabaseManager
 from sqlalchemy import text
 
+
 class LoggingFormatter(logging.Formatter):
     COLORS = {
         logging.DEBUG: "\x1b[38;1m",
@@ -27,31 +28,40 @@ class LoggingFormatter(logging.Formatter):
     DATE_FORMAT = "%Y-%m-%d %I:%M:%S %p"
 
     def format(self, record):
-        if hasattr(self, '_style'):
+        if hasattr(self, "_style"):
             self._style._fmt = self.FORMAT
 
-        record.levelname = f"\x1b[30;1m{self.COLORS[record.levelno]}{record.levelname}\x1b[0m"
+        record.levelname = (
+            f"\x1b[30;1m{self.COLORS[record.levelno]}{record.levelname}\x1b[0m"
+        )
         record.name = f"\x1b[32;1m{record.name}\x1b[0m"
         return super().format(record)
+
 
 def setup_logging():
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
     console_formatter = LoggingFormatter(style="{")
-    file_formatter = logging.Formatter(LoggingFormatter.FORMAT, LoggingFormatter.DATE_FORMAT, style="{")
+    file_formatter = logging.Formatter(
+        LoggingFormatter.FORMAT, LoggingFormatter.DATE_FORMAT, style="{"
+    )
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(console_formatter)
 
-    file_handler = logging.handlers.RotatingFileHandler("discord.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8", mode="a")
+    file_handler = logging.handlers.RotatingFileHandler(
+        "discord.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8", mode="a"
+    )
     file_handler.setFormatter(file_formatter)
 
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
 
+
 setup_logging()
 logger = logging.getLogger("discord_bot")
+
 
 class DiscordBot(commands.Bot):
     def __init__(self) -> None:
@@ -74,10 +84,10 @@ class DiscordBot(commands.Bot):
             538773310704582666,
             657182369240973312,
             1173579369399210120,
-            1219090700407279656, # toxic 
-            1095747082599530627, # ENVY
-            1382196396190470215, # FLOW (GOATED ASF) 
-            1282494458339922033  # jwa
+            1219090700407279656,  # toxic
+            1095747082599530627,  # ENVY
+            1382196396190470215,  # FLOW (GOATED ASF)
+            1282494458339922033,  # jwa
         ]
         self.version = "20251024a"
         super().__init__(
@@ -90,7 +100,7 @@ class DiscordBot(commands.Bot):
 
     async def get_prefix(self, message: discord.Message) -> str:
         if not message.guild:
-            return "!"  
+            return "!"
         return await self.database.get_prefix(message.guild.id) or "!"
 
     async def load_cogs(self) -> None:
@@ -145,11 +155,11 @@ class DiscordBot(commands.Bot):
             self.logger.info("Checking database connection...")
             db_init_time = datetime.now()
             async with self.database.async_sessionmaker() as session:
-                await session.execute(
-                    text("SELECT 1")
-                )
+                await session.execute(text("SELECT 1"))
             db_connected_time = datetime.now() - db_init_time
-            self.logger.info(f"Database responded in {db_connected_time.total_seconds()}s.")
+            self.logger.info(
+                f"Database responded in {db_connected_time.total_seconds()}s."
+            )
             self.logger.info("Database connection established successfully.")
 
             self.logger.info("Initializing database tables & blockchain...")
@@ -182,7 +192,7 @@ class DiscordBot(commands.Bot):
             if self.debug_mode_active and not self.is_coolguy(ctx.author.id):
                 embed = discord.Embed(
                     description="The bot is currently in maintenance mode. Please try again later.",
-                    color=discord.Color.red()
+                    color=discord.Color.red(),
                 )
                 return await ctx.reply(embed=embed, delete_after=5)
 
@@ -190,7 +200,7 @@ class DiscordBot(commands.Bot):
             if is_blacklisted:
                 embed = discord.Embed(
                     description="You are blacklisted from using this bot.",
-                    color=discord.Color.red()
+                    color=discord.Color.red(),
                 )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
@@ -203,11 +213,17 @@ class DiscordBot(commands.Bot):
                 command_name, channel_id
             )
             if command_enabled is False:
-                embed=discord.Embed(title="Error!", description=f"The `{command_name}` command is disabled in this channel by staff.", color=discord.Color.orange())
+                embed = discord.Embed(
+                    title="Error!",
+                    description=f"The `{command_name}` command is disabled in this channel by staff.",
+                    color=discord.Color.orange(),
+                )
                 await ctx.send(embed=embed, delete_after=5)
                 return
 
-            command_enabled_global = await self.database.get_command_status(command_name)
+            command_enabled_global = await self.database.get_command_status(
+                command_name
+            )
             if command_enabled_global is False:
                 embed = discord.Embed(
                     title="Error!",
@@ -225,23 +241,27 @@ class DiscordBot(commands.Bot):
 
             if ctx.guild:
                 command_names_to_check = [ctx.command.name.lower()]
-                if hasattr(ctx.command, 'aliases') and ctx.command.aliases:
-                    command_names_to_check.extend([alias.lower() for alias in ctx.command.aliases])
-                
+                if hasattr(ctx.command, "aliases") and ctx.command.aliases:
+                    command_names_to_check.extend(
+                        [alias.lower() for alias in ctx.command.aliases]
+                    )
+
                 has_permission = True
                 for cmd_name in command_names_to_check:
-                    permission_result = await self.database.check_command_role_restriction(
-                        ctx.guild.id, cmd_name, ctx.author.roles
+                    permission_result = (
+                        await self.database.check_command_role_restriction(
+                            ctx.guild.id, cmd_name, ctx.author.roles
+                        )
                     )
                     if not permission_result:
                         has_permission = False
                         break
-                
+
                 if not has_permission:
                     embed = discord.Embed(
                         title="",
                         description=f"{ctx.author.mention}: You don't have the required role to use `{command_name}`",
-                        color=discord.Color.red()
+                        color=discord.Color.red(),
                     )
                     await ctx.send(embed=embed, delete_after=5)
                     return
@@ -264,41 +284,41 @@ class DiscordBot(commands.Bot):
             f"{'in guild ' + guild.name + ' (ID: ' + str(guild.id) + ')' if guild else 'in DMs'}."
         )
 
-    async def on_app_command_completion(self, interaction: discord.Interaction, command: app_commands.Command):
+    async def on_app_command_completion(
+        self, interaction: discord.Interaction, command: app_commands.Command
+    ):
         self.logger.info(
             f"Slash /{command.name} used by {interaction.user} "
             f"(ID:{interaction.user.id}) in #{interaction.channel} "
             f"(ID:{interaction.channel_id})"
         )
 
-    async def on_app_command_error(self, interaction: discord.Interaction, error) -> None:
+    async def on_app_command_error(
+        self, interaction: discord.Interaction, error
+    ) -> None:
         if isinstance(error, app_commands.CommandOnCooldown):
             retry = error.retry_after
             if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    f"⏳ Try again in {retry:.1f}s.",
-                    ephemeral=True
+                    f"⏳ Try again in {retry:.1f}s.", ephemeral=True
                 )
             else:
                 await interaction.followup.send(
-                    f"⏳ Try again in {retry:.1f}s.",
-                    ephemeral=True
+                    f"⏳ Try again in {retry:.1f}s.", ephemeral=True
                 )
         else:
             # fallback for any other errors
             if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    "❌ Something went wrong.",
-                    ephemeral=True
+                    "❌ Something went wrong.", ephemeral=True
                 )
             else:
                 await interaction.followup.send(
-                    "❌ Something went wrong.",
-                    ephemeral=True
+                    "❌ Something went wrong.", ephemeral=True
                 )
             # and log it
             self.logger.exception(error)
-            
+
     async def on_command_error(self, ctx: Context, error) -> None:
         if isinstance(error, commands.CommandOnCooldown):
             embed = await CooldownUtils.get_cooldown_embed(error.retry_after)
@@ -309,7 +329,8 @@ class DiscordBot(commands.Bot):
             return
         elif isinstance(error, commands.NoPrivateMessage):
             embed = discord.Embed(
-                description="This command cannot be used in DMs!", color=discord.Color.red()
+                description="This command cannot be used in DMs!",
+                color=discord.Color.red(),
             )
             return await ctx.reply(embed=embed, delete_after=5)
         elif isinstance(error, commands.MissingPermissions):
@@ -337,9 +358,7 @@ class DiscordBot(commands.Bot):
             return await ctx.reply(embed=embed, delete_after=5)
         elif isinstance(error, commands.MissingRequiredArgument):
             prefix = await self.database.get_prefix(ctx.guild.id)
-            usage = (
-                f"`{prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
-            )
+            usage = f"`{prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
             embed = discord.Embed(
                 title="Error!",
                 description=f"**Missing argument:** {error.param.name}\n**Usage:** {usage}",
@@ -367,45 +386,72 @@ class DiscordBot(commands.Bot):
         elif isinstance(error, Exception):
             dev_channel_id = int(os.getenv("DEVELOPER_CHANNEL_ID"))
             dev_channel = self.get_channel(dev_channel_id)
-            detailed_error = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+            detailed_error = "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            )
             if dev_channel:
-
                 if len(detailed_error) <= 4000:
                     dev_embed = discord.Embed(
                         title="Unhandled Error",
                         description=f"Error in command `{ctx.command.qualified_name}`:\n```{detailed_error}```",
-                        color=discord.Color.dark_red()
-                    
+                        color=discord.Color.dark_red(),
                     )
-                    dev_embed.add_field(name="Command", value=f"`{ctx.command.qualified_name}`")
-                    dev_embed.add_field(name="User", value=f"{ctx.author} (ID: {ctx.author.id})")
-                    dev_embed.add_field(name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})")
-                    dev_embed.add_field(name="Guild", value=f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DM")
-                    #dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
+                    dev_embed.add_field(
+                        name="Command", value=f"`{ctx.command.qualified_name}`"
+                    )
+                    dev_embed.add_field(
+                        name="User", value=f"{ctx.author} (ID: {ctx.author.id})"
+                    )
+                    dev_embed.add_field(
+                        name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})"
+                    )
+                    dev_embed.add_field(
+                        name="Guild",
+                        value=f"{ctx.guild.name} (ID: {ctx.guild.id})"
+                        if ctx.guild
+                        else "DM",
+                    )
+                    # dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
                     await dev_channel.send(embed=dev_embed)
                 else:
                     dev_embed = discord.Embed(
                         title="Unhandled Error",
                         description=f"Error in command `{ctx.command.qualified_name}`:\n",
-                        color=discord.Color.dark_red()
+                        color=discord.Color.dark_red(),
                     )
-                    dev_embed.add_field(name="Command", value=f"`{ctx.command.qualified_name}`")
-                    dev_embed.add_field(name="User", value=f"{ctx.author} (ID: {ctx.author.id})")
-                    dev_embed.add_field(name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})")
-                    dev_embed.add_field(name="Guild", value=f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DM")
-                    #dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
+                    dev_embed.add_field(
+                        name="Command", value=f"`{ctx.command.qualified_name}`"
+                    )
+                    dev_embed.add_field(
+                        name="User", value=f"{ctx.author} (ID: {ctx.author.id})"
+                    )
+                    dev_embed.add_field(
+                        name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})"
+                    )
+                    dev_embed.add_field(
+                        name="Guild",
+                        value=f"{ctx.guild.name} (ID: {ctx.guild.id})"
+                        if ctx.guild
+                        else "DM",
+                    )
+                    # dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
                     await dev_channel.send(embed=dev_embed)
 
-                    chunks = [detailed_error[i:i+3900] for i in range(0, len(detailed_error), 3900)]
+                    chunks = [
+                        detailed_error[i : i + 3900]
+                        for i in range(0, len(detailed_error), 3900)
+                    ]
                     for i, chunk in enumerate(chunks):
                         part_embed = discord.Embed(
                             title=f"Error Details (Part {i+1}/{len(chunks)})",
                             description=f"```{chunk}```",
-                            color=discord.Color.dark_red()
+                            color=discord.Color.dark_red(),
                         )
                         await dev_channel.send(embed=part_embed)
             else:
-                self.logger.error("Developer channel not found. Full error:\n" + detailed_error)
+                self.logger.error(
+                    "Developer channel not found. Full error:\n" + detailed_error
+                )
                 user_embed = discord.Embed(
                     title="Error!",
                     description="An unexpected error occurred. Please try again later.",
@@ -419,5 +465,7 @@ class DiscordBot(commands.Bot):
             return
 
     load_dotenv()
+
+
 bot = DiscordBot()
 bot.run(os.getenv("TOKEN"))

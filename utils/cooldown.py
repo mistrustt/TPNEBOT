@@ -4,6 +4,7 @@ from discord.ext import commands
 
 logger = logging.getLogger("discord_bot")
 
+
 class CooldownUtils:
     def __init__(self, bot: commands.Bot):
         self.bot = bot

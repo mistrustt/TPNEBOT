@@ -3,6 +3,7 @@ from discord.ext import commands
 
 logger = logging.getLogger("discord_bot")
 
+
 class MiscUtils:
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -14,13 +15,7 @@ class MiscUtils:
 
     async def parse_duration(self, duration_str: str) -> int:
         """Parses a duration string like '1h', '2d' and returns the duration in seconds"""
-        duration_map = {
-            's': 1,
-            'm': 60,
-            'h': 3600,
-            'd': 86400,
-            'w': 604800
-        }
+        duration_map = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
         unit = duration_str[-1]
         if unit not in duration_map:
             raise ValueError("Invalid duration unit. Use s, m, h, d, or w.")
@@ -29,4 +24,3 @@ class MiscUtils:
         except ValueError:
             raise ValueError("Invalid duration value.")
         return duration_value * duration_map[unit]
-    

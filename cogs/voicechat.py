@@ -5,6 +5,7 @@ from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
 
+
 class VoiceControlView(discord.ui.View):
     """Interactive control panel for managing temporary VCs."""
 
@@ -17,7 +18,9 @@ class VoiceControlView(discord.ui.View):
     async def check_ownership(self, interaction: discord.Interaction):
         """Ensure only the current owner can use controls."""
         if interaction.user.id != self.owner.id:
-            await interaction.response.send_message("🚫 You are not the owner of this voice channel!", ephemeral=True)
+            await interaction.response.send_message(
+                "🚫 You are not the owner of this voice channel!", ephemeral=True
+            )
             return False
         return True
 
@@ -28,10 +31,14 @@ class VoiceControlView(discord.ui.View):
 
         perms = self.vc.overwrites_for(self.vc.guild.default_role)
         if perms.connect is False:
-            return await interaction.response.send_message("⚠️ This voice channel is already locked.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ This voice channel is already locked.", ephemeral=True
+            )
 
         await self.vc.set_permissions(self.vc.guild.default_role, connect=False)
-        await interaction.response.send_message("🔒 Voice channel locked successfully.", ephemeral=True)
+        await interaction.response.send_message(
+            "🔒 Voice channel locked successfully.", ephemeral=True
+        )
 
     @discord.ui.button(label="🔓 Unlock", style=discord.ButtonStyle.success)
     async def unlock(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -40,10 +47,14 @@ class VoiceControlView(discord.ui.View):
 
         perms = self.vc.overwrites_for(self.vc.guild.default_role)
         if perms.connect is None or perms.connect is True:
-            return await interaction.response.send_message("⚠️ This voice channel is already unlocked.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ This voice channel is already unlocked.", ephemeral=True
+            )
 
         await self.vc.set_permissions(self.vc.guild.default_role, connect=True)
-        await interaction.response.send_message("🔓 Voice channel unlocked successfully.", ephemeral=True)
+        await interaction.response.send_message(
+            "🔓 Voice channel unlocked successfully.", ephemeral=True
+        )
 
     @discord.ui.button(label="👻 Ghost", style=discord.ButtonStyle.grey)
     async def ghost(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -53,10 +64,14 @@ class VoiceControlView(discord.ui.View):
 
         perms = self.vc.overwrites_for(self.vc.guild.default_role)
         if perms.view_channel is False:
-            return await interaction.response.send_message("⚠️ This voice channel is already ghosted.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ This voice channel is already ghosted.", ephemeral=True
+            )
 
         await self.vc.set_permissions(self.vc.guild.default_role, view_channel=False)
-        await interaction.response.send_message("👻 Your voice channel is now hidden from others.", ephemeral=True)
+        await interaction.response.send_message(
+            "👻 Your voice channel is now hidden from others.", ephemeral=True
+        )
 
     @discord.ui.button(label="👁️ Reveal", style=discord.ButtonStyle.grey)
     async def reveal(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -66,46 +81,66 @@ class VoiceControlView(discord.ui.View):
 
         perms = self.vc.overwrites_for(self.vc.guild.default_role)
         if perms.view_channel is None or perms.view_channel is True:
-            return await interaction.response.send_message("⚠️ This voice channel is already visible.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ This voice channel is already visible.", ephemeral=True
+            )
 
         await self.vc.set_permissions(self.vc.guild.default_role, view_channel=True)
-        await interaction.response.send_message("👁️ Your voice channel is now visible to everyone.", ephemeral=True)
+        await interaction.response.send_message(
+            "👁️ Your voice channel is now visible to everyone.", ephemeral=True
+        )
 
     @discord.ui.button(label="➕ Increase Limit", style=discord.ButtonStyle.primary)
-    async def increase_limit(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def increase_limit(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         """Increase the user limit for the voice channel."""
         if not await self.check_ownership(interaction):
             return
 
-        if self.vc.user_limit >= 99:  
-            return await interaction.response.send_message("⚠️ The user limit cannot be increased further.", ephemeral=True)
+        if self.vc.user_limit >= 99:
+            return await interaction.response.send_message(
+                "⚠️ The user limit cannot be increased further.", ephemeral=True
+            )
 
         new_limit = self.vc.user_limit + 1 if self.vc.user_limit else 1
         await self.vc.edit(user_limit=new_limit)
-        await interaction.response.send_message(f"🔼 Increased user limit to {new_limit}.", ephemeral=True)
+        await interaction.response.send_message(
+            f"🔼 Increased user limit to {new_limit}.", ephemeral=True
+        )
 
     @discord.ui.button(label="➖ Decrease Limit", style=discord.ButtonStyle.primary)
-    async def decrease_limit(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def decrease_limit(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         """Decrease the user limit for the voice channel."""
         if not await self.check_ownership(interaction):
             return
 
         if self.vc.user_limit == 0 or self.vc.user_limit is None:
-            return await interaction.response.send_message("⚠️ The user limit is already at its minimum.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ The user limit is already at its minimum.", ephemeral=True
+            )
 
         new_limit = self.vc.user_limit - 1 if self.vc.user_limit > 1 else 0
         await self.vc.edit(user_limit=new_limit)
-        await interaction.response.send_message(f"🔽 Decreased user limit to {new_limit}.", ephemeral=True)
+        await interaction.response.send_message(
+            f"🔽 Decreased user limit to {new_limit}.", ephemeral=True
+        )
 
     @discord.ui.button(label="👢 Kick User", style=discord.ButtonStyle.danger)
-    async def kick_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def kick_user(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         """Kick a user from the voice channel."""
         if not await self.check_ownership(interaction):
             return
 
         members = self.vc.members
         if len(members) <= 1:
-            return await interaction.response.send_message("⚠️ No other members to kick.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ No other members to kick.", ephemeral=True
+            )
 
         class KickDropdown(discord.ui.Select):
             def __init__(self, vc, owner):
@@ -113,8 +148,11 @@ class VoiceControlView(discord.ui.View):
                 self.owner = owner
 
                 options = [
-                    discord.SelectOption(label=member.display_name, value=str(member.id))
-                    for member in vc.members if member.id != owner.id
+                    discord.SelectOption(
+                        label=member.display_name, value=str(member.id)
+                    )
+                    for member in vc.members
+                    if member.id != owner.id
                 ]
                 super().__init__(placeholder="Select a user to kick", options=options)
 
@@ -124,53 +162,79 @@ class VoiceControlView(discord.ui.View):
 
                 if member:
                     await member.move_to(None)
-                    await interaction.response.send_message(f"👢 Kicked {member.display_name} from the voice channel.", ephemeral=True)
+                    await interaction.response.send_message(
+                        f"👢 Kicked {member.display_name} from the voice channel.",
+                        ephemeral=True,
+                    )
                 else:
-                    await interaction.response.send_message("⚠️ User is no longer in the voice channel.", ephemeral=True)
+                    await interaction.response.send_message(
+                        "⚠️ User is no longer in the voice channel.", ephemeral=True
+                    )
 
         dropdown_view = discord.ui.View()
         dropdown_view.add_item(KickDropdown(self.vc, self.owner))
 
-        await interaction.response.send_message("👢 Select a user to kick:", view=dropdown_view, ephemeral=True)
+        await interaction.response.send_message(
+            "👢 Select a user to kick:", view=dropdown_view, ephemeral=True
+        )
 
     @discord.ui.button(label="✅ Claim Ownership", style=discord.ButtonStyle.success)
-    async def claim_ownership(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def claim_ownership(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         """Allows another user to claim the channel if the owner leaves."""
         if interaction.user.id == self.owner.id:
-            return await interaction.response.send_message("⚠️ You are already the owner of this channel.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ You are already the owner of this channel.", ephemeral=True
+            )
 
         if self.owner in self.vc.members:
-            return await interaction.response.send_message("⚠️ The current owner is still in the channel.", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ The current owner is still in the channel.", ephemeral=True
+            )
 
         self.owner = interaction.user
-        await self.vc.set_permissions(interaction.user, connect=True, manage_channels=True, move_members=True)
-        await interaction.response.send_message("✅ You are now the owner of this voice channel!", ephemeral=True)
+        await self.vc.set_permissions(
+            interaction.user, connect=True, manage_channels=True, move_members=True
+        )
+        await interaction.response.send_message(
+            "✅ You are now the owner of this voice channel!", ephemeral=True
+        )
 
     @discord.ui.button(label="💥 Nuke Channel", style=discord.ButtonStyle.danger)
-    async def nuke_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def nuke_channel(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         """Deletes the voice channel."""
         if not await self.check_ownership(interaction):
             return
 
         await self.vc.delete()
-        await interaction.response.send_message("💥 Voice channel has been deleted.", ephemeral=True)
+        await interaction.response.send_message(
+            "💥 Voice channel has been deleted.", ephemeral=True
+        )
+
 
 logger = logging.getLogger("discord_bot")
+
+
 class Voicechat(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.utils = MiscUtils(self)
-        self.voice_clients = {}  
-        self.current_files = {}  
-        self.current_volume = {}  
-        self.queues = {}  
-        self.check_empty_vc.start()  
+        self.voice_clients = {}
+        self.current_files = {}
+        self.current_volume = {}
+        self.queues = {}
+        self.check_empty_vc.start()
 
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
-    @commands.command(name="jtcsetup", description="Set up the Join To Create system in your server.")
+    @commands.command(
+        name="jtcsetup", description="Set up the Join To Create system in your server."
+    )
     @commands.has_permissions(administrator=True)
     async def jtc_setup(self, ctx: Context):
         """Creates the Join To Create system for the server (only once)."""
@@ -181,7 +245,7 @@ class Voicechat(commands.Cog):
             embed = discord.Embed(
                 title="Join To Create",
                 description="JTC is already set up in this server!",
-                color=discord.Color.red()
+                color=discord.Color.red(),
             )
             await ctx.reply(embed=embed, delete_after=5)
             return
@@ -190,13 +254,22 @@ class Voicechat(commands.Cog):
 
         if not jtc_channel:
             jtc_channel = await guild.create_voice_channel(
-                name="Join To Create",                
+                name="Join To Create",
                 overwrites={
-                    guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True, speak=False, send_messages=False),
-                })
+                    guild.default_role: discord.PermissionOverwrite(
+                        connect=True,
+                        view_channel=True,
+                        speak=False,
+                        send_messages=False,
+                    ),
+                },
+            )
 
         await self.bot.database.add_jtc_setup(guild.id, jtc_channel.id)
-        embed = discord.Embed(description=f"Join To Create has been set up in this server!\n\nUse {jtc_channel.mention} to create temporary VCs.", color=discord.Color.blurple())
+        embed = discord.Embed(
+            description=f"Join To Create has been set up in this server!\n\nUse {jtc_channel.mention} to create temporary VCs.",
+            color=discord.Color.blurple(),
+        )
         await ctx.reply(embed=embed)
 
     @commands.Cog.listener()
@@ -207,25 +280,29 @@ class Voicechat(commands.Cog):
             return
 
         guild = member.guild
-        jtc_channel_id = jtc_channels.jtc_channel_id  
+        jtc_channel_id = jtc_channels.jtc_channel_id
 
         if after.channel and after.channel.id == jtc_channels.jtc_channel_id:
             category = after.channel.category
 
-            max_bitrate = guild.bitrate_limit  
+            max_bitrate = guild.bitrate_limit
 
             temp_channel = await guild.create_voice_channel(
                 name=f"{member.display_name}'s Channel",
                 category=category,
-                bitrate=max_bitrate,  
+                bitrate=max_bitrate,
                 overwrites={
                     guild.default_role: discord.PermissionOverwrite(connect=False),
-                    member: discord.PermissionOverwrite(connect=True, mute_members=True, move_members=True)
-                }
+                    member: discord.PermissionOverwrite(
+                        connect=True, mute_members=True, move_members=True
+                    ),
+                },
             )
 
             await member.move_to(temp_channel)
-            await self.bot.database.add_temp_channel(guild.id, member.id, temp_channel.id)
+            await self.bot.database.add_temp_channel(
+                guild.id, member.id, temp_channel.id
+            )
 
             text_channel = temp_channel.guild.get_channel(temp_channel.id)
             if text_channel is None:
@@ -236,20 +313,21 @@ class Voicechat(commands.Cog):
             embed = discord.Embed(
                 title="Control Panel",
                 description="Use the buttons below to manage your voice channel.",
-                color=discord.Color.blurple()
+                color=discord.Color.blurple(),
             )
             view = VoiceControlView(self.bot, temp_channel, member)
             await text_channel.send(embed=embed, view=view)
 
         if before.channel and before.channel.id == jtc_channel_id:
-            return  
+            return
 
         if before.channel and before.channel != after.channel:
-
-            temp_owner_id = await self.bot.database.get_temp_channel_owner(before.channel.id)
+            temp_owner_id = await self.bot.database.get_temp_channel_owner(
+                before.channel.id
+            )
 
             if temp_owner_id is None:
-                return  
+                return
 
             if len(before.channel.members) == 0:
                 await before.channel.delete()
@@ -270,53 +348,95 @@ class Voicechat(commands.Cog):
         owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
         return vc if owner_id == member.id else None
 
-    @commands.group(name="vc", invoke_without_command=True, description="Voice channel management commands")
+    @commands.group(
+        name="vc",
+        invoke_without_command=True,
+        description="Voice channel management commands",
+    )
     async def vc(self, ctx: Context):
         """Lists all available voice channel commands."""
         if ctx.invoked_subcommand is None:
             subcommands = [command.name for command in self.vc.commands]
             subcommands = ", ".join(subcommands)
-            embed = discord.Embed(title="Voice Channel Commands", description="Manage your private voice channel.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Commands",
+                description="Manage your private voice channel.",
+                color=discord.Color.blurple(),
+            )
             embed.add_field(name="Commands", value=f"{subcommands}")
             await ctx.reply(embed=embed, delete_after=5)
 
-    @vc.command(name="allow", aliases=['permit'], description="Allow a user to join your private VC")
+    @vc.command(
+        name="allow",
+        aliases=["permit"],
+        description="Allow a user to join your private VC",
+    )
     async def allow(self, ctx: Context, user: discord.Member):
         """Allows a specific user to join the VC."""
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.set_permissions(user, connect=True)
-            embed = discord.Embed(title="Voice Channel Management", description=f"✅ {user.mention} can now join your voice channel.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"✅ {user.mention} can now join your voice channel.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to allow this user.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to allow this user.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
-    @vc.command(name="kick", aliases=['boot'], description="Kick a user from your private VC")
+    @vc.command(
+        name="kick", aliases=["boot"], description="Kick a user from your private VC"
+    )
     async def kick(self, ctx: Context, user: discord.Member):
         """Kicks a user from the voice channel."""
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             if user not in vc.members:
-                embed = discord.Embed(title="Voice Channel Management", description="⚠️ That user is not in your voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="⚠️ That user is not in your voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
 
             await user.move_to(None)
-            embed = discord.Embed(title="Voice Channel Management", description=f"👢 {user.mention} has been kicked from the channel.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"👢 {user.mention} has been kicked from the channel.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to kick this user.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to kick this user.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
@@ -326,16 +446,28 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.set_permissions(user, connect=False)
             await user.move_to(None)
-            embed = discord.Embed(title="Voice Channel Management", description=f"🚫 {user.mention} has been banned from the channel.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"🚫 {user.mention} has been banned from the channel.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to ban this user.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to ban this user.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
@@ -344,12 +476,20 @@ class Voicechat(commands.Cog):
         """Unbans a user from the voice channel."""
         vc = await self.is_owner(ctx.author)
         if not vc:
-            embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="🚫 You are not the owner of a voice channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
         await vc.set_permissions(user, connect=True)
-        embed = discord.Embed(title="Voice Channel Management", description=f"✅ {user.mention} has been unbanned from the channel.", color=discord.Color.green())
+        embed = discord.Embed(
+            title="Voice Channel Management",
+            description=f"✅ {user.mention} has been unbanned from the channel.",
+            color=discord.Color.green(),
+        )
         await ctx.reply(embed=embed, delete_after=5)
 
     @vc.command(name="lock", description="Lock your voice channel")
@@ -358,15 +498,27 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.set_permissions(vc.guild.default_role, connect=False)
-            embed=discord.Embed(title="Voice Channel Management", description="🔒 Your voice channel is now locked.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="🔒 Your voice channel is now locked.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to lock the channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to lock the channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
@@ -376,74 +528,134 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.set_permissions(vc.guild.default_role, connect=True)
-            embed= discord.Embed(title="Voice Channel Management", description="🔓 Your voice channel is now unlocked.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="🔓 Your voice channel is now unlocked.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to unlock the channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to unlock the channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
-    @vc.command(name="ghost", aliases=['hide'], description="Make your VC invisible to everyone except you")
+    @vc.command(
+        name="ghost",
+        aliases=["hide"],
+        description="Make your VC invisible to everyone except you",
+    )
     async def ghost(self, ctx: Context):
         """Hides the voice channel from everyone except the owner."""
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.set_permissions(vc.guild.default_role, view_channel=False)
-            embed = discord.Embed(title="Voice Channel Management", description="👻 Your voice channel is now hidden.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="👻 Your voice channel is now hidden.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to hide the channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to hide the channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
-    @vc.command(name="reveal", aliases=['show'], description="Make your VC visible again")
+    @vc.command(
+        name="reveal", aliases=["show"], description="Make your VC visible again"
+    )
     async def reveal(self, ctx: Context):
         """Makes the voice channel visible again."""
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.set_permissions(vc.guild.default_role, view_channel=True)
-            embed = discord.Embed(title="Voice Channel Management", description="👁️ Your voice channel is now visible.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="👁️ Your voice channel is now visible.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to reveal the channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to reveal the channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
-    @vc.command(name="setlimit", aliases=['limit'], description="Set the user limit for your VC")
+    @vc.command(
+        name="setlimit", aliases=["limit"], description="Set the user limit for your VC"
+    )
     async def set_limit(self, ctx: Context, limit: int):
         """Allows the owner to set a user limit."""
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             if limit < 0 or limit > 99:
-                embed = discord.Embed(title="Voice Channel Management", description="⚠️ Please provide a valid limit between 0-99.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="⚠️ Please provide a valid limit between 0-99.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.edit(user_limit=limit)
-            embed = discord.Embed(title="Voice Channel Management", description=f"✅ User limit set to {limit}.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"✅ User limit set to {limit}.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to set the limit.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to set the limit.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
@@ -453,20 +665,36 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             if len(new_name) > 32:
-                embed = discord.Embed(title="Voice Channel Management", description="⚠️ The name must be **32 characters or less**.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="⚠️ The name must be **32 characters or less**.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await vc.edit(name=new_name)
-            embed = discord.Embed(title="Voice Channel Management", description=f"✅ Your voice channel has been renamed to **{new_name}**.", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"✅ Your voice channel has been renamed to **{new_name}**.",
+                color=discord.Color.blurple(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description="⚠️ I don't have the necessary permissions to rename the channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to rename the channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
@@ -476,31 +704,58 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.get_vc(ctx.author)
             if not vc:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 You are not the owner of a voice channel.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
             owner = discord.utils.get(vc.members, id=owner_id)
 
-            if ctx.author.guild_permissions.administrator or ctx.author.guild_permissions.manage_channels:
+            if (
+                ctx.author.guild_permissions.administrator
+                or ctx.author.guild_permissions.manage_channels
+            ):
                 await self.bot.database.set_temp_channel_owner(vc.id, ctx.author.id)
-                await vc.set_permissions(ctx.author, connect=True, manage_channels=True, move_members=True)
-                embed = discord.Embed(title="Voice Channel Management", description=f"✅ You are now the owner of **{vc.name}**!", color=discord.Color.green())
+                await vc.set_permissions(
+                    ctx.author, connect=True, manage_channels=True, move_members=True
+                )
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description=f"✅ You are now the owner of **{vc.name}**!",
+                    color=discord.Color.green(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             if owner:
-                embed = discord.Embed(title="Voice Channel Management", description="🚫 The owner is still in the channel, you cannot claim it.", color=discord.Color.red())
+                embed = discord.Embed(
+                    title="Voice Channel Management",
+                    description="🚫 The owner is still in the channel, you cannot claim it.",
+                    color=discord.Color.red(),
+                )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
             await self.bot.database.set_temp_channel_owner(vc.id, ctx.author.id)
-            await vc.set_permissions(ctx.author, connect=True, manage_channels=True, move_members=True)
-            embed = discord.Embed(title="Voice Channel Management", description=f"✅ You are now the owner of **{vc.name}**!", color=discord.Color.green())
+            await vc.set_permissions(
+                ctx.author, connect=True, manage_channels=True, move_members=True
+            )
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"✅ You are now the owner of **{vc.name}**!",
+                color=discord.Color.green(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(title="Voice Channel Management", description=f"⚠️ I don't have the necessary permissions to claim the channel.", color=discord.Color.red())
+            embed = discord.Embed(
+                title="Voice Channel Management",
+                description=f"⚠️ I don't have the necessary permissions to claim the channel.",
+                color=discord.Color.red(),
+            )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
@@ -511,9 +766,9 @@ class Voicechat(commands.Cog):
             vc = await self.is_owner(ctx.author)
             if not vc:
                 embed = discord.Embed(
-                    title="Voice Channel Management", 
-                    description="🚫 You are not the owner of a voice channel.", 
-                    color=discord.Color.red()
+                    title="Voice Channel Management",
+                    description="🚫 You are not the owner of a voice channel.",
+                    color=discord.Color.red(),
                 )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
@@ -525,31 +780,34 @@ class Voicechat(commands.Cog):
             await self.bot.database.remove_temp_channel(vc.id)
 
             embed = discord.Embed(
-                title="Voice Channel Management", 
-                description=f"💥 Your voice channel **{channel_name}** has been nuked.", 
-                color=discord.Color.blurple()
+                title="Voice Channel Management",
+                description=f"💥 Your voice channel **{channel_name}** has been nuked.",
+                color=discord.Color.blurple(),
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
             embed = discord.Embed(
-                title="Voice Channel Management", 
-                description="⚠️ I don't have the necessary permissions to delete the channel.", 
-                color=discord.Color.red()
+                title="Voice Channel Management",
+                description="⚠️ I don't have the necessary permissions to delete the channel.",
+                color=discord.Color.red(),
             )
             await ctx.reply(embed=embed, delete_after=5)
             return
 
     async def ensure_voice(self, ctx):
-        """ Ensure the bot joins the user's voice channel if not already connected and deafens itself """
-        if ctx.guild.id in self.voice_clients and self.voice_clients[ctx.guild.id].is_connected():
-            return self.voice_clients[ctx.guild.id]  
+        """Ensure the bot joins the user's voice channel if not already connected and deafens itself"""
+        if (
+            ctx.guild.id in self.voice_clients
+            and self.voice_clients[ctx.guild.id].is_connected()
+        ):
+            return self.voice_clients[ctx.guild.id]
 
         if ctx.author.voice:
-            voice_channel = ctx.author.voice.channel  
-            vc = await voice_channel.connect()  
+            voice_channel = ctx.author.voice.channel
+            vc = await voice_channel.connect()
             self.voice_clients[ctx.guild.id] = vc
 
-            await ctx.guild.me.edit(deafen=True)  
+            await ctx.guild.me.edit(deafen=True)
 
             return vc
         else:
@@ -557,22 +815,22 @@ class Voicechat(commands.Cog):
             return None
 
     async def play_next(self, ctx):
-        """ Plays the next song in the queue if available """
+        """Plays the next song in the queue if available"""
         if ctx.guild.id not in self.queues or not self.queues[ctx.guild.id]:
-            await self.disconnect(ctx)  
+            await self.disconnect(ctx)
             return
 
-        next_song = self.queues[ctx.guild.id].pop(0)  
+        next_song = self.queues[ctx.guild.id].pop(0)
         file_path = next_song
 
         vc = self.voice_clients.get(ctx.guild.id)
         if not vc or not vc.is_connected():
             return
 
-        self.play_audio(ctx, file_path)  
+        self.play_audio(ctx, file_path)
 
     def play_audio(self, ctx, file_path):
-        """ Handles audio playback with volume control """
+        """Handles audio playback with volume control"""
         vc = self.voice_clients.get(ctx.guild.id)
         if not vc:
             return
@@ -581,40 +839,59 @@ class Voicechat(commands.Cog):
         ffmpeg_options = f"-af 'volume={volume / 100.0}'"
 
         def after_playback(error):
-            """ Deletes file after playback & moves to the next song """
+            """Deletes file after playback & moves to the next song"""
             if os.path.exists(file_path):
                 os.remove(file_path)
             self.current_files.pop(ctx.guild.id, None)
 
             self.bot.loop.create_task(self.play_next(ctx))
 
-        vc.play(discord.FFmpegPCMAudio(file_path, options=ffmpeg_options), after=after_playback)
+        vc.play(
+            discord.FFmpegPCMAudio(file_path, options=ffmpeg_options),
+            after=after_playback,
+        )
 
     async def disconnect(self, ctx):
-        """ Disconnects the bot from the voice channel """
+        """Disconnects the bot from the voice channel"""
         vc = self.voice_clients.get(ctx.guild.id)
         if vc and vc.is_connected():
             await vc.disconnect()
             del self.voice_clients[ctx.guild.id]
             self.queues.pop(ctx.guild.id, None)
-            embed = discord.Embed(description="Disconnected from the voice channel, queue finished. 🔇", color=discord.Color.red())
+            embed = discord.Embed(
+                description="Disconnected from the voice channel, queue finished. 🔇",
+                color=discord.Color.red(),
+            )
             await ctx.send(embed=embed)
 
-    @commands.command(name="play", aliases=['p'], help="Plays an attached audio file in the voice channel")
+    @commands.command(
+        name="play",
+        aliases=["p"],
+        help="Plays an attached audio file in the voice channel",
+    )
     async def play(self, ctx):
-        """ Plays an attached audio file and queues it if another song is playing """
+        """Plays an attached audio file and queues it if another song is playing"""
         if not ctx.message.attachments:
-            await ctx.send("Please attach an audio file (.mp3, .m4a, .wav) when using this command.", delete_after=5)
+            await ctx.send(
+                "Please attach an audio file (.mp3, .m4a, .wav) when using this command.",
+                delete_after=5,
+            )
             return
 
         attachment = ctx.message.attachments[0]
-        if not any(attachment.filename.endswith(ext) for ext in [".mp3", ".m4a", ".wav"]):
-            await ctx.send("Only `.mp3`, `.m4a`, and `.wav` files are supported.", delete_after=5)
+        if not any(
+            attachment.filename.endswith(ext) for ext in [".mp3", ".m4a", ".wav"]
+        ):
+            await ctx.send(
+                "Only `.mp3`, `.m4a`, and `.wav` files are supported.", delete_after=5
+            )
             return
 
         os.makedirs("music_uploads", exist_ok=True)
 
-        file_path = os.path.join("music_uploads", f"{ctx.guild.id}_{attachment.filename}")
+        file_path = os.path.join(
+            "music_uploads", f"{ctx.guild.id}_{attachment.filename}"
+        )
         await attachment.save(file_path)
 
         vc = await self.ensure_voice(ctx)
@@ -628,45 +905,75 @@ class Voicechat(commands.Cog):
 
         if not vc.is_playing():
             await self.play_next(ctx)
-            embed = discord.Embed(description=f"🎵 - `{attachment.filename}`", color=discord.Color.blurple())
-            embed.set_author(name="Now Playing", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description=f"🎵 - `{attachment.filename}`",
+                color=discord.Color.blurple(),
+            )
+            embed.set_author(
+                name="Now Playing", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
         else:
-            embed = discord.Embed(description=f"🎵 - `{attachment.filename}`", color=discord.Color.green())
-            embed.set_author(name="Added to Queue", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description=f"🎵 - `{attachment.filename}`", color=discord.Color.green()
+            )
+            embed.set_author(
+                name="Added to Queue", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
 
-        embed.set_footer(text=f"Queued by {ctx.author.name} in {vc.channel.name} - {vc.channel.bitrate / 1000}Kbps")
+        embed.set_footer(
+            text=f"Queued by {ctx.author.name} in {vc.channel.name} - {vc.channel.bitrate / 1000}Kbps"
+        )
         await ctx.send(embed=embed)
 
     @commands.command()
     async def skip(self, ctx):
-        """ Skips the currently playing song """
+        """Skips the currently playing song"""
         vc = self.voice_clients.get(ctx.guild.id)
         if vc and vc.is_playing():
-            vc.stop()  
-            embed = discord.Embed(description="Skipped current song.", color=discord.Color.red())
-            embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+            vc.stop()
+            embed = discord.Embed(
+                description="Skipped current song.", color=discord.Color.red()
+            )
+            embed.set_author(
+                name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.send(embed=embed, delete_after=5)
 
     @commands.command()
     async def queue(self, ctx):
-        """ Displays the current music queue """
+        """Displays the current music queue"""
         if ctx.guild.id not in self.queues or not self.queues[ctx.guild.id]:
-            embed = discord.Embed(description="The queue is empty.", color=discord.Color.red())
-            embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description="The queue is empty.", color=discord.Color.red()
+            )
+            embed.set_author(
+                name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.send(embed=embed, delete_after=5)
             return
 
-        queue_list = "\n".join([f"{i+1}. {song[1]} - {song[2]}" for i, song in enumerate(self.queues[ctx.guild.id])])
-        embed = discord.Embed(title="Music Queue", description=queue_list, color=discord.Color.green())
+        queue_list = "\n".join(
+            [
+                f"{i+1}. {song[1]} - {song[2]}"
+                for i, song in enumerate(self.queues[ctx.guild.id])
+            ]
+        )
+        embed = discord.Embed(
+            title="Music Queue", description=queue_list, color=discord.Color.green()
+        )
         await ctx.send(embed=embed)
 
-    @commands.command(name="stop", aliases=['dc', 'disconnect'], help="Stops playback and disconnects from the voice channel")
+    @commands.command(
+        name="stop",
+        aliases=["dc", "disconnect"],
+        help="Stops playback and disconnects from the voice channel",
+    )
     async def stop(self, ctx):
-        """ Stops playback and disconnects, deleting only the file associated with this guild """
+        """Stops playback and disconnects, deleting only the file associated with this guild"""
         vc = self.voice_clients.get(ctx.guild.id)
         if vc and vc.is_connected():
             vc.stop()
@@ -678,8 +985,13 @@ class Voicechat(commands.Cog):
                 if os.path.exists(file_path):
                     os.remove(file_path)
                     logging.info(f"Deleted {file_path} after stop command.")
-            embed=discord.Embed(description="Stopped playback and disconnected.", color=discord.Color.red())
-            embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description="Stopped playback and disconnected.",
+                color=discord.Color.red(),
+            )
+            embed.set_author(
+                name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.send(embed=embed, delete_after=5)
         else:
@@ -687,39 +999,56 @@ class Voicechat(commands.Cog):
 
     @commands.command(name="pause", help="Pauses the currently playing audio.")
     async def pause(self, ctx):
-        """ Pauses the current playback """
+        """Pauses the current playback"""
         vc = self.voice_clients.get(ctx.guild.id)
         if vc and vc.is_playing():
             vc.pause()
-            embed=discord.Embed(description="Playback paused.", color=discord.Color.blurple())
-            embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description="Playback paused.", color=discord.Color.blurple()
+            )
+            embed.set_author(
+                name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(name="resume", help="Resumes the currently paused audio.")
     async def resume(self, ctx):
-        """ Resumes the paused playback """
+        """Resumes the paused playback"""
         vc = self.voice_clients.get(ctx.guild.id)
         if vc and vc.is_paused():
             vc.resume()
-            embed=discord.Embed(description="Playback resumed.", color=discord.Color.blurple())
-            embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description="Playback resumed.", color=discord.Color.blurple()
+            )
+            embed.set_author(
+                name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="volume", aliases=['vol'], help="Adjusts the volume of the current audio (1-100%)")
+    @commands.command(
+        name="volume",
+        aliases=["vol"],
+        help="Adjusts the volume of the current audio (1-100%)",
+    )
     async def volume(self, ctx, volume: str):
-        """ Adjusts the volume of the current playback (1-100%) """
-        volume = volume.replace('%', '')  
+        """Adjusts the volume of the current playback (1-100%)"""
+        volume = volume.replace("%", "")
 
         if not volume.isdigit():
-            await ctx.reply("Please enter a valid number between 1 and 100 (or 1% to 100%).", delete_after=5)
+            await ctx.reply(
+                "Please enter a valid number between 1 and 100 (or 1% to 100%).",
+                delete_after=5,
+            )
             return
 
         volume = int(volume)
 
         if volume < 1 or volume > 100:
-            await ctx.send("Volume must be between 1 and 100 (or 1% to 100%).", delete_after=5)
+            await ctx.send(
+                "Volume must be between 1 and 100 (or 1% to 100%).", delete_after=5
+            )
             return
 
         self.current_volume[ctx.guild.id] = volume
@@ -730,32 +1059,45 @@ class Voicechat(commands.Cog):
             if file_path:
                 vc.stop()
                 self.play_audio(ctx, file_path)
-                embed = discord.Embed(description=f"Volume set to `{volume}%`.", color=discord.Color.blurple())
-                embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+                embed = discord.Embed(
+                    description=f"Volume set to `{volume}%`.",
+                    color=discord.Color.blurple(),
+                )
+                embed.set_author(
+                    name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+                )
                 embed.set_footer(text="Action requested by: " + ctx.author.name)
                 await ctx.reply(embed=embed, delete_after=5)
         else:
-            embed = discord.Embed(description=f"Volume set to `{volume}%`. It will take effect on the next playback.", color=discord.Color.blurple())
-            embed.set_author(name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed = discord.Embed(
+                description=f"Volume set to `{volume}%`. It will take effect on the next playback.",
+                color=discord.Color.blurple(),
+            )
+            embed.set_author(
+                name="Music Player", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.reply(embed=embed, delete_after=5)
 
-    @tasks.loop(seconds=30)  
+    @tasks.loop(seconds=30)
     async def check_empty_vc(self):
-        """ Automatically leaves the voice channel if no humans are present """
+        """Automatically leaves the voice channel if no humans are present"""
         for guild_id, vc in list(self.voice_clients.items()):
             if vc.is_connected():
                 members = vc.channel.members
-                human_members = [m for m in members if not m.bot]  
+                human_members = [m for m in members if not m.bot]
 
                 if len(human_members) == 0:
                     await vc.disconnect()
                     del self.voice_clients[guild_id]
-                    logging.info(f"Left voice channel in {vc.channel.name} due to inactivity.")
+                    logging.info(
+                        f"Left voice channel in {vc.channel.name} due to inactivity."
+                    )
 
     @check_empty_vc.before_loop
     async def before_check_empty_vc(self):
-        await self.bot.wait_until_ready()  
+        await self.bot.wait_until_ready()
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Voicechat(bot))

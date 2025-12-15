@@ -18,6 +18,7 @@ from sqlalchemy import func
 
 logger = logging.getLogger("discord_bot")
 
+
 def prepare_for_json(data):
     if isinstance(data, list):
         return [prepare_for_json(item) for item in data]
@@ -29,6 +30,7 @@ def prepare_for_json(data):
         return str(data)
     else:
         return data
+
 
 class KeyManager:
     @staticmethod
@@ -49,12 +51,12 @@ class KeyManager:
             return key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+                encryption_algorithm=serialization.NoEncryption(),
             )
         else:
             return key.public_bytes(
                 encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
             )
 
     @staticmethod
@@ -63,9 +65,11 @@ class KeyManager:
         Deserialize a PEM key.
         """
         if isinstance(pem_key, str):
-            pem_key = pem_key.encode('utf-8')
+            pem_key = pem_key.encode("utf-8")
         if private:
-            return serialization.load_pem_private_key(pem_key, password=None, backend=default_backend())
+            return serialization.load_pem_private_key(
+                pem_key, password=None, backend=default_backend()
+            )
         else:
             return serialization.load_pem_public_key(pem_key, backend=default_backend())
 
@@ -75,10 +79,11 @@ class KeyManager:
         Sign data using an ECDSA private key.
         """
         try:
-            private_key = serialization.load_pem_private_key(private_key_bytes, password=None, backend=default_backend())
+            private_key = serialization.load_pem_private_key(
+                private_key_bytes, password=None, backend=default_backend()
+            )
             signature = private_key.sign(
-                data.encode('utf-8'),
-                ec.ECDSA(hashes.SHA256())
+                data.encode("utf-8"), ec.ECDSA(hashes.SHA256())
             )
             return signature
         except Exception as e:
@@ -91,9 +96,7 @@ class KeyManager:
         """
         try:
             public_key.verify(
-                signature,
-                data.encode('utf-8'),
-                ec.ECDSA(hashes.SHA256())
+                signature, data.encode("utf-8"), ec.ECDSA(hashes.SHA256())
             )
             return True
         except Exception as e:
@@ -109,8 +112,9 @@ class KeyManager:
         if not salt:
             salt = os.urandom(16)
         if not isinstance(key_pem, bytes):
-            key_pem = key_pem.encode('utf-8')
+            key_pem = key_pem.encode("utf-8")
         return hashlib.sha256(salt + key_pem).hexdigest()
+
 
 class Blockchain:
     def __init__(self, async_sessionmaker):
@@ -127,11 +131,11 @@ class Blockchain:
                 genesis_block = Block(
                     index=0,
                     previous_hash="0",
-                    transactions="[]",  
+                    transactions="[]",
                     created_at=datetime.now(),
                     block_hash="0",
                     validator_id=None,
-                    validator_signature=""
+                    validator_signature="",
                 )
                 genesis_block.block_hash = genesis_block.compute_hash()
                 session.add(genesis_block)
@@ -141,10 +145,8 @@ class Blockchain:
                 logger.info("Genesis block already exists.")
 
     async def load_blockchain_if_exists(self):
-
-        db_blocks = await self.get_full_chain()  
+        db_blocks = await self.get_full_chain()
         if not db_blocks:
-
             logger.info("No blocks found in DB. Skipping in-memory load.")
             return
 
@@ -152,7 +154,6 @@ class Blockchain:
         self.chain = []
 
         for db_block in db_blocks:
-
             try:
                 tx_list = json.loads(db_block.transactions)
             except (json.JSONDecodeError, TypeError):
@@ -165,7 +166,7 @@ class Blockchain:
                 "timestamp": db_block.created_at,
                 "block_hash": db_block.block_hash,
                 "validator_id": db_block.validator_id,
-                "validator_signature": db_block.validator_signature
+                "validator_signature": db_block.validator_signature,
             }
             self.chain.append(block_dict)
 
@@ -173,12 +174,16 @@ class Blockchain:
         if chain_ok:
             logger.info("In-memory blockchain loaded and validated.")
         else:
-            logger.warning("In-memory blockchain loaded but did NOT validate. Consider repairing.")
+            logger.warning(
+                "In-memory blockchain loaded but did NOT validate. Consider repairing."
+            )
 
     async def get_last_block(self):
         """Retrieve the last block in the blockchain."""
         async with self.async_sessionmaker() as session:
-            result = await session.execute(select(Block).order_by(Block.index.desc()).limit(1))
+            result = await session.execute(
+                select(Block).order_by(Block.index.desc()).limit(1)
+            )
             return result.scalar_one_or_none()
 
     async def get_full_chain(self):
@@ -196,7 +201,9 @@ class Blockchain:
                 result = await session.execute(select(Block).order_by(Block.index))
                 blocks = result.scalars().all()
                 if block_index >= len(blocks):
-                    logger.error(f"Block index {block_index} is out of bounds for the blockchain.")
+                    logger.error(
+                        f"Block index {block_index} is out of bounds for the blockchain."
+                    )
                     return
                 for i in range(block_index, len(blocks)):
                     block = blocks[i]
@@ -204,10 +211,14 @@ class Blockchain:
                         previous_block = blocks[i - 1]
                         block.previous_hash = previous_block.block_hash
                     block.block_hash = block.compute_hash()
-                    logger.info(f"Repaired block index {block.index}. New hash: {block.block_hash}")
+                    logger.info(
+                        f"Repaired block index {block.index}. New hash: {block.block_hash}"
+                    )
                     session.add(block)
                 await session.commit()
-                logger.info(f"Blockchain repair starting from index {block_index} completed.")
+                logger.info(
+                    f"Blockchain repair starting from index {block_index} completed."
+                )
 
     async def validate_blockchain(self):
         """
@@ -224,12 +235,16 @@ class Blockchain:
                             previous_hash = block.block_hash
                             continue
                         if block.previous_hash != previous_hash:
-                            logger.error(f"Broken chain at block index {block.index}. Previous hash mismatch.")
+                            logger.error(
+                                f"Broken chain at block index {block.index}. Previous hash mismatch."
+                            )
                             await self.repair_chain(block.index)
                             break
                         recalculated_hash = block.compute_hash()
                         if block.block_hash != recalculated_hash:
-                            logger.error(f"Invalid hash at block index {block.index}. Expected: {recalculated_hash}, Found: {block.block_hash}.")
+                            logger.error(
+                                f"Invalid hash at block index {block.index}. Expected: {recalculated_hash}, Found: {block.block_hash}."
+                            )
                             await self.repair_chain(block.index)
                             break
                         previous_hash = block.block_hash
@@ -245,7 +260,9 @@ class Blockchain:
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                block_result = await session.execute(select(Block).where(Block.index == block_index))
+                block_result = await session.execute(
+                    select(Block).where(Block.index == block_index)
+                )
                 block = block_result.scalar()
                 if not block:
                     raise ValueError(f"Block at index {block_index} not found.")
@@ -261,7 +278,9 @@ class Blockchain:
                     b.block_hash = b.compute_hash()
                     session.add(b)
                 await session.commit()
-                logger.info(f"Block at index {block_index} and all subsequent blocks have been relinked.")
+                logger.info(
+                    f"Block at index {block_index} and all subsequent blocks have been relinked."
+                )
 
     async def add_to_block(self, transactions, validator_private_key_bytes):
         """
@@ -270,22 +289,28 @@ class Blockchain:
         async with self.blockchain_lock:
             if not transactions:
                 return
-            if not hasattr(self, 'transaction_pool'):
+            if not hasattr(self, "transaction_pool"):
                 self.transaction_pool = []
             for transaction in transactions:
                 if not isinstance(transaction, dict):
                     raise TypeError("Each transaction must be a dictionary.")
-                if 'signer_user_id' not in transaction:
-                    signer = transaction.get('from_user_id') or transaction.get('to_user_id')
-                    transaction['signer_user_id'] = signer
+                if "signer_user_id" not in transaction:
+                    signer = transaction.get("from_user_id") or transaction.get(
+                        "to_user_id"
+                    )
+                    transaction["signer_user_id"] = signer
                 self.transaction_pool.append(transaction)
 
             TRANSACTION_THRESHOLD = 10
             if len(self.transaction_pool) >= TRANSACTION_THRESHOLD:
-                logger.debug("Transaction threshold reached, creating a new block with PoS consensus.")
+                logger.debug(
+                    "Transaction threshold reached, creating a new block with PoS consensus."
+                )
                 await self.create_block_with_stake()
 
-    async def create_block_atomic(self, session, transactions: list[dict], validator_user_id: int):
+    async def create_block_atomic(
+        self, session, transactions: list[dict], validator_user_id: int
+    ):
         """
         Create and persist a new block containing the provided transactions inside
         the caller's active database transaction (atomic with balance updates).
@@ -303,36 +328,48 @@ class Blockchain:
             if not isinstance(tx, dict):
                 raise TypeError("Each transaction must be a dictionary.")
             tx = dict(tx)  # shallow copy
-            signer_id = tx.get('signer_user_id') or tx.get('from_user_id') or tx.get('to_user_id')
-            tx['signer_user_id'] = signer_id
+            signer_id = (
+                tx.get("signer_user_id")
+                or tx.get("from_user_id")
+                or tx.get("to_user_id")
+            )
+            tx["signer_user_id"] = signer_id
 
             # separate signature for payload building
-            signature_hex = tx.get('signature')
+            signature_hex = tx.get("signature")
             tx_no_sig = dict(tx)
-            tx_no_sig.pop('signature', None)
+            tx_no_sig.pop("signature", None)
             payload = json.dumps(prepare_for_json(tx_no_sig), sort_keys=True)
 
             if not signature_hex:
                 # sign if missing
-                result = await session.execute(select(Wallet.private_key).where(Wallet.user_id == signer_id))
+                result = await session.execute(
+                    select(Wallet.private_key).where(Wallet.user_id == signer_id)
+                )
                 priv = result.scalar_one_or_none()
                 if not priv:
                     raise ValueError(f"No private key found for signer {signer_id}")
-                tx['signature'] = KeyManager.sign_data(priv, payload).hex()
+                tx["signature"] = KeyManager.sign_data(priv, payload).hex()
             else:
                 # verify; if it fails (legacy/foreign), re-sign canonically
-                pub_res = await session.execute(select(Wallet.public_key).where(Wallet.user_id == signer_id))
+                pub_res = await session.execute(
+                    select(Wallet.public_key).where(Wallet.user_id == signer_id)
+                )
                 public_key_bytes = pub_res.scalar_one_or_none()
                 if not public_key_bytes:
                     raise ValueError(f"No public key found for signer {signer_id}")
-                ok = self._verify_signature_bytes(public_key_bytes, payload, bytes.fromhex(signature_hex))
+                ok = self._verify_signature_bytes(
+                    public_key_bytes, payload, bytes.fromhex(signature_hex)
+                )
                 if not ok:
                     # centralized policy: replace bad signature with signer’s signature
-                    priv_res = await session.execute(select(Wallet.private_key).where(Wallet.user_id == signer_id))
+                    priv_res = await session.execute(
+                        select(Wallet.private_key).where(Wallet.user_id == signer_id)
+                    )
                     priv = priv_res.scalar_one_or_none()
                     if not priv:
                         raise ValueError(f"No private key found for signer {signer_id}")
-                    tx['signature'] = KeyManager.sign_data(priv, payload).hex()
+                    tx["signature"] = KeyManager.sign_data(priv, payload).hex()
 
             prepared.append(tx)
 
@@ -364,14 +401,19 @@ class Blockchain:
         )
         validator_priv = val_priv_res.scalar_one_or_none()
         if not validator_priv:
-            raise ValueError(f"Validator private key missing for user {validator_user_id}")
-        block_data = json.dumps({
-            "index": new_block.index,
-            "previous_hash": new_block.previous_hash,
-            "transactions": json.loads(new_block.transactions),
-            "created_at": str(new_block.created_at),
-            "block_hash": new_block.block_hash,
-        }, sort_keys=True)
+            raise ValueError(
+                f"Validator private key missing for user {validator_user_id}"
+            )
+        block_data = json.dumps(
+            {
+                "index": new_block.index,
+                "previous_hash": new_block.previous_hash,
+                "transactions": json.loads(new_block.transactions),
+                "created_at": str(new_block.created_at),
+                "block_hash": new_block.block_hash,
+            },
+            sort_keys=True,
+        )
         block_sig = KeyManager.sign_data(validator_priv, block_data)
         new_block.validator_id = validator_user_id
         new_block.validator_signature = block_sig.hex()
@@ -379,10 +421,16 @@ class Blockchain:
         session.add(new_block)
         # Do not commit here; caller controls transaction
 
-    def _verify_signature_bytes(self, public_key_bytes: bytes, data: str, signature: bytes) -> bool:
+    def _verify_signature_bytes(
+        self, public_key_bytes: bytes, data: str, signature: bytes
+    ) -> bool:
         try:
-            public_key = serialization.load_pem_public_key(public_key_bytes, backend=default_backend())
-            public_key.verify(signature, data.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+            public_key = serialization.load_pem_public_key(
+                public_key_bytes, backend=default_backend()
+            )
+            public_key.verify(
+                signature, data.encode("utf-8"), ec.ECDSA(hashes.SHA256())
+            )
             return True
         except Exception as e:
             logger.error(f"Signature verification failed: {e}")
@@ -393,7 +441,6 @@ class Blockchain:
         Create a new block from the transaction pool using proof-of-stake consensus.
         """
         try:
-
             logger.debug("Preparing transactions from the pool.")
             prepared_transactions = prepare_for_json(self.transaction_pool)
             self.transaction_pool = []
@@ -415,11 +462,13 @@ class Blockchain:
             logger.debug(f"Validator {validator_user_id} selected.")
         except Exception as e:
             logger.error(f"Validator selection failed: {e}")
-            validator_user_id = 284439598422163476  
+            validator_user_id = 284439598422163476
 
         try:
             logger.debug(f"Retrieving private key for validator {validator_user_id}.")
-            validator_private_key_bytes = await self.get_validator_private_key(validator_user_id)
+            validator_private_key_bytes = await self.get_validator_private_key(
+                validator_user_id
+            )
         except Exception as e:
             logger.error(f"Error retrieving validator's private key: {e}")
             return
@@ -432,19 +481,24 @@ class Blockchain:
                 created_at=datetime.now(),
             )
             new_block.block_hash = new_block.compute_hash()
-            logger.debug(f"New block created with index {new_block.index} and hash {new_block.block_hash}.")
+            logger.debug(
+                f"New block created with index {new_block.index} and hash {new_block.block_hash}."
+            )
         except Exception as e:
             logger.error(f"Error creating new block: {e}")
             return
 
         try:
-            block_data = json.dumps({
-                "index": new_block.index,
-                "previous_hash": new_block.previous_hash,
-                "transactions": json.loads(new_block.transactions),
-                "created_at": str(new_block.created_at),
-                "block_hash": new_block.block_hash,
-            }, sort_keys=True)
+            block_data = json.dumps(
+                {
+                    "index": new_block.index,
+                    "previous_hash": new_block.previous_hash,
+                    "transactions": json.loads(new_block.transactions),
+                    "created_at": str(new_block.created_at),
+                    "block_hash": new_block.block_hash,
+                },
+                sort_keys=True,
+            )
             logger.debug("Block data prepared for signing.")
             logger.debug(f"Block data: {block_data}")
         except Exception as e:
@@ -452,7 +506,9 @@ class Blockchain:
             return
 
         try:
-            validator_signature = KeyManager.sign_data(validator_private_key_bytes, block_data)
+            validator_signature = KeyManager.sign_data(
+                validator_private_key_bytes, block_data
+            )
             new_block.validator_id = validator_user_id
             new_block.validator_signature = validator_signature.hex()
             logger.debug(f"Block signed by validator {validator_user_id}.")
@@ -465,7 +521,9 @@ class Blockchain:
                 async with session.begin():
                     session.add(new_block)
                     await session.commit()
-                    logger.debug(f"Block #{new_block.index} created and committed with {len(prepared_transactions)} transactions.")
+                    logger.debug(
+                        f"Block #{new_block.index} created and committed with {len(prepared_transactions)} transactions."
+                    )
         except Exception as e:
             logger.error(f"Error committing new block to database: {e}")
             return
@@ -474,7 +532,7 @@ class Blockchain:
         """
         Validate a transaction by verifying its signature.
         """
-        signature_hex = transaction.pop('signature', '')
+        signature_hex = transaction.pop("signature", "")
         signature = bytes.fromhex(signature_hex)
         transaction_data = json.dumps(transaction, sort_keys=True)
         if not KeyManager.verify_signature(public_key, transaction_data, signature):
@@ -529,7 +587,10 @@ class Blockchain:
             block_transactions = json.loads(block.transactions)
             for transaction in block_transactions:
                 if isinstance(transaction, dict):
-                    if transaction.get("to_user_id") == user_id or transaction.get("from_user_id") == user_id:
+                    if (
+                        transaction.get("to_user_id") == user_id
+                        or transaction.get("from_user_id") == user_id
+                    ):
                         transactions.append(transaction)
         return transactions
 
@@ -545,7 +606,9 @@ class Blockchain:
         stakes = {}
         for block in chain:
             transactions = json.loads(block.transactions)
-            logger.debug(f"Processing block index {block.index} with {len(transactions)} transactions.")
+            logger.debug(
+                f"Processing block index {block.index} with {len(transactions)} transactions."
+            )
             for tx in transactions:
                 if isinstance(tx, dict):
                     to_user = tx.get("to_user_id")
@@ -553,13 +616,19 @@ class Blockchain:
                     amount = Decimal(str(tx.get("amount", "0")))
                     if to_user:
                         stakes[to_user] = stakes.get(to_user, Decimal("0")) + amount
-                        logger.debug(f"User {to_user} received amount {amount}. New stake: {stakes[to_user]}.")
+                        logger.debug(
+                            f"User {to_user} received amount {amount}. New stake: {stakes[to_user]}."
+                        )
                     if from_user:
                         stakes[from_user] = stakes.get(from_user, Decimal("0")) - amount
-                        logger.debug(f"User {from_user} sent amount {amount}. New stake: {stakes[from_user]}.")
+                        logger.debug(
+                            f"User {from_user} sent amount {amount}. New stake: {stakes[from_user]}."
+                        )
         logger.info("Finished processing all blocks for stake calculation.")
 
-        eligible = {user: stake for user, stake in stakes.items() if stake > Decimal("0")}
+        eligible = {
+            user: stake for user, stake in stakes.items() if stake > Decimal("0")
+        }
         logger.debug(f"Eligible validators based on positive stake: {eligible}.")
 
         total_stake = sum(eligible.values())
@@ -579,7 +648,9 @@ class Blockchain:
                 return user
 
         fallback_validator = random.choice(list(eligible.keys()))
-        logger.info(f"No validator selected in the loop; falling back to random choice: {fallback_validator}.")
+        logger.info(
+            f"No validator selected in the loop; falling back to random choice: {fallback_validator}."
+        )
         return fallback_validator
 
     async def get_validator_private_key(self, validator_user_id):
@@ -587,10 +658,8 @@ class Blockchain:
         Retrieve the validator's private key bytes from the Wallet table.
         """
         async with self.async_sessionmaker() as session:
-
             result = await session.execute(
-                select(Wallet.private_key)
-                .where(Wallet.user_id == validator_user_id)
+                select(Wallet.private_key).where(Wallet.user_id == validator_user_id)
             )
             private_key_bytes = result.scalar_one_or_none()
 
@@ -604,10 +673,8 @@ class Blockchain:
         Retrieve the validator's public key bytes from the Wallet table.
         """
         async with self.async_sessionmaker() as session:
-
             result = await session.execute(
-                select(Wallet.public_key)
-                .where(Wallet.user_id == validator_user_id)
+                select(Wallet.public_key).where(Wallet.user_id == validator_user_id)
             )
             public_key_bytes = result.scalar_one_or_none()
 
@@ -625,7 +692,9 @@ class Blockchain:
 
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                existing = await session.execute(select(Block).order_by(Block.index).limit(1))
+                existing = await session.execute(
+                    select(Block).order_by(Block.index).limit(1)
+                )
                 if existing.scalar_one_or_none() is not None:
                     logger.info("Blockchain already exists; skipping bootstrap.")
                     return
@@ -639,7 +708,9 @@ class Blockchain:
                 supply_res = await session.execute(select(Supply).limit(1))
                 supply_record = supply_res.scalar_one_or_none()
 
-                treasury_balance = supply_record.treasury if supply_record else Decimal('0.00')
+                treasury_balance = (
+                    supply_record.treasury if supply_record else Decimal("0.00")
+                )
 
                 logger.info(
                     f"Found {len(wallets)} wallets, {len(bank_accounts)} bank accounts, "
@@ -650,8 +721,10 @@ class Blockchain:
 
                 genesis_transactions = []
                 for wallet in wallets:
-                    user_total = wallet.balance + bank_dict.get(wallet.wallet_id, Decimal('0'))
-                    if user_total > Decimal('0'):
+                    user_total = wallet.balance + bank_dict.get(
+                        wallet.wallet_id, Decimal("0")
+                    )
+                    if user_total > Decimal("0"):
                         tx = {
                             "from_user_id": 0,
                             "to_user_id": wallet.user_id,
@@ -660,7 +733,7 @@ class Blockchain:
                         }
                         genesis_transactions.append(tx)
 
-                if treasury_balance > Decimal('0'):
+                if treasury_balance > Decimal("0"):
                     tx = {
                         "from_user_id": None,
                         "to_user_id": 0,
@@ -669,9 +742,13 @@ class Blockchain:
                     }
                     genesis_transactions.append(tx)
 
-                logger.info(f"Prepared {len(genesis_transactions)} genesis transactions total.")
+                logger.info(
+                    f"Prepared {len(genesis_transactions)} genesis transactions total."
+                )
 
-                genesis_data = json.dumps(prepare_for_json(genesis_transactions), sort_keys=True)
+                genesis_data = json.dumps(
+                    prepare_for_json(genesis_transactions), sort_keys=True
+                )
                 genesis_block = Block(
                     index=0,
                     previous_hash="0",

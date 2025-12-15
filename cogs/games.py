@@ -13,10 +13,12 @@ logger = logging.getLogger("discord_bot")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+
 class RateLimitError(Exception):
     def __init__(self, retry_after: int):
         super().__init__("Rate limited")
         self.retry_after = retry_after
+
 
 class WouldYouRatherView(View):
     def __init__(self, timeout: float = 15.0):
@@ -49,6 +51,7 @@ class WouldYouRatherView(View):
             "You voted for **Option B**!", ephemeral=True
         )
 
+
 async def fetch_wyr_question() -> str | None:
     """
     Returns the full AI-generated WYR question as a single string,
@@ -56,13 +59,15 @@ async def fetch_wyr_question() -> str | None:
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",       # the key
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",  # the key
         "Content-Type": "application/json",
     }
     payload = {
         "model": "google/gemini-2.0-flash-exp:free",  # model name
         "messages": [
-            {"role": "user", "content": """
+            {
+                "role": "user",
+                "content": """
                 You are the “Funny WYR Bot.” Your sole task is to generate exactly one short, snarky “Would You Rather” question in the format below—no more, no less:
 
                 A) Option A  
@@ -83,8 +88,9 @@ async def fetch_wyr_question() -> str | None:
                 A) Keep reusing your high-school gym socks forever  
                 B) Bathe in a pool of lukewarm soda for life
                 You should not deviate from this format.
-                """}
-        ]
+                """,
+            }
+        ],
     }
 
     async with aiohttp.ClientSession() as session:
@@ -105,24 +111,19 @@ async def fetch_wyr_question() -> str | None:
                 logger.exception("Malformed WYR response")
                 return None
 
+
 class Games(commands.Cog, name="Games"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.utils = MiscUtils(self)
 
     @commands.command(name="rps")
-    async def rps(
-        self, ctx: Context[commands.Bot], player: discord.User = None
-    ):
-        game = button_games.BetaRockPaperScissors(
-            player
-        )  
+    async def rps(self, ctx: Context[commands.Bot], player: discord.User = None):
+        game = button_games.BetaRockPaperScissors(player)
         await game.start(ctx)
 
-    @commands.command(name="tictactoe", aliases=['ttt'])
-    async def tictactoe(
-        self, ctx: Context[commands.Bot], member: discord.User
-    ):
+    @commands.command(name="tictactoe", aliases=["ttt"])
+    async def tictactoe(self, ctx: Context[commands.Bot], member: discord.User):
         await ctx.defer()
         game = button_games.BetaTictactoe(cross=ctx.author, circle=member)
         await game.start(ctx)
@@ -148,23 +149,27 @@ class Games(commands.Cog, name="Games"):
             try:
                 question_text = await fetch_wyr_question()
             except RateLimitError as e:
-                return await ctx.send(embed=discord.Embed(
-                    description=f"🚫 Rate limit exceeded. Try again in **{e.retry_after}** seconds.",
-                    color=discord.Color.red()
-                ))
+                return await ctx.send(
+                    embed=discord.Embed(
+                        description=f"🚫 Rate limit exceeded. Try again in **{e.retry_after}** seconds.",
+                        color=discord.Color.red(),
+                    )
+                )
 
             if not question_text:
-                return await ctx.send(embed=discord.Embed(
-                    description="⚠️ Could not fetch a question right now. Please try again later.",
-                    color=discord.Color.red()
-                ))
+                return await ctx.send(
+                    embed=discord.Embed(
+                        description="⚠️ Could not fetch a question right now. Please try again later.",
+                        color=discord.Color.red(),
+                    )
+                )
 
             # 2) Show question + buttons
             view = WouldYouRatherView()
             ask_embed = discord.Embed(
                 title="🤔 Would You Rather…?",
                 description=question_text,
-                color=discord.Color.purple()
+                color=discord.Color.purple(),
             )
             msg = await ctx.send(embed=ask_embed, view=view)
             view.message = msg
@@ -184,13 +189,14 @@ class Games(commands.Cog, name="Games"):
                         f"**Option A** — {view.votes['A']} vote(s)\n"
                         f"**Option B** — {view.votes['B']} vote(s)"
                     ),
-                    color=discord.Color.orange()
+                    color=discord.Color.orange(),
                 )
                 results.set_footer(text="Game by chaos. :)")
                 await msg.reply(embed=results)
 
             # schedule without blocking
             ctx.bot.loop.create_task(end_game())
+
 
 async def setup(bot):
     await bot.add_cog(Games(bot))
