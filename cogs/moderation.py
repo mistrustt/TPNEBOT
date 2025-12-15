@@ -3477,9 +3477,8 @@ class Moderation(commands.Cog, name="Moderation"):
                     async def unban_lil_dude():
                         await asyncio.sleep(10)
                         try:
-                            #await message.guild.unban(user)
-                            #await user.send(f"join nigga")
-                            await user.send(f"you staying banned until u unblock me")
+                            await message.guild.unban(user)
+                            await user.send(f"join nigga")
                         except Exception as e:
                             logger.error(f"Failed to unban belson: {e}")
                     asyncio.create_task(unban_lil_dude())
