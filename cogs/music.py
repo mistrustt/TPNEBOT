@@ -64,6 +64,15 @@ class Music(commands.Cog, name="Music"):
         self.heardle_answers = {}
         self.snippet_debounce = {}
 
+        def check_question_marks(s):
+            return "?" in s
+        
+        def remove_question_marks(s):
+            return s.replace("?", "")
+        
+        def question_mark_to_spaces(s):
+            return s.replace("?", " ")
+
         def check_parantheses(s):
             return "(" in s and ")" in s
 
@@ -113,6 +122,7 @@ class Music(commands.Cog, name="Music"):
             check_apostrophes: [remove_apostrophes],
             check_periods: [remove_periods, period_to_spaces],
             check_commas: [remove_commas, comma_to_spaces],
+            check_question_marks: [remove_question_marks, question_mark_to_spaces],
         }
 
     async def cog_unload(self):
