@@ -2394,6 +2394,80 @@ class Music(commands.Cog, name="Music"):
 
             asyncio.create_task(debounce_delay(ctx.author.id))
 
+    def find_pledges_channel(self, guild: discord.Guild):
+        channels = []
+        for channel in guild.text_channels:
+            if "pledge" in channel.name.lower():
+                channels.append(channel)
+        return channels
+
+    @commands.command(name="countpledge", aliases=["cp", "countpledges"])
+    @commands.check_any(commands.has_permissions(administrator=True), commands.check(can_test))
+    async def countpledge(self, ctx: commands.Context, after_message_id: int = 0):
+        pledges_channels = self.find_pledges_channel(ctx.guild)
+        count = len(pledges_channels)
+        selected_channel = None
+        if count == 0:
+            await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                "No pledge channels found in this server.",
+            )
+            return
+        elif count > 1:
+            role_list = "\n".join(
+                [
+                    f"{index + 1}. {role.mention}"
+                    for index, role in enumerate(pledges_channels)
+                ]
+            )
+            embed = discord.Embed(
+                description=f"Multiple pledge channels found':\n{role_list}\nPlease reply with the number of the role you want."
+            )
+            msg = await ctx.send(embed=embed)
+
+            def check(m):
+                return (
+                    m.author == ctx.author
+                    and m.channel == ctx.channel
+                    and m.content.isdigit()
+                )
+
+            try:
+                response = await self.bot.wait_for("message", check=check, timeout=30.0)
+                selected_index = int(response.content) - 1
+
+                if selected_index < 0 or selected_index >= len(pledges_channels):
+                    return None, "Invalid selection. Command cancelled."
+
+                await msg.delete()
+                selected_channel = pledges_channels[selected_index]
+                await response.delete()
+            except (ValueError, IndexError):
+                return None, "Invalid selection. Command cancelled."
+            except asyncio.TimeoutError:
+                return None, "You took too long to respond. Command cancelled."
+        else:
+            selected_channel = pledges_channels[0]
+        
+        pledge_count = 0
+        async with ctx.typing():
+            async for message in selected_channel.history(after=discord.Object(id=after_message_id), limit=None):
+                if message.author.bot:
+                    continue
+                
+                numbers = re.findall(r'\d+', message.content)
+                numbers = list(map(int, numbers))
+
+                if len(numbers) == 0:
+                    continue
+                pledge_count += numbers[0]
+            
+        await utils.Embeds.send_success_embed(
+            ctx.channel,
+            ctx.author,
+            f"Total pledges counted in {selected_channel.mention}: **{pledge_count}**",
+        )
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
