@@ -501,6 +501,20 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=error_embed, delete_after=5)
 
+        if role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
+            error_embed = discord.Embed(
+                description=f"🚫 You cannot force the role '{role.name}' because it is higher or equal to your top role.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=error_embed, delete_after=5)
+
+        if member == ctx.author:
+            error_embed = discord.Embed(
+                description=f"🚫 You cannot force a role on yourself.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=error_embed, delete_after=5)
+
         if ctx.guild.id not in self.forced_roles:
             self.forced_roles[ctx.guild.id] = {}
 
@@ -527,7 +541,7 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """Re-applyforce roles if they are removed."""
+        """Re-apply forced roles if they are removed."""
         if before.roles == after.roles:
             return
 
