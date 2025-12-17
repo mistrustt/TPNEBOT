@@ -25,7 +25,7 @@ HEARDLE_GAME_DURATION = 20
 HEARDLE_CLIP_DURATION = 10
 DEFAULT_SNIPPET_DURATION = 15
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
-
+MAX_NAME_TRANSFORMATIONS = 6
 
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -64,14 +64,32 @@ class Music(commands.Cog, name="Music"):
         self.heardle_answers = {}
         self.snippet_debounce = {}
 
+        def check_parantheses(s):
+            return "(" in s and ")" in s
+
         def remove_parentheses(s):
             return re.sub(r"\(.*?\)", "", s).strip()
 
+        def check_brackets(s):
+            return "[" in s and "]" in s
+
         def remove_brackets(s):
             return re.sub(r"\[.*?\]", "", s).strip()
+        
+        def check_semi_brackets(s):
+            return "{" in s and "}" in s
 
+        def remove_semi_brackets(s):
+            return re.sub(r"\{.*?\}", "", s).strip()
+
+        def check_apostrophes(s):
+            return "'" in s    
+    
         def remove_apostrophes(s):
             return s.replace("'", "")
+
+        def check_periods(s):
+            return "." in s
 
         def remove_periods(s):
             return s.replace(".", "")
@@ -79,18 +97,23 @@ class Music(commands.Cog, name="Music"):
         def period_to_spaces(s):
             return s.replace(".", " ")
 
+        def check_commas(s):
+            return "," in s
+
         def remove_commas(s):
             return s.replace(",", "")
+        
+        def comma_to_spaces(s):
+            return s.replace(",", " ")
 
-        self.track_name_transformations = [
-            lambda x: x,
-            remove_parentheses,
-            remove_brackets,
-            remove_apostrophes,
-            remove_periods,
-            period_to_spaces,
-            remove_commas,
-        ]
+        self.track_name_transformations = {
+            check_parantheses: [remove_parentheses],
+            check_brackets: [remove_brackets],
+            check_semi_brackets: [remove_semi_brackets],
+            check_apostrophes: [remove_apostrophes],
+            check_periods: [remove_periods, period_to_spaces],
+            check_commas: [remove_commas, comma_to_spaces],
+        }
 
     async def cog_unload(self):
         await self.session.close()
@@ -1927,17 +1950,27 @@ class Music(commands.Cog, name="Music"):
 
     def get_most_acceptable_track_name(self, orig_name: str):
         name = orig_name.strip()
-        for func in self.track_name_transformations:
-            name = func(name)
+        for funcs in self.track_name_transformations.values():
+            for func in funcs:
+                name = func(name)
         return name
 
     def get_acceptable_track_names(self, orig_name: str):
         name = orig_name.lower().strip()
 
+        required_transformations = []
+
+        for check_func, transform_funcs in self.track_name_transformations.items():
+            if check_func(name):
+                for func in transform_funcs:
+                    if len(required_transformations) >= MAX_NAME_TRANSFORMATIONS:
+                        break
+                    required_transformations.append(func)
+
         # try all combos
         results = set()
-        for r in range(1, len(self.track_name_transformations) + 1):
-            for combo in product(self.track_name_transformations, repeat=r):
+        for r in range(1, len(required_transformations) + 1):
+            for combo in product(required_transformations, repeat=r):
                 temp = name
                 for func in combo:
                     temp = func(temp)
