@@ -2102,187 +2102,187 @@ class Music(commands.Cog, name="Music"):
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
         )
 
-    @commands.command(
-        name="heardle", help="Play a game of Heardle. Juice WRLD songs only."
-    )
-    async def heardle(self, ctx: commands.Context):
-        if any(member.id in self.heardle_blacklist for member in ctx.message.mentions):
-            await ctx.reply("nah nigga stick to your shitty heardle")
-            return
+    # @commands.command(
+    #     name="heardle", help="Play a game of Heardle. Juice WRLD songs only."
+    # )
+    # async def heardle(self, ctx: commands.Context):
+    #     if any(member.id in self.heardle_blacklist for member in ctx.message.mentions):
+    #         await ctx.reply("nah nigga stick to your shitty heardle")
+    #         return
 
-        if ctx.author.id == 567401702190350347 and random.random() < 0.01:
-            await utils.Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                f"You are too old for this command. Age detected: {random.randint(30, 40)}",
-            )
-            return
+    #     if ctx.author.id == 567401702190350347 and random.random() < 0.01:
+    #         await utils.Embeds.send_error_embed(
+    #             ctx.channel,
+    #             ctx.author,
+    #             f"You are too old for this command. Age detected: {random.randint(30, 40)}",
+    #         )
+    #         return
 
-        if ctx.author.id in self.ongoing_heardle:
-            await utils.Embeds.send_error_embed(
-                ctx.channel, ctx.author, "You already have an ongoing game of Heardle!"
-            )
-            return
+    #     if ctx.author.id in self.ongoing_heardle:
+    #         await utils.Embeds.send_error_embed(
+    #             ctx.channel, ctx.author, "You already have an ongoing game of Heardle!"
+    #         )
+    #         return
 
-        # clear existing files
-        self.handle_user_done_heardle(ctx.author.id)
+    #     # clear existing files
+    #     self.handle_user_done_heardle(ctx.author.id)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{JUICEWRLD_API}/juicewrld/radio/random/"
-            ) as response:
+    #     async with aiohttp.ClientSession() as session:
+    #         async with session.get(
+    #             f"{JUICEWRLD_API}/juicewrld/radio/random/"
+    #         ) as response:
 
-                async def handle_request_failed(ctx, code=None):
-                    embed = discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    if code:
-                        embed.set_image(url=f"https://http.cat/{code}")
-                    await ctx.reply(embed=embed, delete_after=5)
+    #             async def handle_request_failed(ctx, code=None):
+    #                 embed = discord.Embed(
+    #                     description="Request failed. Please try again later.",
+    #                     color=discord.Color.red(),
+    #                 )
+    #                 if code:
+    #                     embed.set_image(url=f"https://http.cat/{code}")
+    #                 await ctx.reply(embed=embed, delete_after=5)
 
-                if response.status != 200:
-                    await handle_request_failed(ctx, response.status)
-                    return
+    #             if response.status != 200:
+    #                 await handle_request_failed(ctx, response.status)
+    #                 return
 
-                data = await response.json()
+    #             data = await response.json()
 
-                song_data = data.get("song", None)
-                if not song_data:
-                    await handle_request_failed(ctx)
-                    return
+    #             song_data = data.get("song", None)
+    #             if not song_data:
+    #                 await handle_request_failed(ctx)
+    #                 return
 
-                self.ongoing_heardle.append(ctx.author.id)
-                track_tiles = song_data.get("track_titles", [])
-                path = data.get("path", "")
+    #             self.ongoing_heardle.append(ctx.author.id)
+    #             track_tiles = song_data.get("track_titles", [])
+    #             path = data.get("path", "")
 
-                async with ctx.typing():
-                    # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
-                    download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
-                    image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
-                    image_url = ctx.author.display_avatar.url
-                    async with session.get(image_url) as image_response:
-                        if image_response.status == 200:
-                            image_data = await image_response.read()
-                            with open(image_file_name, "wb") as img_file:
-                                img_file.write(image_data)
+    #             async with ctx.typing():
+    #                 # TODO: make function for downloading temp mp3s for other methods (snippet, etc)
+    #                 download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/?path={self.special_url_encode(path)}"
+    #                 image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
+    #                 image_url = ctx.author.display_avatar.url
+    #                 async with session.get(image_url) as image_response:
+    #                     if image_response.status == 200:
+    #                         image_data = await image_response.read()
+    #                         with open(image_file_name, "wb") as img_file:
+    #                             img_file.write(image_data)
 
-                    result, payload = await self.make_snippet(
-                        image_file_name,
-                        download_url,
-                        f"{ctx.author.id}_heardle",
-                        HEARDLE_CLIP_DURATION,
-                    )
-                    if result == False:
-                        await handle_request_failed(ctx, payload)
-                        self.handle_user_done_heardle(ctx.author.id)
-                        return
+    #                 result, payload = await self.make_snippet(
+    #                     image_file_name,
+    #                     download_url,
+    #                     f"{ctx.author.id}_heardle",
+    #                     HEARDLE_CLIP_DURATION,
+    #                 )
+    #                 if result == False:
+    #                     await handle_request_failed(ctx, payload)
+    #                     self.handle_user_done_heardle(ctx.author.id)
+    #                     return
 
-                    embed = discord.Embed(
-                        description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please send a message of a song title to guess the song or type `exit` to quit the game."
-                    )
-                    message = await ctx.channel.send(
-                        file=discord.File(payload), embed=embed
-                    )
+    #                 embed = discord.Embed(
+    #                     description=f"🎵 {ctx.author.mention}: Here is your clip, you have {HEARDLE_GAME_DURATION} seconds to guess. Please send a message of a song title to guess the song or type `exit` to quit the game."
+    #                 )
+    #                 message = await ctx.channel.send(
+    #                     file=discord.File(payload), embed=embed
+    #                 )
 
-                best_track_title = self.get_most_acceptable_track_name(
-                    song_data.get("name", "Unknown Title")
-                )
+    #             best_track_title = self.get_most_acceptable_track_name(
+    #                 song_data.get("name", "Unknown Title")
+    #             )
 
-                has_guessed = False
-                attempt = 1
-                acceptable_answers = []
-                self.heardle_answers[ctx.author.id] = best_track_title
-                for title in track_tiles:
-                    acceptable_answers.extend(self.get_acceptable_track_names(title))
+    #             has_guessed = False
+    #             attempt = 1
+    #             acceptable_answers = []
+    #             self.heardle_answers[ctx.author.id] = best_track_title
+    #             for title in track_tiles:
+    #                 acceptable_answers.extend(self.get_acceptable_track_names(title))
 
-                async def update_timer_message(
-                    message: discord.Message, full_name, start_time
-                ):
-                    try:
-                        while True:
-                            elapsed = asyncio.get_event_loop().time() - start_time
-                            hint_chars = int(
-                                elapsed // 3
-                            )  # reveal a character every 3 seconds, max 3 as curteousy of silmar
-                            hint = full_name[:hint_chars]
-                            for i in range(len(full_name) - hint_chars):
-                                if full_name[i + hint_chars] == " ":
-                                    hint += " "
-                                else:
-                                    hint += "?"
-                            await message.edit(
-                                content=f"Hint ({round(hint_chars)}/3): {hint}"
-                            )
+    #             async def update_timer_message(
+    #                 message: discord.Message, full_name, start_time
+    #             ):
+    #                 try:
+    #                     while True:
+    #                         elapsed = asyncio.get_event_loop().time() - start_time
+    #                         hint_chars = int(
+    #                             elapsed // 3
+    #                         )  # reveal a character every 3 seconds, max 3 as curteousy of silmar
+    #                         hint = full_name[:hint_chars]
+    #                         for i in range(len(full_name) - hint_chars):
+    #                             if full_name[i + hint_chars] == " ":
+    #                                 hint += " "
+    #                             else:
+    #                                 hint += "?"
+    #                         await message.edit(
+    #                             content=f"Hint ({round(hint_chars)}/3): {hint}"
+    #                         )
 
-                            if hint_chars >= 3:
-                                raise asyncio.CancelledError
+    #                         if hint_chars >= 3:
+    #                             raise asyncio.CancelledError
 
-                            await asyncio.sleep(1)
-                    except asyncio.CancelledError:
-                        # Task cancelled normally when game ends
-                        return
+    #                         await asyncio.sleep(1)
+    #                 except asyncio.CancelledError:
+    #                     # Task cancelled normally when game ends
+    #                     return
 
-                start_time = asyncio.get_event_loop().time()
-                update_task = asyncio.create_task(
-                    update_timer_message(message, best_track_title, start_time)
-                )
+    #             start_time = asyncio.get_event_loop().time()
+    #             update_task = asyncio.create_task(
+    #                 update_timer_message(message, best_track_title, start_time)
+    #             )
 
-                while has_guessed == False:
+    #             while has_guessed == False:
 
-                    def check_guess(m):
-                        return m.author == ctx.author and m.channel == ctx.channel
+    #                 def check_guess(m):
+    #                     return m.author == ctx.author and m.channel == ctx.channel
 
-                    try:
-                        elapsed = asyncio.get_event_loop().time() - start_time
-                        remaining_time = HEARDLE_GAME_DURATION - elapsed
-                        if remaining_time <= 0:
-                            raise TimeoutError
+    #                 try:
+    #                     elapsed = asyncio.get_event_loop().time() - start_time
+    #                     remaining_time = HEARDLE_GAME_DURATION - elapsed
+    #                     if remaining_time <= 0:
+    #                         raise TimeoutError
 
-                        guess_msg = await self.bot.wait_for(
-                            "message", check=check_guess, timeout=remaining_time
-                        )
-                    except TimeoutError:
-                        await utils.Embeds.send_warning_embed(
-                            ctx.channel,
-                            ctx.author,
-                            f"Time's up! You didn't guess the song ({best_track_title}) in time.",
-                        )
-                        try:
-                            await message.delete()
-                        except:
-                            pass
-                        self.handle_user_done_heardle(ctx.author.id)
-                        update_task.cancel()
-                        await self.bot.database.add_heardle_loss(ctx.author.id)
-                        return
+    #                     guess_msg = await self.bot.wait_for(
+    #                         "message", check=check_guess, timeout=remaining_time
+    #                     )
+    #                 except TimeoutError:
+    #                     await utils.Embeds.send_warning_embed(
+    #                         ctx.channel,
+    #                         ctx.author,
+    #                         f"Time's up! You didn't guess the song ({best_track_title}) in time.",
+    #                     )
+    #                     try:
+    #                         await message.delete()
+    #                     except:
+    #                         pass
+    #                     self.handle_user_done_heardle(ctx.author.id)
+    #                     update_task.cancel()
+    #                     await self.bot.database.add_heardle_loss(ctx.author.id)
+    #                     return
 
-                    guess = guess_msg.content.strip().lower()
-                    if guess == "exit":
-                        await guess_msg.add_reaction("👋")
-                        try:
-                            await message.delete()
-                        except:
-                            pass
-                        await self.bot.database.add_heardle_loss(ctx.author.id)
-                        self.handle_user_done_heardle(ctx.author.id)
-                        return
-                    elif guess in acceptable_answers:
-                        has_guessed = True
-                    else:
-                        attempt += 1
-                await utils.Embeds.send_success_embed(
-                    ctx.channel,
-                    ctx.author,
-                    f"Congratulations! You guessed the song correctly: **{best_track_title}**!",
-                )
-                await self.bot.database.add_heardle_win(ctx.author.id)
-                try:
-                    await message.delete()
-                except:
-                    pass
-                self.handle_user_done_heardle(ctx.author.id)
-                update_task.cancel()
+    #                 guess = guess_msg.content.strip().lower()
+    #                 if guess == "exit":
+    #                     await guess_msg.add_reaction("👋")
+    #                     try:
+    #                         await message.delete()
+    #                     except:
+    #                         pass
+    #                     await self.bot.database.add_heardle_loss(ctx.author.id)
+    #                     self.handle_user_done_heardle(ctx.author.id)
+    #                     return
+    #                 elif guess in acceptable_answers:
+    #                     has_guessed = True
+    #                 else:
+    #                     attempt += 1
+    #             await utils.Embeds.send_success_embed(
+    #                 ctx.channel,
+    #                 ctx.author,
+    #                 f"Congratulations! You guessed the song correctly: **{best_track_title}**!",
+    #             )
+    #             await self.bot.database.add_heardle_win(ctx.author.id)
+    #             try:
+    #                 await message.delete()
+    #             except:
+    #                 pass
+    #             self.handle_user_done_heardle(ctx.author.id)
+    #             update_task.cancel()
 
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
