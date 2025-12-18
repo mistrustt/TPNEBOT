@@ -2494,6 +2494,7 @@ class Music(commands.Cog, name="Music"):
             selected_channel = pledges_channels[0]
         
         pledge_count = 0
+        test = []
         async with ctx.typing():
             async for message in selected_channel.history(after=discord.Object(id=after_message_id), limit=None):
                 if message.author.bot:
@@ -2505,11 +2506,15 @@ class Music(commands.Cog, name="Music"):
                 if len(numbers) == 0:
                     continue
                 pledge_count += numbers[0]
-            
+                test.append(numbers[0])
+
+        await ctx.reply(f"Debug pledge amounts found: {test}")
+        
         await utils.Embeds.send_success_embed(
             ctx.channel,
             ctx.author,
-            f"Total pledges counted in {selected_channel.mention}: **{pledge_count}**",
+            f"Total pledges counted in {selected_channel.mention}: **${pledge_count}**",
+            delete_after=None
         )
 
 async def setup(bot: commands.Bot) -> None:
