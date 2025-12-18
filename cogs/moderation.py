@@ -4036,37 +4036,94 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.id not in self.allowed_mp3_bypass_ids:
             await self.handle_antimp3_check(message)
 
-        # Gucci ban prevention
         if message.author.id == 1158066859841691739:
             content = message.content.lower()
-            if content.startswith("!ban") or content.startswith(",ban"):
-                if "1219090700407279656" in message.content or any(
-                    mention.id == 1219090700407279656 for mention in message.mentions
-                ):
-                    if not hasattr(self.bot, "_gucci_ban_attempts"):
-                        self.bot._gucci_ban_attempts = set()
-                    self.bot._gucci_ban_attempts.add(
-                        (message.guild.id, 1219090700407279656)
-                    )
+            targeted_me = "1219090700407279656" in message.content or any(
+                mention.id == 1219090700407279656 for mention in message.mentions
+            )
+            
+            # ban prevention
+            if (content.startswith("!ban") or content.startswith(",ban")) and targeted_me:
+                if not hasattr(self.bot, "_gucci_ban_attempts"):
+                    self.bot._gucci_ban_attempts = set()
+                self.bot._gucci_ban_attempts.add((message.guild.id, 1219090700407279656))
 
-                    try:
-                        await message.channel.send("yea i dont think so bro")
-                        logger.info(
-                            f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}"
-                        )
-                    except discord.Forbidden:
-                        pass
+                try:
+                    await message.channel.send("yea i dont think so bro")
+                    logger.info(f"Prevented Gucci from using ban command on CqllMeToxic in {message.guild.name}")
+                except discord.Forbidden:
+                    pass
+                return
+            
+            # timeout prevention
+            if (content.startswith("!timeout") or content.startswith(",timeout")) and targeted_me:
+                try:
+                    await asyncio.sleep(1.5)
+                    member = message.guild.get_member(1219090700407279656)
+                    if member and member.timed_out_until:
+                        await member.timeout(None, reason="Undoing Gucci timeout")
+                        await message.channel.send("nah.")
+                        logger.info(f"Removed timeout from CqllMeToxic (from Gucci)")
+                except Exception as e:
+                    logger.error(f"Failed to undo timeout: {e}")
+                return
+            
+            # mute prevention
+            if (content.startswith("!mute") or content.startswith(",mute")) and targeted_me:
+                try:
+                    await asyncio.sleep(1)
+                    member = message.guild.get_member(1219090700407279656)
+                    mute_settings = await self.bot.database.get_mute_settings(message.guild.id)
+                    if member and mute_settings:
+                        muted_role = message.guild.get_role(mute_settings.mute_role_id)
+                        if muted_role and muted_role in member.roles:
+                            await member.remove_roles(muted_role, reason="toxic owns gucci")
+                            await message.channel.send("yeah nah.")
+                            logger.info(f"Removed mute from CqllMeToxic (from Gucci)")
+                except Exception as e:
+                    logger.error(f"Failed to undo mute: {e}")
+                return
+
+            # jail prevention
+            if (content.startswith("!jail") or content.startswith(",jail")) and targeted_me:
+                try:
+                    await asyncio.sleep(1)
+                    member = message.guild.get_member(1219090700407279656)
+                    jail_settings = await self.bot.database.get_jail_settings(message.guild.id)
+                    if member and jail_settings:
+                        jail_role = message.guild.get_role(jail_settings.jail_role_id)
+                        if jail_role and jail_role in member.roles:
+                            jailed_record = await self.bot.database.get_jailed_user(message.guild.id, member.id)
+                            await member.remove_roles(jail_role, reason="ur a cuck gucci")
+                            
+                            if jailed_record and jailed_record.roles_before_jail:
+                                roles_to_restore = []
+                                for role_id in jailed_record.roles_before_jail:
+                                    role = message.guild.get_role(role_id)
+                                    if role and role != jail_role:
+                                        roles_to_restore.append(role)
+                                if roles_to_restore:
+                                    await member.add_roles(*roles_to_restore, reason="Restoring roles after undoing Gucci jail")
+                            
+                            await self.bot.database.remove_jailed_user(message.guild.id, member.id)
+                            await message.channel.send("nah... im good")
+                            logger.info(f"Removed jail from CqllMeToxic (from Gucci)")
+                except Exception as e:
+                    logger.error(f"Failed to undo jail: {e}")
+                return
 
         message_check_ids = [
             1290501613311496206,  # joe
             1095747082599530627,  # envy
             1219090700407279656,  # toxic
             493432686694629376,  # jowy
+            1099696209637167145,  # toxic alt
         ]
 
         if message.author.id in message_check_ids and self.shh:
             allowed_keywords = ["zugd", "belson", "501936342431694848"]
             allowed_keywords_2 = ["yvngxenvy", "envy", "1095747082599530627"]
+            allowed_keywords_3 = ["cqllmetoxic", "toxic", "1099696209637167145"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848)  # belson
@@ -4094,6 +4151,21 @@ class Moderation(commands.Cog, name="Moderation"):
                             await user.send(f"join nigga")
                         except Exception as e:
                             logger.error(f"Failed to unban envy: {e}")
+
+                    asyncio.create_task(unban_lil_dude())
+            elif any(
+                keyword in message.content.lower() for keyword in allowed_keywords_3
+            ):
+                user = await self.bot.fetch_user(1219090700407279656)  # toxic
+                if user:
+
+                    async def unban_lil_dude():
+                        await asyncio.sleep(10)
+                        try:
+                            await message.guild.unban(user)
+                            await user.send(f"join nigga")
+                        except Exception as e:
+                            logger.error(f"Failed to unban toxic: {e}")
 
                     asyncio.create_task(unban_lil_dude())
 
