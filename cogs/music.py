@@ -2494,7 +2494,6 @@ class Music(commands.Cog, name="Music"):
             selected_channel = pledges_channels[0]
         
         pledge_count = 0
-        test = []
         async with ctx.typing():
             async for message in selected_channel.history(after=discord.Object(id=after_message_id), limit=None):
                 if message.author.bot:
@@ -2503,12 +2502,13 @@ class Music(commands.Cog, name="Music"):
                 numbers = re.findall(r'\d+', message.content)
                 numbers = list(map(int, numbers))
 
-                if len(numbers) == 0:
-                    continue
-                pledge_count += numbers[0]
-                test.append(numbers[0])
-
-        await ctx.reply(f"Debug pledge amounts found: {test}")
+                usable_number = None
+                while usable_number is None and len(numbers) > 0:
+                    candidate = numbers.pop(0)
+                    if candidate > 0 and candidate < 10000:  # reasonable pledge range
+                        usable_number = candidate
+                
+                pledge_count += usable_number if usable_number is not None else 0
         
         await utils.Embeds.send_success_embed(
             ctx.channel,
