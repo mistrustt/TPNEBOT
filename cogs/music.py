@@ -2444,7 +2444,7 @@ class Music(commands.Cog, name="Music"):
                 channels.append(channel)
         return channels
 
-    @commands.command(name="countpledge", aliases=["cp", "countpledges"])
+    @commands.command(name="countpledge", aliases=["pledges", "pledged", "countpledges"])
     @commands.check_any(commands.has_permissions(administrator=True), commands.check(can_test))
     async def countpledge(self, ctx: commands.Context, after_message_id: int = 0):
         pledges_channels = self.find_pledges_channel(ctx.guild)
