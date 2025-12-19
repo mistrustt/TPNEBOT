@@ -4128,46 +4128,43 @@ class Moderation(commands.Cog, name="Moderation"):
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
                 user = await self.bot.fetch_user(501936342431694848)  # belson
                 if user:
-
-                    async def unban_lil_dude():
+                    async def unban_lil_dude(_user):
                         await asyncio.sleep(10)
                         try:
-                            await message.guild.unban(user)
+                            await message.guild.unban(_user)
                             await user.send(f"join nigga")
                         except Exception as e:
                             logger.error(f"Failed to unban belson: {e}")
 
-                    asyncio.create_task(unban_lil_dude())
+                    asyncio.create_task(unban_lil_dude(user))
             elif any(
                 keyword in message.content.lower() for keyword in allowed_keywords_2
             ):
                 user = await self.bot.fetch_user(1095747082599530627)  # envy
                 if user:
-
-                    async def unban_lil_dude():
+                    async def unban_lil_dude(_user):
                         await asyncio.sleep(10)
                         try:
-                            await message.guild.unban(user)
+                            await message.guild.unban(_user)
                             await user.send(f"join nigga")
                         except Exception as e:
-                            logger.error(f"Failed to unban envy: {e}")
+                            logger.error(f"Failed to unban belson: {e}")
 
-                    asyncio.create_task(unban_lil_dude())
+                    asyncio.create_task(unban_lil_dude(user))
             elif any(
                 keyword in message.content.lower() for keyword in allowed_keywords_3
             ):
                 user = await self.bot.fetch_user(1219090700407279656)  # toxic
                 if user:
-
-                    async def unban_lil_dude():
+                    async def unban_lil_dude(_user):
                         await asyncio.sleep(10)
                         try:
-                            await message.guild.unban(user)
+                            await message.guild.unban(_user)
                             await user.send(f"join nigga")
                         except Exception as e:
-                            logger.error(f"Failed to unban toxic: {e}")
+                            logger.error(f"Failed to unban belson: {e}")
 
-                    asyncio.create_task(unban_lil_dude())
+                    asyncio.create_task(unban_lil_dude(user))
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
