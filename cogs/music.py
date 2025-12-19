@@ -1561,14 +1561,15 @@ class Music(commands.Cog, name="Music"):
     async def create_song_view(self, song_data: dict, random_leak: bool = False):
         class SongContainer(discord.ui.Container):
             ALBUMS = {
-                "JUTE": {"name": "JUICED UP THE EP", "color": "#FFE602"},
+                "jute": {"name": "JUICED UP THE EP", "color": "#FFE602"},
                 "LND": {"name": "Legends Never Die", "color": "#F700FF"},
-                "AFF": {"name": "affliction", "color": "#000000"},
-                "HIH 9 9 9": {
+                "afflictions": {"name": "affliction", "color": "#000000"},
+                "bdm": {"name": "BINGEDRINKINGMUSIC", "color": "#000000"},
+                "HIH 999": {
                     "name": "Heartbroken In Hollywood 9 9 9",
                     "color": "#FF653E",
                 },
-                "JW 9 9 9": {"name": "JuiceWRLD 9 9 9", "color": "#FF2C2C"},
+                "jw 999": {"name": "JuiceWRLD 9 9 9", "color": "#FF2C2C"},
                 "ND": {"name": "NOTHINGS DIFFERENT </3", "color": "#FF8800"},
                 "GB&GR": {"name": "Goodbye & Good Riddance", "color": "#008CFF"},
                 "GB&GR (AE)": {
@@ -1646,17 +1647,6 @@ class Music(commands.Cog, name="Music"):
                 era_name = song.get("era", []).get("name", "N/A")
                 image_url = song.get("image_url")
 
-                header = discord.ui.Section(
-                    accessory=discord.ui.Button(
-                        label="Tracker",
-                        emoji="<:fart:1445127619744890911>",
-                        url="https://juicewrldapi.com/",
-                    )
-                )
-                header.add_item(
-                    discord.ui.TextDisplay(f"### {name}\n{', '.join(track_titles)}")
-                )
-
                 thumb = discord.ui.Section(
                     accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url)
                 )
@@ -1669,18 +1659,18 @@ class Music(commands.Cog, name="Music"):
 
                 thumb.add_item(
                     discord.ui.TextDisplay(
-                        f"Producer(s): **{producers}**\nEngineer(s): **{engineers}**"
-                    )
-                )
-                thumb.add_item(
-                    discord.ui.TextDisplay(
-                        f'**Era**\n{album['name'] if album else era_name}\n'
+                        f"### {name}\n-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n-# Producer(s): **{producers}**\n-# Engineer(s): **{engineers}**"
                     )
                 )
 
-                self.add_item(header)
-                self.add_item(discord.ui.Separator())
                 self.add_item(thumb)
+                self.add_item(discord.ui.Separator())
+
+                self.add_item(
+                    discord.ui.TextDisplay(
+                        f"**Era**\n{album['name'] if album else era_name}\n"
+                    )
+                )
 
                 field = self.FIELDS if not random_leak else self.RANDOM_LEAK_FIELDS
 
@@ -1709,15 +1699,14 @@ class Music(commands.Cog, name="Music"):
                     filtered_files = [
                         f
                         for f in downloads
-                        if og
-                        and "Unreleased Discography" not in f
-                        or not og
-                        and "Original Files" not in f
+                        if (og and "Unreleased Discography" not in f)
+                        or (not og and "Original Files" not in f)
                     ]
 
+                    rows = []
                     row = discord.ui.ActionRow()
 
-                    for i, path in enumerate(filtered_files):
+                    for path in filtered_files:
                         ext = (
                             "OG " + path.split(".")[-1].upper()
                             if "Original Files" in path
@@ -1725,15 +1714,36 @@ class Music(commands.Cog, name="Music"):
                         )
 
                         url = main_url + quote(path)
-                        button = discord.ui.Button(label=ext, url=url)
-                        row.add_item(button)
+                        row.add_item(discord.ui.Button(label=ext, url=url))
 
-                        if (i + 1) % 5 == 0:
-                            self.add_item(row)
+                        if len(row.children) == 5:
+                            rows.append(row)
                             row = discord.ui.ActionRow()
 
-                    if len(row.children) > 0:
-                        self.add_item(row)
+                    if row.children:
+                        rows.append(row)
+
+                    if rows and len(rows[-1].children) < 5:
+                        rows[-1].add_item(
+                            discord.ui.Button(
+                                label="Tracker",
+                                emoji="<:fart:1445127619744890911>",
+                                url="https://juicewrldapi.com/",
+                            )
+                        )
+                    else:
+                        tracker_row = discord.ui.ActionRow()
+                        tracker_row.add_item(
+                            discord.ui.Button(
+                                label="Tracker",
+                                emoji="<:fart:1445127619744890911>",
+                                url="https://juicewrldapi.com/",
+                            )
+                        )
+                        rows.append(tracker_row)
+
+                    for r in rows:
+                        self.add_item(r)
 
         downloads, og = await self.check_file_name(song_data)
 
