@@ -1659,7 +1659,7 @@ class Music(commands.Cog, name="Music"):
 
                 thumb.add_item(
                     discord.ui.TextDisplay(
-                        f"### {name}\n-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n-# Producer(s): **{producers}**\n-# Engineer(s): **{engineers}**"
+                        f"### {name}\n-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n-# Engineer(s): **{engineers}**\n-# Producer(s): **{producers}**"
                     )
                 )
 
