@@ -1909,7 +1909,7 @@ class Music(commands.Cog, name="Music"):
             )
 
     @commands.command("snippet", aliases=["snip"])
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.has_role(1414742766386413590)
     async def snippet(self, ctx: commands.Context, *, query: str):
         song_list = await self.fetch_song(ctx, query)
         if song_list is None:
