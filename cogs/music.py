@@ -1515,7 +1515,59 @@ class Music(commands.Cog, name="Music"):
 
     # start of my beautiful commands
 
-    async def request_filename(self, file_name: str, length: str):
+    async def fetch_song(self, ctx: commands.Context, query: str):
+        async with self.session.get(
+            JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
+        ) as response:
+            if response.status != 200:
+                await ctx.reply(
+                    embed=discord.Embed(
+                        description="Request failed. Please try again later.",
+                        color=discord.Color.red(),
+                    ).set_image(url=f"https://http.cat/{response.status}"),
+                    delete_after=5,
+                )
+                return None
+
+            data = await response.json()
+
+        song_list = [
+            song
+            for song in data.get("results", [])
+            if "session" not in song.get("leak_type").lower()
+        ]
+
+        return song_list
+
+    async def fetch_snippet(self, name: str):
+        async with self.session.get(
+            JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": name}
+        ) as response:
+            if response.status != 200:
+                return None
+
+            data = await response.json()
+
+        valid_snippets = []
+
+        for item in data.get("items", []):
+            if item.get("type") != "file":
+                continue
+
+            mime = item.get("mime_type", "")
+
+            if mime and mime.startswith("video/"):
+                path = item.get("path")
+                
+                fixed_path = quote(path, safe="/") # lowkey wanted to use envys special_url_encode
+                valid_snippets.append(
+                    "https://juicewrldapi.com/juicewrld/files/download/?path="
+                    + fixed_path
+                )
+
+        return valid_snippets
+
+    async def fetch_downloads(self, file_name: str, length: str):
         async with self.session.get(
             JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": file_name}
         ) as response:
@@ -1542,11 +1594,11 @@ class Music(commands.Cog, name="Music"):
 
         length = song.get("length", "0:00")
 
-        downloads = await self.request_filename(file_name, length)
+        downloads = await self.fetch_downloads(file_name, length)
         og = bool(downloads) and file_name != name + "."
 
         if not downloads:
-            downloads = await self.request_filename(name + ".", length)
+            downloads = await self.fetch_downloads(name + ".", length)
             og = False
 
         return downloads, og
@@ -1752,33 +1804,55 @@ class Music(commands.Cog, name="Music"):
 
         return layout_view
 
-    @commands.command("leak", description="Search for a Juice WRLD leak by name")
-    async def leak(self, ctx: commands.Context, *, query: str):
-        # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
-        async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
-        ) as response:
-            if response.status != 200:
-                return await ctx.send(
-                    embed=discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red(),
-                    ).set_image(url=f"https://http.cat/{response.status}"),
-                    delete_after=5,
+    async def create_snippet_view(self, song: dict):
+        class Container(discord.ui.Container):
+            def __init__(self, song: dict, valid_snippets: dict):
+                super().__init__(accent_color=0x2B2D31)
+
+                name = song.get("name")
+                engineers = song.get("engineers")
+                producers = song.get("producers")
+
+                alt_names = [t for t in song.get("track_titles", []) if t != name]
+
+                image_url = song.get("image_url")
+
+                thumb = discord.ui.Section(
+                    accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url)
+                )
+                thumb.add_item(
+                    discord.ui.TextDisplay(
+                        f"### {name}\n-# Alt Name(s): **{', '.join(alt_names) if alt_names else 'N/A'}**\n-# Engineer(s): **{engineers}**\n-# Producer(s): **{producers}**"
+                    )
                 )
 
-            data = await response.json()
+                self.add_item(thumb)
+                self.add_item(discord.ui.Separator())
 
-        # filter out the dogshit sessions cuz why are they even there we dgaf
-        song_list = [
-            song
-            for song in data.get("results", [])
-            if "session" not in song.get("leak_type").lower()
-        ]
+                media_gallery = discord.ui.MediaGallery()
+                for url in valid_snippets:
+                    media_gallery.add_item(media=url)
+
+                self.add_item(media_gallery)
+
+        name = song.get("name")
+
+        valid_snippets = await self.fetch_snippet(name)
+
+        layout_view = discord.ui.LayoutView(timeout=None)
+        layout_view.add_item(Container(song, valid_snippets))
+
+        return layout_view if valid_snippets else None
+
+    @commands.command("leak", description="Search for a Juice WRLD leak by name")
+    async def leak(self, ctx: commands.Context, *, query: str):
+        song_list = await self.fetch_song(ctx, query)
+        if song_list is None:
+            return
 
         if len(song_list) == 1:
             layout_view = await self.create_song_view(song_list[0])
-            await ctx.send(view=layout_view)
+            await ctx.reply(view=layout_view)
 
         elif len(song_list) > 1:
             results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
@@ -1787,7 +1861,7 @@ class Music(commands.Cog, name="Music"):
             options = [
                 discord.SelectOption(
                     label=(
-                        lambda t: f'{t[0]} ({', '.join(t[1:])})' if len(t) > 1 else t[0]
+                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
                     )(song.get("track_titles"))[:100],
                     value=str(song["id"]),
                 )
@@ -1818,6 +1892,84 @@ class Music(commands.Cog, name="Music"):
                         )
 
                     await itn.response.edit_message(embed=None, view=view)
+
+            view = discord.ui.View(timeout=None)
+            view.add_item(SongSelect(options, song_map, ctx.author, self))
+
+            embed = discord.Embed(
+                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**"
+            )
+            await ctx.reply(embed=embed, view=view)
+
+        else:
+            return await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f"I couldnt find a song with the name: `{query}`",
+            )
+
+    @commands.command("snippet", aliases=["snip"])
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def snippet(self, ctx: commands.Context, *, query: str):
+        song_list = await self.fetch_song(ctx, query)
+        if song_list is None:
+            return
+
+        if len(song_list) == 1:
+            layout_view = await self.create_snippet_view(song_list[0])
+            if layout_view is None:
+                return await ctx.reply(
+                    "lowkey this new so its gonna be missing a lot but let big bro flow know so we can fix this",
+                    delete_after=5,
+                )
+            await ctx.reply(view=layout_view)
+
+        elif len(song_list) > 1:
+            results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
+            song_map = {str(song["id"]): song for song in results}
+
+            options = [
+                discord.SelectOption(
+                    label=(
+                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
+                    )(song.get("track_titles"))[:100],
+                    value=str(song["id"]),
+                )
+                for song in results
+            ]
+
+            class SongSelect(discord.ui.Select):
+                def __init__(self, options, song_map, author, cog: Music):
+                    self.song_map = song_map
+                    self.author = author
+                    self.cog = cog
+                    super().__init__(
+                        placeholder="Select a song...",
+                        min_values=1,
+                        max_values=1,
+                        options=options,
+                    )
+
+                async def callback(self, itn: discord.Interaction):
+                    song_id = self.values[0]
+                    song = self.song_map[song_id]
+
+                    layout_view = await self.cog.create_snippet_view(song)
+
+                    if layout_view is None:
+                        return await itn.response.edit_message(
+                            content="lowkey this new so its gonna be missing a lot but let big bro flow know so we can fix this",
+                            embed=None,
+                            view=None,
+                            delete_after=5,
+                        )
+
+                    if self.author != itn.user:
+                        return await itn.response.send_message(
+                            view=layout_view, ephemeral=True
+                        )
+
+                    await itn.response.edit_message(embed=None, view=layout_view)
 
             view = discord.ui.View(timeout=None)
             view.add_item(SongSelect(options, song_map, ctx.author, self))
