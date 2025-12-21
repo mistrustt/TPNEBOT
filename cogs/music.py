@@ -1830,8 +1830,9 @@ class Music(commands.Cog, name="Music"):
                 self.add_item(discord.ui.Separator())
 
                 media_gallery = discord.ui.MediaGallery()
-                for url in valid_snippets:
-                    media_gallery.add_item(media=url)
+                if valid_snippets:
+                    for url in valid_snippets:
+                        media_gallery.add_item(media=url)
 
                 self.add_item(media_gallery)
 
