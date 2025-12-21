@@ -2676,7 +2676,7 @@ class Music(commands.Cog, name="Music"):
         await utils.Embeds.send_success_embed(
             ctx.channel,
             ctx.author,
-            f"Total pledges counted in {selected_channel.mention}: **${pledge_count}**",
+            f"Total pledges counted ({selected_channel.mention}): **${pledge_count:,}**",
             delete_after=None
         )
 
