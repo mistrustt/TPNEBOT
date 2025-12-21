@@ -1541,7 +1541,7 @@ class Music(commands.Cog, name="Music"):
 
     async def fetch_snippet(self, name: str):
         async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": name}
+            JUICEWRLD_API + "/juicewrld/files/browse/", params={"path": f'Snippets/{name}'}
         ) as response:
             if response.status != 200:
                 return None
