@@ -2380,6 +2380,7 @@ class Economy(commands.Cog):
 
     @commands.command(name='xmas', description="Open your Christmas gift!")
     async def xmas(self, ctx: commands.Context):
+        """Open your Christmas gift!"""
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         gift_amount = Decimal(str(user_id))
