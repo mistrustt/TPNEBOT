@@ -2732,10 +2732,10 @@ class Casino(commands.Cog):
     @commands.command(
         name="double",
         aliases=["don", "doubleornothing"],
-        description="Start a double or nothing game with a specified bet amount.",
+        description="Start a double or nothing game",
     )
     async def double_or_nothing(self, ctx: Context, bet_amount: str):
-        """Start a double or nothing game with the specified bet amount."""
+        """Start a double or nothing game"""
         user_id = ctx.author.id
 
         PF = await self.prove_fairness(user_id)
@@ -2809,7 +2809,6 @@ class Casino(commands.Cog):
     async def blackjack(self, ctx: Context, bet_amount: str):
         """
         Play Blackjack with a fresh deck for each game.
-        Supports Hit, Stay, Double Down, and Split.
         """
         user_id = ctx.author.id
 

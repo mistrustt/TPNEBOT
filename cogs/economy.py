@@ -1259,6 +1259,40 @@ class Economy(commands.Cog):
             embed.set_footer(
                 text=f"Total: {await self.formatter(wallet_balance + bank_balance)}"
             )
+
+            # Fetch last 5 transactions
+            user_transactions = await self.bot.database.get_transactions_by_user_id(
+                member.id, limit=5
+            )
+
+            if user_transactions:
+                transactions_text = []
+                for tx in user_transactions:
+                    amount = Decimal(tx.amount) if tx.amount else Decimal("0")
+                    formatted_amount = await self.short_formatter(amount)
+                    description = tx.description if tx.description else "No description"
+                    
+                    if tx.from_user_id == member.id and tx.to_user_id != member.id:
+                        direction = "📤"
+                    elif tx.from_user_id != member.id and tx.to_user_id == member.id:
+                        direction = "📥"
+                    else:
+                        direction = "🔄"
+                    
+                    # Truncate description if too long
+                    if len(description) > 25:
+                        description = description[:22] + "..."
+                    
+                    transactions_text.append(
+                        f"{direction} **{formatted_amount}** • {description}"
+                    )
+                
+                embed.add_field(
+                    name="Recent Transactions",
+                    value="\n".join(transactions_text),
+                    inline=False
+                )
+
             await ctx.reply(embed=embed)
         except ValueError as e:
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
