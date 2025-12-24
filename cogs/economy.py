@@ -2378,6 +2378,48 @@ class Economy(commands.Cog):
         message = await ctx.reply(embed=embed, view=view)
         view.message = message
 
+    @commands.command(name='xmas', description="Open your Christmas gift!")
+    async def xmas(self, ctx: commands.Context):
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        gift_amount = Decimal(str(user_id))
+
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=gift_amount,
+                description="Christmas Gift",
+            )
+        except ValueError as e:
+            embed = discord.Embed(
+                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        color = (
+            discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel)
+            else (
+                ctx.author.top_role.color
+                if ctx.author.top_role
+                else discord.Color.blurple()
+            )
+        )
+
+        embed = discord.Embed(
+            description=f"🎄 Merry Christmas from TPNE! You received a gift of {self.currency_name} **{await self.formatter(gift_amount)}**!",
+            color=color,
+        )
+        embed.set_author(
+            name="Christmas Gift", icon_url=self.utils.get_avatar_url(ctx.author)
+        )
+
+        await self.bot.database.set_cooldown(
+            ctx.author.id, ctx.command.qualified_name, 999999999
+        )
+        await ctx.reply(embed=embed)
+
     @commands.group(name="invest", aliases=["coin"], invoke_without_command=True)
     async def invest(self, ctx: commands.Context):
         prefix = await self.bot.get_prefix(ctx.message)
