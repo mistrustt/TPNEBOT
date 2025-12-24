@@ -1257,7 +1257,7 @@ class Economy(commands.Cog):
                 icon_url=self.utils.get_avatar_url(member),
             )
             embed.set_footer(
-                text=f"Total: {await self.formatter(wallet_balance + bank_balance)}"
+                text=f"Total Balance: {await self.formatter(wallet_balance + bank_balance)}"
             )
 
             # Fetch last 5 transactions
