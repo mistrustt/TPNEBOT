@@ -1069,6 +1069,14 @@ class Fun(commands.Cog, name="Fun"):
             except discord.Forbidden:
                 del self.bot.nickname_force[after.id]
 
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.channel.id == 1453493294389661716:
+            if not message.attachments:
+                await message.delete()
+            else:
+                await message.add_reaction('⬆️')
+                await message.add_reaction('⬇️')            
 
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))
