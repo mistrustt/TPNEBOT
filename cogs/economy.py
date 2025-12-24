@@ -1262,7 +1262,7 @@ class Economy(commands.Cog):
 
             # Fetch last 5 transactions
             user_transactions = await self.bot.database.get_transactions_by_user_id(
-                member.id, limit=5
+                member.id, limit=3
             )
 
             if user_transactions:
