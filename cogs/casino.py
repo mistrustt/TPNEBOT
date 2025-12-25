@@ -3511,10 +3511,14 @@ class Casino(commands.Cog):
 
         winnings = (stake * payout_mult).quantize(Decimal("0.01"))
 
-        if winnings:
+        profit = (stake * payout_mult).quantize(Decimal("0.01"))
+
+        if payout_mult > 0:
+            total_return = (stake + profit).quantize(Decimal("0.01"))
             await self.bot.database.process_treasury_transaction(
-                wallet_id, winnings, "Baccarat Win"
+                wallet_id, total_return, "Baccarat Payout"
             )
+
             revealed_seed, new_hash = await self.bot.database.increment_win(
                 uid,
                 "baccarat",
@@ -3535,17 +3539,20 @@ class Casino(commands.Cog):
                 hash_hex=PF["server_seed_hash"],
             )
 
+
         def prettify(hand):
             return " ".join(hand)
 
         title = f"🏦 Banker {b_total} – 👤 Player {p_total}"
         color = discord.Color.green() if winnings else discord.Color.red()
+        display_amt = profit if payout_mult > 0 else stake
+        label = "Won" if payout_mult > 0 else "Lost"
         desc = (
             f"**Result:** {result.capitalize()}\n"
             f"**Your Bet:** {side.capitalize()}\n\n"
             f"👤 Player {prettify(player)}\n"
             f"🏦 Banker {prettify(banker)}\n\n"
-            f"{'Won' if winnings else 'Lost'} **{await self.formatter(winnings or stake)} {currency}** "
+            f"{label} **{await self.formatter(display_amt)} {currency}**"
             f"({payout_mult}×)"
         )
 
