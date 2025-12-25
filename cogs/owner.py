@@ -1770,7 +1770,7 @@ class Owner(commands.Cog, name="Owner"):
             
             # Clear all cooldowns for all users
             for command_name in all_commands:
-                await self.bot.database.clear_all_cooldowns(command_name)
+                await self.bot.database.clear_all_cooldowns()
             
             embed = discord.Embed(
                 description="All cooldowns for all users have been reset.",
