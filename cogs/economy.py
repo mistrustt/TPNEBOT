@@ -2417,7 +2417,7 @@ class Economy(commands.Cog):
         """Open your Christmas gift!"""
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        gift_amount = Decimal(str(user_id))
+        gift_amount = Decimal(str(user_id)) * Decimal("2") # Unique amount based on user ID
 
         try:
             await self.bot.database.process_treasury_transaction(
