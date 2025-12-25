@@ -2245,7 +2245,17 @@ class DatabaseManager:
                 )
             )
             await session.commit()
-
+    
+    async def clear_all_cooldowns(self):
+        """Wipes all cooldowns from the database and re-initializes the table."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                await session.execute(delete(CommandCooldown))
+                await session.commit()
+                
+                async with self.engine.begin() as conn:
+                    await conn.run_sync(CommandCooldown.__table__.create, checkfirst=True)
+        
     async def set_cooldown(
         self, user_id: int, command_name: str, cooldown_seconds: int
     ):

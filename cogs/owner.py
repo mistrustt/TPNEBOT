@@ -1755,14 +1755,36 @@ class Owner(commands.Cog, name="Owner"):
 
     @commands.command(
         name="resetcooldowns",
-        help="Resets all cooldowns for a specified user",
+        help="Resets all cooldowns for a specified user or all users if 'all' is specified",
         aliases=["rscd"],
         hidden=True,
     )
     @commands.is_owner()
-    async def reset_cooldowns(self, ctx: Context, user: discord.User = None):
-        """Resets all cooldowns for a specified user."""
+    async def reset_cooldowns(self, ctx: Context, user: Union[discord.User, str] = None):
+        """Resets all cooldowns for a specified user or all users if 'all' is specified."""
         user = user or ctx.author
+
+        # Check if 'all' was passed
+        if isinstance(user, str) and user.lower() == "all":
+            all_commands = [cmd.name for cmd in self.bot.commands]
+            
+            # Clear all cooldowns for all users
+            for command_name in all_commands:
+                await self.bot.database.clear_all_cooldowns(command_name)
+            
+            embed = discord.Embed(
+                description="All cooldowns for all users have been reset.",
+                color=discord.Color.blurple(),
+            )
+            await ctx.send(embed=embed, delete_after=5)
+            return
+
+        # If user is a string but not 'all', try to convert to User
+        if isinstance(user, str):
+            try:
+                user = await commands.UserConverter().convert(ctx, user)
+            except commands.BadArgument:
+                return await ctx.send("Invalid user specified.")
 
         if user.bot:
             return await ctx.send("You cannot reset cooldowns for a bot.")
