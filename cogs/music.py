@@ -2745,34 +2745,67 @@ class Music(commands.Cog, name="Music"):
         
         await progress_msg.delete()
         
-        class CoverPaginationView(discord.ui.View):
+        class CoverPaginationView(discord.ui.LayoutView):
             def __init__(self, covers, song_name, author_id):
                 super().__init__(timeout=60)
                 self.covers = covers
                 self.song_name = song_name
                 self.author_id = author_id
                 self.current_page = 0
-                self.per_page = 10
+                self.per_page = 9
                 self.total_pages = (len(covers) + self.per_page - 1) // self.per_page
+                self.update_view()
             
-            def get_embed(self):
+            def update_view(self):
+                self.clear_items()
+                
                 start_idx = self.current_page * self.per_page
                 end_idx = min(start_idx + self.per_page, len(self.covers))
                 current_covers = self.covers[start_idx:end_idx]
                 
-                embed = discord.Embed(
-                    description=f"🎵 Found **{len(self.covers)}** cover(s) for: **{self.song_name}**",
-                    color=discord.Color.blurple()
-                )
+                class CoverContainer(discord.ui.Container):
+                    def __init__(self, covers, song_name, total_covers, current_page, total_pages):
+                        super().__init__(accent_color=0x5865F2)
+                        
+                        self.add_item(discord.ui.TextDisplay(
+                            f"### 🎵 Found {total_covers} Cover(s) for: {song_name}"
+                        ))
+                        
+                        media_gallery = discord.ui.MediaGallery()
+                        for url, ext, variation in covers:
+                            item = discord.MediaGalleryItem(
+                                media=discord.UnfurledMediaItem(url=url)
+                            )
+                            media_gallery.add_item(item)
+                        
+                        self.add_item(media_gallery)
+                        self.add_item(discord.ui.Separator())
+                        self.add_item(discord.ui.TextDisplay(
+                            f"-# Page {current_page + 1}/{total_pages}"
+                        ))
                 
-                cover_list = []
-                for i, (url, ext, variation) in enumerate(current_covers, start=start_idx + 1):
-                    cover_list.append(f"`{i}.` [{variation}.{ext}]({url})")
+                self.add_item(CoverContainer(current_covers, self.song_name, len(self.covers), self.current_page, self.total_pages))
                 
-                embed.add_field(name="Covers", value="\n".join(cover_list), inline=False)
-                embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
-                
-                return embed
+                if self.total_pages > 1:
+                    button_row = discord.ui.ActionRow()
+                    
+                    prev_button = discord.ui.Button(
+                        label="◀ Previous",
+                        style=discord.ButtonStyle.secondary,
+                        disabled=(self.current_page == 0),
+                        custom_id="prev_page"
+                    )
+                    
+                    next_button = discord.ui.Button(
+                        label="Next ▶",
+                        style=discord.ButtonStyle.secondary,
+                        disabled=(self.current_page >= self.total_pages - 1),
+                        custom_id="next_page"
+                    )
+                    
+                    button_row.add_item(prev_button)
+                    button_row.add_item(next_button)
+                    self.add_item(button_row)
             
             async def interaction_check(self, interaction: discord.Interaction) -> bool:
                 if interaction.user.id != self.author_id:
@@ -2781,26 +2814,21 @@ class Music(commands.Cog, name="Music"):
                         ephemeral=True
                     )
                     return False
+                
+                if interaction.data['custom_id'] == 'prev_page':
+                    if self.current_page > 0:
+                        self.current_page -= 1
+                        self.update_view()
+                        await interaction.response.edit_message(view=self)
+                elif interaction.data['custom_id'] == 'next_page':
+                    if self.current_page < self.total_pages - 1:
+                        self.current_page += 1
+                        self.update_view()
+                        await interaction.response.edit_message(view=self)
                 return True
-            
-            @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary)
-            async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.current_page > 0:
-                    self.current_page -= 1
-                    await interaction.response.edit_message(embed=self.get_embed(), view=self)
-                else:
-                    await interaction.response.defer()
-            
-            @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
-            async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if self.current_page < self.total_pages - 1:
-                    self.current_page += 1
-                    await interaction.response.edit_message(embed=self.get_embed(), view=self)
-                else:
-                    await interaction.response.defer()
         
         view = CoverPaginationView(found_covers, song_name, ctx.author.id)
-        await ctx.send(embed=view.get_embed(), view=view)
+        await ctx.send(view=view)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
