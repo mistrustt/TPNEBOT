@@ -2828,7 +2828,12 @@ class Music(commands.Cog, name="Music"):
                 return True
         
         view = CoverPaginationView(found_covers, song_name, ctx.author.id)
-        await ctx.send(view=view)
+        sent_msg = await ctx.send(view=view)
+        
+        await asyncio.sleep(60)
+        await sent_msg.delete()
+        
+        await ctx.send(f"🎵 **Covers for `{song_name}` have been deleted.**")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
