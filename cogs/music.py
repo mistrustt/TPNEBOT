@@ -2682,10 +2682,15 @@ class Music(commands.Cog, name="Music"):
             delete_after=None
         )
 
+class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.base_url = "https://juicewrldapi.com/juicewrld/cover"
+        self.extensions = ["png", "jpg", "jpeg"]
+    
     async def check_cover_exists(self, session: aiohttp.ClientSession, song_name: str, extension: str) -> tuple[bool, str]:
         """Check if a Juice WRLD song cover exists."""
-        base_url = "https://juicewrldapi.com/juicewrld/cover"
-        url = f"{base_url}/{song_name}.{extension}"
+        url = f"{self.base_url}/{song_name}.{extension}"
         try:
             async with session.head(url, timeout=5) as response:
                 return (response.status == 200, url)
@@ -2712,7 +2717,7 @@ class Music(commands.Cog, name="Music"):
         progress_msg = await ctx.send(embed=embed)
         
         variations = [formatted_song]
-        for i in range(1, 50):
+        for i in range(1, 50):  # 50 just in case
             variations.append(f"{formatted_song}{i}")
         
         extensions = ["png", "jpg", "jpeg"]
@@ -2765,20 +2770,21 @@ class Music(commands.Cog, name="Music"):
                 
                 class CoverContainer(discord.ui.Container):
                     def __init__(self, covers, song_name, total_covers, current_page, total_pages):
-                        super().__init__(accent_color=0x5865F2)
+                        super().__init__(accent_color=0x2B2D31)
                         
                         self.add_item(discord.ui.TextDisplay(
                             f"### 🎵 Found {total_covers} Cover(s) for: {song_name}"
                         ))
                         
-                        media_gallery = discord.ui.MediaGallery()
+                        gallery_items = []
                         for url, ext, variation in covers:
                             item = discord.MediaGalleryItem(
-                                media=discord.UnfurledMediaItem(url=url)
+                                media=discord.UnfurledMediaItem(url=url),
+                                description=f"{variation}.{ext}"
                             )
-                            media_gallery.add_item(item)
+                            gallery_items.append(item)
                         
-                        self.add_item(media_gallery)
+                        self.add_item(discord.ui.MediaGallery(*gallery_items))
                         self.add_item(discord.ui.Separator())
                         self.add_item(discord.ui.TextDisplay(
                             f"-# Page {current_page + 1}/{total_pages}"
@@ -2837,4 +2843,5 @@ class Music(commands.Cog, name="Music"):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
+    await bot.add_cog(CoverSearch(bot))
     logger.debug("Music cog initialized successfully")
