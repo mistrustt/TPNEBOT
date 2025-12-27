@@ -2607,6 +2607,8 @@ class Music(commands.Cog, name="Music"):
                 channels.append(channel)
         return channels
 
+# why countpledge in music cog :sob:
+
     @commands.command(name="countpledge", aliases=["pledges", "pledged", "countpledges"])
     @commands.check_any(commands.has_permissions(administrator=True), commands.check(can_test))
     async def countpledge(self, ctx: commands.Context, after_message_id: int = 0):
@@ -2679,6 +2681,168 @@ class Music(commands.Cog, name="Music"):
             f"Total pledges counted ({selected_channel.mention}): **${pledge_count:,}**",
             delete_after=None
         )
+
+class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.base_url = "https://juicewrldapi.com/juicewrld/cover"
+        self.extensions = ["png", "jpg", "jpeg"]
+    
+    async def check_cover_exists(self, session: aiohttp.ClientSession, song_name: str, extension: str) -> tuple[bool, str]:
+        """Check if a Juice WRLD song cover exists."""
+        url = f"{self.base_url}/{song_name}.{extension}"
+        try:
+            async with session.head(url, timeout=5) as response:
+                return (response.status == 200, url)
+        except:
+            return (False, url)
+    
+    @commands.command(name="cover", help="Search for available covers of a song")
+    async def cover(self, ctx: commands.Context, *, song_name: str = None):
+        """Search for song covers in the Juice WRLD API database."""
+        if not song_name:
+            embed = discord.Embed(
+                description="🚫 Please provide a song name to search for covers.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
+        
+        formatted_song = song_name.lower().replace(" ", "")
+        
+        embed = discord.Embed(
+            description=f"🔍 Searching for covers of **{song_name}**...",
+            color=discord.Color.blurple()
+        )
+        progress_msg = await ctx.send(embed=embed)
+        
+        variations = [
+            formatted_song,
+        ]
+        
+        for i in range(1, 50): # 50 just in case
+            variations.append(f"{formatted_song}{i}")
+        
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for variation in variations:
+                for ext in self.extensions:
+                    tasks.append(self.check_cover_exists(session, variation, ext))
+            
+            results = await asyncio.gather(*tasks)
+        
+        found_covers = []
+        task_index = 0
+        for variation in variations:
+            for ext in self.extensions:
+                exists, url = results[task_index]
+                if exists:
+                    found_covers.append((url, ext, variation))
+                task_index += 1
+        
+        if not found_covers:
+            embed = discord.Embed(
+                description=f"❌ No covers found for **{song_name}**.",
+                color=discord.Color.red()
+            )
+            await progress_msg.edit(embed=embed)
+            await asyncio.sleep(10)
+            await progress_msg.delete()
+            return
+        
+        await progress_msg.delete()
+        
+        class CoverPaginationView(discord.ui.LayoutView):
+            def __init__(self, covers, song_name, author_id):
+                super().__init__(timeout=None)
+                self.covers = covers
+                self.song_name = song_name
+                self.author_id = author_id
+                self.current_page = 0
+                self.chunk_size = 9
+                self.total_pages = (len(covers) + self.chunk_size - 1) // self.chunk_size
+                self.update_view()
+            
+            def update_view(self):
+                self.clear_items()
+                
+                start_idx = self.current_page * self.chunk_size
+                end_idx = start_idx + self.chunk_size
+                current_chunk = self.covers[start_idx:end_idx]
+                
+                class CoverContainer(discord.ui.Container):
+                    def __init__(self, chunk_covers, song_name, total_covers, page_num, total_pages):
+                        super().__init__(accent_color=0x2B2D31)
+                        
+                        self.add_item(discord.ui.TextDisplay(
+                            f"### 🎵 Found {total_covers} Cover(s) for: {song_name}"
+                        ))
+                        
+                        gallery_items = []
+                        for url, ext, variation in chunk_covers:
+                            item = discord.MediaGalleryItem(
+                                media=discord.UnfurledMediaItem(url=url),
+                                description=f"{variation}.{ext}"
+                            )
+                            gallery_items.append(item)
+                        
+                        self.add_item(discord.ui.MediaGallery(*gallery_items))
+                        self.add_item(discord.ui.Separator())
+                        self.add_item(discord.ui.TextDisplay(
+                            f"-# Page {page_num + 1}/{total_pages}"
+                        ))
+                
+                self.add_item(CoverContainer(current_chunk, self.song_name, len(self.covers), self.current_page, self.total_pages))
+                
+                if self.total_pages > 1:
+                    button_row = discord.ui.ActionRow()
+                    
+                    prev_button = discord.ui.Button(
+                        label="◀ Previous",
+                        style=discord.ButtonStyle.secondary,
+                        disabled=(self.current_page == 0),
+                        custom_id="prev_page"
+                    )
+                    
+                    next_button = discord.ui.Button(
+                        label="Next ▶",
+                        style=discord.ButtonStyle.secondary,
+                        disabled=(self.current_page >= self.total_pages - 1),
+                        custom_id="next_page"
+                    )
+                    
+                    button_row.add_item(prev_button)
+                    button_row.add_item(next_button)
+                    self.add_item(button_row)
+            
+            async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message(
+                        "This isn't your embed.",
+                        ephemeral=True
+                    )
+                    return False
+                
+                if interaction.data['custom_id'] == 'prev_page':
+                    if self.current_page > 0:
+                        self.current_page -= 1
+                        self.update_view()
+                        await interaction.response.edit_message(view=self)
+                elif interaction.data['custom_id'] == 'next_page':
+                    if self.current_page < self.total_pages - 1:
+                        self.current_page += 1
+                        self.update_view()
+                        await interaction.response.edit_message(view=self)
+                return True
+        
+        pagination_view = CoverPaginationView(found_covers, song_name, ctx.author.id)
+        
+        sent_msg = await ctx.send(view=pagination_view)
+
+        await asyncio.sleep(60)
+        await sent_msg.delete()
+
+        await ctx.send(f"🎵 **Covers for `{song_name}` have been deleted**")
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
