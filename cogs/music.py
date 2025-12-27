@@ -2779,8 +2779,7 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
                         gallery_items = []
                         for url, ext, variation in covers:
                             item = discord.MediaGalleryItem(
-                                media=discord.UnfurledMediaItem(url=url),
-                                description=f"{variation}.{ext}"
+                                media=discord.UnfurledMediaItem(url=url)
                             )
                             gallery_items.append(item)
                         
