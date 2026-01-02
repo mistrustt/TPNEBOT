@@ -1611,7 +1611,7 @@ class Music(commands.Cog, name="Music"):
         except Exception:
             return 0
         
-    def parse_dates(text: str) -> datetime | None:
+    def parse_dates(self, text: str) -> datetime | None:
         if not text:
             return None
         
