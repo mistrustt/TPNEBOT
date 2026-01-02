@@ -5,8 +5,8 @@ import aiohttp
 import asyncio
 from io import BytesIO
 from datetime import datetime
-from discord.ext import commands
 from colorthief import ColorThief
+from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
@@ -37,6 +37,8 @@ class Music(commands.Cog, name="Music"):
         self.default_font = ImageFont.truetype(self.font_path, 24)
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
+        self.songs = []
+        self.cache_songs.start()
         self.standard_colors = {
             "black": "#000000",
             "white": "#FFFFFF",
@@ -1608,6 +1610,19 @@ class Music(commands.Cog, name="Music"):
             return int(m) * 60 + int(s)
         except Exception:
             return 0
+        
+    def parse_dates(text: str) -> datetime | None:
+        if not text:
+            return None
+        
+        match = re.search(r'([A-Za-z]+ \d{1,2}, \d{4})', text)
+        if not match:
+            return None
+
+        try:
+            return datetime.strptime(match.group(1), "%B %d, %Y")
+        except ValueError:
+            return None
 
     async def create_song_view(self, song_data: dict, random_leak: bool = False):
         class SongContainer(discord.ui.Container):
@@ -1907,6 +1922,116 @@ class Music(commands.Cog, name="Music"):
                 ctx.author,
                 f"I couldnt find a song with the name: `{query}`",
             )
+
+    @tasks.loop(hours=1)
+    async def cache_songs(self):
+        await self.fetch_songs()
+
+    async def fetch_songs(self):
+        url = JUICEWRLD_API + '/juicewrld/songs/'
+        songs = []
+
+        while url:
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    return response.status
+                    
+                data = await response.json()
+                songs.extend(data.get('results', []))
+                url = data.get('next')    
+
+        self.songs = songs
+        return 200
+
+    async def fetch_latest_surfaces(self, songs: dict, limit: int = 4):
+        for song in songs:
+            date_leaked_str = song.get('date_leaked', '')
+            song["date_leaked_dt"] = self.parse_dates(date_leaked_str)
+
+        return sorted((
+            s for s in songs 
+            if s['date_leaked_dt'] is not None), 
+            key=lambda s: s['date_leaked_dt'], 
+            reverse=True
+        )[:limit]
+    
+    async def create_latest_surface(self, latest_surfaces: dict):
+        layout_view = discord.ui.LayoutView()
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay('### Latest Surfaces'))
+        container.add_item(discord.ui.Separator())
+
+        for song in latest_surfaces:
+            name = song.get('name', 'N/A')
+            engineers = song.get('engineers', 'N/A')
+            producers = song.get('producers', 'N/A')
+            track_titles = [t for t in song.get("track_titles", []) if t != name]
+            image_url = song.get('image_url')
+            era_name = song.get("era", []).get("name", "N/A")
+            album = self.ALBUMS.get(era_name)
+
+            timestamp = f'<t:{int(song["date_leaked_dt"].timestamp())}:R>'
+            downloads, og = await self.check_file_name(song)
+
+            thumbnail = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
+            thumbnail.add_item(discord.ui.TextDisplay(
+                f'**{name}** - {timestamp}\n'
+                f'-# Era: **{album['name'] if album else era_name}**\n'
+                f'-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n'
+                f'-# Engineer(s): **{engineers}**\n'
+                f'-# Producer(s): **{producers}**'
+            ))
+
+            container.add_item(thumbnail)
+
+            MAIN_URL = "https://juicewrldapi.com/juicewrld/files/download/?path="
+
+            rows = []
+
+            if downloads:
+                filtered_files = [
+                    p for p in downloads
+                    if (og and "Unreleased Discography" not in p)
+                    or (not og and "Original Files" not in p)
+                ]
+
+                for i in range(0, len(filtered_files), 5):
+                    row = discord.ui.ActionRow()
+                    for path in filtered_files[i:i + 5]:
+                        ext = path.rsplit(".", 1)[-1].upper()
+                        label = f"OG {ext}" if "Original Files" in path else ext
+                        row.add_item(discord.ui.Button(label=label, url=MAIN_URL + quote(path)))
+                    rows.append(row)
+            
+            rows.append(discord.ui.Separator())
+
+            for row in rows:
+                container.add_item(row)
+
+        container.remove_item(container.children[-1])
+        layout_view.add_item(container)
+
+        return layout_view
+
+    @commands.command('surfaces', aliases=['leaks'])
+    async def surfaces(self, ctx: commands.Context):
+        if not self.songs:
+            status = await self.fetch_songs()
+            if status != 200:
+                return await ctx.reply(embed=discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red()).set_image(url=f"https://http.cat/{status}"), delete_after=5)
+            
+        async with ctx.typing():
+            songs = self.songs
+            
+            for song in songs:
+                date_leaked_str = song.get('date_leaked', '')
+                song["date_leaked_dt"] = self.parse_dates(date_leaked_str)
+
+            latest_surfaces = await self.fetch_latest_surfaces(songs)
+            layout_view = await self.create_latest_surface(latest_surfaces)
+
+        await ctx.send(view=layout_view)
+        
 
     @commands.command("snippet", aliases=["snip"])
     @commands.has_role(1414742766386413590)
