@@ -1646,8 +1646,11 @@ class Music(commands.Cog, name="Music"):
         og = bool(downloads) and file_name != name + "."
 
         if not downloads:
-            downloads = await self.fetch_downloads(name + ".", length)
-            og = False
+            path = song.get('path', None)
+            if not path:
+                downloads = None
+            else:
+                downloads = [path]
 
         return downloads, og
 
