@@ -2498,12 +2498,12 @@ class Music(commands.Cog, name="Music"):
                         async with session.get(f"{JUICEWRLD_API}/juicewrld/files/cover-art/", params={"path": path}) as album_art_response:
                             if cover_response.status == 200:
                                 image_data = await cover_response.read()
-                                image = Image.open(io.BytesIO(image_data))
+                                image = Image.open(BytesIO(image_data))
                                 blurred_image = image.filter(ImageFilter.GaussianBlur(radius=15))  # Adjust radius for intensity                            
                                 blurred_image.save(image_file_name)
                             elif album_art_response.status == 200:
                                 image_data = await album_art_response.read()
-                                image = Image.open(io.BytesIO(image_data))
+                                image = Image.open(BytesIO(image_data))
                                 blurred_image = image.filter(ImageFilter.GaussianBlur(radius=5))  # Adjust radius for intensity                            
                                 blurred_image.save(image_file_name)
                             else: # Last resort: use user's avatar
