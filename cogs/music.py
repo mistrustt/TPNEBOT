@@ -58,9 +58,6 @@ class Music(commands.Cog, name="Music"):
             1095747082599530627,  # ENVY (DUMB IDIOT)
             1219090700407279656,  # TOXIC (GOAT ASF)
         ]
-        self.heardle_whitelist = [
-            1095747082599530627,  # envy
-        ]
         self.ongoing_heardle = []
         self.heardle_answers = {}
         self.snippet_debounce = {}
@@ -2449,19 +2446,11 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
-        if ctx.author.id == 567401702190350347 and random.random() < 0.01:
+        if ctx.author.id == 567401702190350347 and random.random() < 0.35:
             await utils.Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
                 f"You are too old for this command. Age detected: {random.randint(30, 40)}",
-            )
-            return
-
-        if ctx.author.id not in self.heardle_whitelist:
-            await utils.Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                "You are not whitelisted to play Heardle. Please contact a moderator.",
             )
             return
 
