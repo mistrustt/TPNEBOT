@@ -60,6 +60,9 @@ class Music(commands.Cog, name="Music"):
         ]
         self.heardle_whitelist = [
             1095747082599530627,  # envy
+            1219090700407279656, # toxic
+            1358982755341303851, # allure
+            501936342431694848 # belson
         ]
         self.ongoing_heardle = []
         self.heardle_answers = {}
