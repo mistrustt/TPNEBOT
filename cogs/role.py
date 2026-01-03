@@ -219,6 +219,13 @@ class RoleTools(commands.Cog, name="Roles"):
                 description=f"🚫 {error}", color=discord.Color.red()
             )
             return await ctx.reply(embed=error_embed, delete_after=5)
+        
+        if role.position >= ctx.author.top_role.position:
+            error_embed = discord.Embed(
+                description=f"🚫 You cannot manage the role '{role.name}' because it is higher or equal to your top role.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=error_embed, delete_after=5)
 
         if role.position >= ctx.me.top_role.position:
             error_embed = discord.Embed(
