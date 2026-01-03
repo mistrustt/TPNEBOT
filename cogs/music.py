@@ -62,7 +62,8 @@ class Music(commands.Cog, name="Music"):
             1095747082599530627,  # envy
             1219090700407279656, # toxic
             1358982755341303851, # allure
-            501936342431694848 # belson
+            501936342431694848, # belson
+            1167418093375606796 # Big nigga
         ]
         self.ongoing_heardle = []
         self.heardle_answers = {}
@@ -1652,7 +1653,7 @@ class Music(commands.Cog, name="Music"):
         og = bool(downloads) and file_name != name + "."
 
         if not downloads:
-            downloads = await self.fetch_downloads(name + ".", length)
+            downloads = [song['path']]
             og = False
 
         return downloads, og
