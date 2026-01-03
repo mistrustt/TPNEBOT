@@ -2457,6 +2457,14 @@ class Music(commands.Cog, name="Music"):
             )
             return
 
+        if ctx.author.id not in self.heardle_whitelist:
+            await utils.Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                "You are not whitelisted to play Heardle. Please contact a moderator.",
+            )
+            return
+
         if ctx.author.id in self.ongoing_heardle:
             await utils.Embeds.send_error_embed(
                 ctx.channel, ctx.author, "You already have an ongoing game of Heardle!"
@@ -2567,7 +2575,7 @@ class Music(commands.Cog, name="Music"):
                     acceptable_answers.extend(acceptable_alt_name_list)
 
                 async def update_timer_message(
-                    message: discord.Message, full_name, start_time, color
+                    message: discord.Message, full_name, start_time, author
                 ):
                     try:
                         while True:
@@ -2586,7 +2594,7 @@ class Music(commands.Cog, name="Music"):
                                 else:
                                     hint += "?"
                             await message.edit(
-                                embed=discord.Embed(title="Heardle", description=f"Hint ({round(hint_chars)}/3): {hint}", color=color)
+                                embed=discord.Embed(title="Heardle", description=f"{author.mention} Hint ({round(hint_chars)}/3): {hint}", color=author.color)
                             )
                             await asyncio.sleep(1)
                     except asyncio.CancelledError:
@@ -2594,7 +2602,7 @@ class Music(commands.Cog, name="Music"):
 
                 start_time = asyncio.get_event_loop().time()
                 update_task = asyncio.create_task(
-                    update_timer_message(message, best_track_title, start_time, ctx.author.color)
+                    update_timer_message(message, best_track_title, start_time, ctx.author)
                 )
 
                 while has_guessed == False:
