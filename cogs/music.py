@@ -4,10 +4,10 @@ import logging
 import aiohttp
 import asyncio
 from io import BytesIO
-from datetime import datetime
 from colorthief import ColorThief
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
 import utils.embeds as utils
@@ -38,6 +38,7 @@ class Music(commands.Cog, name="Music"):
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
         self.songs = []
+        self.latest_surfaces = []
         self.cache_songs.start()
         self.standard_colors = {
             "black": "#000000",
@@ -1660,7 +1661,7 @@ class Music(commands.Cog, name="Music"):
         except Exception:
             return 0
         
-    def parse_dates(self, text: str) -> datetime | None:
+    def parse_dates(self, text: str):
         if not text:
             return None
         
@@ -1669,7 +1670,7 @@ class Music(commands.Cog, name="Music"):
             return None
 
         try:
-            return datetime.strptime(match.group(1), "%B %d, %Y")
+            return datetime.strptime(match.group(1), '%B %d, %Y')
         except ValueError:
             return None
 
@@ -1974,7 +1975,9 @@ class Music(commands.Cog, name="Music"):
 
     @tasks.loop(hours=1)
     async def cache_songs(self):
-        await self.fetch_songs()
+        status = await self.fetch_songs()
+        if status == 200:
+            await self.store_latest_surfaces()
 
     async def fetch_songs(self):
         url = JUICEWRLD_API + '/juicewrld/songs/'
@@ -1992,38 +1995,51 @@ class Music(commands.Cog, name="Music"):
         self.songs = songs
         return 200
 
-    async def fetch_latest_surfaces(self, songs: dict, limit: int = 4):
-        for song in songs:
-            date_leaked_str = song.get('date_leaked', '')
-            song["date_leaked_dt"] = self.parse_dates(date_leaked_str)
+    async def store_latest_surfaces(self, days: int = 30):
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=days)
 
-        return sorted((
-            s for s in songs 
-            if s['date_leaked_dt'] is not None), 
-            key=lambda s: s['date_leaked_dt'], 
-            reverse=True
-        )[:limit]
+        hydrated = []
+
+        for song in self.songs:
+            dt = self.parse_dates(song.get('date_leaked', ''))
+            if not dt:
+                continue
+
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+
+            if dt < cutoff:
+                continue
+
+            downloads, og = await self.check_file_name(song)
+
+            song['date_leaked_dt'] = dt
+            song['downloads'] = downloads or []
+            song['og_files'] = og
+
+            hydrated.append(song)
+
+        self.latest_surfaces = sorted(hydrated, key=lambda s: s['date_leaked_dt'], reverse=True)
     
-    async def create_latest_surface(self, latest_surfaces: dict):
-        layout_view = discord.ui.LayoutView()
-        container = discord.ui.Container()
-        container.add_item(discord.ui.TextDisplay('### Latest Surfaces'))
-        container.add_item(discord.ui.Separator())
+    async def build_song_items(self, container: discord.ui.Container, songs: list[dict]):
+        MAIN_URL = 'https://juicewrldapi.com/juicewrld/files/download/?path='
 
-        for song in latest_surfaces:
+        for ii, song in enumerate(songs):
             name = song.get('name', 'N/A')
             engineers = song.get('engineers', 'N/A')
             producers = song.get('producers', 'N/A')
-            track_titles = [t for t in song.get("track_titles", []) if t != name]
+            track_titles = [t for t in song.get('track_titles', []) if t != name]
             image_url = song.get('image_url')
-            era_name = song.get("era", []).get("name", "N/A")
+            era_name = song.get('era', {}).get('name', 'N/A')
             album = self.ALBUMS.get(era_name)
 
-            timestamp = f'<t:{int(song["date_leaked_dt"].timestamp())}:R>'
-            downloads, og = await self.check_file_name(song)
+            timestamp = f'<t:{int(song['date_leaked_dt'].timestamp())}:R>'
 
-            thumbnail = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
-            thumbnail.add_item(discord.ui.TextDisplay(
+            section = discord.ui.Section(
+                accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url)
+            )
+            section.add_item(discord.ui.TextDisplay(
                 f'**{name}** - {timestamp}\n'
                 f'-# Era: **{album['name'] if album else era_name}**\n'
                 f'-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n'
@@ -2031,57 +2047,48 @@ class Music(commands.Cog, name="Music"):
                 f'-# Producer(s): **{producers}**'
             ))
 
-            container.add_item(thumbnail)
+            container.add_item(section)
 
-            MAIN_URL = "https://juicewrldapi.com/juicewrld/files/download/?path="
-
-            rows = []
+            downloads = song.get('downloads', [])
+            og = song.get('og_files', False)
 
             if downloads:
                 filtered_files = [
                     p for p in downloads
-                    if (og and "Unreleased Discography" not in p)
-                    or (not og and "Original Files" not in p)
+                    if (og and 'Unreleased Discography' not in p)
+                    or (not og and 'Original Files' not in p)
                 ]
 
                 for i in range(0, len(filtered_files), 5):
                     row = discord.ui.ActionRow()
                     for path in filtered_files[i:i + 5]:
-                        ext = path.rsplit(".", 1)[-1].upper()
-                        label = f"OG {ext}" if "Original Files" in path else ext
+                        ext = path.rsplit('.', 1)[-1].upper()
+                        label = f'OG {ext}' if 'Original Files' in path else ext
                         row.add_item(discord.ui.Button(label=label, url=MAIN_URL + quote(path)))
-                    rows.append(row)
-            
-            rows.append(discord.ui.Separator())
+                    container.add_item(row)
 
-            for row in rows:
-                container.add_item(row)
-
-        container.remove_item(container.children[-1])
-        layout_view.add_item(container)
-
-        return layout_view
+            if ii < len(songs) - 1:
+                container.add_item(discord.ui.Separator())
 
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
         if not self.songs:
             status = await self.fetch_songs()
             if status != 200:
-                return await ctx.reply(embed=discord.Embed(description="Request failed. Please try again later.", color=discord.Color.red()).set_image(url=f"https://http.cat/{status}"), delete_after=5)
-            
-        async with ctx.typing():
-            songs = self.songs
-            
-            for song in songs:
-                date_leaked_str = song.get('date_leaked', '')
-                song["date_leaked_dt"] = self.parse_dates(date_leaked_str)
+                await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
 
-            latest_surfaces = await self.fetch_latest_surfaces(songs)
-            layout_view = await self.create_latest_surface(latest_surfaces)
+        if not self.latest_surfaces:
+            async with ctx.typing():
+                await self.store_latest_surfaces()
 
-        await ctx.send(view=layout_view)
+            if not self.latest_surfaces:
+                return
+
+        view = LatestSurfacesView(self, self.latest_surfaces)
+        await view.build_page()
+        msg = await ctx.reply(view=view)
+        view.message = msg
         
-
     @commands.command("snippet", aliases=["snip"])
     @commands.has_role(1414742766386413590)
     async def snippet(self, ctx: commands.Context, *, query: str):
@@ -3044,3 +3051,63 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
     await bot.add_cog(CoverSearch(bot))
     logger.debug("Music cog initialized successfully")
+
+class LatestSurfacesView(discord.ui.LayoutView):
+    def __init__(self, cog, songs, per_page: int = 4):
+        super().__init__(timeout=30)
+        self.cog = cog
+        self.songs = songs
+        self.per_page = per_page
+        self.page = 0
+        self.building = False
+
+    def max_page(self):
+        return max((len(self.songs) - 1) // self.per_page, 0)
+
+    def slice(self):
+        start = self.page * self.per_page
+        return self.songs[start:start + self.per_page]
+
+    async def build_page(self):
+        if self.building:
+            return
+        self.building = True
+
+        self.clear_items()
+
+        container = discord.ui.Container(accent_color=0xffffff)
+        container.add_item(discord.ui.TextDisplay('### Latest Surfaces (Last 30 Days)'))
+        container.add_item(discord.ui.Separator())
+
+        await self.cog.build_song_items(container, self.slice())
+        # container.add_item(discord.ui.TextDisplay(f'-# Total Songs: {len(self.songs):,} • Page {self.page+1}/{self.max_page()+1}'))
+        self.add_item(container)
+
+        nav = discord.ui.ActionRow()
+        nav.add_item(discord.ui.Button(label='Previous', style=discord.ButtonStyle.grey, custom_id='latest_prev'))
+        nav.add_item(discord.ui.Button(label='Next', style=discord.ButtonStyle.grey, custom_id='latest_next'))
+        self.add_item(nav)
+
+        self.building = False
+
+    async def interaction_check(self, itn: discord.Interaction):
+        cid = itn.data.get('custom_id')
+        max_page = self.max_page()
+
+        if cid == 'latest_prev':
+            self.page = (self.page - 1) % (max_page + 1)
+        elif cid == 'latest_next':
+            self.page = (self.page + 1) % (max_page + 1)
+        else:
+            return True
+
+        await self.build_page()
+        await itn.response.edit_message(view=self)
+        return False
+    
+    async def on_timeout(self):
+        self.remove_item(self.children[1])
+        try:
+            await self.message.edit(view=self)
+        except discord.NotFound:
+            pass
