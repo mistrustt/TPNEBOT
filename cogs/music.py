@@ -1631,6 +1631,7 @@ class Music(commands.Cog, name="Music"):
             song["path"]
             for song in data.get("items", [])
             if abs(self.duration_to_seconds(song.get("duration")) - target_seconds) <= 1
+            and 'Original Files' in song['path']
         ]
 
     async def check_file_name(self, song: dict):
@@ -1643,7 +1644,7 @@ class Music(commands.Cog, name="Music"):
         length = song.get("length", "0:00")
 
         downloads = await self.fetch_downloads(file_name, length)
-        og = bool(downloads) and file_name != name + "."
+        og = bool(downloads)
 
         if not downloads:
             path = song.get('path', None)
