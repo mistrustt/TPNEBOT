@@ -2101,7 +2101,7 @@ class Music(commands.Cog, name="Music"):
             if not self.latest_surfaces:
                 return
 
-        view = LatestSurfacesView(self, self.latest_surfaces)
+        view = LatestSurfacesView(self, self.latest_surfaces, ctx.author)
         await view.build_page()
         msg = await ctx.reply(view=view)
         view.message = msg
@@ -3070,9 +3070,10 @@ async def setup(bot: commands.Bot) -> None:
     logger.debug("Music cog initialized successfully")
 
 class LatestSurfacesView(discord.ui.LayoutView):
-    def __init__(self, cog, songs, per_page: int = 4):
+    def __init__(self, cog, songs, author, per_page: int = 4):
         super().__init__(timeout=30)
         self.cog = cog
+        self.author = author
         self.songs = songs
         self.per_page = per_page
         self.page = 0
@@ -3108,6 +3109,9 @@ class LatestSurfacesView(discord.ui.LayoutView):
         self.building = False
 
     async def interaction_check(self, itn: discord.Interaction):
+        if itn.user != self.author:
+            return await itn.response.send_message("this aint ur shit bro", ephemeral=True)
+
         cid = itn.data.get('custom_id')
         max_page = self.max_page()
 
