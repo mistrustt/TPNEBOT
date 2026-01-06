@@ -2041,11 +2041,11 @@ class Music(commands.Cog, name="Music"):
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
         
+        await ctx.message.add_reaction('🔄')
         status = await self.fetch_songs()
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
-        await ctx.message.add_reaction('🔄')
         await self.store_latest_surfaces()
         await ctx.message.add_reaction('✅')
 
