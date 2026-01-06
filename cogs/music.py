@@ -3099,12 +3099,15 @@ class LatestSurfacesView(discord.ui.LayoutView):
 
         await self.cog.build_song_items(container, self.slice())
         # container.add_item(discord.ui.TextDisplay(f'-# Total Songs: {len(self.songs):,} • Page {self.page+1}/{self.max_page()+1}'))
-        self.add_item(container)
-
         nav = discord.ui.ActionRow()
         nav.add_item(discord.ui.Button(label='Previous', style=discord.ButtonStyle.grey, custom_id='latest_prev'))
         nav.add_item(discord.ui.Button(label='Next', style=discord.ButtonStyle.grey, custom_id='latest_next'))
-        self.add_item(nav)
+        nav.add_item(discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/'))
+        
+        container.add_item(discord.ui.Separator())
+        container.add_item(nav)
+
+        self.add_item(container)
 
         self.building = False
 
@@ -3127,7 +3130,10 @@ class LatestSurfacesView(discord.ui.LayoutView):
         return False
     
     async def on_timeout(self):
-        self.remove_item(self.children[1])
+        action_row = self.children[0].children[-1]
+        action_row.remove_item(action_row.children[0])
+        action_row.remove_item(action_row.children[0])
+
         try:
             await self.message.edit(view=self)
         except discord.NotFound:
