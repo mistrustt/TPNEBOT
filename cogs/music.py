@@ -2075,6 +2075,7 @@ class Music(commands.Cog, name="Music"):
                 container.add_item(discord.ui.Separator())
 
     @commands.command('syncsurfaces', aliases=['syncleaks'])
+    @commands.has_role(1414742766386413590)
     async def sync_surfaces(self, ctx: commands.Context):
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
