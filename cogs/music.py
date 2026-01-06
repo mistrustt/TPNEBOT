@@ -37,9 +37,12 @@ class Music(commands.Cog, name="Music"):
         self.default_font = ImageFont.truetype(self.font_path, 24)
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
+
         self.songs = []
         self.latest_surfaces = []
+
         self.cache_songs.start()
+
         self.standard_colors = {
             "black": "#000000",
             "white": "#FFFFFF",
@@ -1635,13 +1638,13 @@ class Music(commands.Cog, name="Music"):
         ]
 
     async def check_file_name(self, song: dict):
-        name = song.get("name", "Untitled").replace("*", "")
-        raw_file_name = song.get("file_names") or name
+        name = song.get('name', 'Untitled').replace('*', '')
+        raw_file_name = song.get('file_names') or name
 
-        match = re.search(r"File Name:\s*(.+?)(?:\n|$)", raw_file_name)
-        file_name = (match.group(1) if match else raw_file_name) + "."
+        match = re.search(r'File Name:\s*(.+?)(?:\n|$)', raw_file_name)
+        file_name = (match.group(1) if match else raw_file_name) + '.'
 
-        length = song.get("length", "0:00")
+        length = song.get('length', '0:00')
 
         downloads = await self.fetch_downloads(file_name, length)
         og = bool(downloads)
@@ -2071,6 +2074,20 @@ class Music(commands.Cog, name="Music"):
             if ii < len(songs) - 1:
                 container.add_item(discord.ui.Separator())
 
+    @commands.command('syncsurfaces', aliases=['syncleaks'])
+    async def sync_surfaces(self, ctx: commands.Context):
+        if self.cache_songs.is_running():
+            self.cache_songs.cancel()
+        
+        status = await self.fetch_songs()
+        if status != 200:
+            return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
+        
+        await ctx.message.add_reaction('🔄')
+        await self.store_latest_surfaces()
+        await ctx.message.add_reaction('✅')
+
+
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
         if not self.songs:
@@ -2079,8 +2096,7 @@ class Music(commands.Cog, name="Music"):
                 await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
 
         if not self.latest_surfaces:
-            async with ctx.typing():
-                await self.store_latest_surfaces()
+            await self.store_latest_surfaces()
 
             if not self.latest_surfaces:
                 return
