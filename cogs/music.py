@@ -1567,6 +1567,7 @@ class Music(commands.Cog, name="Music"):
     # start of my beautiful commands
 
     async def fetch_song(self, ctx: commands.Context, query: str):
+        query = query.replace('’', "'")
         async with self.session.get(
             JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
         ) as response:
