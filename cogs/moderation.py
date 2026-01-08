@@ -4016,7 +4016,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 snapshot = message.message_snapshots
                 for shit in snapshot:
                     for attachment in shit.attachments:
-                        await message.channel.send(shit)
                         if attachment.filename.lower().endswith(
                             (".mp3", ".wav", ".flac", ".m4a")
                         ):
