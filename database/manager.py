@@ -1367,15 +1367,7 @@ class DatabaseManager:
                         "amount": str(net_amt),
                         "description": description,
                         "signer_user_id": sender.user_id,
-                    },
-                    {
-                        "id": txid_fee,
-                        "from_user_id": sender.user_id,
-                        "to_user_id": 0,
-                        "amount": str(fee),
-                        "description": f"Fee for P2P: {fee_rate:.2%}",
-                        "signer_user_id": sender.user_id,
-                    },
+                    }
                 ]
                 await self.blockchain.create_block_atomic(
                     session, onchain_txs, validator_user_id=sender.user_id
