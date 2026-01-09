@@ -1312,10 +1312,7 @@ class DatabaseManager:
         amount: Decimal,
         description: str,
     ):
-        factors = await self.get_economic_factors()
-        fee_rate = factors["fee_rate"]
-        fee = (amount * fee_rate).quantize(Decimal("0.01"), ROUND_HALF_UP)
-        net_amt = amount - fee
+        net_amt = (amount).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -1345,13 +1342,9 @@ class DatabaseManager:
                     +net_amt,
                     frozen_field="wallet_frozen",
                 )
-                await self._atomic_balance_change(
-                    session, "supply", "id", 1, +fee, balance_col="treasury"
-                )
 
                 # 2) record DB txs
                 txid_main = str(uuid.uuid4())
-                txid_fee = str(uuid.uuid4())
                 session.add_all(
                     [
                         Transaction(
@@ -1361,15 +1354,7 @@ class DatabaseManager:
                             amount=net_amt,
                             description=description,
                             timestamp=datetime.now(),
-                        ),
-                        Transaction(
-                            id=txid_fee,
-                            from_user_id=sender.user_id,
-                            to_user_id=0,
-                            amount=fee,
-                            description=f"{description} (fee @ {fee_rate:.2%})",
-                            timestamp=datetime.now(),
-                        ),
+                        )
                     ]
                 )
 
