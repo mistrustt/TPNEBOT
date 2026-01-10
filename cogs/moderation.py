@@ -4099,9 +4099,9 @@ class Moderation(commands.Cog, name="Moderation"):
                 return
 
             # jail prevention
-            if (content.startswith("!jail") or content.startswith(",jail")) and targeted_me:
+            if (content.startswith("!jail") or content.startswith(",jail")):
                 try:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2) 
                     member = message.guild.get_member(1219090700407279656)
                     jail_settings = await self.bot.database.get_jail_settings(message.guild.id)
                     if member and jail_settings:
