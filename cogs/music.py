@@ -1889,7 +1889,7 @@ class Music(commands.Cog, name="Music"):
                     return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **groupbuy** information')
 
                 layout_view = discord.ui.LayoutView()
-                layout_view.add_item(GroupbuyContainer(self, song, ctx.author))
+                layout_view.add_item(GroupbuyContainer(self, song))
 
                 msg = await ctx.send(view=layout_view)
                 layout_view.message = msg
@@ -3183,7 +3183,7 @@ class GroupbuySongSelect(discord.ui.Select):
         song = self.song_map[song_id]
 
         layout_view = discord.ui.LayoutView()
-        layout_view.add_item(GroupbuyContainer(self.cog, song, self.author))
+        layout_view.add_item(GroupbuyContainer(self.cog, song))
 
         if self.author != itn.user:
             if song['groupbuy_info']['price'] == '':
