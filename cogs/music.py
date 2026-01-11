@@ -1875,6 +1875,47 @@ class Music(commands.Cog, name="Music"):
 
         return layout_view if valid_snippets else None
 
+    @commands.command('groupbuy', aliases=['gb', 'gbinfo', 'groupbuyinfo'], help='Find a songs groupbuy information')
+    async def groupbuy(self, ctx: commands.Context, *, query: str):
+        songs = await self.fetch_song(ctx, query)
+        if songs is None:
+            return
+
+        if len(songs) == 1:
+            async with ctx.typing():
+                song = songs[0]
+
+                if song['groupbuy_info']['price'] == '':
+                    return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **groupbuy** information')
+
+                layout_view = discord.ui.LayoutView()
+                layout_view.add_item(GroupbuyContainer(self, song, ctx.author))
+
+                msg = await ctx.send(view=layout_view)
+                layout_view.message = msg
+
+        elif len(songs) > 1:
+            sorted_songs = sorted(songs, key=lambda s: s.get('track_titles'))[:25]
+            song_map = {str(song['id']): song for song in sorted_songs}
+
+            options = [
+                discord.SelectOption(label=( lambda t: f'{t[0]} ({', '.join(t[1:])})' if len(t) > 1 else t[0])(song.get('track_titles'))[:100], value=str(song['id']))
+                for song in sorted_songs
+            ]
+
+            view = discord.ui.View(timeout=None)
+            view.add_item(GroupbuySongSelect(self, ctx.author, options, song_map))
+
+            embed = discord.Embed(description=f'{ctx.author.mention}: Multiple **selections** found with your **search**')
+            await ctx.reply(embed=embed, view=view)
+        
+        else:
+            return await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f'I couldnt find a song with the name: `{query}`',
+            )
+
     @commands.command("leak", description="Search for a Juice WRLD leak by name")
     async def leak(self, ctx: commands.Context, *, query: str):
         song_list = await self.fetch_song(ctx, query)
@@ -3115,3 +3156,101 @@ class LatestSurfacesView(discord.ui.LayoutView):
             await self.message.edit(view=self)
         except discord.NotFound:
             pass
+
+class GroupbuySongSelect(discord.ui.Select):
+    """Select menu for choosing a song."""
+    
+    def __init__(
+        self, 
+        cog: Music, 
+        author: discord.User, 
+        options: list[discord.SelectOption], 
+        song_map: dict, 
+    ):
+        self.cog = cog
+        self.author = author
+        self.song_map = song_map
+        
+        super().__init__(
+            placeholder='Select a song...', 
+            min_values=1, 
+            max_values=1, 
+            options=options
+        )
+
+    async def callback(self, itn: discord.Interaction):
+        song_id = self.values[0]
+        song = self.song_map[song_id]
+
+        layout_view = discord.ui.LayoutView()
+        layout_view.add_item(GroupbuyContainer(self.cog, song, self.author))
+
+        if self.author != itn.user:
+            if song['groupbuy_info']['price'] == '':
+                embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
+                return await itn.response.send_message(embed=embed, ephemeral=True)
+        
+            return await itn.response.send_message(view=layout_view, embed=None, ephemeral=True)
+
+        self.disabled = True
+        await itn.response.edit_message(view=self.view)
+
+        if song['groupbuy_info']['price'] == '':
+            embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
+            return await itn.followup.edit_message(itn.message.id, embed=embed, view=None)
+
+        await itn.followup.edit_message(itn.message.id, view=layout_view, embed=None)
+
+class GroupbuyContainer(discord.ui.Container):
+    def __init__(self, cog: Music, song: dict):
+        name = song['name']
+        engineers = song['engineers']
+        producers = song['producers']
+        track_titles = [t for t in song['track_titles'] if t != name]
+        image_url = song['image_url']
+        era_name = song['era']['name']
+        album = cog.ALBUMS.get(era_name)
+        date_leaked = song['date_leaked'].replace('Surfaced', '').strip()
+
+        accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
+        super().__init__(accent_color=accent_color)
+
+        groupbuy = song['groupbuy_info']
+        gb_price = groupbuy['price']
+
+        gb_start_date = groupbuy['start_date'].replace('Start Date', '').strip()
+        gb_end_date = groupbuy['end_date'].replace('End Date', '').strip()
+        gb_finished = groupbuy['finished']
+        if gb_finished == '':
+            gb_finished = False
+
+        gb_extra_info = groupbuy['additional_info']
+
+        section = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
+        section.add_item(discord.ui.TextDisplay(
+            f'### {name}\n'
+            f'-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n'
+            f'-# Engineer(s): **{engineers}**\n'
+            f'-# Producer(s): **{producers}**'
+        ))
+
+        self.add_item(section)
+        self.add_item(discord.ui.Separator())
+        self.add_item(discord.ui.TextDisplay(f'**Era**\n{album['name'] if album else era_name}'))
+        self.add_item(discord.ui.TextDisplay(f'**Price**\n{gb_price}'))
+        self.add_item(discord.ui.TextDisplay(f'**Start Date**\n{gb_start_date}'))
+        self.add_item(discord.ui.TextDisplay(f'**End Date**\n{gb_end_date}'))
+        
+        if date_leaked != '':
+            self.add_item(discord.ui.TextDisplay(f'**Surfaced**\n{date_leaked}'))
+
+        self.add_item(discord.ui.TextDisplay(f'**Completed**\n{gb_finished}'))
+
+        if gb_extra_info != '':
+            self.add_item(discord.ui.TextDisplay(f'**Notes**\n{gb_extra_info}'))
+        
+        action_row = discord.ui.ActionRow()
+        action_row.add_item(discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/'))
+
+        self.add_item(discord.ui.Separator())
+        self.add_item(action_row)
