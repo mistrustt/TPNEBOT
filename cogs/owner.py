@@ -156,6 +156,7 @@ class Owner(commands.Cog, name="Owner"):
             1166141915297743010,  # dennis
             857702737500569650,  # aether
             514641307621261313, # sail mar
+            501936342431694848, # chudson
         ]
         self.whitelisted_users_tpne_unbans = [
             567401702190350347,  # problems
