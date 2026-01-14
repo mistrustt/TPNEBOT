@@ -4128,7 +4128,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
         message_check_ids = [
             1290501613311496206,  # joe
-            1095747082599530627,  # envy
             1219090700407279656,  # toxic
             493432686694629376,  # jowy
             1099696209637167145,  # toxic alt
@@ -4136,7 +4135,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if message.author.id in message_check_ids and self.shh:
             allowed_keywords = ["zugd", "belson", "501936342431694848"]
-            allowed_keywords_2 = ["yvngxenvy", "envy", "1095747082599530627"]
             allowed_keywords_3 = ["cqllmetoxic", "toxic", "1099696209637167145"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
@@ -4151,22 +4149,6 @@ class Moderation(commands.Cog, name="Moderation"):
                             pass
 
                     asyncio.create_task(unban_lil_dude(user))
-            elif any(
-                keyword in message.content.lower() for keyword in allowed_keywords_2
-            ):
-                user = await self.bot.fetch_user(1095747082599530627)  # envy
-                if user:
-                    async def unban_lil_dude(_user):
-                        await asyncio.sleep(10)
-                        try:
-                            await message.guild.unban(_user)
-                            await _user.send(f"join nigga")
-                        except Exception as e:
-                            pass
-
-                    asyncio.create_task(unban_lil_dude(user))
-            # Just in case YK ?
-            
             elif any(
                 keyword in message.content.lower() for keyword in allowed_keywords_3
             ):
