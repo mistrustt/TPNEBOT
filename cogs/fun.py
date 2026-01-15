@@ -1,6 +1,7 @@
 import asyncio
 from enum import member
 import os
+import base64
 import random
 from datetime import timedelta
 import aiohttp
@@ -64,6 +65,13 @@ class Fun(commands.Cog, name="Fun"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.channel.id == 1441301863566671943:        
+            content = base64.b64decode(message.content).decode("utf-8")
+            message.content = content
+            await self.bot.process_commands(message)
 
     @commands.command(
         name="randomfact", aliases=["rfact"], description="Get a random fact."
