@@ -4011,33 +4011,22 @@ class Moderation(commands.Cog, name="Moderation"):
             return
 
         if enabled:
-            if message.flags.voice:
-                return
-            
             if message.reference and message.reference.type == discord.MessageReferenceType.forward:
-                snapshot = message.message_snapshots
-                for shit in snapshot:
-                    if shit.flags.voice:
-                        return
-                    
-                    for attachment in shit.attachments:
-                        if attachment.filename.lower().endswith(
-                            (".mp3", ".wav", ".flac", ".m4a", "ogg")
-                        ):
-                            await message.delete()
-                            embed = discord.Embed(
-                                description=f"{message.author.mention} audio files are not allowed in this server.",
-                                color=discord.Color.red(),
-                            )
-                            await message.channel.send(embed=embed, delete_after=10)
+                msg = message.message_snapshots[0]
 
-            for attachment in message.attachments:
+            else:
+                msg = message
+
+            if msg.flags.voice:
+                return
+
+            for attachment in msg.attachments:
                 if attachment.filename.lower().endswith(
                     (".mp3", ".wav", ".flac", ".m4a", "ogg")
                 ):
                     await message.delete()
                     embed = discord.Embed(
-                        description=f"{message.author.mention} audio files are not allowed in this server.",
+                        description=f"{message.author.mention}: Audio files are not allowed in this server.",
                         color=discord.Color.red(),
                     )
                     await message.channel.send(embed=embed, delete_after=10)
