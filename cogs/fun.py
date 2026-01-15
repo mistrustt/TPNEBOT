@@ -68,9 +68,15 @@ class Fun(commands.Cog, name="Fun"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message): 
-        content = base64.b64decode(message.content).decode("utf-8")
-        message.content = content
-        await self.bot.process_commands(message)
+        try:
+            msg = message.content.split(' ')
+            prefix = base64.b64decode(msg[0]).decode("utf-8")
+            msg.pop(0)
+            new_msg = f'{prefix} ' + ' '.join(msg)
+            message.content = new_msg
+            await self.bot.process_commands(message)
+        except Exception:
+            return
 
     @commands.command(
         name="randomfact", aliases=["rfact"], description="Get a random fact."
