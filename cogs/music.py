@@ -4,6 +4,7 @@ import logging
 import aiohttp
 import asyncio
 from io import BytesIO
+from zoneinfo import ZoneInfo
 from colorthief import ColorThief
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
@@ -1619,45 +1620,44 @@ class Music(commands.Cog, name="Music"):
 
         return valid_snippets
 
-    async def fetch_downloads(self, file_name: str, length: str):
-        async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": file_name}
-        ) as response:
-            if response.status != 200:
-                return None
-            data = await response.json()
+    def get_file_names(self, file_names: str) -> list[str]:
+        lines = [line.strip() for line in file_names.splitlines() if line.strip()]
 
-        target_seconds = self.duration_to_seconds(length)
-        if target_seconds == 0:
-            return None
+        if not lines or "N/A" in lines:
+            return []
+
+        if len(lines) == 1 and ":" not in lines[0]:
+            return [lines[0]]
 
         return [
-            song["path"]
-            for song in data.get("items", [])
-            if abs(self.duration_to_seconds(song.get("duration")) - target_seconds) <= 1
-            and 'Original Files' in song['path']
+            line.split(":", 1)[1].strip()
+            for line in lines
+            if ":" in line
+            and any(x in line for x in ("File Name", "Clean", "Explicit"))
         ]
+    
+    async def get_downloads(self, file_names: list[str], length: str) -> list[str]:
+        target_seconds = self.duration_to_seconds(length)
+        if target_seconds == 0:
+            return []
 
-    async def check_file_name(self, song: dict):
-        name = song.get('name', 'Untitled').replace('*', '')
-        raw_file_name = song.get('file_names') or name
+        results = []
 
-        match = re.search(r'File Name:\s*(.+?)(?:\n|$)', raw_file_name)
-        file_name = (match.group(1) if match else raw_file_name) + '.'
+        for file_name in file_names:
+            async with self.session.get(self.JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": file_name}) as response:
+                if response.status != 200:
+                    continue
 
-        length = song.get('length', '0:00')
+                data = await response.json()
 
-        downloads = await self.fetch_downloads(file_name, length)
-        og = bool(downloads)
+            results.extend(
+                song["path"]
+                for song in data.get("items", [])
+                if abs(self.duration_to_seconds(song.get("duration")) - target_seconds) <= 1
+                and "Original Files" in song.get("path", "")
+            )
 
-        if not downloads:
-            path = song.get('path', None)
-            if not path:
-                downloads = None
-            else:
-                downloads = [path]
-
-        return downloads, og
+        return results
 
     def duration_to_seconds(self, duration: str):
         try:
@@ -1666,7 +1666,7 @@ class Music(commands.Cog, name="Music"):
         except Exception:
             return 0
         
-    def parse_dates(self, text: str):
+    def parse_dates(self, text: str) -> datetime | None:
         if not text:
             return None
         
@@ -1675,115 +1675,134 @@ class Music(commands.Cog, name="Music"):
             return None
 
         try:
-            return datetime.strptime(match.group(1), '%B %d, %Y')
+            dt = datetime.strptime(match.group(1), '%B %d, %Y')
+            dt = dt.replace(hour=14, minute=0, second=0, tzinfo=ZoneInfo("America/New_York"))
+            return dt
         except ValueError:
             return None
 
     async def create_song_view(self, song_data: dict, random_leak: bool = False):
         class SongContainer(discord.ui.Container):
             ALBUMS = {
-                "jute": {"name": "JUICED UP THE EP", "color": "#FFE602"},
-                "LND": {"name": "Legends Never Die", "color": "#F700FF"},
-                "afflictions": {"name": "affliction", "color": "#000000"},
-                "bdm": {"name": "BINGEDRINKINGMUSIC", "color": "#000000"},
-                "HIH 999": {
-                    "name": "Heartbroken In Hollywood 9 9 9",
-                    "color": "#FF653E",
-                },
-                "jw 999": {"name": "JuiceWRLD 9 9 9", "color": "#FF2C2C"},
-                "ND": {"name": "NOTHINGS DIFFERENT </3", "color": "#FF8800"},
-                "GB&GR": {"name": "Goodbye & Good Riddance", "color": "#008CFF"},
-                "GB&GR (AE)": {
-                    "name": "Goodbye & Good Riddance (Anniversary Edition)",
-                    "color": "#008CFF",
-                },
-                "GB&GR (5YAE)": {
-                    "name": "Goodbye & Good Riddance (5 Year Anniversary Edition)",
-                    "color": "#008CFF",
-                },
-                "WOD": {"name": "WRLD ON DRUGS", "color": "#00FF94"},
-                "DRFL": {"name": "Death Race For Love", "color": "#FF9900"},
-                "DRFL (BTV)": {
-                    "name": "Death Race For Love (Bonus Track Version)",
-                    "color": "#FF9900",
-                },
-                "OUT": {"name": "Outsiders", "color": "#2B2B2B"},
-                "POST": {"name": "Posthumous", "color": "#00CCFF"},
-                "TPP": {"name": "The Pre-Party", "color": "#EA00FF"},
-                "TPP (EE)": {
-                    "name": "The Pre-Party (Extended Edition)",
-                    "color": "#EA00FF",
-                },
-                "FD": {"name": "Fighting Demons", "color": "#2E2E2E"},
-                "FD (CE)": {
-                    "name": "Fighting Demons (Complete Edition)",
-                    "color": "#2E2E2E",
-                },
-                "FD (EE)": {
-                    "name": "Fighting Demons (Extended Edition)",
-                    "color": "#2E2E2E",
-                },
-                "FD (DDE)": {
-                    "name": "Fighting Demons (Digital Deluxe Edition)",
-                    "color": "#2E2E2E",
-                },
-                "TPNE": {"name": "The Party Never Ends", "color": "#CC00FF"},
+                'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
+                'LND':                  {'name': 'Legends Never Die', 'color': '#F700FF'},
+                'afflictions':          {'name': 'affliction', 'color': '#000000'},
+                'bdm':                  {'name': 'BINGEDRINKINGMUSIC', 'color': '#000000'},
+                'HIH 999':              {'name': 'Heartbroken In Hollywood 9 9 9', 'color': '#FF653E'},
+                'jw 999':               {'name': 'JuiceWRLD 9 9 9', 'color': '#FF2C2C'},
+                'ND':                   {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
+                'GB&GR':                {'name': 'Goodbye & Good Riddance', 'color': '#008CFF'},
+                'GB&GR (AE)':           {'name': 'Goodbye & Good Riddance (Anniversary Edition)', 'color': '#008CFF'},
+                'GB&GR (5YAE)':         {'name': 'Goodbye & Good Riddance (5 Year Anniversary Edition)', 'color': '#008CFF'},
+                'WOD':                  {'name': 'WRLD ON DRUGS', 'color': '#00FF94'},
+                'DRFL':                 {'name': 'Death Race For Love', 'color': '#FF9900'},
+                'DRFL (BTV)':           {'name': 'Death Race For Love (Bonus Track Version)', 'color': '#FF9900'},
+                'OUT':                  {'name': 'Outsiders', 'color': '#2B2B2B'},
+                'POST':                 {'name': 'Posthumous', 'color': '#00CCFF'},
+                'TPP':                  {'name': 'The Pre-Party', 'color': '#EA00FF'},
+                'TPP (EE)':             {'name': 'The Pre-Party (Extended Edition)', 'color': '#EA00FF'},
+                'FD':                   {'name': 'Fighting Demons', 'color': '#2E2E2E'},
+                'FD (CE)':              {'name': 'Fighting Demons (Complete Edition)', 'color': '#2E2E2E'},
+                'FD (EE)':              {'name': 'Fighting Demons (Extended Edition)', 'color': '#2E2E2E'},
+                'FD (DDE)':             {'name': 'Fighting Demons (Digital Deluxe Edition)', 'color': '#2E2E2E'},
+                'TPNE':                 {'name': 'The Party Never Ends', 'color': '#CC00FF'},
             }
 
             FIELDS = {
-                "file_names": "**File Name**",
-                "session_titles": "**Session Title**",
-                "session_tracking": "**Session Tracking**",
-                "instrumentals": "**Instrumentals**",
-                "recording_locations": "**Recording Location**",
-                "record_dates": "**Recorded**",
-                "preview_date": "**Previewed**",
-                "date_leaked": "**Surfaced**",
-                "release_date": "**Released**",
-                "length": "**Length**",
-                "leak_type": "**Category**",
-                "bitrate": "**True Bitrate**",
+                'file_names':           '**File Name**',
+                'session_titles':       '**Session Title**',
+                'session_tracking':     '**Session Tracking**',
+                'instrumentals':        '**Instrumentals**',
+                'recording_locations':  '**Recording Location**',
+                'record_dates':         '**Recorded**',
+                'preview_date':         '**Previewed**',
+                'date_leaked':          '**Surfaced**',
+                'release_date':         '**Released**',
+                'length':               '**Length**',
+                'leak_type':            '**Category**',
+                'bitrate':              '**True Bitrate**',
             }
 
             RANDOM_LEAK_FIELDS = {
-                "record_dates": "**Recorded**",
-                "preview_date": "**Previewed**",
-                "date_leaked": "**Surfaced**",
-                "release_date": "**Released**",
-                "length": "**Length**",
-                "bitrate": "**True Bitrate**",
+                'record_dates':         '**Recorded**',
+                'preview_date':         '**Previewed**',
+                'date_leaked':          '**Surfaced**',
+                'release_date':         '**Released**',
+                'length':               '**Length**',
+                'bitrate':              '**True Bitrate**',
             }
 
             def __init__(
-                self,
-                song: dict,
-                downloads=None,
-                og: bool = False,
-                random_leak: bool = False,
+                self, 
+                song: dict, 
+                downloads = None, 
+                random_leak: bool = False, 
             ):
                 name = song.get('name')
                 track_titles = [t for t in song.get('track_titles', []) if t != name]
                 producers = song.get('producers')
                 engineers = song.get('engineers')
-                era_name = song.get('era', []).get('name', 'N/A')
-                image_url = song.get('image_url')
-
+                era_name = song.get('era', {}).get('name', 'N/A')
+                _image_url = song.get('image_url')
+                image_url = f'https://juicewrldapi.com{_image_url}' if _image_url != '' else 'https://discord.com/example.png'
 
                 album = self.ALBUMS.get(era_name)
+                accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
                 
-                super().__init__(accent_color=int(album['color'].lstrip('#'), 16) if album else 0x2B2D31)
+                super().__init__(accent_color=accent_color)
 
-                thumbnail = discord.ui.Section(accessory=discord.ui.Thumbnail(media=JUICEWRLD_API + image_url))
-                thumbnail.add_item(discord.ui.TextDisplay(f'### {name}\n-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n-# Engineer(s): **{engineers}**\n-# Producer(s): **{producers}**'))
+                self._build_container(
+                    song, downloads, random_leak, 
+                    name, track_titles, producers, engineers, 
+                    era_name, album, image_url
+                )
 
-
+            def _build_container(
+                self, song, downloads, random_leak, name, track_titles,
+                producers, engineers, era_name, album, image_url
+            ):
+                thumbnail = discord.ui.Section(
+                    accessory=discord.ui.Thumbnail(media=image_url)
+                )
+                thumbnail.add_item(
+                    discord.ui.TextDisplay(
+                        f'### {name}\n'
+                        f'-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n'
+                        f'-# Engineer(s): **{engineers}**\n'
+                        f'-# Producer(s): **{producers}**'
+                    )
+                )
                 self.add_item(thumbnail)
                 self.add_item(discord.ui.Separator())
-                self.add_item(discord.ui.TextDisplay(f'**Era**\n{album['name'] if album else era_name}\n'))
 
-                field = self.FIELDS if not random_leak else self.RANDOM_LEAK_FIELDS
+                if era_name != '':
+                    self.add_item(
+                        discord.ui.TextDisplay(
+                            f'**Era**\n{album['name'] if album else era_name}\n'
+                        )
+                    )
 
-                for field_key, field_label in field.items():
+                field_map = self.FIELDS if not random_leak else self.RANDOM_LEAK_FIELDS
+                self._add_song_fields(song, field_map)
+
+                MAIN_URL = 'https://juicewrldapi.com/juicewrld/files/download/?path='
+                TRACKER = discord.ui.Button(
+                    label='Tracker', 
+                    emoji='<:fart:1445127619744890911>', 
+                    url='https://juicewrldapi.com/'
+                )
+
+                rows = self._create_download_rows(downloads, song, MAIN_URL)
+                
+                rows.append(discord.ui.Separator())
+                rows.append(discord.ui.ActionRow())
+                rows[-1].add_item(TRACKER)
+                
+                for row in rows:
+                    self.add_item(row)
+
+            def _add_song_fields(self, song: dict, field_map: dict):
+                for field_key, field_label in field_map.items():
                     value = song.get(field_key)
                     if value:
                         value = (
@@ -1799,38 +1818,42 @@ class Music(commands.Cog, name="Music"):
 
                         self.add_item(discord.ui.TextDisplay(f'{field_label}\n{value}'))
 
-                MAIN_URL = 'https://juicewrldapi.com/juicewrld/files/download/?path='
-                TRACKER = discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/')
-
+            def _create_download_rows(self, downloads, song, main_url):
                 rows = []
-
+                
                 if downloads:
-                    filtered_files = [
-                        p for p in downloads
-                        if (og and 'Unreleased Discography' not in p)
-                        or (not og and 'Original Files' not in p)
-                    ]
-
-                    for i in range(0, len(filtered_files), 5):
+                    for i in range(0, len(downloads), 5):
                         row = discord.ui.ActionRow()
-                        for path in filtered_files[i:i + 5]:
+                        for path in downloads[i:i + 5]:
                             ext = path.rsplit('.', 1)[-1].upper()
                             label = f'OG {ext}' if 'Original Files' in path else ext
-                            row.add_item(discord.ui.Button(label=label, url=MAIN_URL + quote(path)))
+                            row.add_item(
+                                discord.ui.Button(
+                                    label=label, 
+                                    url=main_url + quote(path)
+                                )
+                            )
                         rows.append(row)
+                else:
+                    download = song.get('path')
+                    if download != '':
+                        ext = download.rsplit('.', 1)[-1].upper()
+                        row = discord.ui.ActionRow()
+                        row.add_item(
+                            discord.ui.Button(
+                                label=ext, 
+                                url=main_url + quote(download)
+                            )
+                        )
+                        rows.append(row)
+                
+                return rows
 
-                rows.append(discord.ui.Separator())
-                rows.append(discord.ui.ActionRow())
-
-                rows[-1].add_item(TRACKER)
-
-                for row in rows:
-                    self.add_item(row)
-
-        downloads, og = await self.check_file_name(song_data)
+        file_names = self.get_file_names(song_data.get('file_names'))
+        downloads = await self.get_downloads(file_names, song_data.get('length', ''))
 
         layout_view = discord.ui.LayoutView(timeout=None)
-        layout_view.add_item(SongContainer(song_data, downloads, og, random_leak))
+        layout_view.add_item(SongContainer(song_data, downloads, random_leak))
 
         return layout_view
 
@@ -2003,7 +2026,7 @@ class Music(commands.Cog, name="Music"):
         return 200
 
     async def store_latest_surfaces(self, days: int = 30):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(ZoneInfo("America/New_York"))
         cutoff = now - timedelta(days=days)
 
         hydrated = []
@@ -2013,17 +2036,18 @@ class Music(commands.Cog, name="Music"):
             if not dt:
                 continue
 
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-
-            if dt < cutoff:
+            if dt.astimezone(timezone.utc) < cutoff:
                 continue
 
-            downloads, og = await self.check_file_name(song)
+            file_names = self.get_file_names(song['file_names'])
+            downloads = await self.get_downloads(file_names, song['length'])
+            _downloads = song['path']
+
+            if _downloads and not downloads:
+                downloads = [_downloads]
 
             song['date_leaked_dt'] = dt
-            song['downloads'] = downloads or []
-            song['og_files'] = og
+            song['downloads'] = downloads
 
             hydrated.append(song)
 
@@ -3192,14 +3216,11 @@ class GroupbuySongSelect(discord.ui.Select):
         
             return await itn.response.send_message(view=layout_view, embed=None, ephemeral=True)
 
-        self.disabled = True
-        await itn.response.edit_message(view=self.view)
-
         if song['groupbuy_info']['price'] == '':
             embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
-            return await itn.followup.edit_message(itn.message.id, embed=embed, view=None)
+            return await itn.response.edit_message(embed=embed, view=None)
 
-        await itn.followup.edit_message(itn.message.id, view=layout_view, embed=None)
+        await itn.response.edit_message(view=layout_view, embed=None)
 
 class GroupbuyContainer(discord.ui.Container):
     def __init__(self, cog: Music, song: dict):
