@@ -4021,9 +4021,10 @@ class Moderation(commands.Cog, name="Moderation"):
                 return
 
             for attachment in msg.attachments:
-                if attachment.filename.lower().endswith(
-                    (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus")
-                ):
+                # if attachment.filename.lower().endswith(
+                #     (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus")
+                # ):
+                if attachment.content_type.lower().startswith('audio/'): # W discord feature
                     await message.delete()
                     embed = discord.Embed(
                         description=f"{message.author.mention}: Audio files are not allowed in this server.",
