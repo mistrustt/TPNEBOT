@@ -4011,12 +4011,15 @@ class Moderation(commands.Cog, name="Moderation"):
             return
 
         if enabled:
+            if message.flags.voice:
+                return
+            
             if message.reference and message.reference.type == discord.MessageReferenceType.forward:
                 snapshot = message.message_snapshots
                 for shit in snapshot:
                     for attachment in shit.attachments:
                         if attachment.filename.lower().endswith(
-                            (".mp3", ".wav", ".flac", ".m4a")
+                            (".mp3", ".wav", ".flac", ".m4a", "ogg")
                         ):
                             await message.delete()
                             embed = discord.Embed(
@@ -4027,7 +4030,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith(
-                    (".mp3", ".wav", ".flac", ".m4a")
+                    (".mp3", ".wav", ".flac", ".m4a", "ogg")
                 ):
                     await message.delete()
                     embed = discord.Embed(
