@@ -4022,7 +4022,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
             for attachment in msg.attachments:
                 if attachment.filename.lower().endswith(
-                    (".mp3", ".wav", ".flac", ".m4a", "ogg")
+                    (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus")
                 ):
                     await message.delete()
                     embed = discord.Embed(
