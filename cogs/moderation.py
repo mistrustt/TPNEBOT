@@ -4017,6 +4017,9 @@ class Moderation(commands.Cog, name="Moderation"):
             if message.reference and message.reference.type == discord.MessageReferenceType.forward:
                 snapshot = message.message_snapshots
                 for shit in snapshot:
+                    if shit.flags.voice:
+                        return
+                    
                     for attachment in shit.attachments:
                         if attachment.filename.lower().endswith(
                             (".mp3", ".wav", ".flac", ".m4a", "ogg")
