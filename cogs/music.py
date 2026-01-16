@@ -2080,22 +2080,25 @@ class Music(commands.Cog, name="Music"):
 
             container.add_item(section)
 
-            downloads = song.get('downloads', [])
-            og = song.get('og_files', False)
+            downloads = song.get('downloads')
 
+            rows = []
+            
             if downloads:
-                filtered_files = [
-                    p for p in downloads
-                    if (og and 'Unreleased Discography' not in p)
-                    or (not og and 'Original Files' not in p)
-                ]
-
-                for i in range(0, len(filtered_files), 5):
+                for i in range(0, len(downloads), 5):
                     row = discord.ui.ActionRow()
-                    for path in filtered_files[i:i + 5]:
+                    for path in downloads[i:i + 5]:
                         ext = path.rsplit('.', 1)[-1].upper()
                         label = f'OG {ext}' if 'Original Files' in path else ext
-                        row.add_item(discord.ui.Button(label=label, url=MAIN_URL + quote(path)))
+                        row.add_item(
+                            discord.ui.Button(
+                                label=label, 
+                                url=MAIN_URL + quote(path)
+                            )
+                        )
+                    rows.append(row)
+                    
+                for row in rows:
                     container.add_item(row)
 
             if ii < len(songs) - 1:
