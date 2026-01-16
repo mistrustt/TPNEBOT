@@ -1644,7 +1644,7 @@ class Music(commands.Cog, name="Music"):
         results = []
 
         for file_name in file_names:
-            async with self.session.get(self.JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": file_name}) as response:
+            async with self.session.get(JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": file_name}) as response:
                 if response.status != 200:
                     continue
 
