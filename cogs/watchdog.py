@@ -20,6 +20,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
         self.max_queue_size = 10
         self.process_interval = 10
         self.guild_settings_cache = {}
+        self.voice_sessions = {}  # {(guild_id, user_id): {"channel_id": int, "joined_at": datetime}}
         self.discord_patterns = [
             # Discord gift link pattern
             re.compile(r"(https?://)?discord((app)?.com/gifts|.gifts)/[a-zA-Z0-9-]+/?"),
@@ -542,17 +543,49 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if not settings or not settings.get("voice_tracking", True):
             return
 
+        session_key = (member.guild.id, member.id)
         changes = []
 
         if before.channel != after.channel:
             if before.channel and after.channel:
-                changes.append(
-                    f"**Moved Channels**: {before.channel.mention} → {after.channel.mention}"
-                )
-            elif after.channel:
+                # User moved between channels - end old session and start new one
+                if session_key in self.voice_sessions:
+                    joined_at = self.voice_sessions[session_key]["joined_at"]
+                    duration = datetime.now(timezone.utc) - joined_at
+                    duration_str = humanfriendly.format_timespan(duration.total_seconds())
+                    changes.append(
+                        f"**Left Channel**: {before.channel.mention} (Duration: {duration_str})"
+                    )
+                
                 changes.append(f"**Joined Channel**: {after.channel.mention}")
+                
+                # Start new session
+                self.voice_sessions[session_key] = {
+                    "channel_id": after.channel.id,
+                    "joined_at": datetime.now(timezone.utc)
+                }
+            elif after.channel:
+                # User joined a channel
+                changes.append(f"**Joined Channel**: {after.channel.mention}")
+                
+                # Start tracking session
+                self.voice_sessions[session_key] = {
+                    "channel_id": after.channel.id,
+                    "joined_at": datetime.now(timezone.utc)
+                }
             elif before.channel:
-                changes.append(f"**Left Channel**: {before.channel.mention}")
+                # User left a channel
+                duration_str = None
+                if session_key in self.voice_sessions:
+                    joined_at = self.voice_sessions[session_key]["joined_at"]
+                    duration = datetime.now(timezone.utc) - joined_at
+                    duration_str = humanfriendly.format_timespan(duration.total_seconds())
+                    del self.voice_sessions[session_key]
+                
+                if duration_str:
+                    changes.append(f"**Left Channel**: {before.channel.mention} (Duration: {duration_str})")
+                else:
+                    changes.append(f"**Left Channel**: {before.channel.mention}")
 
         if before.self_mute != after.self_mute:
             mute_status = "Muted" if after.self_mute else "Unmuted"
