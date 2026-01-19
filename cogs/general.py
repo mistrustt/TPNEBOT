@@ -2502,17 +2502,18 @@ class General(commands.Cog, name="General"):
                             "Approaching API rate limit. Consider slowing down requests."
                         )
 
+                    status = response.status
                     data = await response.json()
-            if response.status != 200:
+            if status != 200:
                 logger.exception(
-                    f'Nasa API Error: {response.status} {data.get("msg", "Unknown error")}'
+                    f'Nasa API Error: {status} {data.get("msg", "Unknown error")}'
                 )
                 embed = discord.Embed(
                     title="Error",
-                    description=f"Nasa API Error {response.status}",
+                    description=f"Nasa API Error {status}",
                     color=discord.Color.red(),
                 )
-                embed.set_image(url="https://http.cat/" + str(response.status))
+                embed.set_image(url="https://http.cat/" + str(status))
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
@@ -2539,8 +2540,6 @@ class General(commands.Cog, name="General"):
                 name=data.get("title", "No Title"),
                 icon_url="https://www.nasa.gov/wp-content/themes/nasa/assets/images/nasa-logo@2x.png",
             )
-            if url:
-                embed.set_image(url=url)
             if hdurl:
                 embed.add_field(
                     name="HD Image", value=f"[apod.nasa.gov]({hdurl})", inline=False

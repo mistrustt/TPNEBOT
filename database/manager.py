@@ -887,6 +887,19 @@ class DatabaseManager:
                     session.add(settings)
                 await session.commit()
 
+    async def set_watchdog_feature(self, guild_id: int, feature: str, enabled: bool):
+        """Set individual watchdog feature toggle"""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                settings = await session.get(ServerSettings, guild_id)
+                if settings:
+                    setattr(settings, f"watchdog_{feature}", enabled)
+                else:
+                    settings = ServerSettings(guild_id=guild_id)
+                    setattr(settings, f"watchdog_{feature}", enabled)
+                    session.add(settings)
+                await session.commit()
+
     async def get_server_settings(self, guild_id: int) -> ServerSettings:
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)

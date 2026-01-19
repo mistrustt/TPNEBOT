@@ -163,12 +163,22 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 self.guild_settings_cache[guild_id] = {
                     "enabled": settings.watchdog_enabled,
                     "channel_id": settings.watchdog_channel_id,
+                    "pii_filter": settings.watchdog_pii_filter,
+                    "card_filter": settings.watchdog_card_filter,
+                    "member_tracking": settings.watchdog_member_tracking,
+                    "message_tracking": settings.watchdog_message_tracking,
+                    "voice_tracking": settings.watchdog_voice_tracking,
                     "last_updated": datetime.now(),
                 }
             else:
                 self.guild_settings_cache[guild_id] = {
                     "enabled": False,
                     "channel_id": None,
+                    "pii_filter": True,
+                    "card_filter": True,
+                    "member_tracking": True,
+                    "message_tracking": True,
+                    "voice_tracking": True,
                     "last_updated": datetime.now(),
                 }
 
@@ -346,8 +356,20 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
     @watchdog_cmd.command(name="toggle", aliases=["t"])
     @commands.has_permissions(administrator=True)
-    async def toggle_listener(self, ctx: Context):
-        """Enable or disable logging for this server."""
+    async def toggle_listener(self, ctx: Context, feature: str = None):
+        """Enable or disable logging for this server or a specific feature.
+        
+        Features:
+        - pii_filter: PII (Personal Identifiable Information) detection
+        - card_filter: Credit card detection
+        - member_tracking: Member join/leave, role changes, nickname changes
+        - message_tracking: Message deletions
+        - voice_tracking: Voice state changes
+        
+        Usage:
+        !watchdog toggle - Toggle entire watchdog on/off
+        !watchdog toggle pii_filter - Toggle PII filter only
+        """
         guild_id = ctx.guild.id
         settings = await self.bot.database.get_server_settings(guild_id)
 
@@ -356,14 +378,36 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 "Server settings not found. Please setup a log channel first."
             )
 
-        enabled = not settings.watchdog_enabled
-        await self.bot.database.set_watchdog_enabled(guild_id, enabled)
+        valid_features = ["pii_filter", "card_filter", "member_tracking", "message_tracking", "voice_tracking"]
+        
+        if feature:
+            # Toggle individual feature
+            if feature not in valid_features:
+                return await ctx.send(
+                    f"Invalid feature. Valid features are: {', '.join(valid_features)}"
+                )
+            
+            current_value = getattr(settings, f"watchdog_{feature}", True)
+            new_value = not current_value
+            await self.bot.database.set_watchdog_feature(guild_id, feature, new_value)
+            
+            # Update cache
+            if guild_id in self.guild_settings_cache:
+                self.guild_settings_cache[guild_id][feature] = new_value
+            
+            status = "enabled" if new_value else "disabled"
+            feature_name = feature.replace("_", " ").title()
+            await ctx.send(f"Watchdog {feature_name} has been {status}.")
+        else:
+            # Toggle entire watchdog
+            enabled = not settings.watchdog_enabled
+            await self.bot.database.set_watchdog_enabled(guild_id, enabled)
 
-        if guild_id in self.guild_settings_cache:
-            self.guild_settings_cache[guild_id]["enabled"] = enabled
+            if guild_id in self.guild_settings_cache:
+                self.guild_settings_cache[guild_id]["enabled"] = enabled
 
-        status = "enabled" if enabled else "disabled"
-        await ctx.send(f"Watchdog logging has been {status}.")
+            status = "enabled" if enabled else "disabled"
+            await ctx.send(f"Watchdog logging has been {status}.")
 
     @watchdog_cmd.command(name="status")
     @commands.has_permissions(administrator=True)
@@ -375,7 +419,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if not settings:
             return await ctx.send("Watchdog has not been configured for this server.")
 
-        status_text = "enabled" if settings.watchdog_enabled else "disabled"
+        status_text = "✅ Enabled" if settings.watchdog_enabled else "❌ Disabled"
         channel_text = (
             f"<#{settings.watchdog_channel_id}>"
             if settings.watchdog_channel_id
@@ -383,18 +427,38 @@ class Watchdog(commands.Cog, name="Watchdog"):
         )
 
         embed = discord.Embed(title="Watchdog Status", color=discord.Color.blurple())
-        embed.add_field(name="Status", value=status_text, inline=True)
-        embed.add_field(name="Log Channel", value=channel_text, inline=True)
+        embed.add_field(name="Overall Status", value=status_text, inline=False)
+        embed.add_field(name="Log Channel", value=channel_text, inline=False)
+        
+        # Add individual feature statuses
+        features = [
+            ("PII Filter", "pii_filter", settings.watchdog_pii_filter),
+            ("Card Filter", "card_filter", settings.watchdog_card_filter),
+            ("Member Tracking", "member_tracking", settings.watchdog_member_tracking),
+            ("Message Tracking", "message_tracking", settings.watchdog_message_tracking),
+            ("Voice Tracking", "voice_tracking", settings.watchdog_voice_tracking),
+        ]
+        
+        feature_status = "\n".join(
+            f"**{name}**: {'✅ Enabled' if enabled else '❌ Disabled'}"
+            for name, _, enabled in features
+        )
+        
+        embed.add_field(name="Features", value=feature_status, inline=False)
 
         await ctx.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        await self.add_log_entry(guild.id, f"{user} was banned from the server.")
+        settings = await self.get_guild_settings(guild.id)
+        if settings and settings.get("member_tracking", True):
+            await self.add_log_entry(guild.id, f"{user} was banned from the server.")
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
-        await self.add_log_entry(guild.id, f"{user} was unbanned from the server.")
+        settings = await self.get_guild_settings(guild.id)
+        if settings and settings.get("member_tracking", True):
+            await self.add_log_entry(guild.id, f"{user} was unbanned from the server.")
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):
@@ -411,10 +475,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
             for guild in self.bot.guilds:
                 if member := guild.get_member(after.id):
-                    await self.add_log_entry(
-                        guild.id,
-                        f"User {after.name} (ID: {after.id}) changed username from '{before.name}' to '{after.name}'.",
-                    )
+                    settings = await self.get_guild_settings(guild.id)
+                    if settings and settings.get("member_tracking", True):
+                        await self.add_log_entry(
+                            guild.id,
+                            f"User {after.name} (ID: {after.id}) changed username from '{before.name}' to '{after.name}'.",
+                        )
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -422,6 +488,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         guild_id = after.guild.id
+        settings = await self.get_guild_settings(guild_id)
+        if not settings or not settings.get("member_tracking", True):
+            return
+
         changes = []
 
         if before.roles != after.roles:
@@ -468,6 +538,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if member.bot or not member.guild:
             return
 
+        settings = await self.get_guild_settings(member.guild.id)
+        if not settings or not settings.get("voice_tracking", True):
+            return
+
         changes = []
 
         if before.channel != after.channel:
@@ -500,60 +574,72 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if message.author.bot or not message.guild or not message.content:
             return
 
+        settings = await self.get_guild_settings(message.guild.id)
+        if not settings:
+            return
+
         content = message.content
 
-        for pattern_name, pattern in self.pii_patterns.items():
-            m = pattern.search(content)
-            if m:
-                snippet = m.group(0)
-                desc = (
-                    f"⚠️ {pattern_name} detected in {message.channel.mention} sent by "
-                    f"{message.author} (`{message.author.id}`): `{snippet}`"
-                )
+        # Check PII filter
+        if settings.get("pii_filter", True):
+            for pattern_name, pattern in self.pii_patterns.items():
+                m = pattern.search(content)
+                if m:
+                    snippet = m.group(0)
+                    desc = (
+                        f"⚠️ {pattern_name} detected in {message.channel.mention} sent by "
+                        f"{message.author} (`{message.author.id}`): `{snippet}`"
+                    )
 
-                if pattern_name == "Discord Token":
+                    if pattern_name == "Discord Token":
+                        try:
+                            token_parts = snippet.split(".")
+                            if len(token_parts) >= 1:
+                                user_id = base64.b64decode(token_parts[0] + "==").decode(
+                                    "utf-8"
+                                )
+                                desc += f"\n**Token User ID**: {user_id}"
+                        except:
+                            pass
+
                     try:
-                        token_parts = snippet.split(".")
-                        if len(token_parts) >= 1:
-                            user_id = base64.b64decode(token_parts[0] + "==").decode(
-                                "utf-8"
-                            )
-                            desc += f"\n**Token User ID**: {user_id}"
-                    except:
-                        pass
+                        await message.delete()
+                    except discord.Forbidden:
+                        desc += "\n*Failed to delete the message due to insufficient permissions.*"
 
-                try:
-                    await message.delete()
-                except discord.Forbidden:
-                    desc += "\n*Failed to delete the message due to insufficient permissions.*"
+                    await self.add_log_entry(message.guild.id, desc)
+                    return
 
-                await self.add_log_entry(message.guild.id, desc)
-                return
+        # Check card filter
+        if settings.get("card_filter", True):
+            NON_LUHN = {"Diners Club enRoute Card"}
 
-        NON_LUHN = {"Diners Club enRoute Card"}
+            for pattern_name, pattern in self.card_patterns.items():
+                for m in pattern.finditer(content):
+                    card_number = re.sub(r"\D", "", m.group(0))
 
-        for pattern_name, pattern in self.card_patterns.items():
-            for m in pattern.finditer(content):
-                card_number = re.sub(r"\D", "", m.group(0))
+                    if pattern_name not in NON_LUHN and not self.luhn(card_number):
+                        continue
 
-                if pattern_name not in NON_LUHN and not self.luhn(card_number):
-                    continue
+                    desc = (
+                        f"⚠️ Genuine Credit Card detected in {message.channel.mention} sent by "
+                        f"{message.author} (`{message.author.id}`)"
+                    )
+                    try:
+                        await message.delete()
+                    except discord.Forbidden:
+                        desc += "\n*Failed to delete the message due to insufficient permissions.*"
 
-                desc = (
-                    f"⚠️ Genuine Credit Card detected in {message.channel.mention} sent by "
-                    f"{message.author} (`{message.author.id}`)"
-                )
-                try:
-                    await message.delete()
-                except discord.Forbidden:
-                    desc += "\n*Failed to delete the message due to insufficient permissions.*"
-
-                await self.add_log_entry(message.guild.id, desc)
-                return
+                    await self.add_log_entry(message.guild.id, desc)
+                    return
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if message.author.bot or not message.guild:
+            return
+
+        settings = await self.get_guild_settings(message.guild.id)
+        if not settings or not settings.get("message_tracking", True):
             return
 
         description = f"Message by {message.author.display_name} (`{message.author.id}`) in {message.channel.mention} was deleted."
@@ -576,6 +662,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         if member.bot or not member.guild:
+            return
+
+        settings = await self.get_guild_settings(member.guild.id)
+        if not settings or not settings.get("member_tracking", True):
             return
 
         join_time = datetime.now(timezone.utc)
