@@ -172,8 +172,14 @@ class Owner(commands.Cog, name="Owner"):
             736148885055078431,  # daniel
             1166141915297743010,  # dennis
         ]
+        self.whitelist_clubhouse = [
+            284439598422163476,  # E
+            1166141915297743010,  # dennis
+        ]
         self.whitelist_mistrust = [
             284439598422163476,  # E
+            1095747082599530627, # envy
+            657182369240973312, # chaos
         ]
         self.whitelist_private = [
             284439598422163476,  # E
@@ -187,9 +193,14 @@ class Owner(commands.Cog, name="Owner"):
     def is_whitelisted_tpne_unbans(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_tpneunbans
+    
     def is_whitelisted_wrld(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_wrld
+
+    def is_whitelisted_clubhouse(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelist_clubhouse
 
     def is_whitelisted_mistrust(self, user_id: int):
         """Check if the user ID is in the whitelist."""
@@ -2303,6 +2314,7 @@ class Owner(commands.Cog, name="Owner"):
             1336128367166095380: self.is_whitelisted_mistrust,
             1440419546396758078: self.is_whitelisted_tpne_unbans,
             1199083709735911465: self.is_whitelisted_private,
+            1452021243669643324: self.is_whitelisted_clubhouse,
         }
 
         if ctx.guild.id not in allowed_guilds:
