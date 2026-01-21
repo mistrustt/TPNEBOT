@@ -146,7 +146,7 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = datetime.now()
-        self.whitelisted_users_tpne = [
+        self.whitelist_tpne = [
             284439598422163476,  # E
             1166140569861496853,  # voj
             736148885055078431,  # daniel
@@ -157,47 +157,47 @@ class Owner(commands.Cog, name="Owner"):
             857702737500569650,  # aether
             514641307621261313, # sail mar
         ]
-        self.whitelisted_users_tpne_unbans = [
+        self.whitelist_tpneunbans = [
             567401702190350347,  # problems
             284439598422163476,  # E
             657182369240973312,  # chaos
+            736148885055078431,  # daniel
+            1166141915297743010,  # dennis
+            1166140569861496853,  # voj
             1290501613311496206,  # joejoe
         ]
-        self.whitelisted_users_wrld = [
+        self.whitelist_wrld = [
             284439598422163476,  # E
             1166140569861496853,  # voj
             736148885055078431,  # daniel
             1166141915297743010,  # dennis
         ]
-        self.whitelisted_users_infohub = [
+        self.whitelist_mistrust = [
             284439598422163476,  # E
-            1166140569861496853,  # voj
-            736148885055078431,  # daniel
         ]
-        self.whitelisted_users_private = [
+        self.whitelist_private = [
             284439598422163476,  # E
         ]
         self.shh_emoji = "🤫"
 
     def is_whitelisted_tpne(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_tpne
+        return user_id in self.whitelist_tpne
 
     def is_whitelisted_tpne_unbans(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_tpne_unbans
-
+        return user_id in self.whitelist_tpneunbans
     def is_whitelisted_wrld(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_wrld
+        return user_id in self.whitelist_wrld
 
-    def is_whitelisted_infohub(self, user_id: int):
+    def is_whitelisted_mistrust(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_infohub
-
+        return user_id in self.whitelist_mistrust
+    
     def is_whitelisted_private(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelisted_users_private
+        return user_id in self.whitelist_private
 
     async def find_role(self, ctx: Context, role_name: str):
         """Helper method to find a role by partial name, ID, or mention."""
@@ -2299,10 +2299,10 @@ class Owner(commands.Cog, name="Owner"):
     ):
         allowed_guilds = {
             1270962480742666311: self.is_whitelisted_tpne,
-            1198831682174853142: self.is_whitelisted_infohub,
             1216776903629869058: self.is_whitelisted_wrld,
-            1336128367166095380: self.is_whitelisted_private,
+            1336128367166095380: self.is_whitelisted_mistrust,
             1440419546396758078: self.is_whitelisted_tpne_unbans,
+            1199083709735911465: self.is_whitelisted_private,
         }
 
         if ctx.guild.id not in allowed_guilds:
