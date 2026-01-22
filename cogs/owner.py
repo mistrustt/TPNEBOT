@@ -1254,7 +1254,6 @@ class Owner(commands.Cog, name="Owner"):
         boosts = guild.premium_subscription_count
         boost_level = guild.premium_tier
         created_at = guild.created_at.strftime("%b %d, %Y")
-        region = str(guild.region).title()
 
         embed = discord.Embed(
             title=f"Server Information: {guild.name}", color=discord.Color.blurple()
