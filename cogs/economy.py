@@ -1557,32 +1557,33 @@ class Economy(commands.Cog):
         """Beg for money. Maybe you'll get lucky!"""
 
         names = [
-            "DJ Relentt",
-            "DJ Scheme",
+            "Dennis",
             "Googly",
-            "Daniel",
-            "Pete",
+            "Lenny",
+            "Shogani",
             "G Money",
             "Lil Bibby",
+            "Pete",
             "Ally Lotti",
-            "Mysterious Stranger",
-            "Your Mom",
-            "Your Dad",
-            "Seezyn",
             "Chris Long",
+            "DJ Relentt",
+            "DJ Scheme",
+            "Juice WRLD",
+            "Drake",
+            "Lil Durk",
+            "King Von",
+            "Chief Keef",
+            "Seezyn",
             "Lil Uzi Vert",
             "Playboi Carti",
             "Young Thug",
             "Gunna",
-            "Dennis",
-            "Lil Peep",
-            "Juice WRLD",
+            "Mysterious Stranger",
         ]
 
         name = secrets.choice(names)
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        balance = await self.bot.database.get_wallet_balance(wallet_id)
 
         positive_interactions = [
             f"**{name}** smiles and says, 'Here, take this. It's not much, but it should help.'",
@@ -1595,6 +1596,16 @@ class Economy(commands.Cog):
             f"**{name}** winks and slips you some money. 'Don't spend it all in one place,' they joke.",
             f"'It's not much, but it's something,' **{name}** says, offering you a small amount.",
             f"**{name}** passes by and drops some change in your hand with a nod of encouragement.",
+            f"**{name}** stops and says, 'You remind me of myself when I was younger,' before handing you some cash.",
+            f"'Today's your lucky day,' **{name}** says cheerfully as they give you some money.",
+            f"**{name}** reaches into their wallet and says, 'I just got paid, here you go.'",
+            f"'Everyone needs help sometimes,' **{name}** says kindly while giving you some coins.",
+            f"**{name}** tosses you some bills and says, 'Put this to good use, alright?'",
+            f"'I've been where you are,' **{name}** says softly before offering you some money.",
+            f"**{name}** grins and says, 'Consider this a gift from the universe,' as they hand you cash.",
+            f"'You've got kind eyes,' **{name}** remarks before dropping some money in your hand.",
+            f"**{name}** pulls out their phone, then reconsiders and gives you the cash instead.",
+            f"'My grandma always told me to help others,' **{name}** says while handing you some bills.",
         ]
 
         negative_interactions = [
@@ -1609,7 +1620,17 @@ class Economy(commands.Cog):
             f"'I can't help you,' **{name}** says bluntly before disappearing into the crowd.",
             f"**{name}** gives you a cold stare and continues on their way without a word.",
             f"**{name}** looks you dead in the eye and screams, 'TOXIC HUMANS IS NEVER COMING'",
+            f"**{name}** pulls out their earbuds just to say 'No' before putting them back in.",
+            f"'I'm broke too,' **{name}** claims while clearly holding a designer bag.",
+            f"**{name}** laughs mockingly and says, 'Nice try, but I'm not falling for that.'",
+            f"'Go ask someone else,' **{name}** says dismissively without breaking stride.",
+            f"**{name}** crosses to the other side of the street to avoid you.",
+            f"'I don't carry cash,' **{name}** lies while their wallet visibly bulges in their pocket.",
+            f"**{name}** rolls their eyes and mutters something under their breath as they pass.",
+            f"'The audacity,' **{name}** whispers loudly before speed-walking away.",
+            f"**{name}** pretends to be on an important phone call and rushes past you.",
         ]
+
         seq = [True] * 4 + [False] * 6
         is_successful = await self.fair_choice(user_id, seq)
 
