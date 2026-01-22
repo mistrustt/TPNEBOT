@@ -1556,34 +1556,47 @@ class Economy(commands.Cog):
     async def beg(self, ctx: commands.Context):
         """Beg for money. Maybe you'll get lucky!"""
 
-        names = [
-            "Dennis",
-            "Googly",
-            "Lenny",
-            "Shogani",
-            "G Money",
-            "Lil Bibby",
-            "Pete",
-            "Ally Lotti",
-            "Chris Long",
-            "DJ Relentt",
-            "DJ Scheme",
-            "Juice WRLD",
-            "Drake",
-            "Lil Durk",
-            "King Von",
-            "Chief Keef",
-            "Seezyn",
-            "Lil Uzi Vert",
-            "Playboi Carti",
-            "Young Thug",
-            "Gunna",
-            "Mysterious Stranger",
+        names_data = [
+            ("Dennis", 10, 1.0, 1.5),
+            ("Googly", 10, 1.0, 1.5),
+            ("Lenny", 10, 1.0, 1.5),
+            ("Shogani", 10, 1.0, 1.5),
+            ("G Money", 8, 1.5, 2.5),
+            ("Lil Bibby", 8, 1.5, 2.5),
+            ("Pete", 10, 1.0, 1.5),
+            ("Ally Lotti", 10, 1.0, 1.5),
+            ("Chris Long", 10, 1.0, 1.5),
+            ("DJ Relentt", 8, 1.2, 2.0),
+            ("DJ Scheme", 8, 1.2, 2.0),
+            ("Juice WRLD", 3, 3.0, 5.0),
+            ("Drake", 4, 2.5, 4.0),
+            ("Lil Durk", 6, 1.8, 3.0),
+            ("King Von", 6, 1.8, 3.0),
+            ("Chief Keef", 6, 1.8, 3.0),
+            ("Seezyn", 8, 1.5, 2.5),
+            ("Lil Uzi Vert", 5, 2.0, 3.5),
+            ("Playboi Carti", 5, 2.0, 3.5),
+            ("Young Thug", 5, 2.0, 3.5),
+            ("Gunna", 6, 1.8, 3.0),
+            ("Mysterious Stranger", 1, 5.0, 10.0),
         ]
 
-        name = secrets.choice(names)
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+
+        # Weighted random selection
+        total_weight = sum(weight for _, weight, _, _ in names_data)
+        rand_val = await self.fair_randbelow(user_id, total_weight, tag="beg_name")
+        
+        cumulative = 0
+        selected_entry = names_data[0]
+        for entry in names_data:
+            cumulative += entry[1]
+            if rand_val < cumulative:
+                selected_entry = entry
+                break
+        
+        name, _, min_mult, max_mult = selected_entry
 
         positive_interactions = [
             f"**{name}** smiles and says, 'Here, take this. It's not much, but it should help.'",
@@ -1632,13 +1645,17 @@ class Economy(commands.Cog):
         ]
 
         seq = [True] * 4 + [False] * 6
-        is_successful = await self.fair_choice(user_id, seq)
+        is_successful = await self.fair_choice(user_id, seq, tag="beg_success")
 
         try:
             if is_successful:
                 response = secrets.choice(positive_interactions)
-                amount = secrets.randbelow(6000) + 200
-                amount = Decimal(amount)
+                base_amount = secrets.randbelow(6000) + 200
+                
+                # Apply multiplier
+                multiplier = await self.fair_uniform(user_id, min_mult, max_mult)
+                amount = Decimal(base_amount) * Decimal(str(multiplier))
+                amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                 try:
                     await self.bot.database.process_treasury_transaction(
@@ -1660,8 +1677,10 @@ class Economy(commands.Cog):
                         if ctx.author.top_role
                         else discord.Color.blurple()
                     )
+                
+                multiplier_text = f" (×{multiplier:.2f})" if multiplier > 1.0 else ""
                 embed = discord.Embed(
-                    description=f"{response}\n\n**{name}** gave you {self.currency_name} **{await self.formatter(amount)}**.",
+                    description=f"{response}\n\n**{name}** gave you {self.currency_name} **{await self.formatter(amount)}**{multiplier_text}.",
                     color=color,
                 )
                 embed.set_author(
