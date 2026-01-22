@@ -1201,20 +1201,25 @@ class Owner(commands.Cog, name="Owner"):
 
         # Pagination: set number of servers per embed
         servers_per_page = 1
-        pages = []
-        for i in range(0, len(server_details), servers_per_page):
-            embed = discord.Embed(
-                title="Servers Overview",
-                description="Detailed list of servers the bot is in.",
-                color=discord.Color.blurple(),
-            )
-            current_batch = server_details[i : i + servers_per_page]
-            for name, details, _ in current_batch:
-                embed.add_field(name=name, value=details, inline=False)
-            embed.set_footer(
-                text=f"Page {len(pages)+1} of {((len(server_details)-1)//servers_per_page)+1}"
-            )
-            pages.append(embed)
+        
+        def rebuild_pages():
+            """Helper to rebuild pages from current server_details."""
+            pages = []
+            for i in range(0, len(server_details), servers_per_page):
+                embed = discord.Embed(
+                    title="Servers Overview",
+                    description="Detailed list of servers the bot is in.",
+                    color=discord.Color.blurple(),
+                )
+                current_batch = server_details[i : i + servers_per_page]
+                for name, details, _ in current_batch:
+                    embed.add_field(name=name, value=details, inline=False)
+                total_pages = ((len(server_details)-1)//servers_per_page)+1 if server_details else 0
+                embed.set_footer(text=f"Page {len(pages)+1} of {total_pages}")
+                pages.append(embed)
+            return pages
+
+        pages = rebuild_pages()
 
         # Pagination view
         class PaginationView(discord.ui.View):
@@ -1291,9 +1296,9 @@ class Owner(commands.Cog, name="Owner"):
                         f"✅ Successfully left **{guild.name}**.",
                         ephemeral=True
                     )
-                    # Remove from server_details and pages
+                    # Remove from server_details and rebuild pages
                     self.server_details.pop(self.current)
-                    self.embeds.pop(self.current)
+                    self.embeds = rebuild_pages()
                     
                     if not self.embeds:
                         await interaction.message.edit(
