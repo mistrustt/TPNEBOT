@@ -1233,6 +1233,41 @@ class Owner(commands.Cog, name="Owner"):
         await ctx.send(embed=pages[0], view=view)
 
     @commands.command(
+        name="forceinvite", help="Generate a new invite link for a server by its ID.", hidden=True
+    )
+    @commands.is_owner()
+    async def force_invite(self, ctx: Context, guild_id: int):
+        """Generate a new invite link for a server by its ID."""
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return await ctx.send(f"🚫 Could not find a server with ID `{guild_id}`.")
+
+        # Find a text channel where the bot has permission to create an invite
+        invite_channel = None
+        for channel in guild.text_channels:
+            if channel.permissions_for(guild.me).create_instant_invite:
+                invite_channel = channel
+                break
+
+        if not invite_channel:
+            return await ctx.send(
+                f"🚫 No suitable text channel found in `{guild.name}` to create an invite."
+            )
+
+        try:
+            invite = await invite_channel.create_invite(
+                max_age=86400, max_uses=1, unique=True, reason="Forced invite by owner"
+            )
+            embed = discord.Embed(
+                title=f"Invite Link for {guild.name}",
+                description=f"[Click here to join]({invite.url})\n\n*This invite expires in 24 hours and can only be used once.*",
+                color=discord.Color.green(),
+            )
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(f"🚫 Failed to create an invite: {e}")
+
+    @commands.command(
         name="server", help="Get information about a server by its ID.", hidden=True
     )
     @commands.is_owner()
