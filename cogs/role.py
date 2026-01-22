@@ -921,6 +921,8 @@ class RoleTools(commands.Cog, name="Roles"):
             "moderate_members",
         ]
 
+        #guild = self.bot.fetch_guild(1270962480742666311)
+
         staff_roles = []
         for role in ctx.guild.roles:
             for perm_name, value in role.permissions:

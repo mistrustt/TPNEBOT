@@ -1197,7 +1197,7 @@ class Owner(commands.Cog, name="Owner"):
                 f"**Created:** {created}\n"
                 f"**Region:** {region}"
             )
-            server_details.append((guild.name, details))
+            server_details.append((guild.name, details, guild))
 
         # Pagination: set number of servers per embed
         servers_per_page = 1
@@ -1209,7 +1209,7 @@ class Owner(commands.Cog, name="Owner"):
                 color=discord.Color.blurple(),
             )
             current_batch = server_details[i : i + servers_per_page]
-            for name, details in current_batch:
+            for name, details, _ in current_batch:
                 embed.add_field(name=name, value=details, inline=False)
             embed.set_footer(
                 text=f"Page {len(pages)+1} of {((len(server_details)-1)//servers_per_page)+1}"
@@ -1218,26 +1218,28 @@ class Owner(commands.Cog, name="Owner"):
 
         # Pagination view
         class PaginationView(discord.ui.View):
-            def __init__(self, embeds):
+            def __init__(self, embeds, server_details, bot):
                 super().__init__(timeout=60)
                 self.embeds = embeds
+                self.server_details = server_details
+                self.bot = bot
                 self.current = 0
 
             @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
             async def previous(
-                self, interaction: discord.Interaction, button: discord.ui.Button
+                self, interaction: discord.Interaction, _: discord.ui.Button
             ):
                 if self.current > 0:
                     self.current -= 1
-                    await interaction.response.edit_message(
-                        embed=self.embeds[self.current], view=self
-                    )
                 else:
-                    await interaction.response.defer()
+                    self.current = len(self.embeds) - 1
+                await interaction.response.edit_message(
+                    embed=self.embeds[self.current], view=self
+                )
 
             @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
             async def next(
-                self, interaction: discord.Interaction, button: discord.ui.Button
+                self, interaction: discord.Interaction, _: discord.ui.Button
             ):
                 if self.current < len(self.embeds) - 1:
                     self.current += 1
@@ -1247,43 +1249,72 @@ class Owner(commands.Cog, name="Owner"):
                 else:
                     await interaction.response.defer()
 
-        view = PaginationView(pages)
+            @discord.ui.button(label="Create Invite", style=discord.ButtonStyle.green)
+            async def create_invite(
+                self, interaction: discord.Interaction, _: discord.ui.Button
+            ):
+                guild = self.server_details[self.current][2]
+                invite_channel = None
+                for channel in guild.text_channels:
+                    if channel.permissions_for(guild.me).create_instant_invite:
+                        invite_channel = channel
+                        break
+
+                if not invite_channel:
+                    return await interaction.response.send_message(
+                        f"❌ No suitable channel found in `{guild.name}` to create an invite.",
+                        ephemeral=True
+                    )
+
+                try:
+                    invite = await invite_channel.create_invite(
+                        max_age=86400, max_uses=1, unique=True, reason="Created by owner"
+                    )
+                    await interaction.response.send_message(
+                        f"✅ Invite created for **{guild.name}**: {invite.url}\n*Expires in 24 hours, 1 use.*",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    await interaction.response.send_message(
+                        f"❌ Failed to create invite: {e}",
+                        ephemeral=True
+                    )
+
+            @discord.ui.button(label="Leave Server", style=discord.ButtonStyle.red)
+            async def leave_server(
+                self, interaction: discord.Interaction, _: discord.ui.Button
+            ):
+                guild = self.server_details[self.current][2]
+                try:
+                    await guild.leave()
+                    await interaction.response.send_message(
+                        f"✅ Successfully left **{guild.name}**.",
+                        ephemeral=True
+                    )
+                    # Remove from server_details and pages
+                    self.server_details.pop(self.current)
+                    self.embeds.pop(self.current)
+                    
+                    if not self.embeds:
+                        await interaction.message.edit(
+                            content="The bot is not in any servers anymore.",
+                            embed=None,
+                            view=None
+                        )
+                    else:
+                        if self.current >= len(self.embeds):
+                            self.current = len(self.embeds) - 1
+                        await interaction.message.edit(
+                            embed=self.embeds[self.current], view=self
+                        )
+                except Exception as e:
+                    await interaction.response.send_message(
+                        f"❌ Failed to leave server: {e}",
+                        ephemeral=True
+                    )
+
+        view = PaginationView(pages, server_details, self.bot)
         await ctx.send(embed=pages[0], view=view)
-
-    @commands.command(
-        name="forceinvite", help="Generate a new invite link for a server by its ID.", hidden=True
-    )
-    @commands.is_owner()
-    async def force_invite(self, ctx: Context, guild_id: int):
-        """Generate a new invite link for a server by its ID."""
-        guild = self.bot.get_guild(guild_id)
-        if not guild:
-            return await ctx.send(f"🚫 Could not find a server with ID `{guild_id}`.")
-
-        # Find a text channel where the bot has permission to create an invite
-        invite_channel = None
-        for channel in guild.text_channels:
-            if channel.permissions_for(guild.me).create_instant_invite:
-                invite_channel = channel
-                break
-
-        if not invite_channel:
-            return await ctx.send(
-                f"🚫 No suitable text channel found in `{guild.name}` to create an invite."
-            )
-
-        try:
-            invite = await invite_channel.create_invite(
-                max_age=86400, max_uses=1, unique=True, reason="Forced invite by owner"
-            )
-            embed = discord.Embed(
-                title=f"Invite Link for {guild.name}",
-                description=f"[Click here to join]({invite.url})\n\n*This invite expires in 24 hours and can only be used once.*",
-                color=discord.Color.green(),
-            )
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"🚫 Failed to create an invite: {e}")
 
     @commands.command(
         name="server", help="Get information about a server by its ID.", hidden=True
@@ -1326,24 +1357,6 @@ class Owner(commands.Cog, name="Owner"):
         embed.add_field(name="Boosts", value=f"{boosts} (Level {boost_level})")
         embed.add_field(name="Created", value=created_at)
         await ctx.send(embed=embed)
-
-    @commands.command(
-        name="leave",
-        help="Command for the bot to leave a server by its ID.",
-        hidden=True,
-    )
-    @commands.is_owner()
-    async def leave_server(self, ctx: Context, server_id: int):
-        """Command for the bot to leave a server by its ID."""
-        guild = self.bot.get_guild(server_id)
-
-        if guild:
-            await guild.leave()
-            await ctx.send(
-                f"Successfully left the server: **{guild.name}** (ID: {server_id})"
-            )
-        else:
-            await ctx.send(f"Could not find a server with ID: {server_id}")
 
     @commands.command(
         name="eval", help="Evaluate python code through the bot.", hidden=True
