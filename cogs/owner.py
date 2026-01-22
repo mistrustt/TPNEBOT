@@ -149,7 +149,6 @@ class Owner(commands.Cog, name="Owner"):
         self.whitelist_tpne = [
             284439598422163476,  # E
             1166140569861496853,  # voj
-            736148885055078431,  # daniel
             657182369240973312,  # chaos
             425724124057436160,  # pop
             1142836406255890586,  # pop alt
@@ -161,7 +160,6 @@ class Owner(commands.Cog, name="Owner"):
             567401702190350347,  # problems
             284439598422163476,  # E
             657182369240973312,  # chaos
-            736148885055078431,  # daniel
             1166141915297743010,  # dennis
             1166140569861496853,  # voj
             1290501613311496206,  # joejoe
@@ -169,7 +167,6 @@ class Owner(commands.Cog, name="Owner"):
         self.whitelist_wrld = [
             284439598422163476,  # E
             1166140569861496853,  # voj
-            736148885055078431,  # daniel
             1166141915297743010,  # dennis
         ]
         self.whitelist_clubhouse = [
