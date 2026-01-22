@@ -449,6 +449,40 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         await ctx.send(embed=embed)
 
+        @commands.Cog.listener()
+        async def on_guild_join(self, guild: discord.Guild):
+            """Leave servers with less than 10 members (excluding bots)."""
+            human_members = [member for member in guild.members if not member.bot]
+            
+            if len(human_members) < 10:
+                logger.info(
+                    f"Left guild '{guild.name}' ({guild.id}) - Only {len(human_members)} human members (minimum required: 10)"
+                )
+                
+                # Try to send a message to the system channel or owner
+                try:
+                    message = (
+                        f"👋 Hello! I'm leaving this server because it doesn't meet the minimum member requirement.\n\n"
+                        f"**Reason**: This server has only {len(human_members)} human member(s), but I require at least 10 human members to operate.\n\n"
+                        f"If you'd like to invite me back in the future, please make sure your server has at least 10 human members. Thank you for understanding!"
+                    )
+                    
+                    # Try to send to system channel first
+                    if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
+                        await guild.system_channel.send(message)
+                    # Otherwise try to DM the owner
+                    elif guild.owner:
+                        await guild.owner.send(message)
+                        
+                except discord.HTTPException as e:
+                    logger.warning(f"Could not notify guild {guild.id} about leaving: {e}")
+                
+                # Leave the guild
+                try:
+                    await guild.leave()
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to leave guild {guild.id}: {e}")
+
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         settings = await self.get_guild_settings(guild.id)
