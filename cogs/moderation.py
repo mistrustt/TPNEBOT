@@ -173,7 +173,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(
         name="msg",
-        aliases=["announce", "pm"],
+        aliases=["announce"],
         help="Send a message to a member or channel in this server.",
         hidden=True,
     )

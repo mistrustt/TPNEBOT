@@ -1154,6 +1154,24 @@ class Owner(commands.Cog, name="Owner"):
             return
 
     @commands.command(
+        name="dm", help="Send a direct message to a user by their ID.", hidden=True
+    )
+    @commands.is_owner()
+    async def dm_user(self, ctx: Context, user_id: int, *, message: str):
+        """Send a direct message to a user by their ID."""
+        try:
+            user = await self.bot.fetch_user(user_id)
+            if not user:
+                return await ctx.send(f"🚫 Could not find a user with ID `{user_id}`.")
+
+            await user.send(message)
+            await ctx.send(f"✅ Message sent to {user.name} (`{user_id}`).")
+        except discord.Forbidden:
+            await ctx.send(f"🚫 Cannot send a DM to user ID `{user_id}` (forbidden).")
+        except Exception as e:
+            await ctx.send(f"🚫 Failed to send DM: {e}")
+
+    @commands.command(
         name="servers", help="List all servers the bot is currently in.", hidden=True
     )
     @commands.is_owner()
