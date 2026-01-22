@@ -1272,8 +1272,6 @@ class Owner(commands.Cog, name="Owner"):
         embed.add_field(name="Emojis", value=emojis)
         embed.add_field(name="Boosts", value=f"{boosts} (Level {boost_level})")
         embed.add_field(name="Created", value=created_at)
-        embed.add_field(name="Region", value=region)
-
         await ctx.send(embed=embed)
 
     @commands.command(
