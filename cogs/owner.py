@@ -146,6 +146,9 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = datetime.now()
+        self.whitelist_wod = [
+            1095747082599530627, # envy
+        ]
         self.whitelist_tpne = [
             284439598422163476,  # E
             1166140569861496853,  # voj
@@ -182,6 +185,10 @@ class Owner(commands.Cog, name="Owner"):
             284439598422163476,  # E
         ]
         self.shh_emoji = "🤫"
+
+    def is_whitelisted_wod(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelist_wod
 
     def is_whitelisted_tpne(self, user_id: int):
         """Check if the user ID is in the whitelist."""
@@ -2374,6 +2381,7 @@ class Owner(commands.Cog, name="Owner"):
         self, ctx: Context, member: discord.Member = None, *, input_str: str
     ):
         allowed_guilds = {
+            1180709266538123345: self.is_whitelisted_wod,
             1270962480742666311: self.is_whitelisted_tpne,
             1216776903629869058: self.is_whitelisted_wrld,
             1336128367166095380: self.is_whitelisted_mistrust,
