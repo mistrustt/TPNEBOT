@@ -1771,26 +1771,26 @@ class Music(commands.Cog, name="Music"):
 
             FIELDS = {
                 'file_names':           '**File Name**',
-                #'session_titles':       '**Session Title**',
-                #'session_tracking':     '**Session Tracking**',
+                'session_titles':       '**Session Title**',
+                'session_tracking':     '**Session Tracking**',
                 'instrumentals':        '**Instrumentals**',
                 'recording_locations':  '**Recording Location**',
                 'record_dates':         '**Recorded**',
-                #'preview_date':         '**Previewed**',
-                #'date_leaked':          '**Surfaced**',
-                #'release_date':         '**Released**',
-                #'length':               '**Length**',
+                'preview_date':         '**Previewed**',
+                'date_leaked':          '**Surfaced**',
+                'release_date':         '**Released**',
+                'length':               '**Length**',
                 'leak_type':            '**Category**',
-                #'bitrate':              '**True Bitrate**',
+                'bitrate':              '**True Bitrate**',
             }
 
             RANDOM_LEAK_FIELDS = {
                 'record_dates':         '**Recorded**',
-                #'preview_date':         '**Previewed**',
-                #'date_leaked':          '**Surfaced**',
-                #'release_date':         '**Released**',
-                #'length':               '**Length**',
-                #'bitrate':              '**True Bitrate**',
+                'preview_date':         '**Previewed**',
+                'date_leaked':          '**Surfaced**',
+                'release_date':         '**Released**',
+                'length':               '**Length**',
+                'bitrate':              '**True Bitrate**',
             }
 
             def __init__(
@@ -1807,10 +1807,8 @@ class Music(commands.Cog, name="Music"):
                 _image_url = song.get('image_url')
                 image_url = f'https://juicewrldapi.com{_image_url}' if _image_url != '' else 'https://discord.com/example.png'
 
-                split_engineers = [e.strip().lower() for e in re.split(r',|&|and', engineers)] if engineers else []
-                session_possible = self.is_session_possible(split_engineers, producers, song.get('recording_locations', '').lower())
                 album = self.ALBUMS.get(era_name)
-                accent_color = 0x38ff45 if session_possible == True else (0xff3838 if session_possible == False else 0xffc61c)
+                accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
                 
                 super().__init__(accent_color=accent_color)
 
@@ -2590,26 +2588,26 @@ class Music(commands.Cog, name="Music"):
 
             FIELDS = {
                 'file_names':           '**File Name**',
-                'session_titles':       '**Session Title**',
-                'session_tracking':     '**Session Tracking**',
+                #'session_titles':       '**Session Title**',
+                #'session_tracking':     '**Session Tracking**',
                 'instrumentals':        '**Instrumentals**',
                 'recording_locations':  '**Recording Location**',
                 'record_dates':         '**Recorded**',
-                'preview_date':         '**Previewed**',
-                'date_leaked':          '**Surfaced**',
-                'release_date':         '**Released**',
-                'length':               '**Length**',
+                #'preview_date':         '**Previewed**',
+                #'date_leaked':          '**Surfaced**',
+                #'release_date':         '**Released**',
+                #'length':               '**Length**',
                 'leak_type':            '**Category**',
-                'bitrate':              '**True Bitrate**',
+                #'bitrate':              '**True Bitrate**',
             }
 
             RANDOM_LEAK_FIELDS = {
                 'record_dates':         '**Recorded**',
-                'preview_date':         '**Previewed**',
-                'date_leaked':          '**Surfaced**',
-                'release_date':         '**Released**',
-                'length':               '**Length**',
-                'bitrate':              '**True Bitrate**',
+                #'preview_date':         '**Previewed**',
+                #'date_leaked':          '**Surfaced**',
+                #'release_date':         '**Released**',
+                #'length':               '**Length**',
+                #'bitrate':              '**True Bitrate**',
             }
 
             def __init__(
@@ -2626,8 +2624,10 @@ class Music(commands.Cog, name="Music"):
                 _image_url = song.get('image_url')
                 image_url = f'https://juicewrldapi.com{_image_url}' if _image_url != '' else 'https://discord.com/example.png'
 
+                split_engineers = [e.strip().lower() for e in re.split(r',|&|and', engineers)] if engineers else []
+                session_possible = self.is_session_possible(split_engineers, producers, song.get('recording_locations', '').lower())
                 album = self.ALBUMS.get(era_name)
-                accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
+                accent_color = 0x38ff45 if session_possible == True else (0xff3838 if session_possible == False else 0xffc61c)
                 
                 super().__init__(accent_color=accent_color)
 
