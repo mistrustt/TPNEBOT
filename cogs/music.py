@@ -1681,67 +1681,6 @@ class Music(commands.Cog, name="Music"):
         except ValueError:
             return None
 
-    def is_session_possible(self, engineers, producers, recording_location):
-        if "max lord" in engineers and "home" not in recording_location:
-            return True
-        if "cbmix" in producers:
-            return True
-
-        # TODO: i still gotta finish ts
-        forbidden_studios = [
-            "enviyon",
-            "public library",
-            "paramount",
-            "electric feel",
-            "fort knox",
-            "chalice",
-            "home recording",
-            "columbia college",
-            "apg",
-            "manhattan", # googly only has some songs from this stu
-            "record plant",
-            "nightbird",
-            "unknown"
-        ]
-        allowed_studios = [
-            "beat asylum",
-            "complex 2010",
-            "monark the producer's home",
-            "penthouse recording",
-            "blue room",
-            "glass tree"
-        ]
-        forbidden_engineers = [
-            "mitch mula",
-            "alex layne",
-            "benny blanco",
-            "xavier daniel",
-            "thomas cullison",
-            "louis bell",
-            "unknown"
-        ]
-        allowed_engineers = [
-            "markee",
-            "monark the producer",
-            "cbmix",
-            "dj l beats",
-            "shaan singh",
-            "d graf",
-            "james kang",
-            "travis louis",
-            "blake harden", 
-            "juice wrld"
-        ]
-        if any(studio in recording_location.lower() for studio in allowed_studios):
-            return True
-        if any(engineer in engineers.lower() for engineer in allowed_engineers):
-            return True
-        if any(studio in recording_location.lower() for studio in forbidden_studios):
-            return False
-        if any(engineer in engineers.lower() for engineer in forbidden_engineers):
-            return False
-        return None
-
     async def create_song_view(self, song_data: dict, random_leak: bool = False):
         class SongContainer(discord.ui.Container):
             ALBUMS = {
@@ -2556,9 +2495,6 @@ class Music(commands.Cog, name="Music"):
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
         )
 
-    def is_session_possible(self, song_data: dict) -> bool:
-        return False # TODO
-
     async def create_session_info_view(self, song_data: dict, random_leak: bool = False):
         class SongContainer(discord.ui.Container):
             ALBUMS = {
@@ -2636,6 +2572,67 @@ class Music(commands.Cog, name="Music"):
                     name, track_titles, producers, engineers, 
                     era_name, album, image_url
                 )
+
+            def is_session_possible(self, engineers, producers, recording_location):
+                if "max lord" in engineers and "home" not in recording_location:
+                    return True
+                if "cbmix" in producers:
+                    return True
+
+                # TODO: i still gotta finish ts
+                forbidden_studios = [
+                    "enviyon",
+                    "public library",
+                    "paramount",
+                    "electric feel",
+                    "fort knox",
+                    "chalice",
+                    "home recording",
+                    "columbia college",
+                    "apg",
+                    "manhattan", # googly only has some songs from this stu
+                    "record plant",
+                    "nightbird",
+                    "unknown"
+                ]
+                allowed_studios = [
+                    "beat asylum",
+                    "complex 2010",
+                    "monark the producer's home",
+                    "penthouse recording",
+                    "blue room",
+                    "glass tree"
+                ]
+                forbidden_engineers = [
+                    "mitch mula",
+                    "alex layne",
+                    "benny blanco",
+                    "xavier daniel",
+                    "thomas cullison",
+                    "louis bell",
+                    "unknown"
+                ]
+                allowed_engineers = [
+                    "markee",
+                    "monark the producer",
+                    "cbmix",
+                    "dj l beats",
+                    "shaan singh",
+                    "d graf",
+                    "james kang",
+                    "travis louis",
+                    "blake harden", 
+                    "juice wrld"
+                ]
+                if any(studio in recording_location.lower() for studio in allowed_studios):
+                    return True
+                if any(engineer in engineers.lower() for engineer in allowed_engineers):
+                    return True
+                if any(studio in recording_location.lower() for studio in forbidden_studios):
+                    return False
+                if any(engineer in engineers.lower() for engineer in forbidden_engineers):
+                    return False
+                return None
 
             def _build_container(
                 self, song, downloads, random_leak, name, track_titles,
