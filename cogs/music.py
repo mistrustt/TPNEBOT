@@ -2737,7 +2737,7 @@ class Music(commands.Cog, name="Music"):
 
         return layout_view
 
-    @commands.command(name="sessioninfo", aliases=["si"])
+    @commands.command(name="sessioninfo")
     async def sessioninfo(self, ctx: commands.Context, *, query: str):
         song_list = await self.fetch_song(ctx, query)
         if song_list is None:
