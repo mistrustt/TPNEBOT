@@ -1574,9 +1574,9 @@ class Economy(commands.Cog):
             ("King Von", 6, 1.8, 3.0),
             ("Chief Keef", 6, 1.8, 3.0),
             ("Seezyn", 8, 1.7, 2.5),
-            ("Lil Uzi Vert", 5, 2.0, 3.5),
-            ("Playboi Carti", 5, 2.0, 3.5),
-            ("Young Thug", 5, 2.0, 3.5),
+            ("Lil Uzi Vert", 3, 3.0, 5.0),
+            ("Playboi Carti", 3, 3.0, 5.0),
+            ("Young Thug", 3, 3.0, 5.0),
             ("Gunna", 6, 1.8, 3.0),
             ("Mysterious Stranger", 1, 7.5, 10.0),
         ]
