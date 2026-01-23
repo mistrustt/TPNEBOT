@@ -1557,17 +1557,17 @@ class Economy(commands.Cog):
         """Beg for money. Maybe you'll get lucky!"""
 
         names_data = [
-            ("Dennis", 10, 1.0, 1.5),
-            ("Googly", 10, 1.0, 1.5),
-            ("Lenny", 10, 1.0, 1.5),
-            ("Shogani", 10, 1.0, 1.5),
-            ("G Money", 8, 1.5, 2.5),
-            ("Lil Bibby", 8, 1.5, 2.5),
+            ("Dennis", 5, 2.0, 3.5),
+            ("Googly", 5, 2.0, 3.5),
+            ("Lenny", 5, 2.0, 3.5),
+            ("Shogani", 5, 2.0, 3.5),
+            ("G Money", 7, 1.5, 2.5),
+            ("Lil Bibby", 7, 1.5, 2.5),
             ("Pete", 10, 1.0, 1.5),
             ("Ally Lotti", 10, 1.0, 1.5),
             ("Chris Long", 10, 1.0, 1.5),
-            ("DJ Relentt", 8, 1.2, 2.0),
-            ("DJ Scheme", 8, 1.2, 2.0),
+            ("DJ Relentt", 8, 1.5, 2.5),
+            ("DJ Scheme", 8, 1.5, 2.5),
             ("Juice WRLD", 3, 3.0, 5.0),
             ("Drake", 4, 2.5, 4.0),
             ("Lil Durk", 6, 1.8, 3.0),
@@ -1578,7 +1578,7 @@ class Economy(commands.Cog):
             ("Playboi Carti", 5, 2.0, 3.5),
             ("Young Thug", 5, 2.0, 3.5),
             ("Gunna", 6, 1.8, 3.0),
-            ("Mysterious Stranger", 1, 5.0, 10.0),
+            ("Mysterious Stranger", 1, 7.5, 10.0),
         ]
 
         user_id = ctx.author.id
