@@ -2105,7 +2105,7 @@ class Music(commands.Cog, name="Music"):
                 container.add_item(discord.ui.Separator())
 
     @commands.command('syncsurfaces', aliases=['syncleaks'])
-    @commands.has_role(1414742766386413590)
+    @commands.has_role(1464010998762438717)
     async def sync_surfaces(self, ctx: commands.Context):
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
@@ -2138,7 +2138,7 @@ class Music(commands.Cog, name="Music"):
         view.message = msg
         
     @commands.command("snippet", aliases=["snip"])
-    @commands.has_role(1414742766386413590)
+    @commands.has_role(1464010998762438717)
     async def snippet(self, ctx: commands.Context, *, query: str):
         song_list = await self.fetch_song(ctx, query)
         if song_list is None:
