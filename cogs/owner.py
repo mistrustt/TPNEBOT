@@ -200,7 +200,7 @@ class Owner(commands.Cog, name="Owner"):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_wod
 
-    def is_whitelisted_wod(self, user_id: int):
+    def is_whitelisted_finalyear(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_finalyear
 
