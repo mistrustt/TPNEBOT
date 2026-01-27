@@ -238,12 +238,19 @@ class RoleTools(commands.Cog, name="Roles"):
                 failed.append(f"{rn} ({error})")
                 continue
 
-            if role.position >= ctx.author.top_role.position:
+            # Prevent acting on roles higher or equal to the command author (unless author is guild owner)
+            if role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
                 failed.append(f"{role.name} (higher or equal to your top role)")
                 continue
 
+            # Prevent acting on roles higher or equal to the bot
             if role.position >= ctx.me.top_role.position:
                 failed.append(f"{role.name} (higher or equal to my top role)")
+                continue
+
+            # Skip default or managed roles which cannot be assigned/removed
+            if role == ctx.guild.default_role or role.managed:
+                failed.append(f"{role.name} (cannot manage default or managed roles)")
                 continue
 
             try:
@@ -255,7 +262,7 @@ class RoleTools(commands.Cog, name="Roles"):
                     added.append(role.name)
             except discord.Forbidden:
                 failed.append(f"{role.name} (no permission)")
-            except discord.HTTPException as e:
+            except discord.HTTPException:
                 failed.append(f"{role.name} (http error)")
 
         desc_parts = []
