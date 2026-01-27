@@ -904,6 +904,52 @@ class DatabaseManager:
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)
 
+    async def add_auto_role(self, guild_id: int, role_id: int) -> None:
+        """Adds a role ID to the ServerSettings.auto_role_ids array for a guild."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                setting = await session.get(ServerSettings, guild_id)
+                if setting:
+                    ids = setting.auto_role_ids or []
+                    if role_id not in ids:
+                        ids.append(role_id)
+                        setting.auto_role_ids = ids
+                else:
+                    setting = ServerSettings(guild_id=guild_id, auto_role_ids=[role_id])
+                    session.add(setting)
+                await session.commit()
+
+    async def remove_auto_role(self, guild_id: int, role_id: int) -> None:
+        """Removes a role ID from ServerSettings.auto_role_ids for a guild."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                setting = await session.get(ServerSettings, guild_id)
+                if not setting or not setting.auto_role_ids:
+                    return
+                ids = list(setting.auto_role_ids)
+                if role_id in ids:
+                    ids.remove(role_id)
+                    setting.auto_role_ids = ids
+                await session.commit()
+
+    async def get_auto_roles(self, guild_id: int) -> list:
+        """Returns a list of role IDs configured as autoroles for the guild."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(ServerSettings.auto_role_ids).filter_by(guild_id=guild_id)
+            )
+            ids = result.scalar_one_or_none()
+            return ids or []
+
+    async def clear_auto_roles(self, guild_id: int) -> None:
+        """Clears autorole configuration for a guild."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                setting = await session.get(ServerSettings, guild_id)
+                if setting:
+                    setting.auto_role_ids = []
+                await session.commit()
+
     async def initialize_supply_record(self):
         """
         Creates a default supply record if it doesn't exist.
