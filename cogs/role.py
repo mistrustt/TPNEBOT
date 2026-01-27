@@ -1038,7 +1038,7 @@ class RoleTools(commands.Cog, name="Roles"):
         aliases=["rb"],
         description="Gives a role to all bots in the server.",
     )
-    @commands.has_permissions(manage_roles=True)
+    @commands.has_permissions(administrator=True)
     async def give_all_bots_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1076,6 +1076,49 @@ class RoleTools(commands.Cog, name="Roles"):
         except discord.HTTPException as e:
             embed = discord.Embed(
                 description=f"🚫 An error occurred while managing the bots roles."
+            )
+            return await ctx.reply(embed=embed)
+
+    @commands.command(name='rolehumans', aliases=['rh'], description="Gives a role to all humans in the server.")
+    @commands.has_permissions(administrator=True)
+    async def give_all_humans_role(self, ctx: Context, *, role_name: str):
+        role, error = await self.find_role(ctx, role_name)
+        if error:
+            error_embed = discord.Embed(
+                description=f"🚫 {error}", color=discord.Color.red()
+            )
+            return await ctx.reply(embed=error_embed, delete_after=5)
+        try:
+            delay = 1
+            for member in ctx.guild.members:
+                if not member.bot and role not in member.roles:
+                    while True:
+                        try:
+                            await member.add_roles(role)
+                            break
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                await asyncio.sleep(delay)
+                                delay *= 2
+                            elif e.status == 404:
+                                break
+                            else:
+                                raise e
+                    await asyncio.sleep(1)
+
+            human_count = sum(1 for m in role.members if not m.bot)
+            embed = discord.Embed(
+                description=f"✅ Gave the role '{role.name}' to all humans. ({human_count} members)"
+            )
+            await ctx.send(embed=embed)
+        except discord.Forbidden:
+            embed = discord.Embed(
+                description="🚫 I do not have permission to manage roles. "
+            )
+            return await ctx.reply(embed=embed)
+        except discord.HTTPException as e:
+            embed = discord.Embed(
+                description=f"🚫 An error occurred while managing the humans roles."
             )
             return await ctx.reply(embed=embed)
 
