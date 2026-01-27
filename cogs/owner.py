@@ -19,6 +19,7 @@ import logging
 import asyncio
 import psutil
 from utils.misc import MiscUtils
+from utils.admin_api import AdminAPIServer
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from sqlalchemy import text
@@ -149,16 +150,6 @@ class Owner(commands.Cog, name="Owner"):
         self.whitelist_wod = [
             1095747082599530627, # envy
         ]
-        self.whitelist_tpne = [
-            284439598422163476,  # E
-            1166140569861496853,  # voj
-            657182369240973312,  # chaos
-            425724124057436160,  # pop
-            1142836406255890586,  # pop alt
-            1166141915297743010,  # dennis
-            857702737500569650,  # aether
-            514641307621261313, # sail mar
-        ]
         self.whitelist_finalyear = [
             284439598422163476,  # E
             1166140569861496853,  # voj
@@ -168,19 +159,6 @@ class Owner(commands.Cog, name="Owner"):
             1166141915297743010,  # dennis
             857702737500569650,  # aether
             514641307621261313, # sail mar
-        ]
-        self.whitelist_tpneunbans = [
-            567401702190350347,  # problems
-            284439598422163476,  # E
-            657182369240973312,  # chaos
-            1166141915297743010,  # dennis
-            1166140569861496853,  # voj
-            1290501613311496206,  # joejoe
-        ]
-        self.whitelist_wrld = [
-            284439598422163476,  # E
-            1166140569861496853,  # voj
-            1166141915297743010,  # dennis
         ]
         self.whitelist_clubhouse = [
             284439598422163476,  # E
@@ -203,18 +181,6 @@ class Owner(commands.Cog, name="Owner"):
     def is_whitelisted_finalyear(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_finalyear
-
-    def is_whitelisted_tpne(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_tpne
-
-    def is_whitelisted_tpne_unbans(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_tpneunbans
-    
-    def is_whitelisted_wrld(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_wrld
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
@@ -435,6 +401,59 @@ class Owner(commands.Cog, name="Owner"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
+
+    @commands.command(name="startapi", hidden=True)
+    @commands.is_owner()
+    async def start_api(self, ctx: Context, host: str = "127.0.0.1", port: int = 8080, secret: str = None):
+        """Start a lightweight admin API server (owner only).
+
+        The server exposes a small JSON status endpoint and a shutdown endpoint
+        protected by an admin secret. If `secret` is not provided one will be
+        generated and DM'd to the command invoker.
+        """
+        if getattr(self.bot, "admin_api_server", None):
+            return await ctx.send("⚠️ Admin API already running.")
+
+        # generate secret if not provided
+        secret = secret or uuid.uuid4().hex
+
+        server = AdminAPIServer(self.bot, host=host, port=port, secret=secret)
+
+        try:
+            await server.start()
+        except Exception as e:
+            return await ctx.send(f"❌ Failed to start Admin API: {e}")
+
+        # store reference on bot so it can be stopped later
+        self.bot.admin_api_server = server
+        self.bot.admin_api_secret = secret
+
+        try:
+            await ctx.author.send(f"Admin API started at http://{host}:{port}\nSecret: {secret}\nUse header X-Admin-Secret to authenticate.")
+            await ctx.send(f"✅ Admin API started on {host}:{port} (secret sent to your DMs)")
+        except Exception:
+            await ctx.send(f"✅ Admin API started on {host}:{port} (could not send DM with secret)")
+
+    @commands.command(name="stopapi", hidden=True)
+    @commands.is_owner()
+    async def stop_api(self, ctx: Context):
+        """Stop the admin API server if it's running."""
+        server = getattr(self.bot, "admin_api_server", None)
+        if not server:
+            return await ctx.send("⚠️ Admin API is not running.")
+
+        try:
+            await server.stop()
+        except Exception as e:
+            return await ctx.send(f"❌ Failed to stop Admin API: {e}")
+
+        try:
+            delattr(self.bot, "admin_api_server")
+            delattr(self.bot, "admin_api_secret")
+        except Exception:
+            pass
+
+        await ctx.send("✅ Admin API stopped.")
 
     @commands.group(
         name="todo", aliases=["task"], invoke_without_command=True, hidden=True
@@ -2396,10 +2415,7 @@ class Owner(commands.Cog, name="Owner"):
     ):
         allowed_guilds = {
             1180709266538123345: self.is_whitelisted_wod,
-            1270962480742666311: self.is_whitelisted_tpne,
-            1216776903629869058: self.is_whitelisted_wrld,
             1336128367166095380: self.is_whitelisted_mistrust,
-            1440419546396758078: self.is_whitelisted_tpne_unbans,
             1199083709735911465: self.is_whitelisted_private,
             1452021243669643324: self.is_whitelisted_clubhouse,
             1429272977526231203: self.is_whitelisted_finalyear,
@@ -2453,187 +2469,6 @@ class Owner(commands.Cog, name="Owner"):
 
         await ctx.message.add_reaction(self.shh_emoji)
         await ctx.message.delete()
-
-    def create_user(self, username):
-        try:
-            subprocess.run(
-                ["headscale", "users", "create", username],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            return f"✅ User `{username}` created."
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode()
-            if "already exists" in stderr:
-                return f"ℹ️ User `{username}` already exists."
-            else:
-                return f"❌ Error creating user: `{stderr}`"
-
-    def create_reusable_preauthkey(self, username):
-        try:
-            # First, get the user's uint ID
-            users_result = subprocess.run(
-                ["headscale", "users", "list", "--output", "json"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            users_data = json.loads(users_result.stdout)
-
-            # Find the user's uint ID
-            user_uint = None
-            for user in users_data:
-                if user["name"] == username:
-                    user_uint = user["id"]
-                    break
-
-            if user_uint is None:
-                return f"❌ User `{username}` not found."
-
-            # Create the preauth key using the uint ID
-            result = subprocess.run(
-                [
-                    "headscale",
-                    "preauthkeys",
-                    "create",
-                    "--user",
-                    str(user_uint),
-                    "--reusable",
-                    "--output",
-                    "json",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            key_data = json.loads(result.stdout)
-            return key_data["key"]
-        except subprocess.CalledProcessError as e:
-            return f"❌ Failed to generate key: `{e.stderr.decode()}`"
-        except (json.JSONDecodeError, KeyError) as e:
-            return f"❌ Error parsing response: `{e}`"
-
-    @commands.group(name="vpn", invoke_without_command=True, hidden=True)
-    @commands.is_owner()
-    async def vpn(self, ctx):
-        embed = discord.Embed(
-            title="VPN",
-            description="Available subcommands: `newuser`, `userlist`, `key`, `register`",
-            color=discord.Color.blurple(),
-        )
-        await ctx.reply(embed=embed)
-
-    def _valid_vpn_username(self, username: str) -> bool:
-        # conservative validation: letters, digits, dot, dash, underscore, max length 64
-        return bool(re.match(r"^[A-Za-z0-9._-]{1,64}$", username))
-
-    @vpn.command(name="newuser", hidden=True)
-    @commands.is_owner()
-    async def vpn_user(self, ctx, username: str):
-        """Create a new VPN user only."""
-        if not self._valid_vpn_username(username):
-            return await ctx.reply(
-                "❌ Invalid username. Use only letters, numbers, dot, dash or underscore (max 64 chars)."
-            )
-
-        loading = await ctx.reply(f"🔧 Creating user `{username}`…")
-        loop = asyncio.get_running_loop()
-        user_result = await loop.run_in_executor(None, self.create_user, username)
-        await ctx.send(user_result)
-        await loading.edit(content=f"✅ Done: {username}")
-
-    @vpn.command(name="userlist", hidden=True)
-    @commands.is_owner()
-    async def vpn_userlist(self, ctx):
-        """List all VPN users."""
-        loading = await ctx.reply("📋 Fetching VPN user list…")
-        try:
-            result = subprocess.run(
-                ["headscale", "users", "list", "--output", "json"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            users_data = json.loads(result.stdout)
-            if not users_data:
-                await loading.edit(content="ℹ️ No VPN users found.")
-                return
-
-            user_list = "\n".join(f"- {user['name']}" for user in users_data)
-            embed = discord.Embed(
-                title="VPN Users", description=user_list, color=discord.Color.blurple()
-            )
-            await loading.edit(content="", embed=embed)
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode()
-            await loading.edit(content=f"❌ Failed to fetch user list: `{stderr}`")
-
-    @vpn.command(name="key", hidden=True)
-    @commands.is_owner()
-    async def vpn_key(self, ctx, username: str):
-        """Generate a reusable auth key for an existing user."""
-        if not self._valid_vpn_username(username):
-            return await ctx.reply(
-                "❌ Invalid username. Use only letters, numbers, dot, dash or underscore (max 64 chars)."
-            )
-
-        loading = await ctx.reply(f"🔑 Generating reusable key for `{username}`…")
-        loop = asyncio.get_running_loop()
-        key_result = await loop.run_in_executor(
-            None, self.create_reusable_preauthkey, username
-        )
-
-        try:
-            await ctx.author.send(
-                f"🔑 Preauth Key for `{username}`:\n```\ntailscale up --login-server http://headscale.mistrust.dev --auth-key {key_result}\n```"
-            )
-            await loading.edit(content=f"✅ Key generated and sent to your DMs.")
-        except Exception:
-            return await loading.edit(
-                content="❌ Failed to send DM. Please check your privacy settings."
-            )
-
-    @vpn.command(name="register", hidden=True)
-    @commands.is_owner()
-    async def new_node(self, ctx, username: str, *key: str):
-        """Register a new VPN node for a user with the given preauth key."""
-        if not self._valid_vpn_username(username):
-            return await ctx.reply(
-                "❌ Invalid username. Use only letters, numbers, dot, dash or underscore (max 64 chars)."
-            )
-
-        preauth_key = " ".join(key).strip()
-        if not preauth_key:
-            return await ctx.reply("❌ You must provide a preauth key.")
-
-        loading = await ctx.reply(f"🔧 Registering new node for `{username}`…")
-        try:
-            result = subprocess.run(
-                [
-                    "headscale",
-                    "nodes",
-                    "register",
-                    "--user",
-                    username,
-                    "--key",
-                    preauth_key,
-                    "--output",
-                    "json",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            node_data = json.loads(result.stdout)
-            node_name = node_data.get("name", "unknown")
-            await loading.edit(
-                content=f"✅ Node `{node_name}` registered for user `{username}`."
-            )
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode()
-            await loading.edit(content=f"❌ Failed to register node: `{stderr}`")
-
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
