@@ -2105,7 +2105,7 @@ class Music(commands.Cog, name="Music"):
                 container.add_item(discord.ui.Separator())
 
     @commands.command('syncsurfaces', aliases=['syncleaks'])
-    @commands.has_role(1414742766386413590)
+    @commands.has_role(1464010998762438717)
     async def sync_surfaces(self, ctx: commands.Context):
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
@@ -2138,7 +2138,7 @@ class Music(commands.Cog, name="Music"):
         view.message = msg
         
     @commands.command("snippet", aliases=["snip"])
-    @commands.has_role(1414742766386413590)
+    @commands.has_role(1464010998762438717)
     async def snippet(self, ctx: commands.Context, *, query: str):
         song_list = await self.fetch_song(ctx, query)
         if song_list is None:
@@ -2494,6 +2494,309 @@ class Music(commands.Cog, name="Music"):
             ctx.author,
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
         )
+
+    async def create_session_info_view(self, song_data: dict, random_leak: bool = False):
+        class SongContainer(discord.ui.Container):
+            ALBUMS = {
+                'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
+                'LND':                  {'name': 'Legends Never Die', 'color': '#F700FF'},
+                'afflictions':          {'name': 'affliction', 'color': '#000000'},
+                'bdm':                  {'name': 'BINGEDRINKINGMUSIC', 'color': '#000000'},
+                'HIH 999':              {'name': 'Heartbroken In Hollywood 9 9 9', 'color': '#FF653E'},
+                'jw 999':               {'name': 'JuiceWRLD 9 9 9', 'color': '#FF2C2C'},
+                'ND':                   {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
+                'GB&GR':                {'name': 'Goodbye & Good Riddance', 'color': '#008CFF'},
+                'GB&GR (AE)':           {'name': 'Goodbye & Good Riddance (Anniversary Edition)', 'color': '#008CFF'},
+                'GB&GR (5YAE)':         {'name': 'Goodbye & Good Riddance (5 Year Anniversary Edition)', 'color': '#008CFF'},
+                'WOD':                  {'name': 'WRLD ON DRUGS', 'color': '#00FF94'},
+                'DRFL':                 {'name': 'Death Race For Love', 'color': '#FF9900'},
+                'DRFL (BTV)':           {'name': 'Death Race For Love (Bonus Track Version)', 'color': '#FF9900'},
+                'OUT':                  {'name': 'Outsiders', 'color': '#2B2B2B'},
+                'POST':                 {'name': 'Posthumous', 'color': '#00CCFF'},
+                'TPP':                  {'name': 'The Pre-Party', 'color': '#EA00FF'},
+                'TPP (EE)':             {'name': 'The Pre-Party (Extended Edition)', 'color': '#EA00FF'},
+                'FD':                   {'name': 'Fighting Demons', 'color': '#2E2E2E'},
+                'FD (CE)':              {'name': 'Fighting Demons (Complete Edition)', 'color': '#2E2E2E'},
+                'FD (EE)':              {'name': 'Fighting Demons (Extended Edition)', 'color': '#2E2E2E'},
+                'FD (DDE)':             {'name': 'Fighting Demons (Digital Deluxe Edition)', 'color': '#2E2E2E'},
+                'TPNE':                 {'name': 'The Party Never Ends', 'color': '#CC00FF'},
+            }
+
+            FIELDS = {
+                'file_names':           '**File Name**',
+                #'session_titles':       '**Session Title**',
+                #'session_tracking':     '**Session Tracking**',
+                'instrumentals':        '**Instrumentals**',
+                'recording_locations':  '**Recording Location**',
+                'record_dates':         '**Recorded**',
+                #'preview_date':         '**Previewed**',
+                #'date_leaked':          '**Surfaced**',
+                #'release_date':         '**Released**',
+                #'length':               '**Length**',
+                'leak_type':            '**Category**',
+                #'bitrate':              '**True Bitrate**',
+            }
+
+            RANDOM_LEAK_FIELDS = {
+                'record_dates':         '**Recorded**',
+                #'preview_date':         '**Previewed**',
+                #'date_leaked':          '**Surfaced**',
+                #'release_date':         '**Released**',
+                #'length':               '**Length**',
+                #'bitrate':              '**True Bitrate**',
+            }
+
+            def __init__(
+                self, 
+                song: dict, 
+                downloads = None, 
+                random_leak: bool = False, 
+            ):
+                name = song.get('name')
+                track_titles = [t for t in song.get('track_titles', []) if t != name]
+                producers = song.get('producers')
+                engineers = song.get('engineers')
+                era_name = song.get('era', {}).get('name', 'N/A')
+                _image_url = song.get('image_url')
+                image_url = f'https://juicewrldapi.com{_image_url}' if _image_url != '' else 'https://discord.com/example.png'
+
+                split_engineers = [e.strip().lower() for e in re.split(r',|&|and', engineers)] if engineers else []
+                session_possible = self.is_session_possible(split_engineers, producers, song.get('recording_locations', '').lower())
+                album = self.ALBUMS.get(era_name)
+                accent_color = 0x38ff45 if session_possible == True else (0xff3838 if session_possible == False else 0xffc61c)
+                
+                super().__init__(accent_color=accent_color)
+
+                self._build_container(
+                    song, downloads, random_leak, 
+                    name, track_titles, producers, engineers, 
+                    era_name, album, image_url
+                )
+
+            def is_session_possible(self, engineers, producers, recording_location):
+                if "max lord" in engineers and "home" not in recording_location:
+                    return True
+                if "cbmix" in producers:
+                    return True
+
+                # TODO: i still gotta finish ts
+                forbidden_studios = [
+                    "enviyon",
+                    "public library",
+                    "paramount",
+                    "electric feel",
+                    "fort knox",
+                    "chalice",
+                    "home recording",
+                    "columbia college",
+                    "apg",
+                    "manhattan", # googly only has some songs from this stu
+                    "record plant",
+                    "nightbird",
+                    "unknown"
+                ]
+                allowed_studios = [
+                    "beat asylum",
+                    "complex 2010",
+                    "monark the producer's home",
+                    "penthouse recording",
+                    "blue room",
+                    "glass tree"
+                ]
+                forbidden_engineers = [
+                    "mitch mula",
+                    "alex layne",
+                    "benny blanco",
+                    "xavier daniel",
+                    "thomas cullison",
+                    "louis bell",
+                    "unknown"
+                ]
+                allowed_engineers = [
+                    "markee",
+                    "monark the producer",
+                    "cbmix",
+                    "dj l beats",
+                    "shaan singh",
+                    "d graf",
+                    "james kang",
+                    "travis louis",
+                    "blake harden", 
+                    "juice wrld"
+                ]
+                if any(studio in recording_location.lower() for studio in allowed_studios):
+                    return True
+                if any(engineer in engineers.lower() for engineer in allowed_engineers):
+                    return True
+                if any(studio in recording_location.lower() for studio in forbidden_studios):
+                    return False
+                if any(engineer in engineers.lower() for engineer in forbidden_engineers):
+                    return False
+                return None
+
+            def _build_container(
+                self, song, downloads, random_leak, name, track_titles,
+                producers, engineers, era_name, album, image_url
+            ):
+                thumbnail = discord.ui.Section(
+                    accessory=discord.ui.Thumbnail(media=image_url)
+                )
+                thumbnail.add_item(
+                    discord.ui.TextDisplay(
+                        f'### {name}\n'
+                        f'-# Alt Name(s): **{', '.join(track_titles) if track_titles else 'N/A'}**\n'
+                        f'-# Engineer(s): **{engineers}**\n'
+                        f'-# Producer(s): **{producers}**'
+                    )
+                )
+                self.add_item(thumbnail)
+                self.add_item(discord.ui.Separator())
+
+                if era_name != '':
+                    self.add_item(
+                        discord.ui.TextDisplay(
+                            f'**Era**\n{album['name'] if album else era_name}\n'
+                        )
+                    )
+
+                field_map = self.FIELDS if not random_leak else self.RANDOM_LEAK_FIELDS
+                self._add_song_fields(song, field_map)
+
+                MAIN_URL = 'https://juicewrldapi.com/juicewrld/files/download/?path='
+                TRACKER = discord.ui.Button(
+                    label='Tracker', 
+                    emoji='<:fart:1445127619744890911>', 
+                    url='https://juicewrldapi.com/'
+                )
+
+                rows = self._create_download_rows(downloads, song, MAIN_URL)
+                
+                rows.append(discord.ui.Separator())
+                rows.append(discord.ui.ActionRow())
+                rows[-1].add_item(TRACKER)
+                
+                for row in rows:
+                    self.add_item(row)
+
+            def _add_song_fields(self, song: dict, field_map: dict):
+                for field_key, field_label in field_map.items():
+                    value = song.get(field_key)
+                    if value:
+                        value = (
+                            value
+                            .replace('Recorded', '')
+                            .replace('First Previewed', '')
+                            .replace('Surfaced', '')
+                            .replace('Released', '')
+                            .strip()
+                        )
+                        if value in ('N/A', 'Unavailable'):
+                            continue
+
+                        self.add_item(discord.ui.TextDisplay(f'{field_label}\n{value}'))
+
+            def _create_download_rows(self, downloads, song, main_url):
+                rows = []
+                
+                if downloads:
+                    for i in range(0, len(downloads), 5):
+                        row = discord.ui.ActionRow()
+                        for path in downloads[i:i + 5]:
+                            ext = path.rsplit('.', 1)[-1].upper()
+                            label = f'OG {ext}' if 'Original Files' in path else ext
+                            row.add_item(
+                                discord.ui.Button(
+                                    label=label, 
+                                    url=main_url + quote(path)
+                                )
+                            )
+                        rows.append(row)
+                else:
+                    download = song.get('path')
+                    if download != '':
+                        ext = download.rsplit('.', 1)[-1].upper()
+                        row = discord.ui.ActionRow()
+                        row.add_item(
+                            discord.ui.Button(
+                                label=ext, 
+                                url=main_url + quote(download)
+                            )
+                        )
+                        rows.append(row)
+                
+                return rows
+
+        file_names = self.get_file_names(song_data.get('file_names'))
+        downloads = await self.get_downloads(file_names, song_data.get('length', ''))
+
+        layout_view = discord.ui.LayoutView(timeout=None)
+        layout_view.add_item(SongContainer(song_data, downloads, random_leak))
+
+        return layout_view
+
+    @commands.command(name="sessioninfo")
+    async def sessioninfo(self, ctx: commands.Context, *, query: str):
+        song_list = await self.fetch_song(ctx, query)
+        if song_list is None:
+            return
+
+        if len(song_list) == 1:
+            layout_view = await self.create_session_info_view(song_list[0])
+            await ctx.reply(view=layout_view)
+
+        elif len(song_list) > 1:
+            results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
+            song_map = {str(song["id"]): song for song in results}
+
+            options = [
+                discord.SelectOption(
+                    label=(
+                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
+                    )(song.get("track_titles"))[:100],
+                    value=str(song["id"]),
+                )
+                for song in results
+            ]
+
+            class SongSelect(discord.ui.Select):
+                def __init__(self, options, song_map, author, cog):
+                    self.song_map = song_map
+                    self.author = author
+                    self.cog = cog
+                    super().__init__(
+                        placeholder="Select a song...",
+                        min_values=1,
+                        max_values=1,
+                        options=options,
+                    )
+
+                async def callback(self, itn: discord.Interaction):
+                    song_id = self.values[0]
+                    song = self.song_map[song_id]
+
+                    view = await self.cog.create_session_info_view(song)
+
+                    if self.author != itn.user:
+                        return await itn.response.send_message(
+                            view=view, ephemeral=True
+                        )
+
+                    await itn.response.edit_message(embed=None, view=view)
+
+            view = discord.ui.View(timeout=None)
+            view.add_item(SongSelect(options, song_map, ctx.author, self))
+
+            embed = discord.Embed(
+                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**"
+            )
+            await ctx.reply(embed=embed, view=view)
+
+        else:
+            return await utils.Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f"I couldnt find a song with the name: `{query}`",
+            )
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
