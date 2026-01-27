@@ -211,53 +211,67 @@ class RoleTools(commands.Cog, name="Roles"):
         invoke_without_command=True,
     )
     @commands.has_permissions(manage_roles=True)
-    async def role(self, ctx: Context, member: discord.Member, *, role_name: str):
-        """Toggle a role on a member (base behavior when calling group directly)."""
-        role, error = await self.find_role(ctx, role_name)
-        if error:
-            error_embed = discord.Embed(
-                description=f"🚫 {error}", color=discord.Color.red()
-            )
-            return await ctx.reply(embed=error_embed, delete_after=5)
-        
-        if role.position >= ctx.author.top_role.position:
-            error_embed = discord.Embed(
-                description=f"🚫 You cannot manage the role '{role.name}' because it is higher or equal to your top role.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=error_embed, delete_after=5)
+    async def role(
+        self, ctx: Context, member: Optional[discord.Member] = None, *, role_name: Optional[str] = None
+    ):
+        """Toggle one or more comma-separated roles on a member (base behavior when calling group directly)."""
+        # If a subcommand was invoked, let it handle things and don't error about missing args
+        if ctx.invoked_subcommand:
+            return
 
-        if role.position >= ctx.me.top_role.position:
-            error_embed = discord.Embed(
-                description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.",
-                color=discord.Color.red(),
+        if member is None or role_name is None:
+            return await ctx.reply(
+                embed=discord.Embed(
+                    description="🚫 Usage: `role <member> <role1, role2, ...>`", color=discord.Color.red()
+                ),
+                delete_after=5,
             )
-            return await ctx.reply(embed=error_embed, delete_after=5)
 
-        try:
-            if role in member.roles:
-                embed = discord.Embed(
-                    description=f"✅ Removed {role.name} from {member.mention}"
-                )
-                await member.remove_roles(role)
-            else:
-                embed = discord.Embed(
-                    description=f"✅ Added {role.name} to {member.mention}"
-                )
-                await member.add_roles(role)
+        role_names = [r.strip() for r in role_name.split(",") if r.strip()]
+        added = []
+        removed = []
+        failed = []
 
-            await ctx.send(embed=embed)
+        for rn in role_names:
+            role, error = await self.find_role(ctx, rn)
+            if error:
+                failed.append(f"{rn} ({error})")
+                continue
 
-        except discord.Forbidden:
-            embed = discord.Embed(
-                description="🚫 I do not have permission to manage roles. "
+            if role.position >= ctx.author.top_role.position:
+                failed.append(f"{role.name} (higher or equal to your top role)")
+                continue
+
+            if role.position >= ctx.me.top_role.position:
+                failed.append(f"{role.name} (higher or equal to my top role)")
+                continue
+
+            try:
+                if role in member.roles:
+                    await member.remove_roles(role, reason=f"Role toggled by {ctx.author}")
+                    removed.append(role.name)
+                else:
+                    await member.add_roles(role, reason=f"Role toggled by {ctx.author}")
+                    added.append(role.name)
+            except discord.Forbidden:
+                failed.append(f"{role.name} (no permission)")
+            except discord.HTTPException as e:
+                failed.append(f"{role.name} (http error)")
+
+        desc_parts = []
+        if added:
+            desc_parts.append(f"✅ Added: {', '.join(added)}")
+        if removed:
+            desc_parts.append(f"✅ Removed: {', '.join(removed)}")
+        if failed:
+            desc_parts.append(f"⚠️ Failed: {', '.join(failed)}")
+
+        if not desc_parts:
+            return await ctx.send(
+                embed=discord.Embed(description="No roles were processed.", color=discord.Color.red())
             )
-            return await ctx.reply(embed=embed)
-        except discord.HTTPException as e:
-            embed = discord.Embed(
-                description=f"🚫 An error occurred while manage the users roles."
-            )
-            return await ctx.reply(embed=embed)
+
+        await ctx.send(embed=discord.Embed(description="\n".join(desc_parts)))
 
     @role.command(name="create", description="Creates a new role.")
     @commands.has_permissions(manage_roles=True)
