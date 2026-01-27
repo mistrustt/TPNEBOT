@@ -286,7 +286,7 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="strip", description="Removes all roles from a member")
     @commands.has_permissions(manage_roles=True)
-    async def create_role(self, ctx: commands.Context, member: discord.Member = None):
+    async def strip_roles(self, ctx: commands.Context, member: discord.Member = None):
         try:
             member = member or ctx.author
             if member.top_role >= ctx.me.top_role:
@@ -391,12 +391,12 @@ class RoleTools(commands.Cog, name="Roles"):
 
         except discord.Forbidden:
             embed = discord.Embed(
-                description="🚫 I do not have permission to create roles."
+                description="🚫 I do not have permission to strip roles."
             )
             return await ctx.reply(embed=embed)
         except discord.HTTPException as e:
             embed = discord.Embed(
-                description=f"🚫 An error occurred while creating the role."
+                description=f"🚫 An error occurred while stripping roles."
             )
             return await ctx.reply(embed=embed)
 
