@@ -3565,11 +3565,18 @@ class Casino(commands.Cog):
         await ctx.reply(embed=embed)
 
     @commands.command(
-        name="hilo", description="Play Hi-Lo - a simple card guessing game!"
-    )
+            name="hilo", description="Play Hi-Lo - a simple card guessing game!"
+        )
     async def hilo(self, ctx: Context, bet_amount: str):
         """Play HiLo - guess if the next card will be higher or lower (Stake-style)"""
         user = ctx.author
+
+        if user.id in self.active_players:
+            await ctx.reply("🚫 You already have an active game running! Finish it first.", delete_after=5)
+            return
+        
+        self.active_players.add(user.id)
+
         try:
             card_emojis = {
                 "A": "<:ace:1361825338539376651>",
@@ -3601,6 +3608,8 @@ class Casino(commands.Cog):
             except ValueError as e:
                 embed = discord.Embed(description=str(e), color=discord.Color.red())
                 await ctx.reply(embed=embed, delete_after=5)
+
+                self.active_players.remove(user.id)
                 return
 
             max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
@@ -3627,6 +3636,8 @@ class Casino(commands.Cog):
                     description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
                 )
                 await ctx.reply(embed=embed, delete_after=5)
+
+                self.active_players.remove(user.id)
                 return
 
             cards = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
@@ -3642,6 +3653,7 @@ class Casino(commands.Cog):
                 "message": None,
                 "view": None,
                 "has_played": False,
+                "skips_used": 0,
             }
 
             def calculate_multiplier(current_card, action):
@@ -3750,6 +3762,10 @@ class Casino(commands.Cog):
 
             async def end_game(win: bool = False):
                 game_state["game_active"] = False
+
+                if user.id in self.active_players:
+                    self.active_players.remove(user.id)
+
                 if game_state["view"]:
                     for child in game_state["view"].children:
                         child.disabled = True
@@ -3798,7 +3814,7 @@ class Casino(commands.Cog):
                             embed=new_embed, view=game_state["view"]
                         )
                 except Exception as e:
-                    logger.error(f"Error updating display: {e}")
+                    self.bot.logger.error(f"Error updating display: {e}")
 
             async def show_result(win: bool):
                 result_color = discord.Color.green() if win else discord.Color.red()
@@ -3825,7 +3841,7 @@ class Casino(commands.Cog):
                             embed=embed, view=game_state["view"]
                         )
                 except Exception as e:
-                    logger.error(f"Error showing result: {e}")
+                    self.bot.logger.error(f"Error showing result: {e}")
 
             async def handle_interaction_response(
                 interaction: Interaction, message=None, ephemeral=True
@@ -3848,17 +3864,14 @@ class Casino(commands.Cog):
                         except discord.errors.InteractionResponded:
                             pass
                 except Exception as e:
-                    logger.error(f"Error handling interaction response: {e}")
+                    self.bot.logger.error(f"Error handling interaction response: {e}")
                     return False
                 return True
 
-            async def higher_callback(interaction: Interaction):
+            async def higher_callback(interaction: discord.Interaction):
                 if interaction.user.id != user.id:
-                    await interaction.response.send_message(
-                        "This isn't your game!", ephemeral=True
-                    )
-                    return
-
+                    return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                
                 if not game_state["game_active"]:
                     return
 
@@ -3866,7 +3879,16 @@ class Casino(commands.Cog):
                     await interaction.response.defer()
                     game_state["has_played"] = True
                     game_state["history"].append(game_state["current_card"])
+                    
                     next_card = await self.fair_choice(user.id, cards)
+
+                    if next_card in ["A", "K"]:
+                        game_state["current_card"] = next_card
+                        await end_game(False)
+                        await show_result(False) 
+                        await update_display(interaction)
+                        return
+
                     multiplier_increase = calculate_multiplier(
                         game_state["current_card"], "higher"
                     )
@@ -3887,7 +3909,7 @@ class Casino(commands.Cog):
                     await update_display(interaction)
 
                 except Exception as e:
-                    logger.error(f"Error in higher callback: {e}")
+                    self.bot.logger.error(f"Error in higher callback: {e}")
 
             async def lower_callback(interaction: Interaction):
                 if interaction.user.id != user.id:
@@ -3903,6 +3925,14 @@ class Casino(commands.Cog):
                     game_state["has_played"] = True
                     game_state["history"].append(game_state["current_card"])
                     next_card = await self.fair_choice(user.id, cards)
+
+                    if next_card in ["A", "K"]:
+                        game_state["current_card"] = next_card
+                        await end_game(False)
+                        await show_result(False) 
+                        await update_display(interaction)
+                        return
+
                     multiplier_increase = calculate_multiplier(
                         game_state["current_card"], "lower"
                     )
@@ -3923,7 +3953,7 @@ class Casino(commands.Cog):
                     await update_display(interaction)
 
                 except Exception as e:
-                    logger.error(f"Error in lower callback: {e}")
+                    self.bot.logger.error(f"Error in lower callback: {e}")
 
             async def skip_callback(interaction: Interaction):
                 if interaction.user.id != user.id:
@@ -3934,8 +3964,17 @@ class Casino(commands.Cog):
                 if not game_state["game_active"]:
                     return
 
+                if game_state["skips_used"] >= 3:
+                    await interaction.response.send_message(
+                        "🚫 Limit reached! You can only skip 3 times per game.", 
+                        ephemeral=True
+                    )
+                    return
+
                 try:
                     await handle_interaction_response(interaction)
+
+                    game_state["skips_used"] += 1
 
                     game_state["history"].append(game_state["current_card"])
                     next_card = await self.fair_choice(user.id, cards)
@@ -3943,7 +3982,7 @@ class Casino(commands.Cog):
                     await update_display(interaction)
 
                 except Exception as e:
-                    logger.error(f"Error in skip callback: {e}")
+                    self.bot.logger.error(f"Error in skip callback: {e}")
 
             async def cashout_callback(interaction: Interaction):
                 if interaction.user.id != user.id:
@@ -3990,7 +4029,7 @@ class Casino(commands.Cog):
                     await show_result(True)
 
                 except Exception as e:
-                    logger.error(f"Error in cashout callback: {e}")
+                    self.bot.logger.error(f"Error in cashout callback: {e}")
                     await handle_interaction_response(
                         interaction,
                         "An error occurred while cashing out!",
@@ -4038,7 +4077,10 @@ class Casino(commands.Cog):
             game_state["message"] = await ctx.reply(embed=embed, view=view)
 
         except Exception as e:
-            logger.error(f"Error in hilo command: {e}", exc_info=True)
+            if user.id in self.active_players:
+                self.active_players.remove(user.id)
+            
+            self.bot.logger.error(f"Error in hilo command: {e}", exc_info=True)
             error_embed = discord.Embed(
                 title="⚠️ Error",
                 description="An error occurred while starting the game.",
