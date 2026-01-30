@@ -5,6 +5,7 @@ import logging
 import platform
 import traceback
 import urllib.parse
+import uuid
 from discord import app_commands, Webhook
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
@@ -12,6 +13,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils
+from utils.admin_api import AdminAPIServer
 from database.manager import DatabaseManager
 from sqlalchemy import text
 
@@ -90,6 +92,8 @@ class DiscordBot(commands.Bot):
             1282494458339922033,  # jwa
         ]
         self.version = "20251024a"
+        self.admin_api_server = None
+        self.admin_api_secret = None
         super().__init__(
             command_prefix=commands.when_mentioned_or(self.get_prefix),
             intents=discord.Intents.all(),
@@ -179,6 +183,22 @@ class DiscordBot(commands.Bot):
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")
+
+            # Start Admin API server if configured via environment variables
+            try:
+                host = os.getenv("ADMIN_API_HOST", "127.0.0.1")
+                port = int(os.getenv("ADMIN_API_PORT", "8080"))
+                secret = os.getenv("ADMIN_API_SECRET")
+                if not secret:
+                    self.logger.warning("ADMIN_API_SECRET not set; Admin API will not be started.")
+                else:
+                    api_server = AdminAPIServer(self, host=host, port=port, secret=secret)
+                    await api_server.start()
+                    self.admin_api_server = api_server
+                    self.admin_api_secret = secret
+                    self.logger.info(f"Admin API running on {host}:{port}")
+            except Exception as e:
+                self.logger.error(f"Failed to start Admin API: {e}")
 
         except Exception as e:
             self.logger.error(f"An error occurred during setup: {e}")
@@ -463,6 +483,18 @@ class DiscordBot(commands.Bot):
                 raise error
         else:
             return
+
+    async def close(self) -> None:
+        # Stop admin API server if running, then close the bot
+        try:
+            if getattr(self, "admin_api_server", None):
+                try:
+                    await self.admin_api_server.stop()
+                    self.logger.info("Admin API stopped cleanly.")
+                except Exception as e:
+                    self.logger.error(f"Error stopping Admin API: {e}")
+        finally:
+            await super().close()
 
     load_dotenv()
 

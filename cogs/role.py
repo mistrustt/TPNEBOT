@@ -211,53 +211,74 @@ class RoleTools(commands.Cog, name="Roles"):
         invoke_without_command=True,
     )
     @commands.has_permissions(manage_roles=True)
-    async def role(self, ctx: Context, member: discord.Member, *, role_name: str):
-        """Toggle a role on a member (base behavior when calling group directly)."""
-        role, error = await self.find_role(ctx, role_name)
-        if error:
-            error_embed = discord.Embed(
-                description=f"🚫 {error}", color=discord.Color.red()
-            )
-            return await ctx.reply(embed=error_embed, delete_after=5)
-        
-        if role.position >= ctx.author.top_role.position:
-            error_embed = discord.Embed(
-                description=f"🚫 You cannot manage the role '{role.name}' because it is higher or equal to your top role.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=error_embed, delete_after=5)
+    async def role(
+        self, ctx: Context, member: Optional[discord.Member] = None, *, role_name: Optional[str] = None
+    ):
+        """Toggle one or more comma-separated roles on a member (base behavior when calling group directly)."""
+        # If a subcommand was invoked, let it handle things and don't error about missing args
+        if ctx.invoked_subcommand:
+            return
 
-        if role.position >= ctx.me.top_role.position:
-            error_embed = discord.Embed(
-                description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.",
-                color=discord.Color.red(),
+        if member is None or role_name is None:
+            return await ctx.reply(
+                embed=discord.Embed(
+                    description="🚫 Usage: `role <member> <role1, role2, ...>`", color=discord.Color.red()
+                ),
+                delete_after=5,
             )
-            return await ctx.reply(embed=error_embed, delete_after=5)
 
-        try:
-            if role in member.roles:
-                embed = discord.Embed(
-                    description=f"✅ Removed {role.name} from {member.mention}"
-                )
-                await member.remove_roles(role)
-            else:
-                embed = discord.Embed(
-                    description=f"✅ Added {role.name} to {member.mention}"
-                )
-                await member.add_roles(role)
+        role_names = [r.strip() for r in role_name.split(",") if r.strip()]
+        added = []
+        removed = []
+        failed = []
 
-            await ctx.send(embed=embed)
+        for rn in role_names:
+            role, error = await self.find_role(ctx, rn)
+            if error:
+                failed.append(f"{rn} ({error})")
+                continue
 
-        except discord.Forbidden:
-            embed = discord.Embed(
-                description="🚫 I do not have permission to manage roles. "
+            # Prevent acting on roles higher or equal to the command author (unless author is guild owner)
+            if role.position >= ctx.author.top_role.position and ctx.author != ctx.guild.owner:
+                failed.append(f"{role.name} (higher or equal to your top role)")
+                continue
+
+            # Prevent acting on roles higher or equal to the bot
+            if role.position >= ctx.me.top_role.position:
+                failed.append(f"{role.name} (higher or equal to my top role)")
+                continue
+
+            # Skip default or managed roles which cannot be assigned/removed
+            if role == ctx.guild.default_role or role.managed:
+                failed.append(f"{role.name} (cannot manage default or managed roles)")
+                continue
+
+            try:
+                if role in member.roles:
+                    await member.remove_roles(role, reason=f"Role toggled by {ctx.author}")
+                    removed.append(role.name)
+                else:
+                    await member.add_roles(role, reason=f"Role toggled by {ctx.author}")
+                    added.append(role.name)
+            except discord.Forbidden:
+                failed.append(f"{role.name} (no permission)")
+            except discord.HTTPException:
+                failed.append(f"{role.name} (http error)")
+
+        desc_parts = []
+        if added:
+            desc_parts.append(f"✅ Added: {', '.join(added)}")
+        if removed:
+            desc_parts.append(f"✅ Removed: {', '.join(removed)}")
+        if failed:
+            desc_parts.append(f"⚠️ Failed: {', '.join(failed)}")
+
+        if not desc_parts:
+            return await ctx.send(
+                embed=discord.Embed(description="No roles were processed.", color=discord.Color.red())
             )
-            return await ctx.reply(embed=embed)
-        except discord.HTTPException as e:
-            embed = discord.Embed(
-                description=f"🚫 An error occurred while manage the users roles."
-            )
-            return await ctx.reply(embed=embed)
+
+        await ctx.send(embed=discord.Embed(description="\n".join(desc_parts)))
 
     @role.command(name="create", description="Creates a new role.")
     @commands.has_permissions(manage_roles=True)
@@ -286,7 +307,7 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="strip", description="Removes all roles from a member")
     @commands.has_permissions(manage_roles=True)
-    async def create_role(self, ctx: commands.Context, member: discord.Member = None):
+    async def strip_roles(self, ctx: commands.Context, member: discord.Member = None):
         try:
             member = member or ctx.author
             if member.top_role >= ctx.me.top_role:
@@ -391,12 +412,12 @@ class RoleTools(commands.Cog, name="Roles"):
 
         except discord.Forbidden:
             embed = discord.Embed(
-                description="🚫 I do not have permission to create roles."
+                description="🚫 I do not have permission to strip roles."
             )
             return await ctx.reply(embed=embed)
         except discord.HTTPException as e:
             embed = discord.Embed(
-                description=f"🚫 An error occurred while creating the role."
+                description=f"🚫 An error occurred while stripping roles."
             )
             return await ctx.reply(embed=embed)
 
@@ -1038,7 +1059,7 @@ class RoleTools(commands.Cog, name="Roles"):
         aliases=["rb"],
         description="Gives a role to all bots in the server.",
     )
-    @commands.has_permissions(manage_roles=True)
+    @commands.has_permissions(administrator=True)
     async def give_all_bots_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1078,6 +1099,166 @@ class RoleTools(commands.Cog, name="Roles"):
                 description=f"🚫 An error occurred while managing the bots roles."
             )
             return await ctx.reply(embed=embed)
+
+    @commands.command(name='rolehumans', aliases=['rh'], description="Gives a role to all humans in the server.")
+    @commands.has_permissions(administrator=True)
+    async def give_all_humans_role(self, ctx: Context, *, role_name: str):
+        role, error = await self.find_role(ctx, role_name)
+        if error:
+            error_embed = discord.Embed(
+                description=f"🚫 {error}", color=discord.Color.red()
+            )
+            return await ctx.reply(embed=error_embed, delete_after=5)
+        try:
+            delay = 1
+            for member in ctx.guild.members:
+                if not member.bot and role not in member.roles:
+                    while True:
+                        try:
+                            await member.add_roles(role)
+                            break
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                await asyncio.sleep(delay)
+                                delay *= 2
+                            elif e.status == 404:
+                                break
+                            else:
+                                raise e
+                    await asyncio.sleep(1)
+
+            human_count = sum(1 for m in role.members if not m.bot)
+            embed = discord.Embed(
+                description=f"✅ Gave the role '{role.name}' to all humans. ({human_count} members)"
+            )
+            await ctx.send(embed=embed)
+        except discord.Forbidden:
+            embed = discord.Embed(
+                description="🚫 I do not have permission to manage roles. "
+            )
+            return await ctx.reply(embed=embed)
+        except discord.HTTPException as e:
+            embed = discord.Embed(
+                description=f"🚫 An error occurred while managing the humans roles."
+            )
+            return await ctx.reply(embed=embed)
+
+    @commands.group(
+        name="autorole",
+        aliases=["ar"],
+        invoke_without_command=True,
+        description="Manage autoroles given to users when they join.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole(self, ctx: Context):
+        embed = discord.Embed(
+            title="Autorole Commands",
+            description=(
+                "`autorole add <role>` — add a role to give on join\n"
+                "`autorole remove <role>` — remove a role\n"
+                "`autorole list` — list configured autoroles\n"
+                "`autorole clear` — remove all autoroles"
+            ),
+            color=discord.Color.blurple(),
+        )
+        await ctx.send(embed=embed)
+
+    @autorole.command(name="add", description="Add a role to autoroles.")
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_add(self, ctx: Context, *, role_name: str):
+        role, error = await self.find_role(ctx, role_name)
+        if error:
+            return await ctx.reply(embed=discord.Embed(description=f"🚫 {error}", color=discord.Color.red()), delete_after=5)
+
+        if role.position >= ctx.me.top_role.position:
+            return await ctx.reply(embed=discord.Embed(description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.", color=discord.Color.red()), delete_after=5)
+
+        try:
+            await self.bot.database.add_auto_role(ctx.guild.id, role.id)
+            await ctx.send(embed=discord.Embed(description=f"✅ Added autorole: {role.mention}"))
+        except Exception as e:
+            logger.error(f"Failed to add autorole: {e}")
+            await ctx.reply(embed=discord.Embed(description="🚫 Failed to add autorole.", color=discord.Color.red()))
+
+    @autorole.command(name="remove", description="Remove a role from autoroles.")
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_remove(self, ctx: Context, *, role_name: str):
+        role, error = await self.find_role(ctx, role_name)
+        if error:
+            return await ctx.reply(embed=discord.Embed(description=f"🚫 {error}", color=discord.Color.red()), delete_after=5)
+
+        try:
+            await self.bot.database.remove_auto_role(ctx.guild.id, role.id)
+            await ctx.send(embed=discord.Embed(description=f"✅ Removed autorole: {role.mention}"))
+        except Exception as e:
+            logger.error(f"Failed to remove autorole: {e}")
+            await ctx.reply(embed=discord.Embed(description="🚫 Failed to remove autorole.", color=discord.Color.red()))
+
+    @autorole.command(name="list", description="List configured autoroles for this server.")
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_list(self, ctx: Context):
+        try:
+            ids = await self.bot.database.get_auto_roles(ctx.guild.id)
+            roles = [ctx.guild.get_role(rid) for rid in ids]
+            roles = [r for r in roles if r]
+            if not roles:
+                return await ctx.send(embed=discord.Embed(description="No autoroles configured.", color=discord.Color.red()))
+
+            desc = "\n".join(r.mention for r in roles)
+            await ctx.send(embed=discord.Embed(title="Autoroles", description=desc, color=discord.Color.blurple()))
+        except Exception as e:
+            logger.error(f"Failed to list autoroles: {e}")
+            await ctx.reply(embed=discord.Embed(description="🚫 Failed to retrieve autoroles.", color=discord.Color.red()))
+
+    @autorole.command(name="clear", description="Clear all autoroles for this server.")
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_clear(self, ctx: Context):
+        try:
+            await self.bot.database.clear_auto_roles(ctx.guild.id)
+            await ctx.send(embed=discord.Embed(description="✅ Cleared autoroles."))
+        except Exception as e:
+            logger.error(f"Failed to clear autoroles: {e}")
+            await ctx.reply(embed=discord.Embed(description="🚫 Failed to clear autoroles.", color=discord.Color.red()))
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        # Assign configured autoroles to new members (multiple roles supported)
+        try:
+            if member.bot:
+                return
+
+            guild = member.guild
+            ids = await self.bot.database.get_auto_roles(guild.id)
+            if not ids:
+                return
+
+            me = guild.me
+            roles_to_add = []
+            for rid in ids:
+                role = guild.get_role(rid)
+                if not role:
+                    continue
+                if role.managed:
+                    continue
+                if role.position >= me.top_role.position:
+                    continue
+                if role in member.roles:
+                    continue
+                roles_to_add.append(role)
+
+            if not roles_to_add:
+                return
+
+            try:
+                await member.add_roles(*roles_to_add, reason="Autorole")
+                logger.info(f"Applied autoroles to {member} in {guild.name}: {[r.name for r in roles_to_add]}")
+            except discord.Forbidden:
+                logger.warning(f"Missing permissions to apply autoroles in guild {guild.id}")
+            except discord.HTTPException as e:
+                logger.error(f"HTTP error applying autoroles: {e}")
+
+        except Exception as e:
+            logger.exception(f"Unexpected error in autorole on_member_join: {e}")
 
 
 async def setup(bot) -> None:
