@@ -500,7 +500,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(
         name="purge",
-        aliases=["clear"],
+        aliases=["clear","prune"],
         description="Deletes user messages from a channel",
     )
     @commands.guild_only()

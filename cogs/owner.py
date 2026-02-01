@@ -147,9 +147,6 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = datetime.now()
-        self.whitelist_wod = [
-            1095747082599530627, # envy
-        ]
         self.whitelist_finalyear = [
             284439598422163476,  # E
             1166140569861496853,  # voj
@@ -2419,6 +2416,7 @@ class Owner(commands.Cog, name="Owner"):
             1199083709735911465: self.is_whitelisted_private,
             1452021243669643324: self.is_whitelisted_clubhouse,
             1429272977526231203: self.is_whitelisted_finalyear,
+            1452021243669643324: self.is_whitelisted_wod
         }
 
         if ctx.guild.id not in allowed_guilds:
