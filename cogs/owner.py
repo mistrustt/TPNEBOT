@@ -147,9 +147,6 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = datetime.now()
-        self.whitelist_wod = [
-            1095747082599530627, # envy
-        ]
         self.whitelist_finalyear = [
             284439598422163476,  # E
             1166140569861496853,  # voj
