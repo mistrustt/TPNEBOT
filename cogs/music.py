@@ -1820,33 +1820,36 @@ class Music(commands.Cog, name="Music"):
 
             def _create_download_rows(self, downloads, song, main_url):
                 rows = []
-                
+
+                download = song.get('path')
+                if download != '':
+                    rows.append(discord.ui.Separator())
+                    rows.append(discord.ui.TextDisplay('**Tagged File(s)**'))
+                    ext = download.rsplit('.', 1)[-1].upper()
+                    main_row = discord.ui.ActionRow()
+                    main_row.add_item(
+                        discord.ui.Button(
+                            label=ext,
+                            url=main_url + quote(download)
+                        )
+                    )
+                    rows.append(main_row)
+
                 if downloads:
+                    rows.append(discord.ui.TextDisplay('**Original File(s)**'))
                     for i in range(0, len(downloads), 5):
                         row = discord.ui.ActionRow()
                         for path in downloads[i:i + 5]:
                             ext = path.rsplit('.', 1)[-1].upper()
-                            label = f'OG {ext}' if 'Original Files' in path else ext
+                            label = f'OG {ext}'
                             row.add_item(
                                 discord.ui.Button(
-                                    label=label, 
+                                    label=label,
                                     url=main_url + quote(path)
                                 )
                             )
                         rows.append(row)
-                else:
-                    download = song.get('path')
-                    if download != '':
-                        ext = download.rsplit('.', 1)[-1].upper()
-                        row = discord.ui.ActionRow()
-                        row.add_item(
-                            discord.ui.Button(
-                                label=ext, 
-                                url=main_url + quote(download)
-                            )
-                        )
-                        rows.append(row)
-                
+
                 return rows
 
         file_names = self.get_file_names(song_data.get('file_names'))
