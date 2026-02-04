@@ -347,6 +347,8 @@ class DiscordBot(commands.Bot):
             return
         elif isinstance(error, commands.errors.UnexpectedQuoteError):
             return
+        elif isinstance(error, commands.errors.CommandInvokeError):
+            return
         elif isinstance(error, commands.NoPrivateMessage):
             embed = discord.Embed(
                 description="This command cannot be used in DMs!",
