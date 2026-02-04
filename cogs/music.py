@@ -3134,29 +3134,53 @@ class Music(commands.Cog, name="Music"):
             best_track_title = self.get_most_acceptable_track_name(
                 song.get("name", "Unknown Title").replace(".mp3", "")
             )
-            image_file_name = (
-                f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_snippet.png"
-            )
             image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
-            async with self.session.get(f"{JUICEWRLD_API}/juicewrld/cover/{best_track_title.lower().replace(" ", "")}.png") as cover_response:
-                async with self.session.get(f"{JUICEWRLD_API}/juicewrld/files/cover-art/", params={"path": path}) as album_art_response:
-                    if cover_response.status == 200:
+
+            # Try the dedicated cover file first, then the album art endpoint.
+            async with self.session.get(
+                f"{JUICEWRLD_API}/juicewrld/cover/{best_track_title.lower().replace(' ', '')}.png"
+            ) as cover_response:
+                async with self.session.get(
+                    f"{JUICEWRLD_API}/juicewrld/files/cover-art/", params={"path": path}
+                ) as album_art_response:
+                    used_image = False
+
+                    # Helper to attempt opening and saving an image safely
+                    async def try_use_image(data: bytes, radius: int) -> bool:
+                        try:
+                            img = Image.open(BytesIO(data))
+                            blurred = img.filter(ImageFilter.GaussianBlur(radius=radius))
+                            blurred.save(image_file_name)
+                            return True
+                        except Exception:
+                            return False
+
+                    # Validate content-type before trying to use it (and catch open errors)
+                    if (
+                        cover_response.status == 200
+                        and cover_response.headers.get("content-type", "").startswith("image")
+                    ):
                         image_data = await cover_response.read()
-                        image = Image.open(BytesIO(image_data))
-                        blurred_image = image.filter(ImageFilter.GaussianBlur(radius=15))  # Adjust radius for intensity                            
-                        blurred_image.save(image_file_name)
-                    elif album_art_response.status == 200:
+                        used_image = await try_use_image(image_data, 15)
+
+                    if not used_image and album_art_response.status == 200 and album_art_response.headers.get("content-type", "").startswith("image"):
                         image_data = await album_art_response.read()
-                        image = Image.open(BytesIO(image_data))
-                        blurred_image = image.filter(ImageFilter.GaussianBlur(radius=5))  # Adjust radius for intensity                            
-                        blurred_image.save(image_file_name)
-                    else: # Last resort: use user's avatar
+                        used_image = await try_use_image(image_data, 5)
+
+                    if not used_image:
+                        # Last resort: use user's avatar (if available), otherwise create a blank image
                         image_url = ctx.author.display_avatar.url
-                        async with self.session.get(image_url) as image_response:
-                            if image_response.status == 200:
-                                image_data = await image_response.read()
-                                with open(image_file_name, "wb") as img_file:
-                                    img_file.write(image_data)
+                        try:
+                            async with self.session.get(image_url) as image_response:
+                                if image_response.status == 200 and image_response.headers.get("content-type", "").startswith("image"):
+                                    image_data = await image_response.read()
+                                    with open(image_file_name, "wb") as img_file:
+                                        img_file.write(image_data)
+                                else:
+                                    # create a simple placeholder image so subsequent processing doesn't fail
+                                    Image.new("RGBA", (200, 200), (50, 50, 50)).save(image_file_name)
+                        except Exception:
+                            Image.new("RGBA", (200, 200), (50, 50, 50)).save(image_file_name)
 
             result, payload = await self.make_snippet(
                 image_file_name, download_url, f"{ctx.author.id}_snippet", path=path
