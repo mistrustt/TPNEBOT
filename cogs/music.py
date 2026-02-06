@@ -2249,7 +2249,7 @@ class Music(commands.Cog, name="Music"):
         if len(song_list) == 1:
             layout_view = await self.create_snippet_view(song_list[0])
             if layout_view is None:
-                return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]}** has no **snippets** available')
+                return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
 
         elif len(song_list) > 1:
             results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
@@ -2284,7 +2284,7 @@ class Music(commands.Cog, name="Music"):
                     layout_view = await self.cog.create_snippet_view(song)
 
                     if layout_view is None:
-                        return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song}** has no **snippets** available')
+                        return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **snippets** available')
 
                     if self.author != itn.user:
                         return await itn.response.send_message(
