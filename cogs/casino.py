@@ -108,6 +108,7 @@ class CrashView(discord.ui.View):
                 await sub_int.response.send_message(
                     f"Bet capped to max {formatted_max}.", ephemeral=True
                 )
+                return
 
             await self.bot.database.process_treasury_transaction(
                 wallet, -bet, "Crash Game Bet"
@@ -117,7 +118,7 @@ class CrashView(discord.ui.View):
             self.crash_points[uid] = await self.generate_crash_point(uid)
 
             self.cashout_btn.disabled = False
-            await sub_int.followup.send(
+            await sub_int.response.send_message(
                 f"You joined with **{await casino.formatter(bet)}** {casino.currency_name}",
                 ephemeral=True,
             )
