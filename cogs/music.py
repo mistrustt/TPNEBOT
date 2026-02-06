@@ -1745,7 +1745,7 @@ class Music(commands.Cog, name="Music"):
                 'release_date':         '**Released**',
                 'length':               '**Length**',
                 'leak_type':            '**Category**',
-                'bitrate':              '**True Bitrate**',
+                'bitrate':              '**Available Files**',
             }
 
             RANDOM_LEAK_FIELDS = {
@@ -1754,7 +1754,7 @@ class Music(commands.Cog, name="Music"):
                 'date_leaked':          '**Surfaced**',
                 'release_date':         '**Released**',
                 'length':               '**Length**',
-                'bitrate':              '**True Bitrate**',
+                'bitrate':              '**Available Files**',
             }
 
             def __init__(
