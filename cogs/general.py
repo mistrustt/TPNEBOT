@@ -56,7 +56,7 @@ class HelpSelect(ui.Select):
             for cog in embeds_by_cog
         ]
         super().__init__(
-            placeholder="Select a command category...",
+            placeholder="Select a command category..",
             min_values=1,
             max_values=1,
             options=options,
