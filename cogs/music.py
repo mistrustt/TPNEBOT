@@ -1915,9 +1915,14 @@ class Music(commands.Cog, name="Music"):
                 self.add_item(discord.ui.Separator())
 
                 media_gallery = discord.ui.MediaGallery()
+                amt = 0
                 if valid_snippets:
                     for url in valid_snippets:
+                        if amt >= 10:
+                            break
+
                         media_gallery.add_item(media=url)
+                        amt += 1
 
                 self.add_item(media_gallery)
 
@@ -2201,8 +2206,10 @@ class Music(commands.Cog, name="Music"):
                 container.add_item(discord.ui.Separator())
 
     @commands.command('syncsurfaces', aliases=['syncleaks'])
-    @commands.has_role(1464010998762438717)
     async def sync_surfaces(self, ctx: commands.Context):
+        if ctx.author.id != 1167418093375606796:
+            return
+        
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
         
@@ -2234,7 +2241,6 @@ class Music(commands.Cog, name="Music"):
         view.message = msg
         
     @commands.command("snippet", aliases=["snip"])
-    @commands.has_role(1464010998762438717)
     async def snippet(self, ctx: commands.Context, *, query: str):
         song_list = await self.fetch_song(ctx, query)
         if song_list is None:
@@ -2243,11 +2249,7 @@ class Music(commands.Cog, name="Music"):
         if len(song_list) == 1:
             layout_view = await self.create_snippet_view(song_list[0])
             if layout_view is None:
-                return await ctx.reply(
-                    "lowkey this new so its gonna be missing a lot but let big bro flow know so we can fix this",
-                    delete_after=5,
-                )
-            await ctx.reply(view=layout_view)
+                return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]}** has no **snippets** available')
 
         elif len(song_list) > 1:
             results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
@@ -2282,12 +2284,7 @@ class Music(commands.Cog, name="Music"):
                     layout_view = await self.cog.create_snippet_view(song)
 
                     if layout_view is None:
-                        return await itn.response.edit_message(
-                            content="lowkey this new so its gonna be missing a lot but let big bro flow know so we can fix this",
-                            embed=None,
-                            view=None,
-                            delete_after=5,
-                        )
+                        return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song}** has no **snippets** available')
 
                     if self.author != itn.user:
                         return await itn.response.send_message(
