@@ -2425,7 +2425,7 @@ class Owner(commands.Cog, name="Owner"):
             1199083709735911465: self.is_whitelisted_private,
             1452021243669643324: self.is_whitelisted_clubhouse,
             1429272977526231203: self.is_whitelisted_finalyear,
-            1452021243669643324: self.is_whitelisted_wod
+            1270962480742666311: self.is_whitelisted_tpne,
         }
 
         if ctx.guild.id not in allowed_guilds:
