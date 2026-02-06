@@ -2250,6 +2250,8 @@ class Music(commands.Cog, name="Music"):
             layout_view = await self.create_snippet_view(song_list[0])
             if layout_view is None:
                 return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
+            
+            await ctx.reply(view=layout_view)
 
         elif len(song_list) > 1:
             results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
