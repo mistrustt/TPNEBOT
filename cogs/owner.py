@@ -188,6 +188,10 @@ class Owner(commands.Cog, name="Owner"):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_clubhouse
 
+    def is_whitelisted_tpne(self, user_id: int):
+        """Check if the user ID is in the whitelist."""
+        return user_id in self.whitelist_tpne
+
     def is_whitelisted_mistrust(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_mistrust
