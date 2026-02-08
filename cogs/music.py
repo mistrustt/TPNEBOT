@@ -2654,6 +2654,7 @@ class Music(commands.Cog, name="Music"):
         created_messages.append(message)
 
         message = await ctx.fetch_message(ctx.message.id)
+        await ctx.reply(message.reactions)
         for reaction in message.reactions:
             if str(reaction.emoji) == "✅":
                 async for user in reaction.users():
