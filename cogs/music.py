@@ -2710,7 +2710,7 @@ class Music(commands.Cog, name="Music"):
                 try:
                     guess = await self.bot.wait_for('message', check=check, timeout=15)
                     await guess.add_reaction("✅")
-                    
+                    continue
                 except asyncio.TimeoutError:
                     player['lives'] -= 1
                     message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. The correct answer was {song.get('name', 'N/A')}.")
