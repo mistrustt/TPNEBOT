@@ -2686,7 +2686,6 @@ class Music(commands.Cog, name="Music"):
         alive_players = get_alive_players(players)
         while len(alive_players) > 1:
             for player in alive_players:
-                await ctx.send("yo")
                 def get_song_recursive(attempt=0):
                     if attempt > 5:
                         return None, None
@@ -2703,6 +2702,8 @@ class Music(commands.Cog, name="Music"):
                     return song, random_3l
 
                 song, random_3l = get_song_recursive()
+                await ctx.send(song)
+                await ctx.send(random_3l)
                 embed = discord.Embed(
                     description=f"Please say a **Juice WRLD** that contains **{random_3l.lower()}**",
                     color = player["color"].value if player["color"] else discord.Color.default().value,
@@ -2719,7 +2720,7 @@ class Music(commands.Cog, name="Music"):
                     continue
                 except asyncio.TimeoutError:
                     player['lives'] -= 1
-                    message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. The correct answer was {song.get('name', 'N/A')}.")
+                    message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. One correct answer was **{song.get('name', 'N/A')}**.")
                     created_messages.append(message)
                     continue
         if len(alive_players) == 1:
