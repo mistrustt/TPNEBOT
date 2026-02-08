@@ -2693,7 +2693,7 @@ class Music(commands.Cog, name="Music"):
 
             song, random_3l = get_song_recursive()
             embed = discord.Embed(
-                description="Please say a **Juice WRLD** that contains **{random_3l.upper()}**",
+                description=f"Please say a **Juice WRLD** that contains **{random_3l.upper()}**",
                 color = player["color"].value if player["color"] else discord.Color.default().value,
             )
             embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
