@@ -43,6 +43,8 @@ class Music(commands.Cog, name="Music"):
         self.latest_surfaces = []
 
         self.cache_songs.start()
+        self.valid_names = []
+        await self.sync_names()
 
         self.standard_colors = {
             "black": "#000000",
@@ -2589,6 +2591,66 @@ class Music(commands.Cog, name="Music"):
             ctx.author,
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
         )
+
+    async def sync_names(self):
+        self.valid_names = []
+        for song in self.songs:
+            main_name = self.get_most_acceptable_track_name(song.get("name", ""))
+            track_titles = song.get("track_titles", [])
+            full_name_list = []
+            for title in track_titles:
+                acceptable_alt_name_list = self.get_acceptable_track_names(title)
+                full_name_list.extend(acceptable_alt_name_list)
+            self.valid_names.append({
+                "main_name": main_name,
+                "names": full_name_list,
+            })
+
+    def get_random_song_for_blacktea(self):
+        random_index = random.randint(0, len(self.valid_names) - 1)
+        return self.valid_names[random_index]
+
+    def get_random_3l_for_blacktea(self, song):
+        main_name = song.get("main_name", "")
+        random_cursor = random.randint(0, len(main_name) - 3)
+        return main_name[random_cursor:random_cursor + 3]
+
+    @commands.command(name="syncvalidnames", aliases=["syncnames"])
+    async def syncvalidnames(self, ctx: commands.Context):
+        await self.sync_names()
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total valid names: {len(self.valid_names)}")
+
+    @commands.command(name="blacktea", help="Play a game of Heardle. Juice WRLD songs only.")
+    async def blacktea(self, ctx: commands.Context):
+        blacktea_embed = discord.Embed(
+            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n`GOAL:` You have **10** seconds to say a word containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n`NOTES:` A word can only be used **once** through the course of the game.",
+            color = discord.Color.green()
+        )
+        blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        message = await ctx.send(embed=blacktea_embed)
+        await message.add_reaction("✅")
+        await asyncio.sleep(30)
+        players = []
+        message = await ctx.fetch_message(ctx.message.id)
+        for reaction in message.reactions:
+            if str(reaction.emoji) == "✅":
+                async for user in reaction.users():
+                    if user.bot:
+                        continue
+                    players.append({
+                        "id": user.id,
+                        "name": user.display_name,
+                        "lives": 2,
+                    })
+        if len(players) <= 1:
+            await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
+            return
+        
+        song = self.get_random_song_for_blacktea()
+        random_3l = self.get_random_3l_for_blacktea(song)
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Starting Black Tea with {len(players)} players! The random 3 letters are: **{random_3l.upper()}**")
+        await asyncio.sleep(5)
+        await ctx.reply(song.get("names", []))
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
