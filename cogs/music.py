@@ -2642,9 +2642,10 @@ class Music(commands.Cog, name="Music"):
                         "name": user.display_name,
                         "lives": 2,
                     })
-        if len(players) <= 0.1:
-            await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
-            return
+        await ctx.reply(players)
+        # if len(players) <= 0:
+        #     await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
+        #     return
         
         song = self.get_random_song_for_blacktea()
         random_3l = self.get_random_3l_for_blacktea(song)
