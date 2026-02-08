@@ -2709,7 +2709,7 @@ class Music(commands.Cog, name="Music"):
                 embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
                 message = await ctx.send(player["mention"], embed=embed)
                 created_messages.append(message)
-
+                
                 def check(m):
                     return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l.lower() in m.content.lower().strip()
                 try:
@@ -2721,7 +2721,10 @@ class Music(commands.Cog, name="Music"):
                     message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. One correct answer was **{song.get('name', 'N/A')}**.")
                     created_messages.append(message)
                     alive_players = get_alive_players(players)
-                    continue
+                    if len(alive_players) <= 1:
+                        break
+                    else:
+                        continue
         if len(alive_players) == 1:
             winner = alive_players[0]
             message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
