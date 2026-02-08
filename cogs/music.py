@@ -2660,6 +2660,9 @@ class Music(commands.Cog, name="Music"):
                     if not user.bot: 
                         players.append({
                             "id": user.id,
+                            "display_name": user.display_name,
+                            "avatar_url": ctx.guild.get_member(user.id).display_avatar.url,
+                            "color": user.color,
                             "mention": user.mention,
                             "lives": 2,
                         })
@@ -2689,9 +2692,13 @@ class Music(commands.Cog, name="Music"):
                 return song, random_3l
 
             song, random_3l = get_song_recursive()
-            message = await ctx.send(player['mention'], embed=discord.Embed(
-                description=f"Please say a **Juice WRLD** that contains **{random_3l.upper()}**",
-            ))
+            embed = discord.Embed(
+                description="Please say a **Juice WRLD** that contains **{random_3l.upper()}**",
+                color = player["color"].value if player["color"] else discord.Color.default().value,
+            )
+            embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
+            message = await ctx.send(player["mention"], embed=embed)
+
             def check(m):
                 return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l in m.content.lower().strip()
             try:
