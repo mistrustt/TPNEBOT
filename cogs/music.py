@@ -2111,6 +2111,7 @@ class Music(commands.Cog, name="Music"):
         status = await self.fetch_songs()
         if status == 200:
             await self.store_latest_surfaces()
+            await self.sync_names()
 
     async def fetch_songs(self):
         url = JUICEWRLD_API + '/juicewrld/songs/'
@@ -2220,7 +2221,6 @@ class Music(commands.Cog, name="Music"):
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
-        await self.sync_names()
         await self.store_latest_surfaces()
         await ctx.message.add_reaction('✅')
 
