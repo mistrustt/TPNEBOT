@@ -2596,24 +2596,18 @@ class Music(commands.Cog, name="Music"):
     async def sync_names(self):
         self.valid_names = []
         for song in self.songs:
-            main_name = self.get_most_acceptable_track_name(song.get("name", ""))
             track_titles = song.get("track_titles", [])
-            full_name_list = []
             for title in track_titles:
                 acceptable_alt_name_list = self.get_acceptable_track_names(title)
-                full_name_list.extend(acceptable_alt_name_list)
-            self.valid_names.append({
-                "main_name": main_name,
-                "names": full_name_list,
-            })
+                self.valid_names.extend(acceptable_alt_name_list)
 
     def get_random_song_for_blacktea(self):
-        random_index = random.randint(0, len(self.valid_names) - 1)
-        return self.valid_names[random_index]
+        random_index = random.randint(0, len(self.songs) - 1)
+        return self.songs[random_index]
 
     def get_random_3l_for_blacktea(self, song):
-        main_name = song.get("main_name", "")
-        names = song.get("names", [])
+        main_name = self.get_most_acceptable_track_name(song.get("name", ""))
+        names = self.get_acceptable_track_names(song.get("name", ""))
 
         def with_name(name):
             letters_only = "".join(c for c in name if c.isalpha())
@@ -2649,7 +2643,7 @@ class Music(commands.Cog, name="Music"):
         created_messages = []
     
         blacktea_embed = discord.Embed(
-            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
+            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **15** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
             color = discord.Color.green(),
         )
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
@@ -2680,11 +2674,35 @@ class Music(commands.Cog, name="Music"):
             ctx.author.id, ctx.command.qualified_name, 30
         )
 
-        song = self.get_random_song_for_blacktea()
-        random_3l = self.get_random_3l_for_blacktea(song)
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Please pick a Juice WRLD song that starts with **{random_3l.lower()}**")
-        await asyncio.sleep(5)
-        await ctx.reply(song.get("names", []))
+        for player in players:
+            def get_song_recursive(attempt=0):
+                if attempt > 5:
+                    return None, None
+                song = self.get_random_song_for_blacktea()
+                if not song:
+                    return get_song_recursive(attempt + 1)
+                main_name = song.get("main_name", "")
+                if main_name.lower() in used_words:
+                    return get_song_recursive(attempt + 1)
+                random_3l = self.get_random_3l_for_blacktea(song)
+                if not random_3l:
+                    return get_song_recursive(attempt + 1)
+                used_words.append(main_name.lower())
+                return song, random_3l
+
+            song, random_3l = get_song_recursive()
+            message = await ctx.send(player['mention'], embed=discord.Embed(
+                description=f"Please say a **Juice WRLD** that contains **{random_3l.upper()}**",
+            ))
+            def check(m):
+                return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l in m.content.lower().strip()
+            try:
+                guess = await self.bot.wait_for('message', check=check, timeout=15)
+                await guess.add_reaction("✅")
+                
+            except asyncio.TimeoutError:
+                player['lives'] -= 1
+                await ctx.send(f"{player['mention']} ran out of time! The correct answer was **{song.get('main_name', 'N/A')}**. Lives remaining: {player['lives']}")
 
         # at the end
         for message in created_messages:
