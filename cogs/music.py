@@ -2658,14 +2658,13 @@ class Music(commands.Cog, name="Music"):
             if str(reaction.emoji) == "✅":
                 async for user in reaction.users():
                     if not user.bot: 
-                        await ctx.send(f"{user.mention} has joined the game.")
                         players.append({
                             "id": user.id,
                             "mention": user.mention,
                             "lives": 2,
                         })
 
-        if len(players) <= 0:
+        if len(players) <= 1:
             await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
             return
         
