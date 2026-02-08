@@ -2691,15 +2691,12 @@ class Music(commands.Cog, name="Music"):
                         return None, None
                     song = self.get_random_song_for_blacktea()
                     if not song:
-                        await ctx.send("1")
                         return await get_song_recursive(attempt + 1)
-                    main_name = song.get("main_name", "")
+                    main_name = song.get("name", "")
                     if main_name.lower() in used_words:
-                        await ctx.send("2")
                         return await get_song_recursive(attempt + 1)
                     random_3l = self.get_random_3l_for_blacktea(song)
                     if not random_3l:
-                        await ctx.send("3")
                         return await get_song_recursive(attempt + 1)
                     used_words.append(main_name.lower())
                     return song, random_3l
