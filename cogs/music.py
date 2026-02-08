@@ -2653,8 +2653,7 @@ class Music(commands.Cog, name="Music"):
 
         created_messages.append(message)
 
-        message = await ctx.fetch_message(ctx.message.id)
-        await ctx.reply(message.reactions)
+        message = await ctx.fetch_message(message.id)
         for reaction in message.reactions:
             if str(reaction.emoji) == "✅":
                 async for user in reaction.users():
@@ -2666,10 +2665,9 @@ class Music(commands.Cog, name="Music"):
                             "lives": 2,
                         })
 
-        await ctx.reply(players)
-        # if len(players) <= 0:
-        #     await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
-        #     return
+        if len(players) <= 0:
+            await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
+            return
         
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 30
