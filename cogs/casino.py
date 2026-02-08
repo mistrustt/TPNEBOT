@@ -4685,8 +4685,10 @@ class Casino(commands.Cog):
             return
 
     @commands.command("keno")
-    @commands.has_role(1464010998762438717)
     async def keno(self, ctx: commands.Context, player_bet: str):
+        if ctx.guild.id != 1336128367166095380:
+            return
+        
         try:
             user_id = ctx.author.id
 
