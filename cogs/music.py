@@ -2675,39 +2675,45 @@ class Music(commands.Cog, name="Music"):
             ctx.author.id, ctx.command.qualified_name, 30
         )
 
-        for player in players:
-            def get_song_recursive(attempt=0):
-                if attempt > 5:
-                    return None, None
-                song = self.get_random_song_for_blacktea()
-                if not song:
-                    return get_song_recursive(attempt + 1)
-                main_name = song.get("main_name", "")
-                if main_name.lower() in used_words:
-                    return get_song_recursive(attempt + 1)
-                random_3l = self.get_random_3l_for_blacktea(song)
-                if not random_3l:
-                    return get_song_recursive(attempt + 1)
-                used_words.append(main_name.lower())
-                return song, random_3l
+        def get_alive_players(players):
+            return [p for p in players if p['lives'] > 0]
 
-            song, random_3l = get_song_recursive()
-            embed = discord.Embed(
-                description=f"Please say a **Juice WRLD** that contains **{random_3l.upper()}**",
-                color = player["color"].value if player["color"] else discord.Color.default().value,
-            )
-            embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
-            message = await ctx.send(player["mention"], embed=embed)
+        while get_alive_players(players) > 1:
+            for player in players:
+                def get_song_recursive(attempt=0):
+                    if attempt > 5:
+                        return None, None
+                    song = self.get_random_song_for_blacktea()
+                    if not song:
+                        return get_song_recursive(attempt + 1)
+                    main_name = song.get("main_name", "")
+                    if main_name.lower() in used_words:
+                        return get_song_recursive(attempt + 1)
+                    random_3l = self.get_random_3l_for_blacktea(song)
+                    if not random_3l:
+                        return get_song_recursive(attempt + 1)
+                    used_words.append(main_name.lower())
+                    return song, random_3l
 
-            def check(m):
-                return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l in m.content.lower().strip()
-            try:
-                guess = await self.bot.wait_for('message', check=check, timeout=15)
-                await guess.add_reaction("✅")
-                
-            except asyncio.TimeoutError:
-                player['lives'] -= 1
-                await ctx.send(f"{player['mention']} ran out of time! The correct answer was **{song.get('main_name', 'N/A')}**. Lives remaining: {player['lives']}")
+                song, random_3l = get_song_recursive()
+                embed = discord.Embed(
+                    description=f"Please say a **Juice WRLD** that contains **{random_3l.lower()}**",
+                    color = player["color"].value if player["color"] else discord.Color.default().value,
+                )
+                embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
+                message = await ctx.send(player["mention"], embed=embed)
+                created_messages.append(message)
+
+                def check(m):
+                    return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l in m.content.lower().strip()
+                try:
+                    guess = await self.bot.wait_for('message', check=check, timeout=15)
+                    await guess.add_reaction("✅")
+                    
+                except asyncio.TimeoutError:
+                    player['lives'] -= 1
+                    message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. The correct answer was {song.get('name', 'N/A')}.")
+                    created_messages.append(message)
 
         # at the end
         for message in created_messages:
