@@ -44,7 +44,6 @@ class Music(commands.Cog, name="Music"):
 
         self.cache_songs.start()
         self.valid_names = []
-        await self.sync_names()
 
         self.standard_colors = {
             "black": "#000000",
@@ -204,6 +203,7 @@ class Music(commands.Cog, name="Music"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
+        await self.sync_names()
 
     async def update_user_index(self, lastfm_username: str):
         """Fetch and index recent listening data for a user."""
