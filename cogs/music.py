@@ -2711,7 +2711,7 @@ class Music(commands.Cog, name="Music"):
                 created_messages.append(message)
 
                 def check(m):
-                    return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l in m.content.lower().strip()
+                    return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l.lower() in m.content.lower().strip()
                 try:
                     guess = await self.bot.wait_for('message', check=check, timeout=15)
                     await guess.add_reaction("✅")
