@@ -2649,7 +2649,7 @@ class Music(commands.Cog, name="Music"):
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
         message = await ctx.send(embed=blacktea_embed)
         await message.add_reaction("✅")
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
 
         created_messages.append(message)
 
@@ -2678,7 +2678,7 @@ class Music(commands.Cog, name="Music"):
         def get_alive_players(players):
             return [p for p in players if p['lives'] > 0]
 
-        while get_alive_players(players) > 1:
+        while len(get_alive_players(players)) > 1:
             for player in players:
                 def get_song_recursive(attempt=0):
                     if attempt > 5:
