@@ -2616,11 +2616,13 @@ class Music(commands.Cog, name="Music"):
         return main_name[random_cursor:random_cursor + 3]
 
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
+    @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
         await self.sync_names()
         await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total valid names: {len(self.valid_names)}")
 
     @commands.command(name="blacktea", help="Play a game of Heardle. Juice WRLD songs only.")
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def blacktea(self, ctx: commands.Context):
         blacktea_embed = discord.Embed(
             description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a word containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A word can only be used **once** through the course of the game.",
@@ -2633,6 +2635,7 @@ class Music(commands.Cog, name="Music"):
         players = []
         message = await ctx.fetch_message(ctx.message.id)
         for reaction in message.reactions:
+            await ctx.reply(reaction)
             if str(reaction.emoji) == "✅":
                 async for user in reaction.users():
                     if user.bot:
