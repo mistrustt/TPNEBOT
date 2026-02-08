@@ -2644,6 +2644,10 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="blacktea", help="Play a game of Heardle. Juice WRLD songs only.")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def blacktea(self, ctx: commands.Context):
+        players = []
+        used_words = []
+        created_messages = []
+    
         blacktea_embed = discord.Embed(
             description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
             color = discord.Color.green(),
@@ -2652,21 +2656,21 @@ class Music(commands.Cog, name="Music"):
         message = await ctx.send(embed=blacktea_embed)
         await message.add_reaction("✅")
         await asyncio.sleep(3)
-        players = []
-        used_words = []
-        created_messages = []
+
         created_messages.append(message)
+
         message = await ctx.fetch_message(ctx.message.id)
         for reaction in message.reactions:
             if str(reaction.emoji) == "✅":
-                await ctx.reply(reaction.users())
                 async for user in reaction.users():
                     if not user.bot: 
+                        await ctx.send(f"{user.mention} has joined the game.")
                         players.append({
                             "id": user.id,
                             "mention": user.mention,
                             "lives": 2,
                         })
+
         await ctx.reply(players)
         # if len(players) <= 0:
         #     await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
