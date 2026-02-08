@@ -44,6 +44,7 @@ class Music(commands.Cog, name="Music"):
 
         self.cache_songs.start()
         self.valid_names = []
+        self.ongoing_blacktea = []
 
         self.standard_colors = {
             "black": "#000000",
@@ -2365,6 +2366,7 @@ class Music(commands.Cog, name="Music"):
     async def cleardownloadcache(self, ctx: commands.Context):
         self.ongoing_heardle = []
         self.snippet_debounce = {}
+        self.ongoing_blacktea = []
 
         files = []
         self.assert_download_cache()
@@ -2643,9 +2645,14 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def blacktea(self, ctx: commands.Context):
+        if ctx.author.id in self.ongoing_blacktea :
+            await utils.Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
+            return
+
         players = []
         used_words = []
         created_messages = []
+        self.ongoing_blacktea.append(ctx.author.id)
     
         blacktea_embed = discord.Embed(
             description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **15** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
@@ -2673,6 +2680,7 @@ class Music(commands.Cog, name="Music"):
                         })
 
         if len(players) <= 1:
+            self.ongoing_blacktea.remove(ctx.author.id)
             await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
             return
         
@@ -2735,6 +2743,7 @@ class Music(commands.Cog, name="Music"):
                 await message.delete()
             except Exception as e:
                 pass
+        self.ongoing_blacktea.remove(ctx.author.id)
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
