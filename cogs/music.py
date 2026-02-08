@@ -2610,13 +2610,18 @@ class Music(commands.Cog, name="Music"):
         names = self.get_acceptable_track_names(song.get("name", ""))
 
         def with_name(name):
-            letters_only = "".join(c for c in name if c.isalpha())
+            valid_slices = []
 
-            if len(letters_only) < 3:
+            for i in range(len(name) - 2):
+                chunk = name[i:i+3]
+
+                if all(c.isalpha() for c in chunk):
+                    valid_slices.append(chunk)
+
+            if not valid_slices:
                 return None
 
-            random_cursor = random.randint(0, len(letters_only) - 3)
-            return letters_only[random_cursor:random_cursor + 3]
+            return random.choice(valid_slices)
         
         main = with_name(main_name)
         if main:
@@ -2681,6 +2686,7 @@ class Music(commands.Cog, name="Music"):
         alive_players = get_alive_players(players)
         while len(alive_players) > 1:
             for player in alive_players:
+                await ctx.send("yo")
                 def get_song_recursive(attempt=0):
                     if attempt > 5:
                         return None, None
@@ -2715,6 +2721,7 @@ class Music(commands.Cog, name="Music"):
                     player['lives'] -= 1
                     message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. The correct answer was {song.get('name', 'N/A')}.")
                     created_messages.append(message)
+                    continue
         if len(alive_players) == 1:
             winner = alive_players[0]
             message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
