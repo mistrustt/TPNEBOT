@@ -2220,6 +2220,7 @@ class Music(commands.Cog, name="Music"):
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
+        await self.sync_names()
         await self.store_latest_surfaces()
         await ctx.message.add_reaction('✅')
 
@@ -2612,8 +2613,26 @@ class Music(commands.Cog, name="Music"):
 
     def get_random_3l_for_blacktea(self, song):
         main_name = song.get("main_name", "")
-        random_cursor = random.randint(0, len(main_name) - 3)
-        return main_name[random_cursor:random_cursor + 3]
+        names = song.get("names", [])
+
+        def with_name(name):
+            letters_only = "".join(c for c in name if c.isalpha())
+
+            if len(letters_only) < 3:
+                return None
+
+            random_cursor = random.randint(0, len(letters_only) - 3)
+            return letters_only[random_cursor:random_cursor + 3]
+        
+        main = with_name(main_name)
+        if main:
+            return main
+        else:
+            for name in names:
+                result = with_name(name)
+                if result:
+                    return result
+        return None
 
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
@@ -2627,7 +2646,7 @@ class Music(commands.Cog, name="Music"):
     async def blacktea(self, ctx: commands.Context):
         blacktea_embed = discord.Embed(
             description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
-            color = discord.Color.green()
+            color = discord.Color.green(),
         )
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
         message = await ctx.send(embed=blacktea_embed)
@@ -2635,10 +2654,12 @@ class Music(commands.Cog, name="Music"):
         await asyncio.sleep(3)
         players = []
         used_words = []
+        created_messages = []
+        created_messages.append(message)
         message = await ctx.fetch_message(ctx.message.id)
         for reaction in message.reactions:
-            await ctx.reply(reaction)
             if str(reaction.emoji) == "✅":
+                await ctx.reply(reaction.users())
                 async for user in reaction.users():
                     if not user.bot: 
                         players.append({
@@ -2657,9 +2678,16 @@ class Music(commands.Cog, name="Music"):
 
         song = self.get_random_song_for_blacktea()
         random_3l = self.get_random_3l_for_blacktea(song)
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Starting Black Tea with {len(players)} players! The random 3 letters are: **{random_3l.lower()}**")
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Please pick a Juice WRLD song that starts with **{random_3l.lower()}**")
         await asyncio.sleep(5)
         await ctx.reply(song.get("names", []))
+
+        # at the end
+        for message in created_messages:
+            try:
+                await message.delete()
+            except Exception as e:
+                pass
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
