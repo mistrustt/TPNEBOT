@@ -2686,6 +2686,7 @@ class Music(commands.Cog, name="Music"):
         alive_players = get_alive_players(players)
         while len(alive_players) > 1:
             for player in alive_players:
+                await ctx.send(player)
                 def get_song_recursive(attempt=0):
                     if attempt > 5:
                         return None, None
