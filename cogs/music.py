@@ -2686,26 +2686,25 @@ class Music(commands.Cog, name="Music"):
         alive_players = get_alive_players(players)
         while len(alive_players) > 1:
             for player in alive_players:
-                def get_song_recursive(attempt=0):
+                async def get_song_recursive(attempt=0):
                     if attempt > 5:
                         return None, None
                     song = self.get_random_song_for_blacktea()
                     if not song:
-                        return get_song_recursive(attempt + 1)
+                        await ctx.send("1")
+                        return await get_song_recursive(attempt + 1)
                     main_name = song.get("main_name", "")
                     if main_name.lower() in used_words:
-                        return get_song_recursive(attempt + 1)
+                        await ctx.send("2")
+                        return await get_song_recursive(attempt + 1)
                     random_3l = self.get_random_3l_for_blacktea(song)
                     if not random_3l:
-                        return get_song_recursive(attempt + 1)
+                        await ctx.send("3")
+                        return await get_song_recursive(attempt + 1)
                     used_words.append(main_name.lower())
                     return song, random_3l
 
-                song, random_3l = get_song_recursive()
-                if song is None:
-                    await utils.Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to find a valid song for the game. Ending game early.")
-                if random_3l is None:
-                    await utils.Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to find a valid 3 letter combination for the game. Ending game early.")
+                song, random_3l = await get_song_recursive()
                 embed = discord.Embed(
                     description=f"Please say a **Juice WRLD** that contains **{random_3l.lower()}**",
                     color = player["color"].value if player["color"] else discord.Color.default().value,
