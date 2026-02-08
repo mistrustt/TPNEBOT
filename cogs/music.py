@@ -2618,14 +2618,15 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
+        old_length = len(self.valid_names)
         await self.sync_names()
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total valid names: {len(self.valid_names)}")
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total valid names: **{old_length}** -> **{len(self.valid_names)}**")
 
     @commands.command(name="blacktea", help="Play a game of Heardle. Juice WRLD songs only.")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def blacktea(self, ctx: commands.Context):
         blacktea_embed = discord.Embed(
-            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a word containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A word can only be used **once** through the course of the game.",
+            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **10** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
             color = discord.Color.green()
         )
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
@@ -2633,26 +2634,30 @@ class Music(commands.Cog, name="Music"):
         await message.add_reaction("✅")
         await asyncio.sleep(3)
         players = []
+        used_words = []
         message = await ctx.fetch_message(ctx.message.id)
         for reaction in message.reactions:
             await ctx.reply(reaction)
             if str(reaction.emoji) == "✅":
                 async for user in reaction.users():
-                    if user.bot:
-                        continue
-                    players.append({
-                        "id": user.id,
-                        "name": user.display_name,
-                        "lives": 2,
-                    })
+                    if not user.bot: 
+                        players.append({
+                            "id": user.id,
+                            "mention": user.mention,
+                            "lives": 2,
+                        })
         await ctx.reply(players)
         # if len(players) <= 0:
         #     await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
         #     return
         
+        await self.bot.database.set_cooldown(
+            ctx.author.id, ctx.command.qualified_name, 30
+        )
+
         song = self.get_random_song_for_blacktea()
         random_3l = self.get_random_3l_for_blacktea(song)
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Starting Black Tea with {len(players)} players! The random 3 letters are: **{random_3l.upper()}**")
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Starting Black Tea with {len(players)} players! The random 3 letters are: **{random_3l.lower()}**")
         await asyncio.sleep(5)
         await ctx.reply(song.get("names", []))
 
