@@ -2640,7 +2640,7 @@ class Music(commands.Cog, name="Music"):
         await self.sync_names()
         await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total valid names: **{old_length}** -> **{len(self.valid_names)}**")
 
-    @commands.command(name="blacktea", help="Play a game of Heardle. Juice WRLD songs only.")
+    @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def blacktea(self, ctx: commands.Context):
         players = []
@@ -2654,7 +2654,7 @@ class Music(commands.Cog, name="Music"):
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
         message = await ctx.send(embed=blacktea_embed)
         await message.add_reaction("✅")
-        await asyncio.sleep(5)
+        await asyncio.sleep(30)
 
         created_messages.append(message)
 
@@ -2709,7 +2709,7 @@ class Music(commands.Cog, name="Music"):
                 embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
                 message = await ctx.send(player["mention"], embed=embed)
                 created_messages.append(message)
-                
+
                 def check(m):
                     return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l.lower() in m.content.lower().strip()
                 try:
