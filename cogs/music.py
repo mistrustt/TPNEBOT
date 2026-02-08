@@ -2714,6 +2714,9 @@ class Music(commands.Cog, name="Music"):
                     player['lives'] -= 1
                     message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. The correct answer was {song.get('name', 'N/A')}.")
                     created_messages.append(message)
+        else:
+            winner = get_alive_players(players)[0]
+            message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
 
         # at the end
         for message in created_messages:
