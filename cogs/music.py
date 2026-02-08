@@ -2678,8 +2678,9 @@ class Music(commands.Cog, name="Music"):
         def get_alive_players(players):
             return [p for p in players if p['lives'] > 0]
 
-        while len(get_alive_players(players)) > 1:
-            for player in players:
+        alive_players = get_alive_players(players)
+        while len(alive_players) > 1:
+            for player in alive_players:
                 def get_song_recursive(attempt=0):
                     if attempt > 5:
                         return None, None
@@ -2714,8 +2715,8 @@ class Music(commands.Cog, name="Music"):
                     player['lives'] -= 1
                     message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. The correct answer was {song.get('name', 'N/A')}.")
                     created_messages.append(message)
-        else:
-            winner = get_alive_players(players)[0]
+        if len(alive_players) == 1:
+            winner = alive_players[0]
             message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
 
         # at the end
