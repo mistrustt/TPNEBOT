@@ -11,7 +11,8 @@ from discord.ext.commands import Context
 from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
-import utils
+import utils.cache as utils
+import utils.embeds as utils
 from itertools import product
 from moviepy import *
 import re
@@ -2193,15 +2194,13 @@ class Music(commands.Cog, name="Music"):
                 container.add_item(discord.ui.Separator())
 
     @commands.command('syncsurfaces', aliases=['syncleaks'])
-    async def sync_surfaces(self, ctx: commands.Context):
-        if ctx.author.id != 1167418093375606796:
-            return
-        
+    @commands.is_owner()
+    async def sync_surfaces(self, ctx: commands.Context):        
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
         
         await ctx.message.add_reaction('🔄')
-        status = await self.fetch_songs()
+        status = await utils.Cache.fetch_songs()
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
@@ -2211,11 +2210,10 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
-        if not self.songs:
-            status = await self.fetch_songs()
-            if status != 200:
-                await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
-
+        songs = utils.Cache.get_songs()
+        if not songs:
+            return
+        
         if not self.latest_surfaces:
             await self.store_latest_surfaces()
 
