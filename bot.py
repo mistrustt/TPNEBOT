@@ -130,7 +130,7 @@ class DiscordBot(commands.Bot):
     @tasks.loop(hours=1)
     async def cache_songs(self):
         await self.wait_until_ready()
-        await Cache.get_songs()
+        await Cache.get_songs(True)
 
     @tasks.loop(minutes=0.25)
     async def status_task(self) -> None:
@@ -189,8 +189,6 @@ class DiscordBot(commands.Bot):
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")
-
-            await Cache.init()
 
             # Start Admin API server if configured via environment variables
             try:
