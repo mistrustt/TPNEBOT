@@ -524,14 +524,14 @@ class DatabaseManager:
             return False
 
     async def log_punishment_command(
-        self, moderator_id: int, guild_id: int, command_name: PunishmentType
+        self, moderator_id: int, guild_id: int, punishment_type: PunishmentType
     ):
         try:
             async with self.async_sessionmaker() as session:
                 log_entry = WatchdogLog(
                     moderator_id=moderator_id,
                     guild_id=guild_id,
-                    command_name=command_name,
+                    punishment_type=punishment_type,
                 )
                 session.add(log_entry)
                 await session.commit()

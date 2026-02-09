@@ -727,7 +727,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 await self.bot.database.log_punishment_command(
                     moderator_id=ctx.author.id,
                     guild_id=ctx.guild.id,
-                    command_name=PunishmentType.KICK,
+                    punishment_type=PunishmentType.KICK,
                 )
                 case_id = await self.bot.database.add_punishment(
                     user_id=member.id,
@@ -852,7 +852,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 await self.bot.database.log_punishment_command(
                     moderator_id=ctx.author.id,
                     guild_id=ctx.guild.id,
-                    command_name=PunishmentType.BAN,
+                    punishment_type=PunishmentType.BAN,
                 )
                 case_id = await self.bot.database.add_punishment(
                     user_id=member.id,
@@ -986,7 +986,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
             guild_id=ctx.guild.id,
-            command_name=PunishmentType.TEMPBAN,
+            punishment_type=PunishmentType.TEMPBAN,
         )
         case_id = await self.bot.database.add_punishment(
             user_id=member.id,
@@ -1362,16 +1362,16 @@ class Moderation(commands.Cog, name="Moderation"):
         formatted = humanfriendly.format_timespan(seconds)
 
         try:
-            await self.bot.database.count_punishment_usage(
+            await self.bot.database.log_punishment_command(
                 moderator_id=ctx.author.id,
                 guild_id=ctx.guild.id,
-                command_name="TIMEOUT",
+                punishment_type=PunishmentType.TIMEOUT,
             )
             case_id = await self.bot.database.add_punishment(
                 user_id=member.id,
                 guild_id=ctx.guild.id,
                 moderator_id=ctx.author.id,
-                punishment_type="TIMEOUT",
+                punishment_type=PunishmentType.TIMEOUT,
                 reason=reason,
                 duration=int(seconds),
             )
@@ -1615,7 +1615,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
             guild_id=ctx.guild.id,
-            command_name=PunishmentType.WARN,
+            punishment_type=PunishmentType.WARN,
         )
         await self.bot.database.add_punishment(
             user_id=int(member.id),
@@ -1822,7 +1822,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
             guild_id=guild_id,
-            command_name=PunishmentType.JAIL,
+            punishment_type=PunishmentType.JAIL,
         )
         await self.bot.database.add_punishment(
             user_id=member.id,
