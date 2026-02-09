@@ -2672,7 +2672,7 @@ class Music(commands.Cog, name="Music"):
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
         old_names_length = len(self.valid_names)
-        self.sync_names()
+        await self.sync_names()
         await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(self.songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
