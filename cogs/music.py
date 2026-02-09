@@ -2817,6 +2817,10 @@ class Music(commands.Cog, name="Music"):
                     return song
 
                 song = get_song_recursive()
+                if not song:
+                    await utils.Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch a valid song for the game. Ending game early.")
+                    self.ongoing_blacktea.remove(ctx.author.id)
+                    break
                 category_data = self.get_random_blacktea_category_data(song)
                 embed = discord.Embed(
                     description=category_data["description"],
