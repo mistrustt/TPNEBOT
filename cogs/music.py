@@ -2716,6 +2716,7 @@ class Music(commands.Cog, name="Music"):
             era = song.get("era", {})
             era_name = era.get("name", "")
 
+            # TODO: fix this doesnt work
             era_full = ALBUMS.get(era_name, {}).get("name", era_name)
             return {
                 "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
@@ -2766,7 +2767,7 @@ class Music(commands.Cog, name="Music"):
         self.ongoing_blacktea.append(ctx.author.id)
     
         blacktea_embed = discord.Embed(
-            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song containing the given group of **3** letters. Failure to do so within the **15** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
+            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song fits the **given category**. Failure to do so within the **15** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
             color = discord.Color.green(),
         )
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
@@ -2827,6 +2828,7 @@ class Music(commands.Cog, name="Music"):
                 message = await ctx.send(player["mention"], embed=embed)
                 created_messages.append(message)
 
+                # TODO: add 3, 2, 1 reaction similar to bleed
                 def check(m):
                     return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and category_data["check_func"](m.content.lower().strip())
                 try:
