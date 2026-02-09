@@ -2687,12 +2687,38 @@ class Music(commands.Cog, name="Music"):
                 "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
             }
         if random_index == 1:
+            ALBUMS = {
+                'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
+                'LND':                  {'name': 'Legends Never Die', 'color': '#F700FF'},
+                'afflictions':          {'name': 'affliction', 'color': '#000000'},
+                'bdm':                  {'name': 'BINGEDRINKINGMUSIC', 'color': '#000000'},
+                'HIH 999':              {'name': 'Heartbroken In Hollywood 9 9 9', 'color': '#FF653E'},
+                'jw 999':               {'name': 'JuiceWRLD 9 9 9', 'color': '#FF2C2C'},
+                'ND':                   {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
+                'GB&GR':                {'name': 'Goodbye & Good Riddance', 'color': '#008CFF'},
+                'GB&GR (AE)':           {'name': 'Goodbye & Good Riddance (Anniversary Edition)', 'color': '#008CFF'},
+                'GB&GR (5YAE)':         {'name': 'Goodbye & Good Riddance (5 Year Anniversary Edition)', 'color': '#008CFF'},
+                'WOD':                  {'name': 'WRLD ON DRUGS', 'color': '#00FF94'},
+                'DRFL':                 {'name': 'Death Race For Love', 'color': '#FF9900'},
+                'DRFL (BTV)':           {'name': 'Death Race For Love (Bonus Track Version)', 'color': '#FF9900'},
+                'OUT':                  {'name': 'Outsiders', 'color': '#2B2B2B'},
+                'POST':                 {'name': 'Posthumous', 'color': '#00CCFF'},
+                'TPP':                  {'name': 'The Pre-Party', 'color': '#EA00FF'},
+                'TPP (EE)':             {'name': 'The Pre-Party (Extended Edition)', 'color': '#EA00FF'},
+                'FD':                   {'name': 'Fighting Demons', 'color': '#2E2E2E'},
+                'FD (CE)':              {'name': 'Fighting Demons (Complete Edition)', 'color': '#2E2E2E'},
+                'FD (EE)':              {'name': 'Fighting Demons (Extended Edition)', 'color': '#2E2E2E'},
+                'FD (DDE)':             {'name': 'Fighting Demons (Digital Deluxe Edition)', 'color': '#2E2E2E'},
+                'TPNE':                 {'name': 'The Party Never Ends', 'color': '#CC00FF'},
+            }
+
             category = song.get("category", "")
             era = song.get("era", {})
             era_name = era.get("name", "")
 
+            era_full = ALBUMS.get(era_name, {}).get("name", era_name)
             return {
-                "description": f"Name a **Juice WRLD** song that is **{category}** and made during {era_name.upper()}",
+                "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
                 "answer": category,
                 "check_func": lambda song_name: self.blacktea_check_category(song_name, category, era_name)
             }
