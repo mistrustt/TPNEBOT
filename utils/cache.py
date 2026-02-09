@@ -6,7 +6,7 @@ JUICEWRLD_API = "https://juicewrldapi.com"
 # This class is to prevent the songs being recached everytime the music cog is reloaded.
 class Cache:
     songs = []
-    session = aiohttp.ClientSession()
+    session = None
     
     @staticmethod
     async def get_songs():
@@ -16,7 +16,8 @@ class Cache:
 
     @staticmethod
     async def init():
-        await Cache.fetch_songs()
+        Cache.session = aiohttp.ClientSession() 
+        await Cache.get_songs()
 
     @staticmethod
     async def fetch_songs():
