@@ -9,15 +9,14 @@ class Cache:
     session = None
     
     @staticmethod
-    async def get_songs(sync=False):
-        if not Cache.session:
-            Cache.session = aiohttp.ClientSession()
-        if not Cache.songs and sync:
-            await Cache.fetch_songs()
+    def get_songs():
         return Cache.songs
 
     @staticmethod
     async def fetch_songs():
+        if not Cache.session:
+            Cache.session = aiohttp.ClientSession()
+
         url = JUICEWRLD_API + '/juicewrld/songs/'
         songs = []
 

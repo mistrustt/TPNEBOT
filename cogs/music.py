@@ -2108,7 +2108,7 @@ class Music(commands.Cog, name="Music"):
 
     @tasks.loop(hours=1)
     async def cache_songs(self):
-        songs = await utils.Cache.get_songs()
+        songs = utils.Cache.get_songs()
         if songs is not None:
             await self.store_latest_surfaces()
             await self.sync_names()
@@ -2200,7 +2200,7 @@ class Music(commands.Cog, name="Music"):
             self.cache_songs.cancel()
         
         await ctx.message.add_reaction('🔄')
-        status = await utils.Cache.fetch_songs()
+        status = utils.Cache.fetch_songs()
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
