@@ -2107,12 +2107,15 @@ class Music(commands.Cog, name="Music"):
                 f"I couldnt find a song with the name: `{query}`",
             )
 
-    @tasks.loop(hours=1)
-    async def cache_songs(self):
+    async def _cache_songs(self):
         status = await self.fetch_songs()
         if status == 200:
             await self.store_latest_surfaces()
             await self.sync_names()
+
+    @tasks.loop(hours=1)
+    async def cache_songs(self):
+        await self._cache_songs()
 
     async def fetch_songs(self):
         url = JUICEWRLD_API + '/juicewrld/songs/'
@@ -2685,12 +2688,14 @@ class Music(commands.Cog, name="Music"):
                 "check_func": lambda song_name: random_3l.lower() in song_name.lower()
             }
 
-    @commands.command(name="syncvalidnames", aliases=["syncnames"])
+    @commands.command(name="syncsongs", aliases=["syncsongs"])
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
-        old_length = len(self.valid_names)
-        await self.sync_names()
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total valid names: **{old_length}** -> **{len(self.valid_names)}**")
+        old_names_length = len(self.valid_names)
+        old_songs_length = len(self.songs)
+        await self._cache_songs()
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{old_songs_length}** -> **{len(self.songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
+
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
