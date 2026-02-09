@@ -2595,6 +2595,8 @@ class Music(commands.Cog, name="Music"):
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
         )
 
+    ### TODO: make all blacktea commands under a class or something for better organization
+
     async def sync_names(self):
         self.valid_names = []
         for song in self.songs:
@@ -2634,6 +2636,54 @@ class Music(commands.Cog, name="Music"):
                 if result:
                     return result
         return None
+
+    # TODO: Make this faster somehow
+    def find_song_by_name(self, name):
+        for song in self.songs:
+            track_titles = song.get("track_titles", [])
+            for title in track_titles:
+                acceptable_name_list = self.get_acceptable_track_names(title)
+                for acceptable_name in acceptable_name_list:
+                    if acceptable_name.lower() == name.lower():
+                        return song
+
+    def blacktea_check_producer(self, song_name, producer):
+        song = self.find_song_by_name(song_name)
+        if not song:
+            return False
+        
+        producers = song.get("producers", "N/A")
+        producers = [
+            p.strip()
+            for p in re.split(r"&|,| and ", producers)
+            if p.strip()
+        ]
+        return producer in producers
+
+    # Returns embed description, correct answer, check function
+    def get_random_blacktea_category_data(self, song):
+        random_index = random.randint(0, 1)
+        if random_index == 0:
+            producers = song.get("producers", "N/A")
+            producers = [
+                p.strip()
+                for p in re.split(r"&|,| and ", producers)
+                if p.strip()
+            ]
+            producer = random.choice(producers) if producers else None
+
+            return {
+                "description": f"Name a **Juice WRLD** song produced by **{producer}**",
+                "answer": producer,
+                "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
+            }
+        else:
+            random_3l = self.get_random_3l_for_blacktea(song)
+            return {
+                "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
+                "answer": random_3l,
+                "check_func": lambda song_name: random_3l.lower() in song_name.lower()
+            }
 
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
@@ -2696,22 +2746,20 @@ class Music(commands.Cog, name="Music"):
             for player in alive_players:
                 def get_song_recursive(attempt=0):
                     if attempt > 5:
-                        return None, None
+                        return None
                     song = self.get_random_song_for_blacktea()
                     if not song:
                         return get_song_recursive(attempt + 1)
                     main_name = song.get("name", "")
                     if main_name.lower() in used_words:
                         return get_song_recursive(attempt + 1)
-                    random_3l = self.get_random_3l_for_blacktea(song)
-                    if not random_3l:
-                        return get_song_recursive(attempt + 1)
                     used_words.append(main_name.lower())
-                    return song, random_3l
+                    return song
 
-                song, random_3l = get_song_recursive()
+                song = get_song_recursive()
+                category_data = self.get_random_blacktea_category_data(song)
                 embed = discord.Embed(
-                    description=f"Please say a **Juice WRLD** that contains **{random_3l.lower()}**",
+                    description=category_data["description"],
                     color = player["color"].value if player["color"] else discord.Color.default().value,
                 )
                 embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
@@ -2719,7 +2767,7 @@ class Music(commands.Cog, name="Music"):
                 created_messages.append(message)
 
                 def check(m):
-                    return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and random_3l.lower() in m.content.lower().strip()
+                    return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and category_data["check_func"](m.content.lower().strip())
                 try:
                     guess = await self.bot.wait_for('message', check=check, timeout=15)
                     await guess.add_reaction("✅")
