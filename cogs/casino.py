@@ -212,7 +212,18 @@ class CrashView(discord.ui.View):
         )
         await self.update_game_message()
 
+        running_start = discord.utils.utcnow()
+        max_run_seconds = 180
+
         while len(self.cashed_out | self.crashed_out) < len(self.players):
+            if (discord.utils.utcnow() - running_start).total_seconds() >= max_run_seconds:
+                for uid in self.players:
+                    if uid not in self.cashed_out and uid not in self.crashed_out:
+                        self.crashed_out[uid] = self.crash_points.get(
+                            uid, self.current_multiplier
+                        )
+                break
+
             self.current_multiplier += self.calculate_increment()
 
             for uid, cp in self.crash_points.items():
