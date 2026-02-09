@@ -2119,7 +2119,8 @@ class Music(commands.Cog, name="Music"):
 
         hydrated = []
 
-        for song in self.songs:
+        songs = utils.Cache.get_songs()
+        for song in songs:
             dt = self.parse_dates(song.get('date_leaked', ''))
             if not dt:
                 continue
@@ -2579,15 +2580,19 @@ class Music(commands.Cog, name="Music"):
 
     async def sync_names(self):
         self.valid_names = []
-        for song in self.songs:
+        songs = utils.Cache.get_songs()
+        for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
                 acceptable_alt_name_list = self.get_acceptable_track_names(title)
                 self.valid_names.extend(acceptable_alt_name_list)
 
     def get_random_song_for_blacktea(self):
-        random_index = random.randint(0, len(self.songs) - 1)
-        return self.songs[random_index]
+        songs = utils.Cache.get_songs()
+        if songs is None:
+            return None
+        random_index = random.randint(0, len(songs) - 1)
+        return songs[random_index]
 
     def get_random_3l_for_blacktea(self, song):
         main_name = self.get_most_acceptable_track_name(song.get("name", ""))
@@ -2619,7 +2624,8 @@ class Music(commands.Cog, name="Music"):
 
     # TODO: Make this faster somehow
     def find_song_by_name(self, name):
-        for song in self.songs:
+        songs = utils.Cache.get_songs()
+        for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
                 acceptable_name_list = self.get_acceptable_track_names(title)
@@ -2668,9 +2674,11 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
+        songs = utils.Cache.get_songs()
+
         old_names_length = len(self.valid_names)
         await self.sync_names()
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(self.songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
