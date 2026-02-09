@@ -2688,7 +2688,7 @@ class Music(commands.Cog, name="Music"):
                 "check_func": lambda song_name: random_3l.lower() in song_name.lower()
             }
 
-    @commands.command(name="syncsongs", aliases=["syncsongs"])
+    @commands.command(name="syncsongs")
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
         old_names_length = len(self.valid_names)
