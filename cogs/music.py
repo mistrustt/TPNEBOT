@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
 import utils.embeds as utils
+import utils.cache as utils
 from itertools import product
 from moviepy import *
 import re
@@ -39,10 +40,9 @@ class Music(commands.Cog, name="Music"):
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
 
-        self.songs = []
         self.latest_surfaces = []
-
         self.cache_songs.start()
+
         self.valid_names = []
         self.ongoing_blacktea = []
 
@@ -2107,31 +2107,12 @@ class Music(commands.Cog, name="Music"):
                 f"I couldnt find a song with the name: `{query}`",
             )
 
-    async def _cache_songs(self):
-        status = await self.fetch_songs()
-        if status == 200:
-            await self.store_latest_surfaces()
-            await self.sync_names()
-
     @tasks.loop(hours=1)
     async def cache_songs(self):
-        await self._cache_songs()
-
-    async def fetch_songs(self):
-        url = JUICEWRLD_API + '/juicewrld/songs/'
-        songs = []
-
-        while url:
-            async with self.session.get(url) as response:
-                if response.status != 200:
-                    return response.status
-                    
-                data = await response.json()
-                songs.extend(data.get('results', []))
-                url = data.get('next')    
-
-        self.songs = songs
-        return 200
+        songs = await utils.Cache.get_songs()
+        if songs is not None:
+            await self.store_latest_surfaces()
+            await self.sync_names()
 
     async def store_latest_surfaces(self, days: int = 30):
         now = datetime.now(ZoneInfo("America/New_York"))
@@ -2688,14 +2669,11 @@ class Music(commands.Cog, name="Music"):
                 "check_func": lambda song_name: random_3l.lower() in song_name.lower()
             }
 
-    @commands.command(name="syncsongs")
+    @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
         old_names_length = len(self.valid_names)
-        old_songs_length = len(self.songs)
-        await self._cache_songs()
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{old_songs_length}** -> **{len(self.songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
-
+        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(self.songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))

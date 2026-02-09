@@ -16,7 +16,7 @@ from utils.cooldown import CooldownUtils
 from utils.admin_api import AdminAPIServer
 from database.manager import DatabaseManager
 from sqlalchemy import text
-
+from utils.cache import Cache
 
 class LoggingFormatter(logging.Formatter):
     COLORS = {
@@ -127,6 +127,10 @@ class DiscordBot(commands.Bot):
                     f"Failed to load extension {extension}\n{type(e).__name__}: {e}"
                 )
 
+    @tasks.loop(hours=1)
+    async def cache_songs(self):
+        await Cache.get_songs()
+
     @tasks.loop(minutes=0.25)
     async def status_task(self) -> None:
         await self.wait_until_ready()
@@ -180,9 +184,12 @@ class DiscordBot(commands.Bot):
             )
 
             self.status_task.start()
+            self.cache_songs.start()
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")
+
+            await Cache.init()
 
             # Start Admin API server if configured via environment variables
             try:
