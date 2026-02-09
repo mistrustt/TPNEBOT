@@ -129,6 +129,7 @@ class DiscordBot(commands.Bot):
 
     @tasks.loop(hours=1)
     async def cache_songs(self):
+        await self.wait_until_ready()
         await Cache.get_songs()
 
     @tasks.loop(minutes=0.25)
