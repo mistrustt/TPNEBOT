@@ -809,6 +809,14 @@ class Moderation(commands.Cog, name="Moderation"):
                 lambda m: identifier in m.name.lower(), ctx.guild.members
             )
 
+        if identifier == None:
+            embed = discord.Embed(
+                description="Please provide a user ID, name, or mention to ban.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
         if not member:
             embed = discord.Embed(
                 description=f"No user found with the identifier: {identifier}. Please try again.",
