@@ -11,8 +11,7 @@ from discord.ext.commands import Context
 from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
-import utils.cache as utils
-import utils.embeds as utils
+import utils as utils
 from itertools import product
 from moviepy import *
 import re
