@@ -163,10 +163,14 @@ class DatabaseManager:
                 result = await session.execute(select(BotConfig))
                 bot_config = result.scalar_one_or_none()
                 if bot_config:
-                    if cog_name not in bot_config.loaded_cogs:
-                        bot_config.loaded_cogs.append(cog_name)
-                    if cog_name in bot_config.unloaded_cogs:
-                        bot_config.unloaded_cogs.remove(cog_name)
+                    loaded_cogs = bot_config.loaded_cogs or []
+                    unloaded_cogs = bot_config.unloaded_cogs or []
+                    if cog_name not in loaded_cogs:
+                        loaded_cogs.append(cog_name)
+                    if cog_name in unloaded_cogs:
+                        unloaded_cogs.remove(cog_name)
+                    bot_config.loaded_cogs = loaded_cogs
+                    bot_config.unloaded_cogs = unloaded_cogs
                 else:
                     bot_config = BotConfig(loaded_cogs=[cog_name], unloaded_cogs=[])
                     session.add(bot_config)
@@ -185,10 +189,14 @@ class DatabaseManager:
                 result = await session.execute(select(BotConfig))
                 bot_config = result.scalar_one_or_none()
                 if bot_config:
-                    if cog_name not in bot_config.unloaded_cogs:
-                        bot_config.unloaded_cogs.append(cog_name)
-                    if cog_name in bot_config.loaded_cogs:
-                        bot_config.loaded_cogs.remove(cog_name)
+                    loaded_cogs = bot_config.loaded_cogs or []
+                    unloaded_cogs = bot_config.unloaded_cogs or []
+                    if cog_name not in unloaded_cogs:
+                        unloaded_cogs.append(cog_name)
+                    if cog_name in loaded_cogs:
+                        loaded_cogs.remove(cog_name)
+                    bot_config.loaded_cogs = loaded_cogs
+                    bot_config.unloaded_cogs = unloaded_cogs
                 else:
                     bot_config = BotConfig(loaded_cogs=[], unloaded_cogs=[cog_name])
                     session.add(bot_config)

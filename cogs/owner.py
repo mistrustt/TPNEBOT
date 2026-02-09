@@ -23,7 +23,7 @@ from utils.admin_api import AdminAPIServer
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from sqlalchemy import text
-from typing import Optional, Union, Any, List, Iterable, List, Tuple
+from typing import Optional, Union, Any, Iterable, List
 from datetime import datetime
 from database.manager import ItemType
 import importlib.util
@@ -121,22 +121,6 @@ def _fmt_list(items: Iterable[str]) -> str:
     return ", ".join(items) if items else "—"
 
 
-async def _safe_db_call(db_obj, func_name: str, *args) -> Tuple[bool, str]:
-    """
-    Call a method on a DB object if present; return (ok, msg).
-    Never raises to the command layer.
-    """
-    if not db_obj:
-        return True, ""  # No DB configured; treat as success for command UX.
-    fn = getattr(db_obj, func_name, None)
-    if not fn:
-        return False, f"DB missing method `{func_name}`"
-    try:
-        await fn(*args)
-        return True, ""
-    except Exception as e:
-        # Return error string so we can show it in the embed
-        return False, f"{type(e).__name__}: {e}"
 
 
 class Owner(commands.Cog, name="Owner"):
@@ -693,13 +677,19 @@ class Owner(commands.Cog, name="Owner"):
                 continue
 
             await self.bot.load_extension(cog_path)
-            ok, db_msg = await _safe_db_call(
-                getattr(self.bot, "database", None), "load_cog", name
-            )
-            if not ok:
-                failed.append(f"`{name}` (loaded; DB error: {db_msg})")
-            else:
-                succeeded.append(name)
+            db = getattr(self.bot, "database", None)
+            if db:
+                try:
+                    await db.load_cog(name)
+                except Exception as exc:
+                    logger.error(
+                        "Failed to mark cog %s as loaded in DB", name, exc_info=exc
+                    )
+                    failed.append(
+                        f"`{name}` (loaded; DB error: {type(exc).__name__}: {exc})"
+                    )
+                    continue
+            succeeded.append(name)
 
         embed = discord.Embed(color=discord.Color.blurple(), title="Cog Load Results")
         if succeeded:
@@ -728,13 +718,19 @@ class Owner(commands.Cog, name="Owner"):
                 continue
 
             await self.bot.unload_extension(cog_path)
-            ok, db_msg = await _safe_db_call(
-                getattr(self.bot, "database", None), "unload_cog", name
-            )
-            if not ok:
-                failed.append(f"`{name}` (unloaded; DB error: {db_msg})")
-            else:
-                succeeded.append(name)
+            db = getattr(self.bot, "database", None)
+            if db:
+                try:
+                    await db.unload_cog(name)
+                except Exception as exc:
+                    logger.error(
+                        "Failed to mark cog %s as unloaded in DB", name, exc_info=exc
+                    )
+                    failed.append(
+                        f"`{name}` (unloaded; DB error: {type(exc).__name__}: {exc})"
+                    )
+                    continue
+            succeeded.append(name)
 
         embed = discord.Embed(color=discord.Color.blurple(), title="Cog Unload Results")
         if succeeded:
