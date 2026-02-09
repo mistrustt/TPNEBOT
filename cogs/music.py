@@ -2207,7 +2207,6 @@ class Music(commands.Cog, name="Music"):
         await self.store_latest_surfaces()
         await ctx.message.add_reaction('✅')
 
-
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
         songs = utils.Cache.get_songs()
@@ -2646,9 +2645,33 @@ class Music(commands.Cog, name="Music"):
         ]
         return producer in producers
 
+    def blacktea_check_category(self, song_name, category, era):
+        song = self.find_song_by_name(song_name)
+        if not song:
+            return False
+        
+        category = song.get("category", "")
+        era = song.get("era", {})
+        era_name = era.get("name", "")
+        return category.lower() == category.lower() and era_name.lower() == era.lower()
+    
+    def blacktea_check_leaked(self, song_name, leaked_date):
+        song = self.find_song_by_name(song_name)
+        if not song:
+            return False
+        
+        date_leaked = song.get("date_leaked", "")
+        end_line_index = date_leaked.rfind("\n")
+        real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+        month = real_date_leaked[0].strip()
+        day = real_date_leaked[1].strip()
+        year = real_date_leaked[2].strip()
+        fmt_answer = f"{month.lower()}{year.lower()}"
+        return fmt_answer == leaked_date    
+
     # Returns embed description, correct answer, check function
     def get_random_blacktea_category_data(self, song):
-        random_index = random.randint(0, 1)
+        random_index = random.randint(0, 3)
         if random_index == 0:
             producers = song.get("producers", "N/A")
             producers = [
@@ -2662,6 +2685,30 @@ class Music(commands.Cog, name="Music"):
                 "description": f"Name a **Juice WRLD** song produced by **{producer}**",
                 "answer": producer,
                 "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
+            }
+        if random_index == 1:
+            category = song.get("category", "")
+            era = song.get("era", {})
+            era_name = era.get("name", "")
+
+            return {
+                "description": f"Name a **Juice WRLD** song that is **{category}** and made during {era_name.upper()}",
+                "answer": category,
+                "check_func": lambda song_name: self.blacktea_check_category(song_name, category, era_name)
+            }
+        if random_index == 2:
+            date_leaked = song.get("date_leaked", "")
+            end_line_index = date_leaked.rfind("\n")
+            real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+            month = real_date_leaked[0].strip()
+            day = real_date_leaked[1].strip()
+            year = real_date_leaked[2].strip()
+            fmt_answer = f"{month.lower()}{year.lower()}"
+
+            return {
+                "description": f"Name a **Juice WRLD** song that leaked in **{month} {year}**",
+                "answer": fmt_answer,
+                "check_func": lambda song_name: self.blacktea_check_leaked(song_name, fmt_answer)
             }
         else:
             random_3l = self.get_random_3l_for_blacktea(song)
