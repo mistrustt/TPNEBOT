@@ -10,13 +10,14 @@ class Cache:
     
     @staticmethod
     async def get_songs():
+        if not Cache.session:
+            Cache.session = aiohttp.ClientSession()
         if not Cache.songs:
             await Cache.fetch_songs()
         return Cache.songs
 
     @staticmethod
     async def init():
-        Cache.session = aiohttp.ClientSession() 
         await Cache.get_songs()
 
     @staticmethod
