@@ -2650,14 +2650,10 @@ class Music(commands.Cog, name="Music"):
         if not song:
             return False
         
-        split = category_era.split("|")
-        category = split[0].strip().lower()
-        era = split[1].strip().lower()
-
         category = song.get("category", "")
         era = song.get("era", {})
         era_name = era.get("name", "")
-        return category.lower() == category.lower() and era_name.lower() == era.lower()
+        return f'{category}{era_name}' == category_era
     
     def blacktea_check_leaked(self, song_name, leaked_date):
         song = self.find_song_by_name(song_name)
@@ -2723,7 +2719,7 @@ class Music(commands.Cog, name="Music"):
             era_full = ALBUMS.get(era_name, {}).get("name", era_name)
             return {
                 "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
-                "check_func": lambda song_name: self.blacktea_check_category(song_name, f"{category}|{era_name}")
+                "check_func": lambda song_name: self.blacktea_check_category(song_name, f"{category}{era_name}")
             }
         if random_index == 2:
             date_leaked = song.get("date_leaked", "")
