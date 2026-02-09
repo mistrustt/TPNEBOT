@@ -2645,11 +2645,15 @@ class Music(commands.Cog, name="Music"):
         ]
         return producer in producers
 
-    def blacktea_check_category(self, song_name, category, era):
+    def blacktea_check_category(self, song_name, category_era):
         song = self.find_song_by_name(song_name)
         if not song:
             return False
         
+        split = category_era.split("|")
+        category = split[0].strip().lower()
+        era = split[1].strip().lower()
+
         category = song.get("category", "")
         era = song.get("era", {})
         era_name = era.get("name", "")
@@ -2683,7 +2687,6 @@ class Music(commands.Cog, name="Music"):
 
             return {
                 "description": f"Name a **Juice WRLD** song produced by **{producer}**",
-                "answer": producer,
                 "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
             }
         if random_index == 1:
@@ -2720,28 +2723,23 @@ class Music(commands.Cog, name="Music"):
             era_full = ALBUMS.get(era_name, {}).get("name", era_name)
             return {
                 "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
-                "answer": category,
-                "check_func": lambda song_name: self.blacktea_check_category(song_name, category, era_name)
+                "check_func": lambda song_name: self.blacktea_check_category(song_name, f"{category}|{era_name}")
             }
         if random_index == 2:
             date_leaked = song.get("date_leaked", "")
             end_line_index = date_leaked.rfind("\n")
             real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
             month = real_date_leaked[0].strip()
-            day = real_date_leaked[1].strip()
             year = real_date_leaked[2].strip()
-            fmt_answer = f"{month.lower()}{year.lower()}"
 
             return {
                 "description": f"Name a **Juice WRLD** song that leaked in **{month} {year}**",
-                "answer": fmt_answer,
-                "check_func": lambda song_name: self.blacktea_check_leaked(song_name, fmt_answer)
+                "check_func": lambda song_name: self.blacktea_check_leaked(song_name, f"{month.lower()}{year.lower()}")
             }
         else:
             random_3l = self.get_random_3l_for_blacktea(song)
             return {
                 "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
-                "answer": random_3l,
                 "check_func": lambda song_name: random_3l.lower() in song_name.lower()
             }
 
