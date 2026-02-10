@@ -2108,7 +2108,7 @@ class Music(commands.Cog, name="Music"):
 
     @tasks.loop(hours=1)
     async def cache_songs(self):
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
         if songs is not None:
             await self.store_latest_surfaces()
             await self.sync_names()
@@ -2119,7 +2119,7 @@ class Music(commands.Cog, name="Music"):
 
         hydrated = []
 
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
         for song in songs:
             dt = self.parse_dates(song.get('date_leaked', ''))
             if not dt:
@@ -2200,7 +2200,7 @@ class Music(commands.Cog, name="Music"):
             self.cache_songs.cancel()
         
         await ctx.message.add_reaction('🔄')
-        status = await utils.cache.fetch_songs()
+        status = await utils.Cache.fetch_songs()
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
@@ -2209,7 +2209,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
         if not songs:
             return
         
@@ -2599,7 +2599,7 @@ class Music(commands.Cog, name="Music"):
 
     async def sync_names(self):
         self.valid_names = []
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
         for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
@@ -2607,7 +2607,7 @@ class Music(commands.Cog, name="Music"):
                 self.valid_names.extend(acceptable_alt_name_list)
 
     def get_random_song_for_blacktea(self):
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
         if songs is None:
             return None
         random_index = random.randint(0, len(songs) - 1)
@@ -2643,7 +2643,7 @@ class Music(commands.Cog, name="Music"):
 
     # TODO: Make this faster somehow
     def find_song_by_name(self, name):
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
         for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
@@ -2762,7 +2762,7 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
-        songs = utils.cache.get_songs()
+        songs = utils.Cache.get_songs()
 
         old_names_length = len(self.valid_names)
         await self.sync_names()

@@ -12,7 +12,7 @@ from discord.ext.commands import Context
 from datetime import datetime
 import logging
 from utils.misc import MiscUtils
-import utils.embeds as utils
+from utils import Embeds
 from database.models import PunishmentType
 
 logger = logging.getLogger("discord_bot")
@@ -725,7 +725,7 @@ class Fun(commands.Cog, name="Fun"):
         chosen_nickname = random.choice(self.nickname_list)
 
         await member.edit(nick=chosen_nickname, reason="Random Nickname Command")
-        await utils.Embeds.send_success_embed(
+        await Embeds.send_success_embed(
             ctx,
             ctx.author,
             f"{member.mention}'s nickname has been changed to `{chosen_nickname}`!",
@@ -843,7 +843,7 @@ class Fun(commands.Cog, name="Fun"):
         """Unjails a user from Jail Roulette."""
         last_victim_id = self.jail_roulette_history.get(ctx.author.id)
         if not last_victim_id:
-            return await utils.Embeds.send_error_embed(
+            return await Embeds.send_error_embed(
                 ctx,
                 ctx.author,
                 "You have not jailed anyone using Jail Roulette.",
@@ -852,7 +852,7 @@ class Fun(commands.Cog, name="Fun"):
         guild_id = ctx.guild.id
         jail_settings = await self.bot.database.get_jail_settings(guild_id)
         if not jail_settings or not jail_settings.jail_role_id:
-            return await utils.Embeds.send_error_embed(
+            return await Embeds.send_error_embed(
                 ctx,
                 ctx.author,
                 "Jail system is not configured properly. Contact an admin.",
@@ -863,21 +863,21 @@ class Fun(commands.Cog, name="Fun"):
             jail_settings.jail_channel_id
         )  # we dont use jail channel but its jus good to check
         if not jail_role or not jail_channel:
-            return await utils.Embeds.send_error_embed(
+            return await Embeds.send_error_embed(
                 ctx, ctx.author, "Jail role or channel misconfigured. Contact an admin."
             )
 
         try:
             victim = await ctx.guild.fetch_member(last_victim_id)
             if not victim:
-                return await utils.Embeds.send_error_embed(
+                return await Embeds.send_error_embed(
                     ctx,
                     ctx.author,
                     "The jailed user is no longer in the guild.",
                 )
 
             if jail_role not in victim.roles:
-                return await utils.Embeds.send_error_embed(
+                return await Embeds.send_error_embed(
                     ctx,
                     ctx.author,
                     "The user is not currently jailed.",
@@ -902,7 +902,7 @@ class Fun(commands.Cog, name="Fun"):
                         await victim.add_roles(
                             *roles_to_restore, reason="Restoring roles after unjail"
                         )
-                        await utils.Embeds.send_success_embed(
+                        await Embeds.send_success_embed(
                             ctx,
                             ctx.author,
                             f"Successfully unjailed {victim.mention} and restored {len(roles_to_restore)} previous roles.",
@@ -923,13 +923,13 @@ class Fun(commands.Cog, name="Fun"):
 
             del self.jail_roulette_history[ctx.author.id]
         except discord.Forbidden:
-            await utils.Embeds.send_error_embed(
+            await Embeds.send_error_embed(
                 ctx,
                 ctx.author,
                 "I don't have permission to unjail this user.",
             )
         except Exception as e:
-            await utils.Embeds.send_error_embed(
+            await Embeds.send_error_embed(
                 ctx,
                 ctx.author,
                 f"Failed to unjail user: {str(e)}",
@@ -986,7 +986,7 @@ class Fun(commands.Cog, name="Fun"):
             guild_id = ctx.guild.id
             jail_settings = await self.bot.database.get_jail_settings(guild_id)
             if not jail_settings or not jail_settings.jail_role_id:
-                return await utils.Embeds.send_error_embed(
+                return await Embeds.send_error_embed(
                     ctx,
                     ctx.author,
                     "Jail system is not configured properly. Contact an admin.",
@@ -997,7 +997,7 @@ class Fun(commands.Cog, name="Fun"):
                 jail_settings.jail_channel_id
             )  # we dont use jail channel but its jus good to check
             if not jail_role or not jail_channel:
-                return await utils.Embeds.send_error_embed(
+                return await Embeds.send_error_embed(
                     ctx,
                     ctx.author,
                     "Jail role or channel misconfigured. Contact an admin.",
