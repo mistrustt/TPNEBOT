@@ -298,6 +298,27 @@ class DiscordBot(commands.Bot):
         except discord.HTTPException:
             return
 
+    async def on_command_completion(self, ctx: Context) -> None:
+        command_name = ctx.command.qualified_name
+        user = ctx.author
+        channel = ctx.channel
+        guild = ctx.guild
+
+        self.logger.info(
+            f"Command '{command_name}' executed by {user} (ID: {user.id}) "
+            f"in channel '{channel}' (ID: {channel.id}) "
+            f"{'in guild ' + guild.name + ' (ID: ' + str(guild.id) + ')' if guild else 'in DMs'}."
+        )
+
+    async def on_app_command_completion(
+        self, interaction: discord.Interaction, command: app_commands.Command
+    ):
+        self.logger.info(
+            f"Slash /{command.name} used by {interaction.user} "
+            f"(ID:{interaction.user.id}) in #{interaction.channel} "
+            f"(ID:{interaction.channel_id})"
+        )
+
     async def on_app_command_error(
         self, interaction: discord.Interaction, error
     ) -> None:
