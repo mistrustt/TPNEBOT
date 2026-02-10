@@ -540,7 +540,7 @@ class DatabaseManager:
                 if punishment_type:
                     query = query.where(Punishment.type == punishment_type)
                 if days > 0:
-                    cutoff = discord.utils.utcnow() - timedelta(days=days)
+                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -639,7 +639,7 @@ class DatabaseManager:
                 if punishment_type:
                     query = query.where(Punishment.type == punishment_type)
                 if days > 0:
-                    cutoff = discord.utils.utcnow() - timedelta(days=days)
+                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -670,7 +670,7 @@ class DatabaseManager:
                     type=punishment_type,
                     reason=reason,
                     duration=duration,
-                    created_at=discord.utils.utcnow(),
+                    created_at=discord.utils.utcnow().replace(tzinfo=None),
                 )
                 session.add(punishment)
                 await session.commit()
@@ -979,7 +979,7 @@ class DatabaseManager:
                         punishment_id=punishment.id,
                         moderator_id=moderator_id,
                         note=note,
-                        created_at=discord.utils.utcnow(),
+                        created_at=discord.utils.utcnow().replace(tzinfo=None),
                     )
                     session.add(case_note)
                     await session.commit()
@@ -1047,7 +1047,7 @@ class DatabaseManager:
                     Punishment.guild_id == guild_id,
                 )
                 if days > 0:
-                    cutoff = discord.utils.utcnow() - timedelta(days=days)
+                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 query = query.group_by(Punishment.type)
                 result = await session.execute(query)
@@ -1067,7 +1067,7 @@ class DatabaseManager:
                     Punishment.type, func.count(Punishment.id).label("count")
                 ).where(Punishment.guild_id == guild_id)
                 if days > 0:
-                    cutoff = discord.utils.utcnow() - timedelta(days=days)
+                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 query = query.group_by(Punishment.type)
                 result = await session.execute(query)
@@ -1098,7 +1098,7 @@ class DatabaseManager:
                         type=p["punishment_type"],
                         reason=p["reason"],
                         duration=p.get("duration"),
-                        created_at=discord.utils.utcnow(),
+                        created_at=discord.utils.utcnow().replace(tzinfo=None),
                     )
                     session.add(punishment)
                     added += 1
