@@ -12,7 +12,7 @@ from discord.ext.commands import Context
 from datetime import datetime
 import logging
 from utils.misc import MiscUtils
-from utils import Embeds
+from utils.embeds import Embeds
 from database.models import PunishmentType
 
 logger = logging.getLogger("discord_bot")

@@ -11,7 +11,8 @@ from discord.ext.commands import Context
 from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
-import utils as utils
+from utils.cache import Cache
+from utils.embeds import Embeds
 from itertools import product
 from moviepy import *
 import re
@@ -1948,7 +1949,7 @@ class Music(commands.Cog, name="Music"):
                 song = songs[0]
 
                 if song['groupbuy_info']['price'] == '':
-                    return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **groupbuy** information')
+                    return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **groupbuy** information')
 
                 layout_view = discord.ui.LayoutView()
                 layout_view.add_item(GroupbuyContainer(self, song))
@@ -1972,7 +1973,7 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(embed=embed, view=view)
         
         else:
-            return await utils.Embeds.send_warning_embed(
+            return await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 f'I couldnt find a song with the name: `{query}`',
@@ -2036,7 +2037,7 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(embed=embed, view=view)
 
         else:
-            return await utils.Embeds.send_warning_embed(
+            return await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 f"I couldnt find a song with the name: `{query}`",
@@ -2100,7 +2101,7 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(embed=embed, view=view)
 
         else:
-            return await utils.Embeds.send_warning_embed(
+            return await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 f"I couldnt find a song with the name: `{query}`",
@@ -2108,7 +2109,7 @@ class Music(commands.Cog, name="Music"):
 
     @tasks.loop(hours=1)
     async def cache_songs(self):
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
         if songs is not None:
             await self.store_latest_surfaces()
             await self.sync_names()
@@ -2119,7 +2120,7 @@ class Music(commands.Cog, name="Music"):
 
         hydrated = []
 
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
         for song in songs:
             dt = self.parse_dates(song.get('date_leaked', ''))
             if not dt:
@@ -2200,7 +2201,7 @@ class Music(commands.Cog, name="Music"):
             self.cache_songs.cancel()
         
         await ctx.message.add_reaction('🔄')
-        status = await utils.Cache.fetch_songs()
+        status = await Cache.fetch_songs()
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
         
@@ -2209,7 +2210,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
         if not songs:
             return
         
@@ -2233,7 +2234,7 @@ class Music(commands.Cog, name="Music"):
         if len(song_list) == 1:
             layout_view = await self.create_snippet_view(song_list[0])
             if layout_view is None:
-                return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
+                return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
             
             await ctx.reply(view=layout_view)
 
@@ -2270,7 +2271,7 @@ class Music(commands.Cog, name="Music"):
                     layout_view = await self.cog.create_snippet_view(song)
 
                     if layout_view is None:
-                        return await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **snippets** available')
+                        return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **snippets** available')
 
                     if self.author != itn.user:
                         return await itn.response.send_message(
@@ -2288,7 +2289,7 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(embed=embed, view=view)
 
         else:
-            return await utils.Embeds.send_warning_embed(
+            return await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 f"I couldnt find a song with the name: `{query}`",
@@ -2368,7 +2369,7 @@ class Music(commands.Cog, name="Music"):
 
         count = len(files)
         if count == 0:
-            await utils.Embeds.send_info_embed(
+            await Embeds.send_info_embed(
                 ctx.channel, ctx.author, "No files found in the download cache."
             )
             return
@@ -2570,7 +2571,7 @@ class Music(commands.Cog, name="Music"):
             Music.can_test(ctx, self) == False
             and ctx.author.guild_permissions.manage_guild == False
         ):
-            await utils.Embeds.send_error_embed(
+            await Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
                 "You do not have permission to use this command.",
@@ -2581,7 +2582,7 @@ class Music(commands.Cog, name="Music"):
             member.id not in self.heardle_answers
             or self.heardle_answers[member.id] is None
         ):
-            await utils.Embeds.send_warning_embed(
+            await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 f"{member.display_name} does not have an ongoing Heardle game.",
@@ -2589,7 +2590,7 @@ class Music(commands.Cog, name="Music"):
             return
 
         answer = self.heardle_answers[member.id]
-        await utils.Embeds.send_info_embed(
+        await Embeds.send_info_embed(
             ctx.channel,
             ctx.author,
             f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
@@ -2599,7 +2600,7 @@ class Music(commands.Cog, name="Music"):
 
     async def sync_names(self):
         self.valid_names = []
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
         for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
@@ -2607,7 +2608,7 @@ class Music(commands.Cog, name="Music"):
                 self.valid_names.extend(acceptable_alt_name_list)
 
     def get_random_song_for_blacktea(self):
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
         if songs is None:
             return None
         random_index = random.randint(0, len(songs) - 1)
@@ -2643,7 +2644,7 @@ class Music(commands.Cog, name="Music"):
 
     # TODO: Make this faster somehow
     def find_song_by_name(self, name):
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
         for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
@@ -2762,17 +2763,17 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="syncvalidnames", aliases=["syncnames"])
     @commands.is_owner()
     async def syncvalidnames(self, ctx: commands.Context):
-        songs = utils.Cache.get_songs()
+        songs = Cache.get_songs()
 
         old_names_length = len(self.valid_names)
         await self.sync_names()
-        await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
+        await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def blacktea(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_blacktea :
-            await utils.Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
+            await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
             return
 
         players = []
@@ -2807,7 +2808,7 @@ class Music(commands.Cog, name="Music"):
 
         if len(players) <= 1:
             self.ongoing_blacktea.remove(ctx.author.id)
-            await utils.Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
+            await Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
             return
         
         await self.bot.database.set_cooldown(
@@ -2834,7 +2835,7 @@ class Music(commands.Cog, name="Music"):
 
                 song = get_song_recursive()
                 if not song:
-                    await utils.Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch a valid song for the game. Ending game early.")
+                    await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch a valid song for the game. Ending game early.")
                     self.ongoing_blacktea.remove(ctx.author.id)
                     break
                 category_data = self.get_random_blacktea_category_data(song)
@@ -2855,7 +2856,7 @@ class Music(commands.Cog, name="Music"):
                     continue
                 except asyncio.TimeoutError:
                     player['lives'] -= 1
-                    message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. One correct answer was **{song.get('name', 'N/A')}**.")
+                    message = await Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. One correct answer was **{song.get('name', 'N/A')}**.")
                     created_messages.append(message)
                     alive_players = get_alive_players(players)
                     if len(alive_players) <= 1:
@@ -2864,7 +2865,7 @@ class Music(commands.Cog, name="Music"):
                         continue
         if len(alive_players) == 1:
             winner = alive_players[0]
-            message = await utils.Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
+            message = await Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
 
         # at the end
         for message in created_messages:
@@ -2877,7 +2878,7 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
         if ctx.author.id == 567401702190350347 and random.random() < 0.35:
-            await utils.Embeds.send_error_embed(
+            await Embeds.send_error_embed(
                 ctx.channel,
                 ctx.author,
                 f"You are too old for this command. Age detected: {random.randint(30, 40)}",
@@ -2885,7 +2886,7 @@ class Music(commands.Cog, name="Music"):
             return
 
         if ctx.author.id in self.ongoing_heardle:
-            await utils.Embeds.send_error_embed(
+            await Embeds.send_error_embed(
                 ctx.channel, ctx.author, "You already have an ongoing game of Heardle!"
             )
             return
@@ -3039,7 +3040,7 @@ class Music(commands.Cog, name="Music"):
                             "message", check=check_guess, timeout=remaining_time
                         )
                     except TimeoutError:
-                        await utils.Embeds.send_warning_embed(
+                        await Embeds.send_warning_embed(
                             ctx.channel,
                             ctx.author,
                             f"Time's up! You didn't guess the song ({best_track_title} [{raw_track_title}]) in time.",
@@ -3069,7 +3070,7 @@ class Music(commands.Cog, name="Music"):
                     else:
                         attempt += 1
                 elapsed = asyncio.get_event_loop().time() - start_time
-                await utils.Embeds.send_success_embed(
+                await Embeds.send_success_embed(
                     ctx.channel,
                     ctx.author,
                     f"Congratulations! You guessed the song correctly: **{best_track_title}** in {round(elapsed)} seconds ({attempt} attempts)!",
@@ -3086,7 +3087,7 @@ class Music(commands.Cog, name="Music"):
     async def makesnippet(self, ctx: commands.Context, *, query: str):
         debounce = self.snippet_debounce.get(ctx.author.id, False)
         if debounce:
-            await utils.Embeds.send_warning_embed(
+            await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 "Please wait a bit before making another snippet.",
@@ -3140,7 +3141,7 @@ class Music(commands.Cog, name="Music"):
 
             song = None
             if count == 0:
-                await utils.Embeds.send_error_embed(
+                await Embeds.send_error_embed(
                     ctx.channel,
                     ctx.author,
                     f"I couldnt find a song with the name: `{query}`",
@@ -3290,7 +3291,7 @@ class Music(commands.Cog, name="Music"):
         count = len(pledges_channels)
         selected_channel = None
         if count == 0:
-            await utils.Embeds.send_warning_embed(
+            await Embeds.send_warning_embed(
                 ctx.channel,
                 ctx.author,
                 "No pledge channels found in this server.",
@@ -3349,7 +3350,7 @@ class Music(commands.Cog, name="Music"):
                 
                 pledge_count += usable_number if usable_number is not None else 0
         
-        await utils.Embeds.send_success_embed(
+        await Embeds.send_success_embed(
             ctx.channel,
             ctx.author,
             f"Total pledges counted ({selected_channel.mention}): **${pledge_count:,}**",
