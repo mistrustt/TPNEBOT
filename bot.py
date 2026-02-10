@@ -153,7 +153,7 @@ class DiscordBot(commands.Bot):
     @tasks.loop(hours=24)
     async def stats_retention_task(self) -> None:
         await self.wait_until_ready()
-        cutoff = datetime.utcnow() - timedelta(days=365)
+        cutoff =  datetime.datetime.now(datetime.UTC) - timedelta(days=365)
         await self.database.purge_stats_before(cutoff.date())
 
     def is_coolguy(self, user_id: int):
