@@ -22,9 +22,15 @@ from utils.misc import MiscUtils
 from utils.admin_api import AdminAPIServer
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from sqlalchemy import text
+from sqlalchemy import text, select, func
 from typing import Optional, Union, Any, Iterable, List
-from datetime import datetime
+from datetime import datetime, timedelta
+from database.models import (
+    CommandUsageDaily,
+    CommandLatencyDaily,
+    CommandErrorDaily,
+    DailyUserExposure,
+)
 from database.manager import ItemType
 import importlib.util
 
@@ -169,6 +175,491 @@ class Owner(commands.Cog, name="Owner"):
     def is_whitelisted_private(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         return user_id in self.whitelist_private
+
+    class _MetricsGraphView(discord.ui.View):
+        def __init__(
+            self,
+            owner,
+            author_id: int,
+            title: str,
+            labels: list[str],
+            values: list[float],
+            *,
+            kind: str = "bar",
+            ylabel: str = "Count",
+        ):
+            super().__init__(timeout=120)
+            self.owner = owner
+            self.author_id = author_id
+            self.title = title
+            self.labels = labels
+            self.values = values
+            self.kind = kind
+            self.ylabel = ylabel
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self.author_id:
+                await interaction.response.send_message(
+                    "You can’t use this button.", ephemeral=True
+                )
+                return False
+            return True
+
+        @discord.ui.button(label="Graph", style=discord.ButtonStyle.primary)
+        async def graph(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            try:
+                image_bytes = self.owner._render_metrics_chart(
+                    title=self.title,
+                    labels=self.labels,
+                    values=self.values,
+                    kind=self.kind,
+                    ylabel=self.ylabel,
+                )
+            except Exception as e:
+                await interaction.response.send_message(
+                    f"Failed to render graph: {e}", ephemeral=True
+                )
+                return
+
+            file = discord.File(fp=image_bytes, filename="metrics.png")
+            await interaction.response.send_message(file=file, ephemeral=True)
+
+    def _render_metrics_chart(
+        self,
+        *,
+        title: str,
+        labels: list[str],
+        values: list[float],
+        kind: str,
+        ylabel: str,
+    ):
+        import io as _io
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        if kind == "line":
+            ax.plot(labels, values, marker="o")
+        else:
+            ax.bar(labels, values)
+
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", labelrotation=45)
+        fig.tight_layout()
+
+        buffer = _io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=150)
+        plt.close(fig)
+        buffer.seek(0)
+        return buffer
+
+    @commands.group(
+        name="metrics",
+        help="Metrics commands for bot stats.",
+        invoke_without_command=True,
+        hidden=True,
+    )
+    @commands.is_owner()
+    async def metrics(self, ctx: Context):
+        embed = discord.Embed(
+            title="Metrics",
+            description="Available subcommands: usage, latency, errors, exposure, topguilds, perday",
+            color=discord.Color.blurple(),
+        )
+        await ctx.send(embed=embed)
+
+    @metrics.command(name="usage", hidden=True)
+    @commands.is_owner()
+    async def metrics_usage(
+        self,
+        ctx: Context,
+        days: int = 7,
+        guild_id: Optional[int] = None,
+    ):
+        days = max(0, days)
+        cutoff = None
+        if days:
+            cutoff = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.bot.database.async_sessionmaker() as session:
+            stmt = (
+                select(
+                    CommandUsageDaily.command_name,
+                    CommandUsageDaily.is_slash,
+                    func.sum(CommandUsageDaily.count).label("total"),
+                )
+                .group_by(CommandUsageDaily.command_name, CommandUsageDaily.is_slash)
+                .order_by(text("total DESC"))
+            )
+            if cutoff:
+                stmt = stmt.where(CommandUsageDaily.bucket_date >= cutoff)
+            if guild_id:
+                stmt = stmt.where(CommandUsageDaily.guild_id == guild_id)
+
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        if not rows:
+            return await ctx.send("No command usage data found for that range.")
+
+        lines = []
+        for name, is_slash, total in rows:
+            kind = "slash" if is_slash else "prefix"
+            lines.append(f"{name} ({kind}) - {total}")
+
+        embed = discord.Embed(
+            title="Command Usage",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Days: {days}")
+        view = self._MetricsGraphView(
+            self,
+            ctx.author.id,
+            title="Command Usage",
+            labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _ in rows],
+            values=[int(total) for _, _, total in rows],
+            ylabel="Calls",
+        )
+        await ctx.send(embed=embed, view=view)
+
+    @metrics.command(name="latency", hidden=True)
+    @commands.is_owner()
+    async def metrics_latency(
+        self,
+        ctx: Context,
+        days: int = 7,
+        guild_id: Optional[int] = None,
+    ):
+        days = max(0, days)
+        cutoff = None
+        if days:
+            cutoff = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.bot.database.async_sessionmaker() as session:
+            stmt = (
+                select(
+                    CommandLatencyDaily.command_name,
+                    CommandLatencyDaily.is_slash,
+                    func.sum(CommandLatencyDaily.latency_ms_sum).label("sum_ms"),
+                    func.sum(CommandLatencyDaily.latency_count).label("count"),
+                )
+                .group_by(CommandLatencyDaily.command_name, CommandLatencyDaily.is_slash)
+                .order_by(text("sum_ms DESC"))
+            )
+            if cutoff:
+                stmt = stmt.where(CommandLatencyDaily.bucket_date >= cutoff)
+            if guild_id:
+                stmt = stmt.where(CommandLatencyDaily.guild_id == guild_id)
+
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        if not rows:
+            return await ctx.send("No command latency data found for that range.")
+
+        lines = []
+        for name, is_slash, sum_ms, count in rows:
+            avg_ms = int(sum_ms / count) if count else 0
+            kind = "slash" if is_slash else "prefix"
+            lines.append(f"{name} ({kind}) - avg {avg_ms} ms ({count} calls)")
+
+        embed = discord.Embed(
+            title="Command Latency",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Days: {days}")
+        view = self._MetricsGraphView(
+            self,
+            ctx.author.id,
+            title="Command Latency (Avg)",
+            labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _, _ in rows],
+            values=[int(sum_ms / count) if count else 0 for _, _, sum_ms, count in rows],
+            ylabel="Avg ms",
+        )
+        await ctx.send(embed=embed, view=view)
+
+    @metrics.command(name="errors", hidden=True)
+    @commands.is_owner()
+    async def metrics_errors(
+        self,
+        ctx: Context,
+        days: int = 7,
+        guild_id: Optional[int] = None,
+    ):
+        days = max(0, days)
+        cutoff = None
+        if days:
+            cutoff = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.bot.database.async_sessionmaker() as session:
+            stmt = (
+                select(
+                    CommandErrorDaily.command_name,
+                    CommandErrorDaily.error_type,
+                    CommandErrorDaily.is_slash,
+                    func.sum(CommandErrorDaily.count).label("total"),
+                )
+                .group_by(
+                    CommandErrorDaily.command_name,
+                    CommandErrorDaily.error_type,
+                    CommandErrorDaily.is_slash,
+                )
+                .order_by(text("total DESC"))
+            )
+            if cutoff:
+                stmt = stmt.where(CommandErrorDaily.bucket_date >= cutoff)
+            if guild_id:
+                stmt = stmt.where(CommandErrorDaily.guild_id == guild_id)
+
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        if not rows:
+            return await ctx.send("No command error data found for that range.")
+
+        lines = []
+        for name, error_type, is_slash, total in rows:
+            kind = "slash" if is_slash else "prefix"
+            lines.append(f"{name} ({kind}) - {error_type}: {total}")
+
+        embed = discord.Embed(
+            title="Command Errors",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Days: {days}")
+        view = self._MetricsGraphView(
+            self,
+            ctx.author.id,
+            title="Command Errors",
+            labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, _, is_slash, _ in rows],
+            values=[int(total) for _, _, _, total in rows],
+            ylabel="Errors",
+        )
+        await ctx.send(embed=embed, view=view)
+
+    @metrics.command(name="exposure", hidden=True)
+    @commands.is_owner()
+    async def metrics_exposure(
+        self,
+        ctx: Context,
+        days: int = 7,
+        guild_id: Optional[int] = None,
+    ):
+        days = max(0, days)
+        cutoff = None
+        if days:
+            cutoff = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.bot.database.async_sessionmaker() as session:
+            stmt = select(
+                func.count().label("rows"),
+                func.count(func.distinct(DailyUserExposure.user_hash)).label("unique"),
+            )
+            if cutoff:
+                stmt = stmt.where(DailyUserExposure.bucket_date >= cutoff)
+            if guild_id:
+                stmt = stmt.where(DailyUserExposure.guild_id == guild_id)
+
+            result = await session.execute(stmt)
+            row = result.first()
+
+        total_rows = row.rows if row else 0
+        unique_users = row.unique if row else 0
+
+        embed = discord.Embed(
+            title="User Exposure",
+            description=(
+                f"Unique users: {unique_users}\nExposure rows: {total_rows}"
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Days: {days}")
+        view = self._MetricsGraphView(
+            self,
+            ctx.author.id,
+            title="User Exposure",
+            labels=["Unique users", "Exposure rows"],
+            values=[int(unique_users), int(total_rows)],
+            ylabel="Count",
+        )
+        await ctx.send(embed=embed, view=view)
+
+    @metrics.command(name="topguilds", hidden=True)
+    @commands.is_owner()
+    async def metrics_topguilds(
+        self,
+        ctx: Context,
+        command_name: str,
+        days: int = 7,
+    ):
+        days = max(0, days)
+        cutoff = None
+        if days:
+            cutoff = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.bot.database.async_sessionmaker() as session:
+            stmt = (
+                select(
+                    CommandUsageDaily.guild_id,
+                    func.sum(CommandUsageDaily.count).label("total"),
+                )
+                .where(CommandUsageDaily.command_name == command_name)
+                .group_by(CommandUsageDaily.guild_id)
+                .order_by(text("total DESC"))
+            )
+            if cutoff:
+                stmt = stmt.where(CommandUsageDaily.bucket_date >= cutoff)
+
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        if not rows:
+            return await ctx.send("No guild usage data found for that command.")
+
+        lines = []
+        for gid, total in rows:
+            lines.append(f"{gid or 'DM'} - {total}")
+
+        embed = discord.Embed(
+            title=f"Top Guilds for {command_name}",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Days: {days}")
+        view = self._MetricsGraphView(
+            self,
+            ctx.author.id,
+            title=f"Top Guilds for {command_name}",
+            labels=[str(gid or "DM") for gid, _ in rows],
+            values=[int(total) for _, total in rows],
+            ylabel="Calls",
+        )
+        await ctx.send(embed=embed, view=view)
+
+    @metrics.command(name="perday", hidden=True)
+    @commands.is_owner()
+    async def metrics_perday(
+        self,
+        ctx: Context,
+        metric: str = "usage",
+        command_name: Optional[str] = None,
+        days: int = 14,
+        guild_id: Optional[int] = None,
+    ):
+        metric = metric.lower()
+        days = max(1, min(days, 90))
+        cutoff = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.bot.database.async_sessionmaker() as session:
+            if metric == "errors":
+                stmt = (
+                    select(
+                        CommandErrorDaily.bucket_date,
+                        func.sum(CommandErrorDaily.count).label("total"),
+                    )
+                    .where(CommandErrorDaily.bucket_date >= cutoff)
+                    .group_by(CommandErrorDaily.bucket_date)
+                    .order_by(CommandErrorDaily.bucket_date.asc())
+                )
+                if command_name:
+                    stmt = stmt.where(CommandErrorDaily.command_name == command_name)
+                if guild_id:
+                    stmt = stmt.where(CommandErrorDaily.guild_id == guild_id)
+                ylabel = "Errors"
+                title = "Errors per Day"
+            elif metric == "latency":
+                stmt = (
+                    select(
+                        CommandLatencyDaily.bucket_date,
+                        func.sum(CommandLatencyDaily.latency_ms_sum).label("sum_ms"),
+                        func.sum(CommandLatencyDaily.latency_count).label("count"),
+                    )
+                    .where(CommandLatencyDaily.bucket_date >= cutoff)
+                    .group_by(CommandLatencyDaily.bucket_date)
+                    .order_by(CommandLatencyDaily.bucket_date.asc())
+                )
+                if command_name:
+                    stmt = stmt.where(CommandLatencyDaily.command_name == command_name)
+                if guild_id:
+                    stmt = stmt.where(CommandLatencyDaily.guild_id == guild_id)
+                ylabel = "Avg ms"
+                title = "Latency per Day"
+            elif metric == "exposure":
+                stmt = (
+                    select(
+                        DailyUserExposure.bucket_date,
+                        func.count(func.distinct(DailyUserExposure.user_hash)).label(
+                            "unique"
+                        ),
+                    )
+                    .where(DailyUserExposure.bucket_date >= cutoff)
+                    .group_by(DailyUserExposure.bucket_date)
+                    .order_by(DailyUserExposure.bucket_date.asc())
+                )
+                if guild_id:
+                    stmt = stmt.where(DailyUserExposure.guild_id == guild_id)
+                ylabel = "Unique users"
+                title = "Exposure per Day"
+            else:
+                stmt = (
+                    select(
+                        CommandUsageDaily.bucket_date,
+                        func.sum(CommandUsageDaily.count).label("total"),
+                    )
+                    .where(CommandUsageDaily.bucket_date >= cutoff)
+                    .group_by(CommandUsageDaily.bucket_date)
+                    .order_by(CommandUsageDaily.bucket_date.asc())
+                )
+                if command_name:
+                    stmt = stmt.where(CommandUsageDaily.command_name == command_name)
+                if guild_id:
+                    stmt = stmt.where(CommandUsageDaily.guild_id == guild_id)
+                ylabel = "Calls"
+                title = "Usage per Day"
+
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        if not rows:
+            return await ctx.send("No per-day data found for that range.")
+
+        labels = []
+        values = []
+        for row in rows:
+            bucket = row[0]
+            labels.append(bucket.strftime("%Y-%m-%d"))
+            if metric == "latency":
+                sum_ms = row[1]
+                count = row[2]
+                values.append(int(sum_ms / count) if count else 0)
+            else:
+                values.append(int(row[1]))
+
+        embed = discord.Embed(
+            title=title,
+            description="\n".join(f"{d}: {v}" for d, v in zip(labels, values)),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Days: {days} | Metric: {metric}")
+        view = self._MetricsGraphView(
+            self,
+            ctx.author.id,
+            title=title,
+            labels=labels,
+            values=values,
+            kind="line",
+            ylabel=ylabel,
+        )
+        await ctx.send(embed=embed, view=view)
 
     async def find_role(self, ctx: Context, role_name: str):
         """Helper method to find a role by partial name, ID, or mention."""
