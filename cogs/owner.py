@@ -552,7 +552,7 @@ class Owner(commands.Cog, name="Owner"):
         ctx: Context,
         metric: str = "usage",
         command_name: Optional[str] = None,
-        days: int = 14,
+        days: int = 7,
         guild_id: Optional[int] = None,
     ):
         metric = metric.lower()

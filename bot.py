@@ -311,7 +311,10 @@ class DiscordBot(commands.Bot):
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
             interaction._stats_started_at = time.perf_counter()
-        await self.tree.process_interaction(interaction)
+        if hasattr(self, "process_application_commands"):
+            await self.process_application_commands(interaction)
+        elif hasattr(self.tree, "process_interaction"):
+            await self.tree.process_interaction(interaction)
 
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name
