@@ -751,7 +751,7 @@ class DatabaseManager:
         used_at: Optional[datetime] = None,
     ) -> None:
         try:
-            used_at = used_at or datetime.now(timezone.utc)
+            used_at = used_at or datetime.utcnow()
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandUsageDaily).where(
@@ -792,7 +792,7 @@ class DatabaseManager:
         used_at: Optional[datetime] = None,
     ) -> None:
         try:
-            used_at = used_at or datetime.now(timezone.utc)
+            used_at = used_at or datetime.utcnow()
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandLatencyDaily).where(
@@ -833,7 +833,7 @@ class DatabaseManager:
         used_at: Optional[datetime] = None,
     ) -> None:
         try:
-            used_at = used_at or datetime.now(timezone.utc)
+            used_at = used_at or datetime.utcnow()
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandErrorDaily).where(
@@ -872,7 +872,7 @@ class DatabaseManager:
         seen_at: Optional[datetime] = None,
     ) -> None:
         try:
-            seen_at = seen_at or datetime.now(timezone.utc)
+            seen_at = seen_at or datetime.utcnow()
             bucket_date = seen_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(DailyUserExposure).where(

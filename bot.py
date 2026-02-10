@@ -10,7 +10,7 @@ import uuid
 from discord import app_commands, Webhook
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils
@@ -153,7 +153,7 @@ class DiscordBot(commands.Bot):
     @tasks.loop(hours=24)
     async def stats_retention_task(self) -> None:
         await self.wait_until_ready()
-        cutoff = datetime.now(timezone.utc) - timedelta(days=365)
+        cutoff = datetime.utcnow() - timedelta(days=365)
         await self.database.purge_stats_before(cutoff.date())
 
     def is_coolguy(self, user_id: int):
@@ -311,7 +311,7 @@ class DiscordBot(commands.Bot):
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
             interaction._stats_started_at = time.perf_counter()
-        await super().on_interaction(interaction)
+        await self.process_application_commands(interaction)
 
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name
@@ -320,7 +320,7 @@ class DiscordBot(commands.Bot):
         guild = ctx.guild
 
         try:
-            used_at = datetime.now(timezone.utc)
+            used_at = datetime.utcnow()
             user_hash = hash_user_id(user.id)
             guild_id = guild.id if guild else None
             latency_ms = None
@@ -361,7 +361,7 @@ class DiscordBot(commands.Bot):
         self, interaction: discord.Interaction, command: app_commands.Command
     ):
         try:
-            used_at = datetime.now(timezone.utc)
+            used_at = datetime.utcnow()
             user_hash = hash_user_id(interaction.user.id)
             guild_id = interaction.guild.id if interaction.guild else None
             latency_ms = None
@@ -405,7 +405,7 @@ class DiscordBot(commands.Bot):
             if not isinstance(error, app_commands.CommandOnCooldown):
                 command = getattr(interaction, "command", None)
                 command_name = command.qualified_name if command else "unknown"
-                used_at = datetime.now(timezone.utc)
+                used_at = datetime.utcnow()
                 guild_id = interaction.guild.id if interaction.guild else None
                 await self.database.record_command_error(
                     command_name=command_name,
@@ -455,7 +455,7 @@ class DiscordBot(commands.Bot):
             if ctx.command and not isinstance(
                 error, (commands.CommandNotFound, commands.CommandOnCooldown)
             ):
-                used_at = datetime.now(timezone.utc)
+                used_at = datetime.utcnow()
                 guild_id = ctx.guild.id if ctx.guild else None
                 await self.database.record_command_error(
                     command_name=ctx.command.qualified_name,
