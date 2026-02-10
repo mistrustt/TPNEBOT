@@ -540,6 +540,39 @@ class GameHistory(Base):
     )
 
 
+class GameSession(Base):
+    __tablename__ = "game_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    game_name = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False, default="active")
+    guild_id = Column(BigInteger, nullable=True)
+    channel_id = Column(BigInteger, nullable=True)
+    message_id = Column(BigInteger, nullable=True)
+    owner_id = Column(BigInteger, nullable=True)
+    participants = Column(ARRAY(BigInteger), nullable=True)
+    wager_total = Column(Numeric(precision=38, scale=2), nullable=True)
+    state = Column(JSON, nullable=True)
+    rng = Column(JSON, nullable=True)
+    errors = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class GameSessionEvent(Base):
+    __tablename__ = "game_session_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(
+        UUID(as_uuid=True), ForeignKey("game_sessions.id", ondelete="CASCADE")
+    )
+    event_type = Column(String, nullable=False)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ReportSetting(Base):
     __tablename__ = "report_settings"
 

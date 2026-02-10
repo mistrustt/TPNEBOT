@@ -49,6 +49,8 @@ from .models import (
     GameStats,
     HeardleGameStats,
     GameHistory,
+    GameSession,
+    GameSessionEvent,
     UserRoleHistory,
     Streak,
     Task,
@@ -201,6 +203,195 @@ class DatabaseManager:
                     bot_config = BotConfig(loaded_cogs=[], unloaded_cogs=[cog_name])
                     session.add(bot_config)
                 await session.commit()
+
+    async def create_game_session(
+        self,
+        game_name: str,
+        *,
+        guild_id: int | None = None,
+        channel_id: int | None = None,
+        message_id: int | None = None,
+        owner_id: int | None = None,
+        participants: list[int] | None = None,
+        wager_total: Decimal | None = None,
+        state: dict | None = None,
+        rng: dict | None = None,
+        errors: list | None = None,
+    ) -> uuid.UUID:
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                gs = GameSession(
+                    game_name=game_name,
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    owner_id=owner_id,
+                    participants=participants,
+                    wager_total=wager_total,
+                    state=state,
+                    rng=rng,
+                    errors=errors,
+                )
+                session.add(gs)
+            return gs.id
+
+    async def get_game_session(self, session_id: uuid.UUID) -> GameSession | None:
+        async with self.async_sessionmaker() as session:
+            return await session.get(GameSession, session_id)
+
+    async def list_game_sessions(
+        self,
+        *,
+        game_name: str | None = None,
+        guild_id: int | None = None,
+        owner_id: int | None = None,
+        limit: int = 50,
+    ) -> list[GameSession]:
+        async with self.async_sessionmaker() as session:
+            stmt = select(GameSession).order_by(GameSession.created_at.desc())
+            if game_name:
+                stmt = stmt.where(GameSession.game_name == game_name)
+            if guild_id:
+                stmt = stmt.where(GameSession.guild_id == guild_id)
+            if owner_id:
+                stmt = stmt.where(GameSession.owner_id == owner_id)
+            if limit:
+                stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def update_game_session(
+        self,
+        session_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        message_id: int | None = None,
+        participants: list[int] | None = None,
+        wager_total: Decimal | None = None,
+        state: dict | None = None,
+        rng: dict | None = None,
+        errors: list | None = None,
+    ) -> bool:
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                gs = await session.get(GameSession, session_id)
+                if not gs:
+                    return False
+                if status is not None:
+                    gs.status = status
+                if message_id is not None:
+                    gs.message_id = message_id
+                if participants is not None:
+                    gs.participants = participants
+                if wager_total is not None:
+                    gs.wager_total = wager_total
+                if state is not None:
+                    current = gs.state or {}
+                    current.update(state)
+                    gs.state = current
+                if rng is not None:
+                    current = gs.rng or {}
+                    current.update(rng)
+                    gs.rng = current
+                if errors is not None:
+                    current = list(gs.errors or [])
+                    current.extend(errors)
+                    gs.errors = current
+            return True
+
+    async def add_game_session_event(
+        self, session_id: uuid.UUID, event_type: str, payload: dict | None = None
+    ) -> None:
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                session.add(
+                    GameSessionEvent(
+                        session_id=session_id,
+                        event_type=event_type,
+                        payload=payload or {},
+                    )
+                )
+
+    async def get_game_session_events(
+        self, session_id: uuid.UUID, limit: int = 50
+    ) -> list[GameSessionEvent]:
+        async with self.async_sessionmaker() as session:
+            stmt = (
+                select(GameSessionEvent)
+                .where(GameSessionEvent.session_id == session_id)
+                .order_by(GameSessionEvent.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def add_game_session_refund(
+        self,
+        session_id: uuid.UUID,
+        *,
+        user_id: int,
+        wallet_id: str,
+        amount: str,
+        reason: str | None = None,
+    ) -> bool:
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                gs = await session.get(GameSession, session_id)
+                if not gs:
+                    return False
+                state = gs.state or {}
+                refunds = list(state.get("refunds", []))
+                refunds.append(
+                    {
+                        "user_id": user_id,
+                        "wallet_id": wallet_id,
+                        "amount": amount,
+                        "reason": reason or "refund",
+                    }
+                )
+                state["refunds"] = refunds
+                gs.state = state
+            return True
+
+    async def remove_game_session_refund(
+        self, session_id: uuid.UUID, *, user_id: int
+    ) -> bool:
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                gs = await session.get(GameSession, session_id)
+                if not gs:
+                    return False
+                state = gs.state or {}
+                refunds = [r for r in state.get("refunds", []) if r.get("user_id") != user_id]
+                state["refunds"] = refunds
+                gs.state = state
+            return True
+
+    async def end_game_session(
+        self,
+        session_id: uuid.UUID,
+        *,
+        outcome: str | None = None,
+        reason: str | None = None,
+        final_state: dict | None = None,
+    ) -> bool:
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                gs = await session.get(GameSession, session_id)
+                if not gs:
+                    return False
+                payload = {
+                    "outcome": outcome,
+                    "reason": reason,
+                    "final_state": final_state or gs.state or {},
+                }
+                session.add(
+                    GameSessionEvent(
+                        session_id=session_id, event_type="ended", payload=payload
+                    )
+                )
+                await session.delete(gs)
+            return True
 
     async def get_lastfm_usernames(self):
         async with self.async_sessionmaker() as session:

@@ -25,11 +25,14 @@ logger = logging.getLogger("discord_bot")
 
 
 class CrashView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, host_id: int, channel_id: int):
+    def __init__(
+        self, bot: commands.Bot, host_id: int, channel_id: int, session_id=None
+    ):
         super().__init__(timeout=None)
         self.bot = bot
         self.host_id = host_id
         self.channel_id = channel_id
+        self.session_id = session_id
 
         self.game_task: asyncio.Task | None = None
         self.is_running = False
@@ -114,8 +117,22 @@ class CrashView(discord.ui.View):
                 wallet, -bet, "Crash Game Bet"
             )
 
+            await casino._add_refund(
+                self.session_id,
+                user_id=uid,
+                wallet_id=str(wallet),
+                amount=bet,
+                reason="crash_bet",
+            )
+
             self.players[uid] = bet
             self.crash_points[uid] = await self.generate_crash_point(uid)
+
+            await casino._log_game_event(
+                self.session_id,
+                "join",
+                {"user_id": uid, "bet": str(bet)},
+            )
 
             self.cashout_btn.disabled = False
             await sub_int.response.send_message(
@@ -142,6 +159,14 @@ class CrashView(discord.ui.View):
         wallet = await self.bot.database.get_wallet_id_for_user(uid)
         await self.bot.database.process_treasury_transaction(
             wallet, win, "Crash Game Payout"
+        )
+
+        casino: Casino = self.bot.get_cog("Casino")
+        await casino._remove_refund(self.session_id, user_id=uid)
+        await casino._log_game_event(
+            self.session_id,
+            "cashout",
+            {"user_id": uid, "multiplier": str(mult), "win": str(win)},
         )
 
         self.cashed_out[uid] = self.current_multiplier
@@ -186,6 +211,10 @@ class CrashView(discord.ui.View):
             color=discord.Color.green(),
         )
         self.game_message = await ctx.send(embed=embed, view=self)
+        casino: Casino = self.bot.get_cog("Casino")
+        await casino._update_game_session(
+            self.session_id, message_id=self.game_message.id
+        )
 
         while discord.utils.utcnow().timestamp() < self.countdown_end:
             await asyncio.sleep(2)
@@ -201,6 +230,12 @@ class CrashView(discord.ui.View):
                 view=None,
             )
             self.is_running = False
+            await casino._end_game_session(
+                self.session_id,
+                outcome="cancelled",
+                reason="no_players",
+                final_state={"phase": "starting"},
+            )
             return
 
         self.game_phase = "running"
@@ -222,6 +257,12 @@ class CrashView(discord.ui.View):
                         self.crashed_out[uid] = self.crash_points.get(
                             uid, self.current_multiplier
                         )
+                        await casino._remove_refund(self.session_id, user_id=uid)
+                        await casino._log_game_event(
+                            self.session_id,
+                            "crash",
+                            {"user_id": uid, "multiplier": str(self.crashed_out[uid])},
+                        )
                 break
 
             self.current_multiplier += self.calculate_increment()
@@ -230,10 +271,25 @@ class CrashView(discord.ui.View):
                 if uid not in self.cashed_out and uid not in self.crashed_out:
                     if self.current_multiplier >= cp:
                         self.crashed_out[uid] = self.crash_points[uid]
+                        await casino._remove_refund(self.session_id, user_id=uid)
+                        await casino._log_game_event(
+                            self.session_id,
+                            "crash",
+                            {"user_id": uid, "multiplier": str(cp)},
+                        )
             await self.update_game_message()
             await asyncio.sleep(1)
 
         self.game_phase = "ended"
+        await casino._end_game_session(
+            self.session_id,
+            outcome="completed",
+            final_state={
+                "players": {str(k): str(v) for k, v in self.players.items()},
+                "cashed_out": {str(k): str(v) for k, v in self.cashed_out.items()},
+                "crashed_out": {str(k): str(v) for k, v in self.crashed_out.items()},
+            },
+        )
 
         self.cashout_btn.disabled = True
         await self.game_message.edit(embed=await self.make_embed(), view=None)
@@ -313,7 +369,15 @@ class CrashView(discord.ui.View):
 
 class MinesView(discord.ui.View):
     def __init__(
-        self, grid, bomb_positions, main_message, user_id, bet_amount, bot, PF: dict
+        self,
+        grid,
+        bomb_positions,
+        main_message,
+        user_id,
+        bet_amount,
+        bot,
+        PF: dict,
+        session_id=None,
     ):
         super().__init__(timeout=600)
         self.grid = grid
@@ -332,6 +396,7 @@ class MinesView(discord.ui.View):
         self.clicked_positions = set()
         self.game_over = False
         self.error_count = 0
+        self.session_id = session_id
 
         for i in range(5):
             for j in range(5):
@@ -412,6 +477,13 @@ class MinesView(discord.ui.View):
                 except Exception:
                     pass
             await interaction.response.edit_message(embed=embed, view=self)
+            casino: Casino = self.bot.get_cog("Casino")
+            await casino._remove_refund(self.session_id, user_id=self.user_id)
+            await casino._end_game_session(
+                self.session_id,
+                outcome="loss",
+                final_state={"reason": "bomb", "bomb_pos": pos},
+            )
         except Exception as e:
             logger.error(f"Error handling bomb click: {str(e)}")
             await self.send_error_message(interaction)
@@ -453,6 +525,14 @@ class MinesView(discord.ui.View):
                 wallet_id=wallet_id,
                 amount=self.bet_amount,
                 description="Mines game refund due to error",
+            )
+
+            casino: Casino = self.bot.get_cog("Casino")
+            await casino._remove_refund(self.session_id, user_id=self.user_id)
+            await casino._end_game_session(
+                self.session_id,
+                outcome="cancelled",
+                reason="emergency_end",
             )
 
             embed = discord.Embed(
@@ -566,6 +646,13 @@ class MinesView(discord.ui.View):
         except Exception as e:
             logger.error(f"Failed to record mines win: {e}")
 
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="win",
+            final_state={"reason": "all_gems", "winnings": str(winnings)},
+        )
+
         if self.cashout_message:
             try:
                 await self.cashout_message.delete()
@@ -583,15 +670,39 @@ class MinesView(discord.ui.View):
         )
         await self.main_message.edit(embed=embed, view=self)
 
+    async def force_end(self, *, refund: bool = False):
+        casino: Casino = self.bot.get_cog("Casino")
+        self.game_over = True
+        for child in self.children:
+            child.disabled = True
+        if refund:
+            wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=self.bet_amount,
+                description="Mines Refund",
+            )
+        try:
+            await self.main_message.edit(view=self)
+        except Exception:
+            pass
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="forced_end",
+            final_state={"refund": refund},
+        )
+
 
 class CashoutView(discord.ui.View):
-    def __init__(self, main_message, game_view, user_id, bet_amount, bot):
+    def __init__(self, main_message, game_view, user_id, bet_amount, bot, session_id=None):
         super().__init__(timeout=600)
         self.main_message = main_message
         self.game_view = game_view
         self.user_id = user_id
         self.bet_amount = bet_amount
         self.bot = bot
+        self.session_id = session_id
 
         cashout_button = discord.ui.Button(
             label="Cashout", style=discord.ButtonStyle.success, custom_id="cashout"
@@ -692,11 +803,25 @@ class CashoutView(discord.ui.View):
             logger.error(f"Failed to delete cashout message: {e}")
 
         self.game_view.cashout_message = None
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="win",
+            final_state={"reason": "cashout", "winnings": str(winnings)},
+        )
 
 
 class DoubleOrNothingView(View):
     def __init__(
-        self, bot, initial_user, initial_amount, winnings, currency_name, user_id, PF
+        self,
+        bot,
+        initial_user,
+        initial_amount,
+        winnings,
+        currency_name,
+        user_id,
+        PF,
+        session_id=None,
     ):
         super().__init__(timeout=60)
         self.bot = bot
@@ -707,6 +832,8 @@ class DoubleOrNothingView(View):
         self.user_id = user_id
         self.rounds = 0
         self.PF = PF
+        self.session_id = session_id
+        self.message: discord.Message | None = None
 
     @discord.ui.button(label="Double", style=discord.ButtonStyle.green)
     async def double_button(
@@ -746,6 +873,11 @@ class DoubleOrNothingView(View):
             )
             embed.set_footer(text=f"Round {self.rounds}")
             await interaction.response.edit_message(embed=embed, view=self)
+            await casino._log_game_event(
+                self.session_id,
+                "double",
+                {"round": self.rounds, "winnings": str(self.winnings)},
+            )
         else:
             revealed_seed, new_hash = await self.bot.database.increment_loss(
                 self.user_id,
@@ -764,6 +896,12 @@ class DoubleOrNothingView(View):
                 name="Double Or Nothing", icon_url=self.initial_user.display_avatar.url
             )
             await interaction.response.edit_message(embed=embed, view=None)
+            await casino._remove_refund(self.session_id, user_id=self.user_id)
+            await casino._end_game_session(
+                self.session_id,
+                outcome="loss",
+                final_state={"reason": "double_loss", "rounds": self.rounds},
+            )
             self.stop()
 
     @discord.ui.button(label="Cash Out", style=discord.ButtonStyle.red)
@@ -795,6 +933,38 @@ class DoubleOrNothingView(View):
             amount=self.winnings,
             description="Double or Nothing Winnings",
         )
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="win",
+            final_state={"reason": "cashout", "winnings": str(self.winnings)},
+        )
+        self.stop()
+
+    async def force_end(self, *, refund: bool = False):
+        casino: Casino = self.bot.get_cog("Casino")
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        if refund:
+            wallet_id = await self.bot.database.get_wallet_id_for_user(
+                self.initial_user.id
+            )
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=self.initial_amount,
+                description="Double or Nothing Refund",
+            )
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="forced_end",
+            final_state={"reason": "force_end", "refund": refund},
+        )
         self.stop()
 
     async def on_timeout(self):
@@ -819,6 +989,7 @@ class PokerView(View):
         wallet_id,
         user_id,
         PF,
+        session_id=None,
     ):
         super().__init__(timeout=60)
         self.bot = bot
@@ -831,6 +1002,8 @@ class PokerView(View):
         self.wallet_id = wallet_id
         self.user_id = user_id
         self.PF = PF
+        self.session_id = session_id
+        self.message: discord.Message | None = None
 
         self.play_button = Button(label="Play", style=discord.ButtonStyle.green)
         self.fold_button = Button(label="Fold", style=discord.ButtonStyle.red)
@@ -972,6 +1145,13 @@ class PokerView(View):
             color=color,
         )
         await interaction.response.edit_message(embed=embed, view=self)
+        casino: Casino = self.bot.get_cog("Casino")
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="win" if player_wins else "loss",
+            final_state={"result": "win" if player_wins else "loss"},
+        )
 
     async def fold_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -999,6 +1179,35 @@ class PokerView(View):
             color=discord.Color.red(),
         )
         await interaction.response.edit_message(embed=embed, view=self)
+        casino: Casino = self.bot.get_cog("Casino")
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="loss",
+            final_state={"result": "fold"},
+        )
+
+    async def force_end(self, *, refund: bool = False):
+        casino: Casino = self.bot.get_cog("Casino")
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        if refund:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=self.wallet_id,
+                amount=self.bet,
+                description="Poker Refund",
+            )
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="forced_end",
+            final_state={"reason": "force_end", "refund": refund},
+        )
 
 
 class LadderView(View):
@@ -1006,6 +1215,7 @@ class LadderView(View):
         super().__init__(timeout=60)
         self.user_id = user_id
         self.cog = cog
+        self.message: discord.Message | None = None
 
     @discord.ui.button(label="Climb", style=discord.ButtonStyle.green)
     async def climb_button(
@@ -1205,6 +1415,7 @@ class Casino(commands.Cog):
         self.ladder_games = {}
         self.active_players = set()
         self.active_games: dict[int, CrashView] = {}
+        self.session_registry = {}
         self.cooldowns = {}
         self.defaultpot = 10000.0
         self.roll_history = defaultdict(list)
@@ -1225,6 +1436,105 @@ class Casino(commands.Cog):
             "keno",
         ]
         self.fair = ProvenFairness()
+
+    def _json_safe(self, value: Any) -> Any:
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, (list, tuple)):
+            return [self._json_safe(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._json_safe(v) for k, v in value.items()}
+        return value
+
+    async def _create_game_session(
+        self,
+        ctx: Context | None,
+        game_name: str,
+        *,
+        owner_id: int | None = None,
+        participants: list[int] | None = None,
+        wager_total: Decimal | None = None,
+        state: dict | None = None,
+        rng: dict | None = None,
+        message_id: int | None = None,
+    ):
+        db = getattr(self.bot, "database", None)
+        if not db:
+            return None
+        gid = ctx.guild.id if ctx and ctx.guild else None
+        cid = ctx.channel.id if ctx and ctx.channel else None
+        owner_id = owner_id or (ctx.author.id if ctx else None)
+        if participants is None and owner_id:
+            participants = [owner_id]
+        return await db.create_game_session(
+            game_name,
+            guild_id=gid,
+            channel_id=cid,
+            message_id=message_id,
+            owner_id=owner_id,
+            participants=participants,
+            wager_total=wager_total,
+            state=self._json_safe(state or {}),
+            rng=self._json_safe(rng or {}),
+        )
+
+    async def _update_game_session(self, session_id, **kwargs) -> None:
+        db = getattr(self.bot, "database", None)
+        if not db or not session_id:
+            return
+        clean = {}
+        for key, value in kwargs.items():
+            clean[key] = self._json_safe(value)
+        await db.update_game_session(session_id, **clean)
+
+    async def _log_game_event(self, session_id, event_type: str, payload: dict | None):
+        db = getattr(self.bot, "database", None)
+        if not db or not session_id:
+            return
+        await db.add_game_session_event(session_id, event_type, self._json_safe(payload or {}))
+
+    async def _add_refund(self, session_id, *, user_id: int, wallet_id: str, amount: Decimal, reason: str):
+        db = getattr(self.bot, "database", None)
+        if not db or not session_id:
+            return
+        await db.add_game_session_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=str(amount),
+            reason=reason,
+        )
+
+    async def _remove_refund(self, session_id, *, user_id: int):
+        db = getattr(self.bot, "database", None)
+        if not db or not session_id:
+            return
+        await db.remove_game_session_refund(session_id, user_id=user_id)
+
+    async def _end_game_session(
+        self, session_id, *, outcome: str | None = None, reason: str | None = None, final_state: dict | None = None
+    ):
+        db = getattr(self.bot, "database", None)
+        if not db or not session_id:
+            return
+        await db.end_game_session(
+            session_id,
+            outcome=outcome,
+            reason=reason,
+            final_state=self._json_safe(final_state or {}),
+        )
+        self.session_registry.pop(str(session_id), None)
+
+    def _register_session_handler(self, session_id, handler) -> None:
+        if session_id:
+            self.session_registry[str(session_id)] = handler
+
+    async def force_end_session(self, session_id, *, refund: bool = False) -> bool:
+        handler = self.session_registry.get(str(session_id))
+        if not handler:
+            return False
+        await handler(refund=refund)
+        return True
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -1910,6 +2220,7 @@ class Casino(commands.Cog):
     async def gamble(self, ctx: Context, bet_amount: str):
         try:
             user_id = ctx.author.id
+            session_id = None
 
             PF = await self.prove_fairness(user_id)
 
@@ -1948,6 +2259,26 @@ class Casino(commands.Cog):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
+            session_id = await self._create_game_session(
+                ctx,
+                "gamble",
+                owner_id=user_id,
+                wager_total=amount,
+                state={
+                    "user_id": user_id,
+                    "bet": str(amount),
+                    "wallet_id": str(wallet_id),
+                },
+                rng=PF,
+            )
+            await self._add_refund(
+                session_id,
+                user_id=user_id,
+                wallet_id=str(wallet_id),
+                amount=amount,
+                reason="gamble_bet",
+            )
+
             win_multiplier = Decimal("2.0")
             is_winner = await self.fair_randbelow(user_id, 2) == 1
 
@@ -1971,11 +2302,28 @@ class Casino(commands.Cog):
                         description=f"🚫 Transaction failed: {e}",
                         color=discord.Color.red(),
                     )
+                    await self._end_game_session(
+                        session_id,
+                        outcome="error",
+                        reason=str(e),
+                        final_state={"winnings": str(winnings)},
+                    )
                     await ctx.reply(embed=embed, delete_after=5)
                     return
                 embed = discord.Embed(
                     description=f"You won {self.currency_name} **{await self.formatter(winnings)}**!",
                     color=discord.Color.green(),
+                )
+                await self._remove_refund(session_id, user_id=user_id)
+                await self._log_game_event(
+                    session_id,
+                    "result",
+                    {"outcome": "win", "winnings": str(winnings)},
+                )
+                await self._end_game_session(
+                    session_id,
+                    outcome="win",
+                    final_state={"winnings": str(winnings)},
                 )
             else:
                 revealed_seed, new_hash = await self.bot.database.increment_loss(
@@ -1990,6 +2338,17 @@ class Casino(commands.Cog):
                 embed = discord.Embed(
                     description=f"You lost {self.currency_name} **{await self.formatter(amount)}**",
                     color=discord.Color.red(),
+                )
+                await self._remove_refund(session_id, user_id=user_id)
+                await self._log_game_event(
+                    session_id,
+                    "result",
+                    {"outcome": "loss", "loss": str(amount)},
+                )
+                await self._end_game_session(
+                    session_id,
+                    outcome="loss",
+                    final_state={"loss": str(amount)},
                 )
 
             await self.bot.database.set_cooldown(
@@ -2009,6 +2368,7 @@ class Casino(commands.Cog):
     async def supergamble(self, ctx: Context, bet_amount: str):
         try:
             user_id = ctx.author.id
+            session_id = None
 
             PF = await self.prove_fairness(user_id)
 
@@ -2044,6 +2404,26 @@ class Casino(commands.Cog):
                 )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
+
+            session_id = await self._create_game_session(
+                ctx,
+                "supergamble",
+                owner_id=user_id,
+                wager_total=amount,
+                state={
+                    "user_id": user_id,
+                    "bet": str(amount),
+                    "wallet_id": str(wallet_id),
+                },
+                rng=PF,
+            )
+            await self._add_refund(
+                session_id,
+                user_id=user_id,
+                wallet_id=str(wallet_id),
+                amount=amount,
+                reason="supergamble_bet",
+            )
 
             win_roll = await self.fair_randbelow(user_id, 100)
             bonus_roll = await self.fair_randbelow(user_id, 100)
@@ -2100,12 +2480,20 @@ class Casino(commands.Cog):
                         description=f"🚫 Transaction failed: {e}",
                         color=discord.Color.red(),
                     )
+                    await self._end_game_session(
+                        session_id,
+                        outcome="error",
+                        reason=str(e),
+                        final_state={"winnings": str(winnings)},
+                    )
                     await ctx.reply(embed=embed, delete_after=5)
                     return
                 embed = discord.Embed(
                     description=f"🎉 You hit the jackpot and won **{await self.formatter(winnings)} {self.currency_name}**! {bonus_text}",
                     color=discord.Color.gold(),
                 )
+                outcome = "win"
+                outcome_amount = winnings
 
             else:
                 recovery_roll = bonus_roll
@@ -2126,12 +2514,20 @@ class Casino(commands.Cog):
                             description=f"🚫 Transaction failed: {e}",
                             color=discord.Color.red(),
                         )
+                        await self._end_game_session(
+                            session_id,
+                            outcome="error",
+                            reason=str(e),
+                            final_state={"recovery": str(recovery)},
+                        )
                         await ctx.reply(embed=embed, delete_after=5)
                         return
                     embed = discord.Embed(
                         description=f"You lost, but recovered **{await self.formatter(recovery)} {self.currency_name}**!",
                         color=discord.Color.blurple(),
                     )
+                    outcome = "loss"
+                    outcome_amount = recovery
                 else:
                     revealed_seed, new_hash = await self.bot.database.increment_loss(
                         user_id,
@@ -2146,11 +2542,25 @@ class Casino(commands.Cog):
                         description=f"You lost **{await self.formatter(amount)} {self.currency_name}**.",
                         color=discord.Color.red(),
                     )
+                    outcome = "loss"
+                    outcome_amount = amount
 
             await self.bot.database.set_cooldown(
                 user_id, ctx.command.qualified_name, 60
             )
             await ctx.reply(embed=embed)
+
+            await self._remove_refund(session_id, user_id=user_id)
+            await self._log_game_event(
+                session_id,
+                "result",
+                {"outcome": outcome, "amount": str(outcome_amount)},
+            )
+            await self._end_game_session(
+                session_id,
+                outcome=outcome,
+                final_state={"amount": str(outcome_amount)},
+            )
 
         except ValueError as e:
             await ctx.reply(
@@ -2166,6 +2576,7 @@ class Casino(commands.Cog):
     async def slots(self, ctx: Context, bet_amount: str):
         user_id = ctx.author.id
         currency = self.currency_name
+        session_id = None
 
         PF = await self.prove_fairness(user_id)
 
@@ -2201,6 +2612,26 @@ class Casino(commands.Cog):
                 embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()),
                 delete_after=5,
             )
+
+        session_id = await self._create_game_session(
+            ctx,
+            "slots",
+            owner_id=user_id,
+            wager_total=stake,
+            state={
+                "user_id": user_id,
+                "bet": str(stake),
+                "wallet_id": str(wallet_id),
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=stake,
+            reason="slots_bet",
+        )
 
         symbols = [":cherries:", ":lemon:", ":seven:", ":bell:", ":beers:", ":gem:"]
         weights = [4.61, 3.81, 3.03, 2.22, 1.44, 1.08]
@@ -2302,6 +2733,22 @@ class Casino(commands.Cog):
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
         await ctx.reply(embed=embed)
 
+        await self._remove_refund(session_id, user_id=user_id)
+        await self._log_game_event(
+            session_id,
+            "result",
+            {
+                "outcome": "win" if winnings else "loss",
+                "amount": str(winnings or stake),
+                "multiplier": str(multiplier),
+            },
+        )
+        await self._end_game_session(
+            session_id,
+            outcome="win" if winnings else "loss",
+            final_state={"amount": str(winnings or stake)},
+        )
+
     @commands.command(
         name="dice",
         aliases=["diceroll", "roll"],
@@ -2309,6 +2756,7 @@ class Casino(commands.Cog):
     )
     async def roll(self, ctx: Context, bet_amount: str, guess: str):
         user_id = ctx.author.id
+        session_id = None
 
         PF = await self.prove_fairness(user_id)
 
@@ -2365,6 +2813,27 @@ class Casino(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
             return
+
+        session_id = await self._create_game_session(
+            ctx,
+            "dice",
+            owner_id=user_id,
+            wager_total=amount,
+            state={
+                "user_id": user_id,
+                "bet": str(amount),
+                "wallet_id": str(wallet_id),
+                "guess": guess,
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=amount,
+            reason="dice_bet",
+        )
 
         die1 = await self.fair_randbelow(user_id, 6) + 1
         die2 = await self.fair_randbelow(user_id, 6) + 1
@@ -2453,6 +2922,22 @@ class Casino(commands.Cog):
         )
         await ctx.reply(embed=embed)
 
+        await self._remove_refund(session_id, user_id=user_id)
+        await self._log_game_event(
+            session_id,
+            "result",
+            {
+                "outcome": "win" if winnings > 0 else "loss",
+                "amount": str(winnings or amount),
+                "roll": {"die1": die1, "die2": die2, "total": total},
+            },
+        )
+        await self._end_game_session(
+            session_id,
+            outcome="win" if winnings > 0 else "loss",
+            final_state={"amount": str(winnings or amount)},
+        )
+
     @commands.command(
         name="roulette",
         aliases=["roul", "rou"],
@@ -2478,6 +2963,7 @@ class Casino(commands.Cog):
             return
 
         user_id = ctx.author.id
+        session_id = None
 
         PF = await self.prove_fairness(user_id)
 
@@ -2546,6 +3032,27 @@ class Casino(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
             return
+
+        session_id = await self._create_game_session(
+            ctx,
+            "roulette",
+            owner_id=user_id,
+            wager_total=amount,
+            state={
+                "user_id": user_id,
+                "bet": str(amount),
+                "wallet_id": str(wallet_id),
+                "choice": choice,
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=amount,
+            reason="roulette_bet",
+        )
 
         red_numbers = {
             1,
@@ -2741,6 +3248,23 @@ class Casino(commands.Cog):
         )
         await ctx.reply(embed=embed)
 
+        await self._remove_refund(session_id, user_id=user_id)
+        await self._log_game_event(
+            session_id,
+            "result",
+            {
+                "outcome": "win" if winnings > 0 else "loss",
+                "amount": str(winnings or amount),
+                "spin": str(spin_result),
+                "color": color_label,
+            },
+        )
+        await self._end_game_session(
+            session_id,
+            outcome="win" if winnings > 0 else "loss",
+            final_state={"amount": str(winnings or amount)},
+        )
+
     @commands.command(
         name="double",
         aliases=["don", "doubleornothing"],
@@ -2749,6 +3273,7 @@ class Casino(commands.Cog):
     async def double_or_nothing(self, ctx: Context, bet_amount: str):
         """Start a double or nothing game"""
         user_id = ctx.author.id
+        session_id = None
 
         PF = await self.prove_fairness(user_id)
 
@@ -2788,6 +3313,26 @@ class Casino(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
             return
 
+        session_id = await self._create_game_session(
+            ctx,
+            "double",
+            owner_id=user_id,
+            wager_total=amount,
+            state={
+                "user_id": user_id,
+                "bet": str(amount),
+                "wallet_id": str(wallet_id),
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=amount,
+            reason="double_bet",
+        )
+
         amount_formatted = await self.formatter(amount)
         embed = discord.Embed(
             description=(
@@ -2809,11 +3354,14 @@ class Casino(commands.Cog):
             currency_name=self.currency_name,
             user_id=user_id,
             PF=PF,
+            session_id=session_id,
         )
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
         )
-        await ctx.reply(embed=embed, view=view)
+        msg = await ctx.reply(embed=embed, view=view)
+        view.message = msg
+        self._register_session_handler(session_id, view.force_end)
 
     @commands.command(
         name="blackjack", aliases=["bj", "21"], description="Play a game of blackjack"
@@ -2823,6 +3371,7 @@ class Casino(commands.Cog):
         Play Blackjack with a fresh deck for each game.
         """
         user_id = ctx.author.id
+        session_id = None
 
         PF = await self.prove_fairness(user_id)
 
@@ -2867,6 +3416,26 @@ class Casino(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
             return
+
+        session_id = await self._create_game_session(
+            ctx,
+            "blackjack",
+            owner_id=user_id,
+            wager_total=amount,
+            state={
+                "user_id": user_id,
+                "bet": str(amount),
+                "wallet_id": str(wallet_id),
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=amount,
+            reason="blackjack_bet",
+        )
 
         suits = ["♥", "♦", "♣", "♠"]
         ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
@@ -3022,6 +3591,7 @@ class Casino(commands.Cog):
 
             results = []
             total_winnings = Decimal(0)
+            outcomes = []
 
             if has_split:
                 for idx, (hand_cards, hand_bet, _) in enumerate(split_hands):
@@ -3029,6 +3599,7 @@ class Casino(commands.Cog):
                     outcome, result, winnings = await finalize_game(
                         interaction, hand_score, dealer_score, hand_bet, hand_cards
                     )
+                    outcomes.append(outcome)
                     total_winnings += winnings
                     results.append(
                         f"**Hand {idx + 1}:** {', '.join(hand_cards)} (Total: **{hand_score}**)\n{result}"
@@ -3038,6 +3609,7 @@ class Casino(commands.Cog):
                 outcome, result, winnings = await finalize_game(
                     interaction, player_score, dealer_score, current_bet, player_cards
                 )
+                outcomes.append(outcome)
                 total_winnings += winnings
                 results.append(
                     f"**Your cards:** {', '.join(player_cards)} (Total: **{player_score}**)\n{result}"
@@ -3068,6 +3640,20 @@ class Casino(commands.Cog):
                 color=embed_color,
             )
             await interaction.edit_original_response(embed=embed, view=view)
+
+            if outcomes and all(o == "tie" for o in outcomes):
+                final_outcome = "tie"
+            elif any(o == "win" for o in outcomes):
+                final_outcome = "win"
+            else:
+                final_outcome = "loss"
+
+            await self._remove_refund(session_id, user_id=user_id)
+            await self._end_game_session(
+                session_id,
+                outcome=final_outcome,
+                final_state={"total_winnings": str(total_winnings)},
+            )
 
         async def update_embed(interaction):
             if has_split:
@@ -3343,6 +3929,7 @@ class Casino(commands.Cog):
     async def poker(self, ctx: commands.Context, bet_amount: str):
         user_id = ctx.author.id
         PF = await self.prove_fairness(user_id)
+        session_id = None
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -3379,6 +3966,26 @@ class Casino(commands.Cog):
                 delete_after=5,
             )
 
+        session_id = await self._create_game_session(
+            ctx,
+            "poker",
+            owner_id=user_id,
+            wager_total=bet,
+            state={
+                "user_id": user_id,
+                "bet": str(bet),
+                "wallet_id": str(wallet_id),
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=bet,
+            reason="poker_bet",
+        )
+
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
 
         suits = ["♥", "♦", "♣", "♠"]
@@ -3411,8 +4018,11 @@ class Casino(commands.Cog):
             wallet_id,
             user_id,
             PF,
+            session_id=session_id,
         )
-        await ctx.reply(embed=embed, view=view)
+        msg = await ctx.reply(embed=embed, view=view)
+        view.message = msg
+        self._register_session_handler(session_id, view.force_end)
 
     @commands.command(
         name="baccarat",
@@ -3431,6 +4041,7 @@ class Casino(commands.Cog):
 
         uid = ctx.author.id
         currency = self.currency_name
+        session_id = None
 
         PF = await self.prove_fairness(uid)
 
@@ -3466,6 +4077,27 @@ class Casino(commands.Cog):
                 embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()),
                 delete_after=5,
             )
+
+        session_id = await self._create_game_session(
+            ctx,
+            "baccarat",
+            owner_id=uid,
+            wager_total=stake,
+            state={
+                "user_id": uid,
+                "bet": str(stake),
+                "wallet_id": str(wallet_id),
+                "side": side,
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=uid,
+            wallet_id=str(wallet_id),
+            amount=stake,
+            reason="baccarat_bet",
+        )
 
         ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
         card_val = {r: i for i, r in enumerate(ranks, start=1)} | {
@@ -3576,12 +4208,29 @@ class Casino(commands.Cog):
         await self.bot.database.set_cooldown(uid, ctx.command.qualified_name, 5)
         await ctx.reply(embed=embed)
 
+        await self._remove_refund(session_id, user_id=uid)
+        await self._log_game_event(
+            session_id,
+            "result",
+            {
+                "outcome": "win" if payout_mult > 0 else "loss",
+                "amount": str(display_amt),
+                "result": result,
+            },
+        )
+        await self._end_game_session(
+            session_id,
+            outcome="win" if payout_mult > 0 else "loss",
+            final_state={"amount": str(display_amt)},
+        )
+
     @commands.command(
             name="hilo", description="Play Hi-Lo - a simple card guessing game!"
         )
     async def hilo(self, ctx: Context, bet_amount: str):
         """Play HiLo - guess if the next card will be higher or lower (Stake-style)"""
         user = ctx.author
+        session_id = None
 
         if user.id in self.active_players:
             await ctx.reply("🚫 You already have an active game running! Finish it first.", delete_after=5)
@@ -3652,6 +4301,26 @@ class Casino(commands.Cog):
                 self.active_players.remove(user.id)
                 return
 
+            session_id = await self._create_game_session(
+                ctx,
+                "hilo",
+                owner_id=user_id,
+                wager_total=bet_amount,
+                state={
+                    "user_id": user_id,
+                    "bet": str(bet_amount),
+                    "wallet_id": str(wallet_id),
+                },
+                rng=PF,
+            )
+            await self._add_refund(
+                session_id,
+                user_id=user_id,
+                wallet_id=str(wallet_id),
+                amount=bet_amount,
+                reason="hilo_bet",
+            )
+
             cards = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
             card_values = {card: idx for idx, card in enumerate(cards)}
             current_card = await self.fair_choice(ctx.author.id, cards[1:-1])
@@ -3666,6 +4335,7 @@ class Casino(commands.Cog):
                 "view": None,
                 "has_played": False,
                 "skips_used": 0,
+                "session_id": session_id,
             }
 
             def calculate_multiplier(current_card, action):
@@ -3792,7 +4462,23 @@ class Casino(commands.Cog):
                         nonce=PF["nonce"],
                         hash_hex=PF["server_seed_hash"],
                     )
+                    await self._remove_refund(session_id, user_id=user_id)
+                    await self._end_game_session(
+                        session_id,
+                        outcome="win",
+                        final_state={
+                            "winnings": str(
+                                game_state["bet_amount"] * game_state["multiplier"]
+                            )
+                        },
+                    )
                     return game_state["bet_amount"] * game_state["multiplier"]
+                await self._remove_refund(session_id, user_id=user_id)
+                await self._end_game_session(
+                    session_id,
+                    outcome="loss",
+                    final_state={"loss": str(game_state["bet_amount"])},
+                )
                 return None
 
             async def update_display(interaction: discord.Interaction | None = None):
@@ -4088,6 +4774,30 @@ class Casino(commands.Cog):
             embed = await create_embed()
             game_state["message"] = await ctx.reply(embed=embed, view=view)
 
+            async def force_end(refund: bool = False):
+                game_state["game_active"] = False
+                for child in game_state["view"].children:
+                    child.disabled = True
+                if refund:
+                    wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=wallet_id,
+                        amount=game_state["bet_amount"],
+                        description="HiLo Refund",
+                    )
+                try:
+                    await game_state["message"].edit(view=game_state["view"])
+                except Exception:
+                    pass
+                await self._remove_refund(session_id, user_id=user_id)
+                await self._end_game_session(
+                    session_id,
+                    outcome="forced_end",
+                    final_state={"refund": refund},
+                )
+
+            self._register_session_handler(session_id, force_end)
+
         except Exception as e:
             if user.id in self.active_players:
                 self.active_players.remove(user.id)
@@ -4109,6 +4819,7 @@ class Casino(commands.Cog):
         """Start climbing the Lucky Ladder with a bet."""
         user_id = ctx.author.id
         PF = await self.prove_fairness(user_id)
+        session_id = None
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -4147,12 +4858,33 @@ class Casino(commands.Cog):
                 delete_after=5,
             )
 
+        session_id = await self._create_game_session(
+            ctx,
+            "ladder",
+            owner_id=user_id,
+            wager_total=amount,
+            state={
+                "user_id": user_id,
+                "bet": str(amount),
+                "wallet_id": str(wallet_id),
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=amount,
+            reason="ladder_bet",
+        )
+
         self.ladder_games[user_id] = {
             "step": 0,
             "bet": amount,
             "current_multiplier": Decimal("1.00"),
             "start_time": discord.utils.utcnow(),
             "PF": PF,
+            "session_id": session_id,
         }
 
         embed = discord.Embed(
@@ -4180,7 +4912,33 @@ class Casino(commands.Cog):
 
         view = LadderView(user_id, self)
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
-        await ctx.reply(embed=embed, view=view)
+        msg = await ctx.reply(embed=embed, view=view)
+        view.message = msg
+
+        async def force_end(refund: bool = False):
+            game = self.ladder_games.pop(user_id, None)
+            if refund and game:
+                wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=game["bet"],
+                    description="Lucky Ladder Refund",
+                )
+            for child in view.children:
+                child.disabled = True
+            if view.message:
+                try:
+                    await view.message.edit(view=view)
+                except Exception:
+                    pass
+            await self._remove_refund(session_id, user_id=user_id)
+            await self._end_game_session(
+                session_id,
+                outcome="forced_end",
+                final_state={"refund": refund},
+            )
+
+        self._register_session_handler(session_id, force_end)
 
     async def climb_ladder(self, interaction: discord.Interaction, user_id: int):
         """Handles the player's climb action with provably-fair RNG."""
@@ -4277,6 +5035,12 @@ class Casino(commands.Cog):
                     f"🏆 **Congratulations!!** You've reached the top!\n"
                     f"You won **{await self.formatter(current_winnings)}**!"
                 )
+                await self._remove_refund(game.get("session_id"), user_id=user_id)
+                await self._end_game_session(
+                    game.get("session_id"),
+                    outcome="win",
+                    final_state={"winnings": str(current_winnings)},
+                )
                 del self.ladder_games[user_id]
                 return await interaction.response.edit_message(embed=embed, view=None)
 
@@ -4302,6 +5066,12 @@ class Casino(commands.Cog):
                     f"You rolled: {(roll/100):.2f}"
                 ),
                 color=discord.Color.red(),
+            )
+            await self._remove_refund(game.get("session_id"), user_id=user_id)
+            await self._end_game_session(
+                game.get("session_id"),
+                outcome="loss",
+                final_state={"loss": str(bet)},
             )
             del self.ladder_games[user_id]
             await interaction.response.edit_message(embed=embed, view=None)
@@ -4364,6 +5134,12 @@ class Casino(commands.Cog):
         )
         del self.ladder_games[user_id]
         await interaction.response.edit_message(embed=embed, view=None)
+        await self._remove_refund(game.get("session_id"), user_id=user_id)
+        await self._end_game_session(
+            game.get("session_id"),
+            outcome="win",
+            final_state={"winnings": str(final_reward)},
+        )
 
     @commands.command(
         name="crash", description="Start a crash game in the current channel."
@@ -4375,8 +5151,36 @@ class Casino(commands.Cog):
                 "A crash game is already running here.", delete_after=5
             )
 
-        view = CrashView(self.bot, ctx.author.id, cid)
+        session_id = await self._create_game_session(
+            ctx,
+            "crash",
+            owner_id=ctx.author.id,
+            state={"host_id": ctx.author.id},
+        )
+        view = CrashView(self.bot, ctx.author.id, cid, session_id=session_id)
         self.active_games[cid] = view
+
+        async def force_end(refund: bool = False):
+            for pid, bet in list(view.players.items()):
+                if pid not in view.cashed_out and pid not in view.crashed_out:
+                    if refund:
+                        wallet = await self.bot.database.get_wallet_id_for_user(pid)
+                        await self.bot.database.process_treasury_transaction(
+                            wallet, bet, "Crash Refund"
+                        )
+                    view.crashed_out[pid] = view.crash_points.get(pid, Decimal("0"))
+            view.is_running = False
+            if view.game_task:
+                view.game_task.cancel()
+            if view.game_message:
+                await view.game_message.edit(embed=await view.make_embed(), view=None)
+            await self._end_game_session(
+                session_id,
+                outcome="forced_end",
+                final_state={"refund": refund},
+            )
+
+        self._register_session_handler(session_id, force_end)
 
         view.game_task = asyncio.create_task(view.start_game(ctx))
 
@@ -4438,6 +5242,13 @@ class Casino(commands.Cog):
                 await self.bot.database.process_treasury_transaction(
                     wallet_id, -amt, "Crash Bet"
                 )
+                await casino_cog._add_refund(
+                    current_game.session_id,
+                    user_id=uid,
+                    wallet_id=str(wallet_id),
+                    amount=amt,
+                    reason="crash_bet",
+                )
                 current_game.players[uid] = amt
 
                 current_game.crash_points[
@@ -4446,6 +5257,11 @@ class Casino(commands.Cog):
 
                 await modal_inter.response.send_message(
                     f"Joined at {amt}", ephemeral=True
+                )
+                await casino_cog._log_game_event(
+                    current_game.session_id,
+                    "join",
+                    {"user_id": uid, "bet": str(amt)},
                 )
                 await current_game.update_game_message()
 
@@ -4466,6 +5282,13 @@ class Casino(commands.Cog):
             wallet = await self.bot.database.get_wallet_id_for_user(uid)
             await self.bot.database.process_treasury_transaction(
                 wallet, win, "Crash Win"
+            )
+
+            await casino_cog._remove_refund(current_game.session_id, user_id=uid)
+            await casino_cog._log_game_event(
+                current_game.session_id,
+                "cashout",
+                {"user_id": uid, "multiplier": str(mult), "win": str(win)},
             )
 
             current_game.cashed_out[uid] = mult
@@ -4578,6 +5401,7 @@ class Casino(commands.Cog):
             user_id = ctx.author.id
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
+            session_id = None
 
             try:
                 parsed_bet_amount = await self.amount_handler(bet_amount, balance)
@@ -4631,6 +5455,28 @@ class Casino(commands.Cog):
                 await ctx.reply(embed=embed)
                 return
 
+            PF = await self.prove_fairness(user_id)
+            session_id = await self._create_game_session(
+                ctx,
+                "mines",
+                owner_id=user_id,
+                wager_total=bet_amount,
+                state={
+                    "user_id": user_id,
+                    "bet": str(bet_amount),
+                    "wallet_id": str(wallet_id),
+                    "bombs": num_bombs,
+                },
+                rng=PF,
+            )
+            await self._add_refund(
+                session_id,
+                user_id=user_id,
+                wallet_id=str(wallet_id),
+                amount=bet_amount,
+                reason="mines_bet",
+            )
+
             grid_size = 5
             grid = [[" " for _ in range(grid_size)] for _ in range(grid_size)]
 
@@ -4667,7 +5513,6 @@ class Casino(commands.Cog):
             try:
                 main_message = await ctx.reply(embed=embed)
 
-                PF = await self.prove_fairness(user_id)
                 game_view = MinesView(
                     grid,
                     bomb_positions,
@@ -4676,11 +5521,18 @@ class Casino(commands.Cog):
                     bet_amount,
                     self.bot,
                     PF,
+                    session_id=session_id,
                 )
                 await main_message.edit(view=game_view)
+                self._register_session_handler(session_id, game_view.force_end)
 
                 cashout_view = CashoutView(
-                    main_message, game_view, user_id, bet_amount, self.bot
+                    main_message,
+                    game_view,
+                    user_id,
+                    bet_amount,
+                    self.bot,
+                    session_id=session_id,
                 )
                 cashout_msg = await ctx.reply(view=cashout_view)
                 game_view.cashout_message = cashout_msg
@@ -4728,9 +5580,24 @@ class Casino(commands.Cog):
                     delete_after=5,
                 )
 
+            session_id = await self._create_game_session(
+                ctx,
+                "keno",
+                owner_id=user_id,
+                wager_total=amount,
+                state={
+                    "user_id": user_id,
+                    "bet": str(amount),
+                    "wallet_id": str(wallet_id),
+                },
+                rng=PF,
+            )
+
             formatted_bet = await self.formatter(amount)
-            game_ui_view = GameUI(self, amount, formatted_bet, wallet_id, PF)
-            table_ui_view = TableUI(self)
+            game_ui_view = GameUI(
+                self, amount, formatted_bet, wallet_id, PF, session_id=session_id
+            )
+            table_ui_view = TableUI(self, session_id=session_id)
 
             grid_msg = await ctx.reply(view=table_ui_view)
             await ctx.send(view=game_ui_view)
@@ -4738,6 +5605,15 @@ class Casino(commands.Cog):
             game_ui_view.container.table_ui_view = table_ui_view
             table_ui_view.message = grid_msg
             table_ui_view.player = ctx.author
+
+            async def force_end(refund: bool = False):
+                await self._end_game_session(
+                    session_id,
+                    outcome="forced_end",
+                    final_state={"refund": refund},
+                )
+
+            self._register_session_handler(session_id, force_end)
 
         except ValueError as e:
             embed = discord.Embed(description=str(e), color=discord.Color.red())
@@ -4788,11 +5664,17 @@ keno_payouts = {
 
 class GameUI(discord.ui.LayoutView):
     def __init__(
-        self, cog, player_bet: int, formatted_bet, player_wallet, PF: ProvenFairness
+        self,
+        cog,
+        player_bet: int,
+        formatted_bet,
+        player_wallet,
+        PF: ProvenFairness,
+        session_id=None,
     ):
         super().__init__(timeout=None)
         self.container = GameUIContainer(
-            cog, player_bet, formatted_bet, player_wallet, PF
+            cog, player_bet, formatted_bet, player_wallet, PF, session_id=session_id
         )
         self.add_item(self.container)
 
@@ -4805,6 +5687,7 @@ class GameUIContainer(discord.ui.Container):
         formatted_bet,
         player_wallet,
         PF: ProvenFairness,
+        session_id=None,
     ):
         super().__init__(accent_color=0x2B2D31)
         self.table_ui_view: TableUI = None
@@ -4812,6 +5695,7 @@ class GameUIContainer(discord.ui.Container):
         self.player_bet = player_bet
         self.player_wallet = player_wallet
         self.player_formatted_bet = formatted_bet
+        self.session_id = session_id
         self.game_title = discord.ui.TextDisplay(
             f"### Keno | Select your stake | {cog.currency_name} {self.player_formatted_bet}"
         )
@@ -4833,7 +5717,7 @@ class GameUIContainer(discord.ui.Container):
 
 
 class TableUI(discord.ui.LayoutView):
-    def __init__(self, cog: Casino):
+    def __init__(self, cog: Casino, session_id=None):
         super().__init__(timeout=None)
         self.message: discord.Message = None
 
@@ -4850,6 +5734,7 @@ class TableUI(discord.ui.LayoutView):
 
         self.container = TableUIContainer(self.default_color)
         self.add_item(self.container)
+        self.session_id = session_id
 
     def get_all_buttons(self):
         buttons = []
@@ -4990,6 +5875,7 @@ class BetButton(discord.ui.Button):
     async def callback(self, itn: discord.Interaction):
         try:
             table_ui_view: TableUI = self.parent.parent.table_ui_view
+            game_ui_container: GameUIContainer = self.parent.parent
 
             bet_multiplier, player_bet, wallet_id = await self.handle_bullshit(
                 table_ui_view, itn
@@ -5031,6 +5917,17 @@ class BetButton(discord.ui.Button):
                     description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
                 )
                 return await itn.response.send_message(embed=embed, delete_after=5)
+
+            session_id = getattr(game_ui_container, "session_id", None) or getattr(
+                table_ui_view, "session_id", None
+            )
+            await self.cog._add_refund(
+                session_id,
+                user_id=table_ui_view.player.id,
+                wallet_id=str(wallet_id),
+                amount=Decimal(player_bet),
+                reason="keno_bet",
+            )
 
             if total_win == player_bet:
                 table_ui_view.container.win_loss_text.content = f"### You broke even {table_ui_view.selected_emoji} {total_win_formatted}"
@@ -5080,6 +5977,13 @@ class BetButton(discord.ui.Button):
                     description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
                 )
                 return await itn.response.send_message(embed=embed, delete_after=5)
+
+            await self.cog._remove_refund(session_id, user_id=table_ui_view.player.id)
+            await self.cog._end_game_session(
+                session_id,
+                outcome="win" if total_win >= player_bet else "loss",
+                final_state={"amount": str(total_win)},
+            )
 
             await itn.response.defer()
         except Exception as e:

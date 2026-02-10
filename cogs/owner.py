@@ -700,6 +700,149 @@ class Owner(commands.Cog, name="Owner"):
             )
         await ctx.send(embed=embed)
 
+    @commands.group(
+        name="gamesession",
+        aliases=["gs"],
+        help="Supervise active game sessions",
+        invoke_without_command=True,
+        hidden=True,
+    )
+    @commands.is_owner()
+    async def gamesession(self, ctx: Context):
+        embed = discord.Embed(
+            title="Game Sessions",
+            description="Available subcommands: list, show, events, end",
+            color=discord.Color.blurple(),
+        )
+        await ctx.send(embed=embed)
+
+    @gamesession.command(name="list", hidden=True)
+    @commands.is_owner()
+    async def gamesession_list(self, ctx: Context, limit: int = 10):
+        limit = max(1, min(limit, 25))
+        sessions = await self.bot.database.list_game_sessions(limit=limit)
+        if not sessions:
+            return await ctx.send("No active game sessions.")
+
+        lines = []
+        for s in sessions:
+            created = s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"
+            lines.append(
+                f"{s.id} • {s.game_name} • owner {s.owner_id} • {created}"
+            )
+        embed = discord.Embed(
+            title="Active Game Sessions",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        await ctx.send(embed=embed)
+
+    @gamesession.command(name="show", hidden=True)
+    @commands.is_owner()
+    async def gamesession_show(self, ctx: Context, session_id: str):
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
+            return await ctx.send("Invalid session ID.")
+
+        gs = await self.bot.database.get_game_session(sid)
+        if not gs:
+            return await ctx.send("Session not found.")
+
+        embed = discord.Embed(
+            title=f"Session {gs.id}", color=discord.Color.blurple()
+        )
+        embed.add_field(name="Game", value=gs.game_name, inline=True)
+        embed.add_field(name="Owner", value=str(gs.owner_id), inline=True)
+        embed.add_field(name="Channel", value=str(gs.channel_id), inline=True)
+        embed.add_field(name="Wager", value=str(gs.wager_total), inline=True)
+        embed.add_field(
+            name="Participants",
+            value=", ".join(str(p) for p in (gs.participants or [])) or "—",
+            inline=False,
+        )
+        embed.add_field(
+            name="State",
+            value=textwrap.shorten(str(gs.state or {}), width=900, placeholder="..."),
+            inline=False,
+        )
+        embed.add_field(
+            name="RNG",
+            value=textwrap.shorten(str(gs.rng or {}), width=900, placeholder="..."),
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @gamesession.command(name="events", hidden=True)
+    @commands.is_owner()
+    async def gamesession_events(
+        self, ctx: Context, session_id: str, limit: int = 10
+    ):
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
+            return await ctx.send("Invalid session ID.")
+
+        events = await self.bot.database.get_game_session_events(sid, limit=limit)
+        if not events:
+            return await ctx.send("No events found for this session.")
+
+        lines = []
+        for e in events:
+            created = e.created_at.strftime("%Y-%m-%d %H:%M") if e.created_at else "?"
+            lines.append(
+                f"{created} • {e.event_type} • "
+                f"{textwrap.shorten(str(e.payload), width=700, placeholder='...')}"
+            )
+        embed = discord.Embed(
+            title=f"Session Events — {sid}",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        await ctx.send(embed=embed)
+
+    @gamesession.command(name="end", hidden=True)
+    @commands.is_owner()
+    async def gamesession_end(
+        self, ctx: Context, session_id: str, refund: bool = False
+    ):
+        try:
+            sid = uuid.UUID(session_id)
+        except ValueError:
+            return await ctx.send("Invalid session ID.")
+
+        casino = self.bot.get_cog("Casino")
+        handled = False
+        if casino:
+            handled = await casino.force_end_session(sid, refund=refund)
+
+        if handled:
+            return await ctx.send("Session force-ended via live handler.")
+
+        gs = await self.bot.database.get_game_session(sid)
+        if not gs:
+            return await ctx.send("Session not found.")
+
+        if refund:
+            refunds = (gs.state or {}).get("refunds", [])
+            for r in refunds:
+                try:
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=r.get("wallet_id"),
+                        amount=Decimal(r.get("amount")),
+                        description="Game Session Refund",
+                    )
+                except Exception as exc:
+                    logger.error("Refund failed for %s: %s", r, exc)
+
+        await self.bot.database.end_game_session(
+            sid,
+            outcome="forced_end",
+            reason="admin_end",
+            final_state=gs.state or {},
+        )
+        await ctx.send("Session ended.")
+
     # ---------- UNLOAD ----------
     @commands.command(name="unload", hidden=True)
     @commands.is_owner()
