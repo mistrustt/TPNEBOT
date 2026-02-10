@@ -1,5 +1,6 @@
 import logging.handlers
 import os, random
+import time
 import discord
 import logging
 import platform
@@ -9,7 +10,7 @@ import uuid
 from discord import app_commands, Webhook
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils
@@ -17,6 +18,7 @@ from utils.admin_api import AdminAPIServer
 from database.manager import DatabaseManager
 from sqlalchemy import text
 from utils.cache import Cache
+from utils.stats import hash_user_id
 
 class LoggingFormatter(logging.Formatter):
     COLORS = {
@@ -148,6 +150,12 @@ class DiscordBot(commands.Bot):
             )
         )
 
+    @tasks.loop(hours=24)
+    async def stats_retention_task(self) -> None:
+        await self.wait_until_ready()
+        cutoff = datetime.now(timezone.utc) - timedelta(days=365)
+        await self.database.purge_stats_before(cutoff.date())
+
     def is_coolguy(self, user_id: int):
         return user_id in self.cool_guys
 
@@ -186,6 +194,7 @@ class DiscordBot(commands.Bot):
 
             self.status_task.start()
             self.cache_songs.start()
+            self.stats_retention_task.start()
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")
@@ -202,7 +211,7 @@ class DiscordBot(commands.Bot):
                     await api_server.start()
                     self.admin_api_server = api_server
                     self.admin_api_secret = secret
-                    self.logger.info(f"Admin API running on {host}:{port}")
+                    self.logger.info(f"Admin API running on port {port}")
             except Exception as e:
                 self.logger.error(f"Failed to start Admin API: {e}")
 
@@ -292,17 +301,55 @@ class DiscordBot(commands.Bot):
                     await ctx.send(embed=embed, delete_after=5)
                     return
 
+            ctx._stats_started_at = time.perf_counter()
             await super().invoke(ctx)
         except discord.errors.DiscordServerError:
             return
         except discord.HTTPException:
             return
 
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        if interaction.type == discord.InteractionType.application_command:
+            interaction._stats_started_at = time.perf_counter()
+        await super().on_interaction(interaction)
+
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name
         user = ctx.author
         channel = ctx.channel
         guild = ctx.guild
+
+        try:
+            used_at = datetime.now(timezone.utc)
+            user_hash = hash_user_id(user.id)
+            guild_id = guild.id if guild else None
+            latency_ms = None
+            started_at = getattr(ctx, "_stats_started_at", None)
+            if started_at is not None:
+                latency_ms = int((time.perf_counter() - started_at) * 1000)
+
+            await self.database.record_command_usage(
+                command_name=command_name,
+                guild_id=guild_id,
+                user_hash=user_hash,
+                is_slash=False,
+                used_at=used_at,
+            )
+            await self.database.record_user_exposure(
+                guild_id=guild_id,
+                user_hash=user_hash,
+                seen_at=used_at,
+            )
+            if latency_ms is not None:
+                await self.database.record_command_latency(
+                    command_name=command_name,
+                    guild_id=guild_id,
+                    is_slash=False,
+                    latency_ms=latency_ms,
+                    used_at=used_at,
+                )
+        except Exception as e:
+            self.logger.warning(f"Stats tracking failed: {e}")
 
         self.logger.info(
             f"Command '{command_name}' executed by {user} (ID: {user.id}) "
@@ -313,6 +360,38 @@ class DiscordBot(commands.Bot):
     async def on_app_command_completion(
         self, interaction: discord.Interaction, command: app_commands.Command
     ):
+        try:
+            used_at = datetime.now(timezone.utc)
+            user_hash = hash_user_id(interaction.user.id)
+            guild_id = interaction.guild.id if interaction.guild else None
+            latency_ms = None
+            started_at = getattr(interaction, "_stats_started_at", None)
+            if started_at is not None:
+                latency_ms = int((time.perf_counter() - started_at) * 1000)
+
+            await self.database.record_command_usage(
+                command_name=command.qualified_name,
+                guild_id=guild_id,
+                user_hash=user_hash,
+                is_slash=True,
+                used_at=used_at,
+            )
+            await self.database.record_user_exposure(
+                guild_id=guild_id,
+                user_hash=user_hash,
+                seen_at=used_at,
+            )
+            if latency_ms is not None:
+                await self.database.record_command_latency(
+                    command_name=command.qualified_name,
+                    guild_id=guild_id,
+                    is_slash=True,
+                    latency_ms=latency_ms,
+                    used_at=used_at,
+                )
+        except Exception as e:
+            self.logger.warning(f"Stats tracking failed: {e}")
+
         self.logger.info(
             f"Slash /{command.name} used by {interaction.user} "
             f"(ID:{interaction.user.id}) in #{interaction.channel} "
@@ -322,6 +401,32 @@ class DiscordBot(commands.Bot):
     async def on_app_command_error(
         self, interaction: discord.Interaction, error
     ) -> None:
+        try:
+            if not isinstance(error, app_commands.CommandOnCooldown):
+                command = getattr(interaction, "command", None)
+                command_name = command.qualified_name if command else "unknown"
+                used_at = datetime.now(timezone.utc)
+                guild_id = interaction.guild.id if interaction.guild else None
+                await self.database.record_command_error(
+                    command_name=command_name,
+                    guild_id=guild_id,
+                    is_slash=True,
+                    error_type=type(error).__name__,
+                    used_at=used_at,
+                )
+                started_at = getattr(interaction, "_stats_started_at", None)
+                if started_at is not None:
+                    latency_ms = int((time.perf_counter() - started_at) * 1000)
+                    await self.database.record_command_latency(
+                        command_name=command_name,
+                        guild_id=guild_id,
+                        is_slash=True,
+                        latency_ms=latency_ms,
+                        used_at=used_at,
+                    )
+        except Exception as e:
+            self.logger.warning(f"Stats tracking failed: {e}")
+
         if isinstance(error, app_commands.CommandOnCooldown):
             retry = error.retry_after
             if not interaction.response.is_done():
@@ -346,6 +451,32 @@ class DiscordBot(commands.Bot):
             self.logger.exception(error)
 
     async def on_command_error(self, ctx: Context, error) -> None:
+        try:
+            if ctx.command and not isinstance(
+                error, (commands.CommandNotFound, commands.CommandOnCooldown)
+            ):
+                used_at = datetime.now(timezone.utc)
+                guild_id = ctx.guild.id if ctx.guild else None
+                await self.database.record_command_error(
+                    command_name=ctx.command.qualified_name,
+                    guild_id=guild_id,
+                    is_slash=False,
+                    error_type=type(error).__name__,
+                    used_at=used_at,
+                )
+                started_at = getattr(ctx, "_stats_started_at", None)
+                if started_at is not None:
+                    latency_ms = int((time.perf_counter() - started_at) * 1000)
+                    await self.database.record_command_latency(
+                        command_name=ctx.command.qualified_name,
+                        guild_id=guild_id,
+                        is_slash=False,
+                        latency_ms=latency_ms,
+                        used_at=used_at,
+                    )
+        except Exception as e:
+            self.logger.warning(f"Stats tracking failed: {e}")
+
         if isinstance(error, commands.CommandOnCooldown):
             embed = await CooldownUtils.get_cooldown_embed(error.retry_after)
             await ctx.reply(embed=embed, delete_after=error.retry_after)

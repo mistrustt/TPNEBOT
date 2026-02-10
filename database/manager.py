@@ -27,6 +27,10 @@ from .models import (
     JailedUser,
     CommandStatus,
     CommandCooldown,
+    CommandUsageDaily,
+    CommandLatencyDaily,
+    CommandErrorDaily,
+    DailyUserExposure,
     Blacklist,
     BoosterRole,
     Transaction,
@@ -736,6 +740,188 @@ class DatabaseManager:
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error logging moderation command: {str(e)}")
+
+    async def record_command_usage(
+        self,
+        *,
+        command_name: str,
+        guild_id: Optional[int],
+        user_hash: Optional[str],
+        is_slash: bool,
+        used_at: Optional[datetime] = None,
+    ) -> None:
+        try:
+            used_at = used_at or datetime.now(timezone.utc)
+            bucket_date = used_at.date()
+            async with self.async_sessionmaker() as session:
+                stmt = select(CommandUsageDaily).where(
+                    CommandUsageDaily.bucket_date == bucket_date,
+                    CommandUsageDaily.command_name == command_name,
+                    CommandUsageDaily.guild_id == guild_id,
+                    CommandUsageDaily.user_hash == user_hash,
+                    CommandUsageDaily.is_slash == is_slash,
+                )
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row:
+                    row.count += 1
+                    row.last_used_at = used_at
+                else:
+                    session.add(
+                        CommandUsageDaily(
+                            bucket_date=bucket_date,
+                            command_name=command_name,
+                            guild_id=guild_id,
+                            user_hash=user_hash,
+                            is_slash=is_slash,
+                            count=1,
+                            last_used_at=used_at,
+                        )
+                    )
+                await session.commit()
+        except SQLAlchemyError as e:
+            logging.error(f"Error recording command usage: {str(e)}")
+
+    async def record_command_latency(
+        self,
+        *,
+        command_name: str,
+        guild_id: Optional[int],
+        is_slash: bool,
+        latency_ms: int,
+        used_at: Optional[datetime] = None,
+    ) -> None:
+        try:
+            used_at = used_at or datetime.now(timezone.utc)
+            bucket_date = used_at.date()
+            async with self.async_sessionmaker() as session:
+                stmt = select(CommandLatencyDaily).where(
+                    CommandLatencyDaily.bucket_date == bucket_date,
+                    CommandLatencyDaily.command_name == command_name,
+                    CommandLatencyDaily.guild_id == guild_id,
+                    CommandLatencyDaily.is_slash == is_slash,
+                )
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row:
+                    row.latency_ms_sum += latency_ms
+                    row.latency_count += 1
+                    row.last_used_at = used_at
+                else:
+                    session.add(
+                        CommandLatencyDaily(
+                            bucket_date=bucket_date,
+                            command_name=command_name,
+                            guild_id=guild_id,
+                            is_slash=is_slash,
+                            latency_ms_sum=latency_ms,
+                            latency_count=1,
+                            last_used_at=used_at,
+                        )
+                    )
+                await session.commit()
+        except SQLAlchemyError as e:
+            logging.error(f"Error recording command latency: {str(e)}")
+
+    async def record_command_error(
+        self,
+        *,
+        command_name: str,
+        guild_id: Optional[int],
+        is_slash: bool,
+        error_type: str,
+        used_at: Optional[datetime] = None,
+    ) -> None:
+        try:
+            used_at = used_at or datetime.now(timezone.utc)
+            bucket_date = used_at.date()
+            async with self.async_sessionmaker() as session:
+                stmt = select(CommandErrorDaily).where(
+                    CommandErrorDaily.bucket_date == bucket_date,
+                    CommandErrorDaily.command_name == command_name,
+                    CommandErrorDaily.guild_id == guild_id,
+                    CommandErrorDaily.is_slash == is_slash,
+                    CommandErrorDaily.error_type == error_type,
+                )
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row:
+                    row.count += 1
+                    row.last_seen_at = used_at
+                else:
+                    session.add(
+                        CommandErrorDaily(
+                            bucket_date=bucket_date,
+                            command_name=command_name,
+                            guild_id=guild_id,
+                            is_slash=is_slash,
+                            error_type=error_type,
+                            count=1,
+                            last_seen_at=used_at,
+                        )
+                    )
+                await session.commit()
+        except SQLAlchemyError as e:
+            logging.error(f"Error recording command error: {str(e)}")
+
+    async def record_user_exposure(
+        self,
+        *,
+        guild_id: Optional[int],
+        user_hash: str,
+        seen_at: Optional[datetime] = None,
+    ) -> None:
+        try:
+            seen_at = seen_at or datetime.now(timezone.utc)
+            bucket_date = seen_at.date()
+            async with self.async_sessionmaker() as session:
+                stmt = select(DailyUserExposure).where(
+                    DailyUserExposure.bucket_date == bucket_date,
+                    DailyUserExposure.guild_id == guild_id,
+                    DailyUserExposure.user_hash == user_hash,
+                )
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row:
+                    return
+                session.add(
+                    DailyUserExposure(
+                        bucket_date=bucket_date,
+                        guild_id=guild_id,
+                        user_hash=user_hash,
+                        first_seen_at=seen_at,
+                    )
+                )
+                await session.commit()
+        except SQLAlchemyError as e:
+            logging.error(f"Error recording user exposure: {str(e)}")
+
+    async def purge_stats_before(self, cutoff_date) -> None:
+        try:
+            async with self.async_sessionmaker() as session:
+                await session.execute(
+                    delete(CommandUsageDaily).where(
+                        CommandUsageDaily.bucket_date < cutoff_date
+                    )
+                )
+                await session.execute(
+                    delete(CommandLatencyDaily).where(
+                        CommandLatencyDaily.bucket_date < cutoff_date
+                    )
+                )
+                await session.execute(
+                    delete(CommandErrorDaily).where(
+                        CommandErrorDaily.bucket_date < cutoff_date
+                    )
+                )
+                await session.execute(
+                    delete(DailyUserExposure).where(
+                        DailyUserExposure.bucket_date < cutoff_date
+                    )
+                )
+                await session.commit()
+        except SQLAlchemyError as e:
+            logging.error(f"Error purging stats before {cutoff_date}: {str(e)}")
 
     async def update_punishment_reason(
         self, case_id: int, guild_id: int, new_reason: str

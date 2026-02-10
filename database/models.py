@@ -15,6 +15,7 @@ from sqlalchemy import (
     LargeBinary,
     UniqueConstraint,
     DateTime,
+    Date,
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import declarative_base
@@ -194,6 +195,96 @@ class CommandCooldown(Base):
 
     def __repr__(self):
         return f"<CommandCooldown(user_id={self.user_id}, command_name={self.command_name}, cooldown_expiry={self.cooldown_expiry})>"
+
+
+class CommandUsageDaily(Base):
+    __tablename__ = "command_usage_daily"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bucket_date = Column(Date, nullable=False, index=True)
+    command_name = Column(String, nullable=False, index=True)
+    guild_id = Column(BigInteger, nullable=True, index=True)
+    user_hash = Column(String(64), nullable=True, index=True)
+    is_slash = Column(Boolean, default=False, nullable=False)
+    count = Column(Integer, default=0, nullable=False)
+    last_used_at = Column(TIMESTAMP, default=datetime.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket_date",
+            "command_name",
+            "guild_id",
+            "user_hash",
+            "is_slash",
+            name="uq_command_usage_daily",
+        ),
+    )
+
+
+class CommandLatencyDaily(Base):
+    __tablename__ = "command_latency_daily"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bucket_date = Column(Date, nullable=False, index=True)
+    command_name = Column(String, nullable=False, index=True)
+    guild_id = Column(BigInteger, nullable=True, index=True)
+    is_slash = Column(Boolean, default=False, nullable=False)
+    latency_ms_sum = Column(BigInteger, default=0, nullable=False)
+    latency_count = Column(Integer, default=0, nullable=False)
+    last_used_at = Column(TIMESTAMP, default=datetime.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket_date",
+            "command_name",
+            "guild_id",
+            "is_slash",
+            name="uq_command_latency_daily",
+        ),
+    )
+
+
+class CommandErrorDaily(Base):
+    __tablename__ = "command_error_daily"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bucket_date = Column(Date, nullable=False, index=True)
+    command_name = Column(String, nullable=False, index=True)
+    guild_id = Column(BigInteger, nullable=True, index=True)
+    is_slash = Column(Boolean, default=False, nullable=False)
+    error_type = Column(String, nullable=False)
+    count = Column(Integer, default=0, nullable=False)
+    last_seen_at = Column(TIMESTAMP, default=datetime.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket_date",
+            "command_name",
+            "guild_id",
+            "is_slash",
+            "error_type",
+            name="uq_command_error_daily",
+        ),
+    )
+
+
+class DailyUserExposure(Base):
+    __tablename__ = "daily_user_exposure"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bucket_date = Column(Date, nullable=False, index=True)
+    guild_id = Column(BigInteger, nullable=True, index=True)
+    user_hash = Column(String(64), nullable=False, index=True)
+    first_seen_at = Column(TIMESTAMP, default=datetime.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket_date",
+            "guild_id",
+            "user_hash",
+            name="uq_daily_user_exposure",
+        ),
+    )
 
 
 class LastFMusers(Base):
