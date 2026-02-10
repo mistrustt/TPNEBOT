@@ -311,7 +311,7 @@ class DiscordBot(commands.Bot):
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
             interaction._stats_started_at = time.perf_counter()
-        await self.process_application_commands(interaction)
+        await self.tree.process_interaction(interaction)
 
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name
@@ -321,6 +321,8 @@ class DiscordBot(commands.Bot):
 
         try:
             used_at = discord.utils.utcnow()
+            if used_at.tzinfo is not None:
+                used_at = used_at.replace(tzinfo=None)
             user_hash = hash_user_id(user.id)
             guild_id = guild.id if guild else None
             latency_ms = None
@@ -362,6 +364,8 @@ class DiscordBot(commands.Bot):
     ):
         try:
             used_at = discord.utils.utcnow()
+            if used_at.tzinfo is not None:
+                used_at = used_at.replace(tzinfo=None)
             user_hash = hash_user_id(interaction.user.id)
             guild_id = interaction.guild.id if interaction.guild else None
             latency_ms = None
@@ -406,6 +410,8 @@ class DiscordBot(commands.Bot):
                 command = getattr(interaction, "command", None)
                 command_name = command.qualified_name if command else "unknown"
                 used_at = discord.utils.utcnow()
+                if used_at.tzinfo is not None:
+                    used_at = used_at.replace(tzinfo=None)
                 guild_id = interaction.guild.id if interaction.guild else None
                 await self.database.record_command_error(
                     command_name=command_name,
@@ -456,6 +462,8 @@ class DiscordBot(commands.Bot):
                 error, (commands.CommandNotFound, commands.CommandOnCooldown)
             ):
                 used_at = discord.utils.utcnow()
+                if used_at.tzinfo is not None:
+                    used_at = used_at.replace(tzinfo=None)
                 guild_id = ctx.guild.id if ctx.guild else None
                 await self.database.record_command_error(
                     command_name=ctx.command.qualified_name,

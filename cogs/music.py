@@ -2341,6 +2341,15 @@ class Music(commands.Cog, name="Music"):
                 except Exception as e:
                     logger.error(f"Error deleting file {file_path}: {e}")
 
+    def remove_file(self, file_path: str) -> None:
+        if not file_path:
+            return
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            logger.error(f"Error deleting file {file_path}: {e}")
+
     @commands.command(name="cdc")
     @commands.check_any(commands.is_owner(), commands.check(can_test))
     async def cleardownloadcache(self, ctx: commands.Context):
@@ -2483,6 +2492,8 @@ class Music(commands.Cog, name="Music"):
         start_point: int = None,
         path: str = None,
     ):
+        temp_file_path = None
+        output_path = None
         async with aiohttp.ClientSession() as session:
             async with session.get(download_url, params={"path": path} if path else None) as download_response:
                 if download_response.status != 200:
@@ -2511,7 +2522,16 @@ class Music(commands.Cog, name="Music"):
                     output_path, codec="libx264", audio_codec="aac", logger=None
                 )
 
-                return True, output_path
+                final_clip.close()
+                sub_clip.close()
+                orig_clip.close()
+
+        if temp_file_path:
+            self.remove_file(temp_file_path)
+        if image_path and image_path.startswith(DOWNLOAD_CACHE_FOLDER_NAME):
+            self.remove_file(image_path)
+
+        return True, output_path
 
     @commands.command(aliases=["hstats"])
     async def heardlestats(self, ctx: commands.Context, member: discord.Member = None):
@@ -2959,6 +2979,7 @@ class Music(commands.Cog, name="Music"):
                             self.add_item(media_gallery)
 
                     message = await ctx.send(file=discord.File(payload))
+                    self.remove_file(payload)
                     # heardle_view = discord.ui.LayoutView(timeout=None)
                     # heardle_view.add_item(HeardleContainer(ctx.guild.icon.url, message.attachments[0].url))
                     # await message.delete()
@@ -3247,6 +3268,7 @@ class Music(commands.Cog, name="Music"):
                 return
 
             message = await ctx.channel.send(file=discord.File(payload))
+            self.remove_file(payload)
 
             async def debounce_delay(author_id: int):
                 await asyncio.sleep(15)  # default snippet debounce
