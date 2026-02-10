@@ -313,8 +313,6 @@ class DiscordBot(commands.Bot):
             interaction._stats_started_at = time.perf_counter()
         if hasattr(self, "process_application_commands"):
             await self.process_application_commands(interaction)
-        elif hasattr(self.tree, "process_interaction"):
-            await self.tree.process_interaction(interaction)
 
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name
