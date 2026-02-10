@@ -67,7 +67,7 @@ from .models import (
     UserAlt,
 )
 from .blockchain import Blockchain, KeyManager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import discord
 import uuid
 import logging
@@ -540,7 +540,7 @@ class DatabaseManager:
                 if punishment_type:
                     query = query.where(Punishment.type == punishment_type)
                 if days > 0:
-                    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -639,7 +639,7 @@ class DatabaseManager:
                 if punishment_type:
                     query = query.where(Punishment.type == punishment_type)
                 if days > 0:
-                    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -670,7 +670,7 @@ class DatabaseManager:
                     type=punishment_type,
                     reason=reason,
                     duration=duration,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=discord.utils.utcnow(),
                 )
                 session.add(punishment)
                 await session.commit()
@@ -752,6 +752,8 @@ class DatabaseManager:
     ) -> None:
         try:
             used_at = used_at or discord.utils.utcnow()
+            if used_at.tzinfo is not None:
+                used_at = used_at.replace(tzinfo=None)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandUsageDaily).where(
@@ -793,6 +795,8 @@ class DatabaseManager:
     ) -> None:
         try:
             used_at = used_at or discord.utils.utcnow()
+            if used_at.tzinfo is not None:
+                used_at = used_at.replace(tzinfo=None)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandLatencyDaily).where(
@@ -834,6 +838,8 @@ class DatabaseManager:
     ) -> None:
         try:
             used_at = used_at or discord.utils.utcnow()
+            if used_at.tzinfo is not None:
+                used_at = used_at.replace(tzinfo=None)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandErrorDaily).where(
@@ -873,6 +879,8 @@ class DatabaseManager:
     ) -> None:
         try:
             seen_at = seen_at or discord.utils.utcnow()
+            if seen_at.tzinfo is not None:
+                seen_at = seen_at.replace(tzinfo=None)
             bucket_date = seen_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(DailyUserExposure).where(
@@ -971,7 +979,7 @@ class DatabaseManager:
                         punishment_id=punishment.id,
                         moderator_id=moderator_id,
                         note=note,
-                        created_at=datetime.now(timezone.utc),
+                        created_at=discord.utils.utcnow(),
                     )
                     session.add(case_note)
                     await session.commit()
@@ -1039,7 +1047,7 @@ class DatabaseManager:
                     Punishment.guild_id == guild_id,
                 )
                 if days > 0:
-                    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 query = query.group_by(Punishment.type)
                 result = await session.execute(query)
@@ -1059,7 +1067,7 @@ class DatabaseManager:
                     Punishment.type, func.count(Punishment.id).label("count")
                 ).where(Punishment.guild_id == guild_id)
                 if days > 0:
-                    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 query = query.group_by(Punishment.type)
                 result = await session.execute(query)
@@ -1090,7 +1098,7 @@ class DatabaseManager:
                         type=p["punishment_type"],
                         reason=p["reason"],
                         duration=p.get("duration"),
-                        created_at=datetime.now(timezone.utc),
+                        created_at=discord.utils.utcnow(),
                     )
                     session.add(punishment)
                     added += 1
@@ -1539,7 +1547,7 @@ class DatabaseManager:
                 # first‐time generation
                 wallet.server_seed = secrets.token_hex(16)
                 wallet.previous_server_seed = None
-                wallet.seed_rotated_at = datetime.now(timezone.utc)
+                wallet.seed_rotated_at = discord.utils.utcnow()
                 await session.commit()
             return wallet.server_seed
 
@@ -1572,7 +1580,7 @@ class DatabaseManager:
         if not old_seed:
             # First-time init; no reveal yet
             w.server_seed = secrets.token_hex(32)
-            w.seed_rotated_at = datetime.now(timezone.utc)
+            w.seed_rotated_at = discord.utils.utcnow()
             new_hash = hashlib.sha256(w.server_seed.encode()).hexdigest()
             return None, new_hash
 
@@ -1582,7 +1590,7 @@ class DatabaseManager:
         new_seed = secrets.token_hex(32)
         w.previous_server_seed = old_seed
         w.server_seed = new_seed
-        w.seed_rotated_at = datetime.now(timezone.utc)
+        w.seed_rotated_at = discord.utils.utcnow()
 
         # Back-fill revealed seed into history tied to old_hash
         await session.execute(
@@ -1618,7 +1626,7 @@ class DatabaseManager:
                 if not getattr(w, "server_seed", None):
                     w.server_seed = secrets.token_hex(32)  # 256-bit seed
                     w.previous_server_seed = None
-                    w.seed_rotated_at = datetime.now(timezone.utc)
+                    w.seed_rotated_at = discord.utils.utcnow()
 
                 if not getattr(w, "client_seed", None):
                     w.client_seed = secrets.token_hex(16)

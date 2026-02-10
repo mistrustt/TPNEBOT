@@ -3,7 +3,7 @@ import discord
 import logging
 import asyncio
 from discord.ext import commands, tasks
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from discord.ext.commands import Context
 from collections import defaultdict
 from typing import Optional
@@ -585,7 +585,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 # User moved between channels - end old session and start new one
                 if session_key in self.voice_sessions:
                     joined_at = self.voice_sessions[session_key]["joined_at"]
-                    duration = datetime.now(timezone.utc) - joined_at
+                    duration = discord.utils.utcnow() - joined_at
                     duration_str = humanfriendly.format_timespan(duration.total_seconds())
                     changes.append(
                         f"**Left Channel**: {before.channel.mention} (Duration: {duration_str})"
@@ -596,7 +596,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 # Start new session
                 self.voice_sessions[session_key] = {
                     "channel_id": after.channel.id,
-                    "joined_at": datetime.now(timezone.utc)
+                    "joined_at": discord.utils.utcnow()
                 }
             elif after.channel:
                 # User joined a channel
@@ -605,14 +605,14 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 # Start tracking session
                 self.voice_sessions[session_key] = {
                     "channel_id": after.channel.id,
-                    "joined_at": datetime.now(timezone.utc)
+                    "joined_at": discord.utils.utcnow()
                 }
             elif before.channel:
                 # User left a channel
                 duration_str = None
                 if session_key in self.voice_sessions:
                     joined_at = self.voice_sessions[session_key]["joined_at"]
-                    duration = datetime.now(timezone.utc) - joined_at
+                    duration = discord.utils.utcnow() - joined_at
                     duration_str = humanfriendly.format_timespan(duration.total_seconds())
                     del self.voice_sessions[session_key]
                 
@@ -735,7 +735,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if not settings or not settings.get("member_tracking", True):
             return
 
-        join_time = datetime.now(timezone.utc)
+        join_time = discord.utils.utcnow()
         account_age = join_time - member.created_at
 
         description = f"{member.display_name} (`{member.id}`) has joined the server."

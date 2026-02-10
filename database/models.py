@@ -23,8 +23,9 @@ from decimal import Decimal
 import uuid
 import hashlib
 import json
+import discord
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
+from datetime import datetime
 import enum
 
 Base = declarative_base()
@@ -560,7 +561,7 @@ class Block(Base):
             "index": self.index,
             "previous_hash": self.previous_hash,
             "transactions": self.transactions,
-            "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),
+            "created_at": (self.created_at or discord.utils.utcnow()).isoformat(),
         }
         return hashlib.sha256(
             json.dumps(block_data, sort_keys=True).encode()
