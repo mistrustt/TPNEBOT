@@ -140,7 +140,7 @@ class WatchdogLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     moderator_id = Column(BigInteger, nullable=False)
     guild_id = Column(BigInteger, nullable=False)
-    command_name = Column(Enum(PunishmentType), nullable=False)
+    punishment_type = Column(Enum(PunishmentType), nullable=False)
     created_at = Column(TIMESTAMP, default=datetime.now())
 
 
