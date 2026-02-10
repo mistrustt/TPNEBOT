@@ -1016,7 +1016,7 @@ class Fun(commands.Cog, name="Fun"):
             await self.bot.database.log_punishment_command(
                 moderator_id=ctx.author.id,
                 guild_id=guild_id,
-                command_name=PunishmentType.JAIL,
+                punishment_type=PunishmentType.JAIL,
             )
             await self.bot.database.add_punishment(
                 user_id=victim.id,
