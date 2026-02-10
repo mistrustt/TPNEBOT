@@ -4,6 +4,7 @@ import time
 import discord
 import logging
 import platform
+import inspect
 import traceback
 import urllib.parse
 import uuid
@@ -317,6 +318,9 @@ class DiscordBot(commands.Bot):
             await base.on_interaction(interaction)
             return
 
+        if interaction.type != discord.InteractionType.application_command:
+            return
+
         if hasattr(self, "process_application_commands"):
             await self.process_application_commands(interaction)
             return
@@ -324,10 +328,14 @@ class DiscordBot(commands.Bot):
         tree = getattr(self, "tree", None)
         if tree is not None:
             if hasattr(tree, "process_interaction"):
-                await tree.process_interaction(interaction)
+                result = tree.process_interaction(interaction)
+                if inspect.isawaitable(result):
+                    await result
                 return
             if hasattr(tree, "_from_interaction"):
-                await tree._from_interaction(interaction)
+                result = tree._from_interaction(interaction)
+                if inspect.isawaitable(result):
+                    await result
                 return
 
     async def on_command_completion(self, ctx: Context) -> None:
