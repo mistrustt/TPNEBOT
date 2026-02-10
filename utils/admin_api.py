@@ -159,7 +159,7 @@ class AdminAPIServer:
     def _log_audit(self, entry: Dict[str, Any]) -> None:
         try:
             path = os.path.join(os.getcwd(), "admin_api_audit.log")
-            entry["timestamp"] = datetime.utcnow().isoformat()
+            entry["timestamp"] = discord.utils.utcnow().isoformat()
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
         except Exception:

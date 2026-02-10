@@ -153,7 +153,7 @@ class DiscordBot(commands.Bot):
     @tasks.loop(hours=24)
     async def stats_retention_task(self) -> None:
         await self.wait_until_ready()
-        cutoff = datetime.now(datetime.UTC) - timedelta(days=365)
+        cutoff = discord.utils.utcnow() - timedelta(days=365)
         await self.database.purge_stats_before(cutoff.date())
 
     def is_coolguy(self, user_id: int):
@@ -320,7 +320,7 @@ class DiscordBot(commands.Bot):
         guild = ctx.guild
 
         try:
-            used_at = datetime.utcnow()
+            used_at = discord.utils.utcnow()
             user_hash = hash_user_id(user.id)
             guild_id = guild.id if guild else None
             latency_ms = None
@@ -361,7 +361,7 @@ class DiscordBot(commands.Bot):
         self, interaction: discord.Interaction, command: app_commands.Command
     ):
         try:
-            used_at = datetime.utcnow()
+            used_at = discord.utils.utcnow()
             user_hash = hash_user_id(interaction.user.id)
             guild_id = interaction.guild.id if interaction.guild else None
             latency_ms = None
@@ -405,7 +405,7 @@ class DiscordBot(commands.Bot):
             if not isinstance(error, app_commands.CommandOnCooldown):
                 command = getattr(interaction, "command", None)
                 command_name = command.qualified_name if command else "unknown"
-                used_at = datetime.utcnow()
+                used_at = discord.utils.utcnow()
                 guild_id = interaction.guild.id if interaction.guild else None
                 await self.database.record_command_error(
                     command_name=command_name,
@@ -455,7 +455,7 @@ class DiscordBot(commands.Bot):
             if ctx.command and not isinstance(
                 error, (commands.CommandNotFound, commands.CommandOnCooldown)
             ):
-                used_at = datetime.utcnow()
+                used_at = discord.utils.utcnow()
                 guild_id = ctx.guild.id if ctx.guild else None
                 await self.database.record_command_error(
                     command_name=ctx.command.qualified_name,

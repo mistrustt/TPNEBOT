@@ -451,7 +451,7 @@ class General(commands.Cog, name="General"):
                 title=title,
                 description=description,
                 color=color,
-                timestamp=datetime.utcnow(),
+                timestamp=discord.utils.utcnow(),
             )
             emb.set_thumbnail(url=self.bot.user.display_avatar.url)
             return emb

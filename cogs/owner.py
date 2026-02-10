@@ -1767,7 +1767,7 @@ class Owner(commands.Cog, name="Owner"):
                             name=str(ctx.author),
                             icon_url=getattr(ctx.author, "avatar.url", None),
                         )
-                        embed.timestamp = datetime.utcnow()
+                        embed.timestamp = discord.utils.utcnow()
 
                         current_embed_chars = len(embed.description or "") + sum(
                             len(f.name) + len(f.value) for f in embed.fields
@@ -1816,7 +1816,7 @@ class Owner(commands.Cog, name="Owner"):
                                             ctx.author, "avatar.url", None
                                         ),
                                     )
-                                    embed.timestamp = datetime.utcnow()
+                                    embed.timestamp = discord.utils.utcnow()
                                     current_embed_chars = 0
 
                                 embed.add_field(

@@ -751,7 +751,7 @@ class DatabaseManager:
         used_at: Optional[datetime] = None,
     ) -> None:
         try:
-            used_at = used_at or datetime.utcnow()
+            used_at = used_at or discord.utils.utcnow()
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandUsageDaily).where(
@@ -792,7 +792,7 @@ class DatabaseManager:
         used_at: Optional[datetime] = None,
     ) -> None:
         try:
-            used_at = used_at or datetime.utcnow()
+            used_at = used_at or discord.utils.utcnow()
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandLatencyDaily).where(
@@ -833,7 +833,7 @@ class DatabaseManager:
         used_at: Optional[datetime] = None,
     ) -> None:
         try:
-            used_at = used_at or datetime.utcnow()
+            used_at = used_at or discord.utils.utcnow()
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandErrorDaily).where(
@@ -872,7 +872,7 @@ class DatabaseManager:
         seen_at: Optional[datetime] = None,
     ) -> None:
         try:
-            seen_at = seen_at or datetime.utcnow()
+            seen_at = seen_at or discord.utils.utcnow()
             bucket_date = seen_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(DailyUserExposure).where(
@@ -2267,7 +2267,7 @@ class DatabaseManager:
         COOLDOWN = timedelta(hours=1)
 
         global _LAST_REBALANCE_AT
-        now = datetime.utcnow()
+        now = discord.utils.utcnow()
 
         need_rebalance = (treasury_health < MIN_HW or treasury_health > MAX_HW) and (
             _LAST_REBALANCE_AT is None or now - _LAST_REBALANCE_AT > COOLDOWN
