@@ -2857,7 +2857,10 @@ class Music(commands.Cog, name="Music"):
                     continue
                 except asyncio.TimeoutError:
                     player['lives'] -= 1
-                    message = await Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. One correct answer was **{song.get('name', 'N/A')}**.")
+                    message = await ctx.send(embed=discord.Embed(
+                        description=f"💥 {player['mention']} you now have {player['lives']} lives. One correct answer was {song.get('name', 'N/A')}",
+                        color=discord.Color.red(),
+                    ))
                     created_messages.append(message)
                     alive_players = get_alive_players(players)
                     if len(alive_players) <= 1:
@@ -2866,7 +2869,10 @@ class Music(commands.Cog, name="Music"):
                         continue
         if len(alive_players) == 1:
             winner = alive_players[0]
-            message = await Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
+            message = await ctx.send(embed=discord.Embed(
+                description=f"🏆 {winner['mention']} is the winner of this game of Blacktea with **{winner['lives']}** lives remaining!",
+                color=discord.Color.gold(),
+            ), delete_after=15)
 
         # at the end
         for message in created_messages:
