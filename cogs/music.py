@@ -2858,7 +2858,7 @@ class Music(commands.Cog, name="Music"):
                 except asyncio.TimeoutError:
                     player['lives'] -= 1
                     message = await ctx.send(embed=discord.Embed(
-                        description=f"💥 {player['mention']} you now have {player['lives']} lives. One correct answer was {song.get('name', 'N/A')}",
+                        description=f"💥 {player['mention']} you now have **{player['lives']}** lives. One correct answer was **{song.get('name', 'N/A')}**",
                         color=discord.Color.red(),
                     ))
                     created_messages.append(message)
