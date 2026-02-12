@@ -121,6 +121,8 @@ class Blockchain:
         self.async_sessionmaker = async_sessionmaker
         self.blockchain_lock = asyncio.Lock()
         self.transaction_pool = []
+        self._repair_task: asyncio.Task | None = None
+        self._repair_task_lock = asyncio.Lock()
 
     async def create_genesis_block(self):
         """Create the genesis block if the blockchain is empty."""
@@ -192,67 +194,147 @@ class Blockchain:
             result = await session.execute(select(Block).order_by(Block.index))
             return result.scalars().all()
 
-    async def repair_chain(self, block_index):
+    async def schedule_repair_chain(self, block_index: int) -> bool:
+        """Schedule a repair in the background (non-blocking).
+
+        Returns True if a new repair task was started, False if a repair is already running.
         """
-        Repair the blockchain starting from the invalid block.
+
+        async with self._repair_task_lock:
+            if self._repair_task and not self._repair_task.done():
+                logger.warning(
+                    "Blockchain repair already in progress; not scheduling another."
+                )
+                return False
+
+            async def _runner():
+                try:
+                    await self.repair_chain(block_index)
+                except Exception:
+                    logger.exception(
+                        "Unhandled exception while repairing blockchain (background task)."
+                    )
+
+            self._repair_task = asyncio.create_task(
+                _runner(), name=f"blockchain:repair_chain:{block_index}"
+            )
+            logger.warning(
+                f"Scheduled blockchain repair starting from block index {block_index}."
+            )
+            return True
+
+    async def repair_chain(self, block_index: int, *, batch_size: int = 250):
+        """Repair the blockchain starting from the invalid block.
+
+        This is potentially expensive; it yields to the event loop and commits in batches
+        to avoid blocking the bot for long periods.
         """
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                result = await session.execute(select(Block).order_by(Block.index))
-                blocks = result.scalars().all()
-                if block_index >= len(blocks):
+
+        if block_index < 0:
+            logger.error("Block index cannot be negative.")
+            return
+
+        async with self.blockchain_lock:
+            # Figure out bounds + starting previous hash.
+            async with self.async_sessionmaker() as session:
+                max_idx_res = await session.execute(select(func.max(Block.index)))
+                max_index = max_idx_res.scalar()
+
+                if max_index is None:
+                    logger.info("No blocks found; nothing to repair.")
+                    return
+                if block_index > max_index:
                     logger.error(
-                        f"Block index {block_index} is out of bounds for the blockchain."
+                        f"Block index {block_index} is out of bounds for the blockchain (max={max_index})."
                     )
                     return
-                for i in range(block_index, len(blocks)):
-                    block = blocks[i]
-                    if i > 0:
-                        previous_block = blocks[i - 1]
-                        block.previous_hash = previous_block.block_hash
-                    block.block_hash = block.compute_hash()
-                    logger.info(
-                        f"Repaired block index {block.index}. New hash: {block.block_hash}"
+
+                prev_hash = "0"
+                if block_index > 0:
+                    prev_hash_res = await session.execute(
+                        select(Block.block_hash).where(Block.index == (block_index - 1))
                     )
-                    session.add(block)
-                await session.commit()
+                    prev_hash = prev_hash_res.scalar_one_or_none() or "0"
+
+            logger.warning(
+                f"Starting blockchain repair from index {block_index} through {max_index} (batch_size={batch_size})."
+            )
+
+            current_index = block_index
+            while current_index <= max_index:
+                async with self.async_sessionmaker() as session:
+                    async with session.begin():
+                        res = await session.execute(
+                            select(Block)
+                            .where(
+                                Block.index >= current_index,
+                                Block.index < (current_index + batch_size),
+                            )
+                            .order_by(Block.index)
+                        )
+                        blocks = res.scalars().all()
+                        if not blocks:
+                            break
+
+                        for block in blocks:
+                            if block.index == 0:
+                                block.previous_hash = "0"
+                            else:
+                                block.previous_hash = prev_hash
+
+                            # compute_hash can be CPU-heavy for large chains; offload.
+                            new_hash = await asyncio.to_thread(block.compute_hash)
+                            block.block_hash = new_hash
+                            prev_hash = new_hash
+                            session.add(block)
+
+                last_repaired = blocks[-1].index
                 logger.info(
-                    f"Blockchain repair starting from index {block_index} completed."
+                    f"Repaired blockchain blocks {current_index}..{last_repaired}."
                 )
+                current_index = last_repaired + 1
+
+                # Yield so other bot tasks can run.
+                await asyncio.sleep(0)
+
+            logger.info(
+                f"Blockchain repair starting from index {block_index} completed."
+            )
 
     async def validate_blockchain(self):
         """
         Validate the blockchain and return the result and the index of the first invalid block (if any).
         """
-        for attempt in range(5):
-            async with self.async_sessionmaker() as session:
-                async with session.begin():
-                    result = await session.execute(select(Block).order_by(Block.index))
-                    blocks = result.scalars().all()
-                    previous_hash = None
-                    for block in blocks:
-                        if block.index == 0:
-                            previous_hash = block.block_hash
-                            continue
-                        if block.previous_hash != previous_hash:
-                            logger.error(
-                                f"Broken chain at block index {block.index}. Previous hash mismatch."
-                            )
-                            await self.repair_chain(block.index)
-                            break
-                        recalculated_hash = block.compute_hash()
-                        if block.block_hash != recalculated_hash:
-                            logger.error(
-                                f"Invalid hash at block index {block.index}. Expected: {recalculated_hash}, Found: {block.block_hash}."
-                            )
-                            await self.repair_chain(block.index)
-                            break
-                        previous_hash = block.block_hash
-                    else:
-                        logger.info("Blockchain validated successfully.")
-                        return True, None
-        logger.error("Blockchain validation failed after multiple attempts.")
-        return False, None
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(select(Block).order_by(Block.index))
+                blocks = result.scalars().all()
+
+        previous_hash = None
+        for block in blocks:
+            if block.index == 0:
+                previous_hash = block.block_hash
+                continue
+
+            if block.previous_hash != previous_hash:
+                logger.error(
+                    f"Broken chain at block index {block.index}. Previous hash mismatch."
+                )
+                await self.schedule_repair_chain(block.index)
+                return False, block.index
+
+            recalculated_hash = await asyncio.to_thread(block.compute_hash)
+            if block.block_hash != recalculated_hash:
+                logger.error(
+                    f"Invalid hash at block index {block.index}. Expected: {recalculated_hash}, Found: {block.block_hash}."
+                )
+                await self.schedule_repair_chain(block.index)
+                return False, block.index
+
+            previous_hash = block.block_hash
+
+        logger.info("Blockchain validated successfully.")
+        return True, None
 
     async def remove_invalid_block(self, block_index: int):
         """
