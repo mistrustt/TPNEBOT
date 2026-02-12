@@ -152,7 +152,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if (
             guild_id not in self.guild_settings_cache
             or (
-                datetime.now()
+                discord.utils.utcnow()
                 - self.guild_settings_cache.get(guild_id, {}).get(
                     "last_updated", datetime.min
                 )
@@ -169,7 +169,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     "member_tracking": settings.watchdog_member_tracking,
                     "message_tracking": settings.watchdog_message_tracking,
                     "voice_tracking": settings.watchdog_voice_tracking,
-                    "last_updated": datetime.now(),
+                    "last_updated": discord.utils.utcnow(),
                 }
             else:
                 self.guild_settings_cache[guild_id] = {
@@ -180,7 +180,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     "member_tracking": True,
                     "message_tracking": True,
                     "voice_tracking": True,
-                    "last_updated": datetime.now(),
+                    "last_updated": discord.utils.utcnow(),
                 }
 
         return self.guild_settings_cache.get(guild_id)

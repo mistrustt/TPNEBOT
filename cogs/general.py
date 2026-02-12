@@ -197,7 +197,7 @@ class NamesPaginationView(ui.View):
             embed.description = "No entries on this page."
             return embed
 
-        now = datetime.now()
+        now = discord.utils.utcnow()
         for idx, item in enumerate(page_items, start=start + 1):
             # Expected dict structure:
             # {"old_name": ..., "new_name": ..., "change_type": ..., "timestamp": ...}
@@ -292,7 +292,7 @@ class General(commands.Cog, name="General"):
     def __init__(self, bot) -> None:
         self.bot = bot
         self.utils = MiscUtils(self)
-        self.start_time = datetime.now()
+        self.start_time = discord.utils.utcnow()
         self.session = aiohttp.ClientSession()
         self.hidden_cogs: List[str] = ["Jishaku", "Owner", "Mix"]
         self.per_page = 1
@@ -301,7 +301,7 @@ class General(commands.Cog, name="General"):
         self.reaction_snipes = {}
         self.afk_users = {}
         self.currency_api = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies"
-        self.start_time = datetime.now()
+        self.start_time = discord.utils.utcnow()
 
         try:
             font_path = "DejaVuSans-ExtraLight.ttf"
@@ -365,7 +365,7 @@ class General(commands.Cog, name="General"):
         snipe_data = (
             message.content,
             message.author,
-            datetime.now(),
+            discord.utils.utcnow(),
             message.attachments,
         )
         channel_snipes.append(snipe_data)
@@ -387,7 +387,12 @@ class General(commands.Cog, name="General"):
         channel_snipes = self.edit_snipes.setdefault(guild_id, {}).setdefault(
             channel_id, []
         )
-        snipe_data = (before.content, after.content, before.author, datetime.now())
+        snipe_data = (
+            before.content,
+            after.content,
+            before.author,
+            discord.utils.utcnow(),
+        )
         channel_snipes.append(snipe_data)
         if len(channel_snipes) > 50:
             channel_snipes[:] = channel_snipes[-50:]
@@ -409,7 +414,7 @@ class General(commands.Cog, name="General"):
         snipe_data = (
             message.content,
             message.author,
-            datetime.now(),
+            discord.utils.utcnow(),
             message.attachments,
         )
         channel_snipes.append(snipe_data)
@@ -423,7 +428,7 @@ class General(commands.Cog, name="General"):
         user_id = message.author.id
         if user_id in self.afk_users:
             afk_data = self.afk_users.pop(user_id)
-            afk_duration = datetime.now() - afk_data["start_time"]
+            afk_duration = discord.utils.utcnow() - afk_data["start_time"]
             embed = discord.Embed(
                 description=f"Welcome back {message.author.mention}! You were AFK for **{humanfriendly.format_timespan(afk_duration, False)}**."
             )
@@ -431,7 +436,7 @@ class General(commands.Cog, name="General"):
         for mentioned in message.mentions:
             if mentioned.id in self.afk_users:
                 afk_data = self.afk_users[mentioned.id]
-                afk_duration = datetime.now() - afk_data["start_time"]
+                afk_duration = discord.utils.utcnow() - afk_data["start_time"]
                 embed = discord.Embed(
                     description=f"{mentioned.display_name} is currently AFK\n\nReason: **{afk_data['reason']}**\n\nDuration: **{humanfriendly.format_timespan(afk_duration, False)}**."
                 )
@@ -659,7 +664,7 @@ class General(commands.Cog, name="General"):
             )
 
         embed.set_footer(text=f"Last Updated")
-        embed.timestamp = datetime.now()
+        embed.timestamp = discord.utils.utcnow()
 
         await ctx.reply(embed=embed)
 
@@ -682,7 +687,7 @@ class General(commands.Cog, name="General"):
         if user_id in self.afk_users:
             previous_reason = self.afk_users[user_id]["reason"]
             previous_time = self.afk_users[user_id]["start_time"]
-            duration = datetime.now() - previous_time
+            duration = discord.utils.utcnow() - previous_time
 
             embed = discord.Embed(
                 description=f"You are already AFK:\n**Reason:** {previous_reason}\n**Duration:** {humanfriendly.format_timespan(duration, False)}",
@@ -694,7 +699,7 @@ class General(commands.Cog, name="General"):
         try:
             self.afk_users[user_id] = {
                 "reason": reason,
-                "start_time": datetime.now(),
+                "start_time": discord.utils.utcnow(),
                 "guild_id": ctx.guild.id if ctx.guild else None,
                 "channel_id": ctx.channel.id,
             }
@@ -705,7 +710,7 @@ class General(commands.Cog, name="General"):
                 if hasattr(ctx.author, "top_role")
                 else discord.Color.blurple(),
             )
-            embed.timestamp = datetime.now()
+            embed.timestamp = discord.utils.utcnow()
 
             await ctx.reply(embed=embed)
 
@@ -1059,7 +1064,9 @@ class General(commands.Cog, name="General"):
         else:
             boosting_status = "<:crossmark:1360656870305693742>"
 
-        embed = discord.Embed(color=discord.Color.blurple(), timestamp=datetime.now())
+        embed = discord.Embed(
+            color=discord.Color.blurple(), timestamp=discord.utils.utcnow()
+        )
         embed.set_thumbnail(url=self.utils.get_avatar_url(member))
         embed.add_field(
             name="__Username/ID__", value=f"{member.name} (`{member.id}`)", inline=False
@@ -1188,7 +1195,7 @@ class General(commands.Cog, name="General"):
         )
 
         embed = discord.Embed(
-            title=f"**{guild.name}**", colour=color, timestamp=datetime.now()
+            title=f"**{guild.name}**", colour=color, timestamp=discord.utils.utcnow()
         )
         embed.set_thumbnail(url=str(guild.icon.url))
 
@@ -1238,18 +1245,18 @@ class General(commands.Cog, name="General"):
     async def ping(self, ctx: commands.Context) -> None:
         websocket_latency = round(self.bot.latency * 1000, 2)
 
-        typing_start = datetime.now()
+        typing_start = discord.utils.utcnow()
         async with ctx.channel.typing():
             await asyncio.sleep(0.1)
-        typing_end = datetime.now()
+        typing_end = discord.utils.utcnow()
         typing_latency = round((typing_end - typing_start).total_seconds() * 1000, 2)
 
-        db_start = datetime.now()
+        db_start = discord.utils.utcnow()
         async with self.bot.database.get_session() as session:
             async with session.begin():
                 result = await session.execute(text("SELECT 1"))
                 _ = result.scalar()
-        db_end = datetime.now()
+        db_end = discord.utils.utcnow()
         database_latency = round((db_end - db_start).total_seconds() * 1000, 2)
 
         embed = discord.Embed(
@@ -1610,7 +1617,7 @@ class General(commands.Cog, name="General"):
                         icon_url=self.utils.get_avatar_url(ctx.author),
                     )
                     embed.set_footer(text=f"{ctx.author.name}")
-                    embed.timestamp = datetime.now()
+                    embed.timestamp = discord.utils.utcnow()
                     await ctx.reply(embed=embed)
             except aiohttp.ClientError as e:
                 error_msg = f"An error occurred while fetching data: {str(e)}"
@@ -1661,7 +1668,7 @@ class General(commands.Cog, name="General"):
     @commands.command(name="uptime", description="Check the bot's uptime.")
     async def uptime(self, ctx: commands.Context):
         """Shows the bot's uptime."""
-        current_time = datetime.now()
+        current_time = discord.utils.utcnow()
         uptime_duration = current_time - self.start_time
         days, seconds = uptime_duration.days, uptime_duration.seconds
         weeks, days = divmod(days, 7)
@@ -2278,7 +2285,7 @@ class General(commands.Cog, name="General"):
                                 last_updated, "%Y-%m-%dT%H:%M:%SZ"
                             )
                         except ValueError:
-                            dt_obj = datetime.now()
+                            dt_obj = discord.utils.utcnow()
 
                     unix_timestamp = int(dt_obj.timestamp())
                     discord_timestamp = f"<t:{unix_timestamp}:R>"
@@ -2822,7 +2829,7 @@ class General(commands.Cog, name="General"):
             )
             y_current += auth_h
 
-            date_str = datetime.now().strftime("%d/%m/%Y")
+            date_str = discord.utils.utcnow().strftime("%d/%m/%Y")
             l, t, r, b = draw.textbbox((0, 0), date_str, font=self.font_date)
             w_date, h_date = r - l, b - t
             x_date = W - PAD - w_date

@@ -927,7 +927,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
                 return
             tz = pytz.timezone(user_timezone)
-            current_time = datetime.now(tz)
+            current_time = discord.utils.utcnow().astimezone(tz)
 
             formatted_time = current_time.strftime("%I:%M %p")
 

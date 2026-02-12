@@ -1801,7 +1801,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 duration_seconds = secs
                 jailed_until = (
                     discord.utils.utcnow() + timedelta(seconds=secs)
-                ).replace(tzinfo=None)
+                )
                 reason_text = raw_reason
         else:
             reason_text = f"{raw_dur} {raw_reason}".strip() if raw_dur else raw_reason

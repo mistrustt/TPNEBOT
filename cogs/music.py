@@ -1324,9 +1324,12 @@ class Music(commands.Cog, name="Music"):
                                     start_time = datetime.fromisoformat(
                                         start_time_str.replace("Z", "+00:00")
                                     )
+                                    if start_time.tzinfo is None:
+                                        start_time = start_time.replace(
+                                            tzinfo=timezone.utc
+                                        )
                                     elapsed_duration = (
-                                        discord.utils.utcnow()
-                                        - start_time.replace(tzinfo=None)
+                                        discord.utils.utcnow() - start_time
                                     ).total_seconds()
                                 except:
                                     elapsed_duration = 0
@@ -2115,8 +2118,7 @@ class Music(commands.Cog, name="Music"):
             await self.sync_names()
 
     async def store_latest_surfaces(self, days: int = 30):
-        now = datetime.now(ZoneInfo("America/New_York"))
-        cutoff = now - timedelta(days=days)
+        cutoff = discord.utils.utcnow() - timedelta(days=days)
 
         hydrated = []
 

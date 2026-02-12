@@ -67,7 +67,7 @@ from .models import (
     UserAlt,
 )
 from .blockchain import Blockchain, KeyManager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import discord
 import uuid
 import logging
@@ -540,7 +540,7 @@ class DatabaseManager:
                 if punishment_type:
                     query = query.where(Punishment.type == punishment_type)
                 if days > 0:
-                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -639,7 +639,7 @@ class DatabaseManager:
                 if punishment_type:
                     query = query.where(Punishment.type == punishment_type)
                 if days > 0:
-                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 result = await session.execute(query)
                 return result.scalar_one()
@@ -670,7 +670,7 @@ class DatabaseManager:
                     type=punishment_type,
                     reason=reason,
                     duration=duration,
-                    created_at=discord.utils.utcnow().replace(tzinfo=None),
+                    created_at=discord.utils.utcnow(),
                 )
                 session.add(punishment)
                 await session.commit()
@@ -752,8 +752,8 @@ class DatabaseManager:
     ) -> None:
         try:
             used_at = used_at or discord.utils.utcnow()
-            if used_at.tzinfo is not None:
-                used_at = used_at.replace(tzinfo=None)
+            if used_at.tzinfo is None:
+                used_at = used_at.replace(tzinfo=timezone.utc)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandUsageDaily).where(
@@ -795,8 +795,8 @@ class DatabaseManager:
     ) -> None:
         try:
             used_at = used_at or discord.utils.utcnow()
-            if used_at.tzinfo is not None:
-                used_at = used_at.replace(tzinfo=None)
+            if used_at.tzinfo is None:
+                used_at = used_at.replace(tzinfo=timezone.utc)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandLatencyDaily).where(
@@ -838,8 +838,8 @@ class DatabaseManager:
     ) -> None:
         try:
             used_at = used_at or discord.utils.utcnow()
-            if used_at.tzinfo is not None:
-                used_at = used_at.replace(tzinfo=None)
+            if used_at.tzinfo is None:
+                used_at = used_at.replace(tzinfo=timezone.utc)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(CommandErrorDaily).where(
@@ -879,8 +879,8 @@ class DatabaseManager:
     ) -> None:
         try:
             seen_at = seen_at or discord.utils.utcnow()
-            if seen_at.tzinfo is not None:
-                seen_at = seen_at.replace(tzinfo=None)
+            if seen_at.tzinfo is None:
+                seen_at = seen_at.replace(tzinfo=timezone.utc)
             bucket_date = seen_at.date()
             async with self.async_sessionmaker() as session:
                 stmt = select(DailyUserExposure).where(
@@ -979,7 +979,7 @@ class DatabaseManager:
                         punishment_id=punishment.id,
                         moderator_id=moderator_id,
                         note=note,
-                        created_at=discord.utils.utcnow().replace(tzinfo=None),
+                        created_at=discord.utils.utcnow(),
                     )
                     session.add(case_note)
                     await session.commit()
@@ -1047,7 +1047,7 @@ class DatabaseManager:
                     Punishment.guild_id == guild_id,
                 )
                 if days > 0:
-                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 query = query.group_by(Punishment.type)
                 result = await session.execute(query)
@@ -1067,7 +1067,7 @@ class DatabaseManager:
                     Punishment.type, func.count(Punishment.id).label("count")
                 ).where(Punishment.guild_id == guild_id)
                 if days > 0:
-                    cutoff = discord.utils.utcnow().replace(tzinfo=None) - timedelta(days=days)
+                    cutoff = discord.utils.utcnow() - timedelta(days=days)
                     query = query.where(Punishment.created_at > cutoff)
                 query = query.group_by(Punishment.type)
                 result = await session.execute(query)
@@ -1098,7 +1098,7 @@ class DatabaseManager:
                         type=p["punishment_type"],
                         reason=p["reason"],
                         duration=p.get("duration"),
-                        created_at=discord.utils.utcnow().replace(tzinfo=None),
+                        created_at=discord.utils.utcnow(),
                     )
                     session.add(punishment)
                     added += 1
@@ -1707,7 +1707,7 @@ class DatabaseManager:
                         to_user_id=wallet.user_id,
                         amount=amount,
                         description=description,
-                        timestamp=datetime.now(),
+                        timestamp=discord.utils.utcnow(),
                     )
                 )
 
@@ -1751,7 +1751,7 @@ class DatabaseManager:
                         to_user_id=wallet.user_id,
                         amount=amount,
                         description=description,
-                        timestamp=datetime.now(),
+                        timestamp=discord.utils.utcnow(),
                     )
                 )
 
@@ -1805,7 +1805,7 @@ class DatabaseManager:
                             to_user_id=receiver.user_id,
                             amount=net_amt,
                             description=description,
-                            timestamp=datetime.now(),
+                            timestamp=discord.utils.utcnow(),
                         )
                     ]
                 )
@@ -1891,7 +1891,7 @@ class DatabaseManager:
                             to_user_id=to_uid,
                             amount=net,
                             description=description,
-                            timestamp=datetime.now(),
+                            timestamp=discord.utils.utcnow(),
                         ),
                         Transaction(
                             id=tid_fee,
@@ -1899,7 +1899,7 @@ class DatabaseManager:
                             to_user_id=to_uid if from_uid == 0 else 0,
                             amount=fee,
                             description=f"{description} (fee @ {fee_rate:.2%})",
-                            timestamp=datetime.now(),
+                            timestamp=discord.utils.utcnow(),
                         ),
                     ]
                 )
@@ -2153,7 +2153,7 @@ class DatabaseManager:
                     to_user_id=0,
                     amount=amount,
                     description=description,
-                    timestamp=datetime.now(),
+                    timestamp=discord.utils.utcnow(),
                 )
                 session.add(transaction_db)
                 # Atomic on-chain block (validator = owner/admin)
@@ -2194,7 +2194,7 @@ class DatabaseManager:
                     to_user_id=None,
                     amount=amount,
                     description=description,
-                    timestamp=datetime.now(),
+                    timestamp=discord.utils.utcnow(),
                 )
                 session.add(transaction_db)
                 # Atomic on-chain block (validator = owner/admin)
@@ -2670,7 +2670,7 @@ class DatabaseManager:
         async with self.async_sessionmaker() as session:
             await session.execute(
                 delete(CommandCooldown).where(
-                    CommandCooldown.cooldown_expiry < datetime.now()
+                    CommandCooldown.cooldown_expiry < discord.utils.utcnow()
                 )
             )
             await session.commit()
@@ -2689,7 +2689,7 @@ class DatabaseManager:
         self, user_id: int, command_name: str, cooldown_seconds: int
     ):
         """Sets a cooldown for both prefix and slash commands for a user."""
-        expiry_time = datetime.now() + timedelta(seconds=cooldown_seconds)
+        expiry_time = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
 
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -2723,7 +2723,9 @@ class DatabaseManager:
             )
             cooldown_expiry = result.scalar_one_or_none()
             if cooldown_expiry:
-                remaining_time = (cooldown_expiry - datetime.now()).total_seconds()
+                remaining_time = (
+                    cooldown_expiry - discord.utils.utcnow()
+                ).total_seconds()
                 max_remaining = max(max_remaining, remaining_time)
 
             return max(0, max_remaining)
@@ -2886,7 +2888,7 @@ class DatabaseManager:
             )
             price_record = result.scalar_one_or_none()
 
-            now = datetime.now()
+            now = discord.utils.utcnow()
             if (
                 price_record
                 and price_record.timestamp
@@ -2919,12 +2921,12 @@ class DatabaseManager:
 
                         if price_record:
                             price_record.price = price
-                            price_record.timestamp = datetime.now()
+                            price_record.timestamp = discord.utils.utcnow()
                         else:
                             new_record = CryptoPrice(
                                 symbol=symbol.upper(),
                                 price=price,
-                                timestamp=datetime.now(),
+                                timestamp=discord.utils.utcnow(),
                             )
                             session.add(new_record)
 
@@ -4446,7 +4448,9 @@ class DatabaseManager:
             streak = result.scalars().first()
 
             if streak:
-                if (datetime.now() - streak.last_worked).total_seconds() < 24 * 3600:
+                if (
+                    discord.utils.utcnow() - streak.last_worked
+                ).total_seconds() < 24 * 3600:
                     return streak.streak_count
                 else:
                     return 0
@@ -4464,12 +4468,12 @@ class DatabaseManager:
 
                 if streak:
                     streak.streak_count = streak_count
-                    streak.last_worked = datetime.now()
+                    streak.last_worked = discord.utils.utcnow()
                 else:
                     new_streak = Streak(
                         user_id=user_id,
                         streak_count=streak_count,
-                        last_worked=datetime.now(),
+                        last_worked=discord.utils.utcnow(),
                     )
                     session.add(new_streak)
 
@@ -4644,7 +4648,7 @@ class DatabaseManager:
         :param new_name: The new username or nickname
         :param change_type: Type of change - "username" or "nickname"
         """
-        timestamp = datetime.now()
+        timestamp = discord.utils.utcnow()
         async with self.async_sessionmaker() as session:
             try:
                 new_entry = UserNameHistory(
@@ -4722,7 +4726,7 @@ class DatabaseManager:
         """Logs the user's roles to the database."""
         async with self.get_session() as session:
             user_role_history = UserRoleHistory(
-                user_id=user_id, roles=roles, timestamp=datetime.now()
+                user_id=user_id, roles=roles, timestamp=discord.utils.utcnow()
             )
             session.add(user_role_history)
             await session.commit()

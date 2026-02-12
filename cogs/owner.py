@@ -136,7 +136,7 @@ class Owner(commands.Cog, name="Owner"):
         self.utils = MiscUtils(self)
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
-        self.start_time = datetime.now()
+        self.start_time = discord.utils.utcnow()
         self.whitelist_clubhouse = [
             284439598422163476,  # E
             1166141915297743010,  # dennis

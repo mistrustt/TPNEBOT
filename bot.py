@@ -11,7 +11,7 @@ import uuid
 from discord import app_commands, Webhook
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils
@@ -171,10 +171,10 @@ class DiscordBot(commands.Bot):
             self.logger.info("-------------------")
 
             self.logger.info("Checking database connection...")
-            db_init_time = datetime.now()
+            db_init_time = discord.utils.utcnow()
             async with self.database.async_sessionmaker() as session:
                 await session.execute(text("SELECT 1"))
-            db_connected_time = datetime.now() - db_init_time
+            db_connected_time = discord.utils.utcnow() - db_init_time
             self.logger.info(
                 f"Database responded in {db_connected_time.total_seconds()}s."
             )
@@ -346,8 +346,8 @@ class DiscordBot(commands.Bot):
 
         try:
             used_at = discord.utils.utcnow()
-            if used_at.tzinfo is not None:
-                used_at = used_at.replace(tzinfo=None)
+            if used_at.tzinfo is None:
+                used_at = used_at.replace(tzinfo=timezone.utc)
             user_hash = hash_user_id(user.id)
             guild_id = guild.id if guild else None
             latency_ms = None
@@ -389,8 +389,8 @@ class DiscordBot(commands.Bot):
     ):
         try:
             used_at = discord.utils.utcnow()
-            if used_at.tzinfo is not None:
-                used_at = used_at.replace(tzinfo=None)
+            if used_at.tzinfo is None:
+                used_at = used_at.replace(tzinfo=timezone.utc)
             user_hash = hash_user_id(interaction.user.id)
             guild_id = interaction.guild.id if interaction.guild else None
             latency_ms = None
@@ -435,8 +435,8 @@ class DiscordBot(commands.Bot):
                 command = getattr(interaction, "command", None)
                 command_name = command.qualified_name if command else "unknown"
                 used_at = discord.utils.utcnow()
-                if used_at.tzinfo is not None:
-                    used_at = used_at.replace(tzinfo=None)
+                if used_at.tzinfo is None:
+                    used_at = used_at.replace(tzinfo=timezone.utc)
                 guild_id = interaction.guild.id if interaction.guild else None
                 await self.database.record_command_error(
                     command_name=command_name,
@@ -487,8 +487,8 @@ class DiscordBot(commands.Bot):
                 error, (commands.CommandNotFound, commands.CommandOnCooldown)
             ):
                 used_at = discord.utils.utcnow()
-                if used_at.tzinfo is not None:
-                    used_at = used_at.replace(tzinfo=None)
+                if used_at.tzinfo is None:
+                    used_at = used_at.replace(tzinfo=timezone.utc)
                 guild_id = ctx.guild.id if ctx.guild else None
                 await self.database.record_command_error(
                     command_name=ctx.command.qualified_name,

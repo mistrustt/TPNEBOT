@@ -104,7 +104,7 @@ class Punishment(Base):
     type = Column(Enum(PunishmentType), nullable=False)
     reason = Column(String, nullable=False)
     duration = Column(Integer, nullable=True)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     __table_args__ = (CheckConstraint("case_id >= 0", name="case_id_non_negative"),)
 
@@ -116,7 +116,7 @@ class CaseNote(Base):
     case_id = Column(Integer, ForeignKey("punishments.id"), nullable=False)
     moderator_id = Column(BigInteger, nullable=False)
     note = Column(String, nullable=False)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     punishment = relationship("Punishment", back_populates="notes")
 
@@ -141,7 +141,7 @@ class WatchdogLog(Base):
     moderator_id = Column(BigInteger, nullable=False)
     guild_id = Column(BigInteger, nullable=False)
     punishment_type = Column(Enum(PunishmentType), nullable=False)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
 
 class JailSetting(Base):
@@ -160,7 +160,7 @@ class JailedUser(Base):
     user_id = Column(BigInteger, nullable=False)
     jailed_until = Column(TIMESTAMP(timezone=True), nullable=True)
     roles = Column(ARRAY(BigInteger), nullable=True)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     def __repr__(self):
         return (
@@ -192,7 +192,7 @@ class CommandCooldown(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, nullable=False)
     command_name = Column(String, nullable=False)
-    cooldown_expiry = Column(TIMESTAMP, nullable=False)
+    cooldown_expiry = Column(DateTime(timezone=True), nullable=False)
 
     def __repr__(self):
         return f"<CommandCooldown(user_id={self.user_id}, command_name={self.command_name}, cooldown_expiry={self.cooldown_expiry})>"
@@ -208,7 +208,7 @@ class CommandUsageDaily(Base):
     user_hash = Column(String(64), nullable=True, index=True)
     is_slash = Column(Boolean, default=False, nullable=False)
     count = Column(Integer, default=0, nullable=False)
-    last_used_at = Column(TIMESTAMP, default=datetime.now())
+    last_used_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     __table_args__ = (
         UniqueConstraint(
@@ -232,7 +232,7 @@ class CommandLatencyDaily(Base):
     is_slash = Column(Boolean, default=False, nullable=False)
     latency_ms_sum = Column(BigInteger, default=0, nullable=False)
     latency_count = Column(Integer, default=0, nullable=False)
-    last_used_at = Column(TIMESTAMP, default=datetime.now())
+    last_used_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     __table_args__ = (
         UniqueConstraint(
@@ -255,7 +255,7 @@ class CommandErrorDaily(Base):
     is_slash = Column(Boolean, default=False, nullable=False)
     error_type = Column(String, nullable=False)
     count = Column(Integer, default=0, nullable=False)
-    last_seen_at = Column(TIMESTAMP, default=datetime.now())
+    last_seen_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     __table_args__ = (
         UniqueConstraint(
@@ -276,7 +276,7 @@ class DailyUserExposure(Base):
     bucket_date = Column(Date, nullable=False, index=True)
     guild_id = Column(BigInteger, nullable=True, index=True)
     user_hash = Column(String(64), nullable=False, index=True)
-    first_seen_at = Column(TIMESTAMP, default=datetime.now())
+    first_seen_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     __table_args__ = (
         UniqueConstraint(
@@ -346,7 +346,7 @@ class Transaction(Base):
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
     description = Column(String, nullable=True)
-    timestamp = Column(TIMESTAMP, default=datetime.now)
+    timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow)
     block_hash = Column(String(64), nullable=True)
 
     def __repr__(self):
@@ -416,7 +416,7 @@ class Bounty(Base):
         Numeric(precision=38, scale=8), nullable=False, default=Decimal("0.00")
     )
     active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     def __repr__(self):
         return (
@@ -431,7 +431,7 @@ class UserRoleHistory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, nullable=False)
     roles = Column(ARRAY(BigInteger), nullable=False)
-    timestamp = Column(TIMESTAMP, default=datetime.now(), nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
 
     def __repr__(self):
         return f"<UserRoleHistory user_id={self.user_id} roles={self.roles}>"
@@ -547,7 +547,7 @@ class Block(Base):
     block_hash = Column(String(64), nullable=False, unique=True)
     previous_hash = Column(String(64), nullable=False)
     transactions = Column(JSON, nullable=False)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     validator_id = Column(BigInteger, nullable=True)
     validator_signature = Column(String, nullable=True)
@@ -677,7 +677,7 @@ class Streak(Base):
 
     user_id = Column(BigInteger, primary_key=True)
     streak_count = Column(Integer, default=0, nullable=False)
-    last_worked = Column(TIMESTAMP, nullable=False, default=datetime.now())
+    last_worked = Column(DateTime(timezone=True), nullable=False, default=discord.utils.utcnow)
 
     def __repr__(self):
         return f"<Streak(user_id={self.user_id}, streak_count={self.streak_count}, last_worked={self.last_worked})>"
@@ -707,7 +707,7 @@ class TempVoiceChannel(Base):
     channel_id = Column(BigInteger, primary_key=True)
     guild_id = Column(BigInteger, nullable=False)
     owner_id = Column(BigInteger, nullable=False)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
 
 class UserNameHistory(Base):
@@ -718,7 +718,7 @@ class UserNameHistory(Base):
     old_name = Column(String, nullable=False)
     new_name = Column(String, nullable=False)
     change_type = Column(String, nullable=False)
-    timestamp = Column(TIMESTAMP, default=datetime.now(), nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -736,7 +736,7 @@ class CryptoAsset(Base):
     symbol = Column(String, nullable=False)
     amount = Column(Numeric(precision=38, scale=8), default=Decimal("0.00000000"))
     purchase_price = Column(Numeric(precision=38, scale=8), default=Decimal("0.00"))
-    purchase_date = Column(TIMESTAMP, default=datetime.now())
+    purchase_date = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     def __repr__(self):
         return f"<CryptoAsset(user_id={self.user_id}, symbol='{self.symbol}', amount={self.amount})>"
@@ -750,7 +750,7 @@ class CryptoPrice(Base):
     price = Column(
         Numeric(precision=38, scale=8), nullable=False, default=Decimal("0.00")
     )
-    timestamp = Column(TIMESTAMP, default=datetime.now())
+    timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     def __repr__(self):
         return f"<CryptoPrice(symbol='{self.symbol}', price={self.price}, timestamp={self.timestamp})>"
@@ -796,7 +796,7 @@ class CommandRoleRestriction(Base):
     guild_id = Column(BigInteger, nullable=False)
     command_name = Column(String, nullable=False)
     role_id = Column(BigInteger, nullable=False)
-    created_at = Column(TIMESTAMP, default=datetime.now())
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
     __table_args__ = (
         UniqueConstraint(

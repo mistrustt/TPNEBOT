@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import os
 import random
-from datetime import datetime
+import discord
 from decimal import Decimal
 from .models import Block, Wallet, BankAccount, Transaction, Supply
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -132,7 +132,7 @@ class Blockchain:
                     index=0,
                     previous_hash="0",
                     transactions="[]",
-                    created_at=datetime.now(),
+                    created_at=discord.utils.utcnow(),
                     block_hash="0",
                     validator_id=None,
                     validator_signature="",
@@ -391,7 +391,7 @@ class Blockchain:
             index=(last_index + 1) if last_index is not None else 1,
             previous_hash=prev_hash,
             transactions=json.dumps(prepare_for_json(prepared)),
-            created_at=datetime.now(),
+            created_at=discord.utils.utcnow(),
         )
         new_block.block_hash = new_block.compute_hash()
 
@@ -478,7 +478,7 @@ class Blockchain:
                 index=last_block.index + 1 if last_block else 1,
                 previous_hash=previous_hash,
                 transactions=json.dumps(prepared_transactions),
-                created_at=datetime.now(),
+                created_at=discord.utils.utcnow(),
             )
             new_block.block_hash = new_block.compute_hash()
             logger.debug(
@@ -753,7 +753,7 @@ class Blockchain:
                     index=0,
                     previous_hash="0",
                     transactions=genesis_data,
-                    created_at=datetime.now(),
+                    created_at=discord.utils.utcnow(),
                     block_hash="0",
                     validator_id=0,
                     validator_signature="",

@@ -117,7 +117,7 @@ class Fun(commands.Cog, name="Fun"):
                             title="Random Fact",
                             description=fact_text,
                             color=color,
-                            timestamp=datetime.now(),
+                            timestamp=discord.utils.utcnow(),
                         )
                         embed.set_footer(text="Source: API Ninjas")
                     else:
@@ -184,7 +184,7 @@ class Fun(commands.Cog, name="Fun"):
                 )
 
                 embed = discord.Embed(
-                    title=f"Fact of the Day – {datetime.now().strftime('%Y-%m-%d')}",
+                    title=f"Fact of the Day – {discord.utils.utcnow().strftime('%Y-%m-%d')}",
                     description=fact_text,
                     color=color,
                 )
@@ -805,7 +805,7 @@ class Fun(commands.Cog, name="Fun"):
             if not hasattr(self.bot, "nickname_force"):
                 self.bot.nickname_force = {}
 
-            end_time = datetime.now() + timedelta(seconds=nickname_duration)
+            end_time = discord.utils.utcnow() + timedelta(seconds=nickname_duration)
             self.bot.nickname_force[victim.id] = {
                 "nickname": chosen_nickname,
                 "original_nickname": original_nickname,
@@ -1063,7 +1063,7 @@ class Fun(commands.Cog, name="Fun"):
 
         force_info = self.bot.nickname_force[after.id]
 
-        if datetime.now() > force_info["end_time"]:
+        if discord.utils.utcnow() > force_info["end_time"]:
             try:
                 await after.edit(
                     nick=force_info.get("original_nickname"),
