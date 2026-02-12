@@ -2686,11 +2686,12 @@ class Music(commands.Cog, name="Music"):
         date_leaked = song.get("date_leaked", "")
         end_line_index = date_leaked.rfind("\n")
         real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
-        month = real_date_leaked[0].strip()
-        day = real_date_leaked[1].strip()
+        if real_date_leaked and len(real_date_leaked) < 3:
+            return False
+        # month = real_date_leaked[0].strip()
+        # day = real_date_leaked[1].strip()
         year = real_date_leaked[2].strip()
-        fmt_answer = f"{month.lower()}{year.lower()}"
-        return fmt_answer == leaked_date    
+        return year.lower() == leaked_date    
 
     # Returns embed description, correct answer, check function
     def get_random_blacktea_category_data(self, song):
@@ -2748,12 +2749,12 @@ class Music(commands.Cog, name="Music"):
             date_leaked = song.get("date_leaked", "")
             end_line_index = date_leaked.rfind("\n")
             real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
-            month = real_date_leaked[0].strip()
+            # month = real_date_leaked[0].strip()
             year = real_date_leaked[2].strip()
 
             return {
-                "description": f"Name a **Juice WRLD** song that leaked in **{month} {year}**",
-                "check_func": lambda song_name: self.blacktea_check_leaked(song_name, f"{month.lower()}{year.lower()}")
+                "description": f"Name a **Juice WRLD** song that leaked in **{year}**",
+                "check_func": lambda song_name: self.blacktea_check_leaked(song_name, year.lower())
             }
         else:
             random_3l = self.get_random_3l_for_blacktea(song)
@@ -2858,7 +2859,10 @@ class Music(commands.Cog, name="Music"):
                     continue
                 except asyncio.TimeoutError:
                     player['lives'] -= 1
-                    message = await Embeds.send_info_embed(ctx.channel, ctx.author, f"{player['mention']} you have {player['lives']} lives remaining. One correct answer was **{song.get('name', 'N/A')}**.")
+                    message = await ctx.send(embed=discord.Embed(
+                        description=f"💥 {player['mention']} you now have **{player['lives']}** lives. One correct answer was **{song.get('name', 'N/A')}**",
+                        color=discord.Color.red(),
+                    ))
                     created_messages.append(message)
                     alive_players = get_alive_players(players)
                     if len(alive_players) <= 1:
@@ -2867,7 +2871,10 @@ class Music(commands.Cog, name="Music"):
                         continue
         if len(alive_players) == 1:
             winner = alive_players[0]
-            message = await Embeds.send_info_embed(ctx.channel, ctx.author, f"Congratulations {winner['mention']} you are the winner of this game of Black Tea! 🏆")
+            message = await ctx.send(embed=discord.Embed(
+                description=f"🏆 {winner['mention']} is the winner of this game of Blacktea with **{winner['lives']}** lives remaining!",
+                color=discord.Color.gold(),
+            ), delete_after=15)
 
         # at the end
         for message in created_messages:
