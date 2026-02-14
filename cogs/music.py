@@ -45,7 +45,6 @@ class Music(commands.Cog, name="Music"):
 
         self.valid_names = []
         self.ongoing_blacktea = []
-        self.song_index = self.build_song_index()
 
         self.standard_colors = {
             "black": "#000000",
@@ -188,6 +187,7 @@ class Music(commands.Cog, name="Music"):
             check_question_marks: [remove_question_marks, question_mark_to_spaces],
             check_hyphens: [remove_hyphens, hyphen_to_spaces],
         }
+        self.song_index = self.build_song_index()
 
     async def cog_unload(self):
         await self.session.close()
