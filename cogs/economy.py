@@ -1558,7 +1558,7 @@ class Economy(commands.Cog):
 
         names_data = [
             ("Dennis", 5, 2.0, 3.5),
-            ("Googly", 5, 2.0, 3.5),
+            ("Googly (Idiot 🤡)", 5, 2.0, 3.5),
             ("Lenny", 5, 2.0, 3.5),
             ("Shogani", 5, 2.0, 3.5),
             ("G Money", 10, 1.5, 1.5),
