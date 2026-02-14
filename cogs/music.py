@@ -2749,6 +2749,11 @@ class Music(commands.Cog, name="Music"):
             date_leaked = song.get("date_leaked", "")
             end_line_index = date_leaked.rfind("\n")
             real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+            if not real_date_leaked or len(real_date_leaked) < 3:
+                return {
+                    "description": f"Name a **Juice WRLD** song that leaked in **{date_leaked.strip()}**",
+                    "check_func": lambda song_name: self.blacktea_check_leaked(song_name, date_leaked.strip().lower())
+                }
             # month = real_date_leaked[0].strip()
             year = real_date_leaked[2].strip()
 
