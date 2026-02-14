@@ -2908,14 +2908,6 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
-        if ctx.author.id == 567401702190350347 and random.random() < 0.35:
-            await Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                f"You are too old for this command. Age detected: {random.randint(30, 40)}",
-            )
-            return
-
         if ctx.author.id in self.ongoing_heardle:
             await Embeds.send_error_embed(
                 ctx.channel, ctx.author, "You already have an ongoing game of Heardle!"
@@ -2965,7 +2957,7 @@ class Music(commands.Cog, name="Music"):
                             if cover_response.status == 200:
                                 image_data = await cover_response.read()
                                 image = Image.open(BytesIO(image_data))
-                                blurred_image = image.filter(ImageFilter.GaussianBlur(radius=15))  # Adjust radius for intensity                            
+                                blurred_image = image.filter(ImageFilter.GaussianBlur(radius=25))  # Adjust radius for intensity                            
                                 blurred_image.save(image_file_name)
                             elif album_art_response.status == 200:
                                 image_data = await album_art_response.read()
