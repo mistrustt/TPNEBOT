@@ -614,7 +614,6 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.guild_only()
     @commands.check_any(
         commands.has_permissions(manage_messages=True),
-        commands.has_role(1414742766386413590),
     )
     async def app_clear(self, ctx: Context):
         """Clear all bot messages and any invocation of your bot's commands."""
