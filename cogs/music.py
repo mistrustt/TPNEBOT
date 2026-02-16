@@ -2751,13 +2751,12 @@ class Music(commands.Cog, name="Music"):
                 if p.strip()
             ]
 
+            producer = random.choice(producers) if producers else None
             if producer in self.producer_counts:
                 count = self.producer_counts[producer]
                 if count < 6: # Adjust this number to how common you want the producer questions to be, this is just a safeguard to prevent really common producers from dominating the category
                     return self.get_random_blacktea_category_data(song)
             
-            producer = random.choice(producers) if producers else None
-
             return {
                 "description": f"Name a **Juice WRLD** song produced by **{producer}**",
                 "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
