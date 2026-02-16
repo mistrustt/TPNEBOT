@@ -204,7 +204,7 @@ class Music(commands.Cog, name="Music"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
-        await self.sync_names()
+        await self.sync_blacktea()
 
     async def update_user_index(self, lastfm_username: str):
         """Fetch and index recent listening data for a user."""
@@ -2600,8 +2600,10 @@ class Music(commands.Cog, name="Music"):
 
     ### TODO: make all blacktea commands under a class or something for better organization
 
-    async def sync_producer_counts(self):
+    async def sync_blacktea(self):
+        self.valid_names = []
         self.producer_counts = {}
+
         songs = Cache.get_songs()
         for song in songs:
             producers = song.get("producers", "N/A")
@@ -2613,11 +2615,6 @@ class Music(commands.Cog, name="Music"):
                 else:
                     self.producer_counts[producer] = 1
 
-
-    async def sync_names(self):
-        self.valid_names = []
-        songs = Cache.get_songs()
-        for song in songs:
             track_titles = song.get("track_titles", [])
             for title in track_titles:
                 acceptable_alt_name_list = self.get_acceptable_track_names(title)
@@ -2730,8 +2727,11 @@ class Music(commands.Cog, name="Music"):
                 for p in re.split(r"&|,| and ", producers)
                 if p.strip()
             ]
-            if len(producers) > 5:
-                return default_return()
+
+            if producer in self.producer_counts:
+                count = self.producer_counts[producer]
+                if count < 6: # Adjust this number to how common you want the producer questions to be, this is just a safeguard to prevent really common producers from dominating the category
+                    return self.get_random_blacktea_category_data(song)
             
             producer = random.choice(producers) if producers else None
 
@@ -2802,15 +2802,14 @@ class Music(commands.Cog, name="Music"):
             }
         else:
             return default_return()
-    @commands.command(name="syncvalidnames", aliases=["syncnames"])
+    @commands.command(name="syncblacktea", aliases=["sbt"])
     @commands.is_owner()
-    async def syncvalidnames(self, ctx: commands.Context):
+    async def syncblacktea(self, ctx: commands.Context):
         songs = Cache.get_songs()
 
         old_names_length = len(self.valid_names)
         old_prods_length = len(self.producer_counts)
-        await self.sync_names()
-        await self.sync_producer_counts()
+        await self.sync_blacktea()
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
 
