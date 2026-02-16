@@ -2833,13 +2833,16 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="syncblacktea", aliases=["sbt"])
     @commands.is_owner()
     async def syncblacktea(self, ctx: commands.Context):
-        songs = Cache.get_songs()
+        await ctx.message.add_reaction('🔄')
 
+        songs = Cache.get_songs()
         old_names_length = len(self.valid_names)
         old_prods_length = len(self.producer_counts)
         await self.sync_blacktea()
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
+
+        await ctx.message.add_reaction('✅')
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
