@@ -2610,6 +2610,13 @@ class Music(commands.Cog, name="Music"):
             producers = song.get("producers", "N/A")
             producers = [p.strip() for p in re.split(r"&|,| and ", producers) if p.strip()]
 
+            era = song.get("era", {})
+            era_name = era.get("name", "N/A")
+            if era_name == "POST": # ignore posthumus cuz thats gay!
+                continue
+            if len(producers) > 5: # also ignore songs with a ton of producers
+                continue
+
             for producer in producers:
                 if producer in self.producer_counts:
                     self.producer_counts[producer] += 1
