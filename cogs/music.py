@@ -2645,7 +2645,8 @@ class Music(commands.Cog, name="Music"):
         return None
 
     def find_songs_by_name(self, name):
-        self.song_index = self.song_index or {}
+        if not hasattr(self, "song_index"):
+            self.song_index = {}
 
         if name in self.song_index:
             return self.song_index[name]
