@@ -44,6 +44,7 @@ class Music(commands.Cog, name="Music"):
         self.cache_songs.start()
 
         self.valid_names = []
+        self.producer_counts = {}
         self.ongoing_blacktea = []
 
         self.standard_colors = {
