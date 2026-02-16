@@ -187,7 +187,6 @@ class Music(commands.Cog, name="Music"):
             check_question_marks: [remove_question_marks, question_mark_to_spaces],
             check_hyphens: [remove_hyphens, hyphen_to_spaces],
         }
-        self.song_index = self.build_song_index()
 
     async def cog_unload(self):
         await self.session.close()
@@ -2645,23 +2644,23 @@ class Music(commands.Cog, name="Music"):
                     return result
         return None
 
-    def build_song_index(self):
-        index = {}  # Maps normalized name -> list of songs
-        songs = Cache.get_songs()
-        
-        for song in songs:
-            track_titles = song.get("track_titles", [])
-            for title in track_titles:
-                for acceptable_name in self.get_acceptable_track_names(title):
-                    key = acceptable_name.lower()
-                    if key not in index:
-                        index[key] = []
-                    index[key].append(song)
-        
-        return index
-
     def find_songs_by_name(self, name):
-        return self.song_index.get(name.lower(), [])
+        self.song_index = self.song_index or {}
+
+        if name in self.song_index:
+            return self.song_index[name]
+        else:
+            songs = Cache.get_songs()
+            valid_songs = []
+            for song in songs:
+                track_titles = song.get("track_titles", [])
+                for title in track_titles:
+                    for acceptable_name in self.get_acceptable_track_names(title):
+                        if acceptable_name == name:
+                            valid_songs.append(song)
+            self.song_index[name] = valid_songs
+            return valid_songs
+                        
 
     def blacktea_check_producer(self, song_name, producer):
         songs = self.find_songs_by_name(song_name)
