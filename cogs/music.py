@@ -2600,6 +2600,20 @@ class Music(commands.Cog, name="Music"):
 
     ### TODO: make all blacktea commands under a class or something for better organization
 
+    async def sync_producer_counts(self):
+        self.producer_counts = {}
+        songs = Cache.get_songs()
+        for song in songs:
+            producers = song.get("producers", "N/A")
+            producers = [p.strip() for p in re.split(r"&|,| and ", producers) if p.strip()]
+
+            for producer in producers:
+                if producer in self.producer_counts:
+                    self.producer_counts[producer] += 1
+                else:
+                    self.producer_counts[producer] = 1
+
+
     async def sync_names(self):
         self.valid_names = []
         songs = Cache.get_songs()
@@ -2794,8 +2808,11 @@ class Music(commands.Cog, name="Music"):
         songs = Cache.get_songs()
 
         old_names_length = len(self.valid_names)
+        old_prods_length = len(self.producer_counts)
         await self.sync_names()
+        await self.sync_producer_counts()
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
+        await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
