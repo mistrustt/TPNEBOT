@@ -2794,7 +2794,7 @@ class Music(commands.Cog, name="Music"):
             # TODO: fix this doesnt work
             era_full = ALBUMS.get(era_name, {}).get("name", era_name)
 
-            if category == "recording_session" or era_name == "GB&GR (AE)" or era_name == "GB&GR (5YAE)":
+            if category == "recording_session" or era_name == "GB&GR (AE)" or era_name == "GB&GR (5YAE)" or era_name == "MAINSTREAM":
                 return default_return()
 
             return {
