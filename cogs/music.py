@@ -2744,6 +2744,9 @@ class Music(commands.Cog, name="Music"):
     def get_random_blacktea_category_data(self, song):
         def default_return():
             random_3l = self.get_random_3l_for_blacktea(song)
+            while not random_3l:
+                song = self.get_random_song_for_blacktea()
+                random_3l = self.get_random_3l_for_blacktea(song)
             return {
                 "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
                 "check_func": lambda song_name: random_3l.lower() in song_name.lower()
