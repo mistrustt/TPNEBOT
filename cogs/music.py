@@ -2716,10 +2716,32 @@ class Music(commands.Cog, name="Music"):
             year = real_date_leaked[2].strip()
             return year.lower() == leaked_date if year else False
         return False
+    
+    def blacktea_check_groupbuy_price(self, song_name, leaked_date):
+        songs = self.find_songs_by_name(song_name)
+        if not songs:
+            return False
+
+        for song in songs:
+            groupbuy_info = song.get("groupbuy_info", {})
+            price = groupbuy_info.get("price", "")
+            numerical_price = ''.join(filter(str.isdigit, price))
+            if not numerical_price:
+                return False
+            
+            return int(numerical_price) >= int(leaked_date)
+        return False
 
     # Returns embed description, correct answer, check function
     def get_random_blacktea_category_data(self, song):
-        random_index = random.randint(0, 3)
+        def default_return():
+            random_3l = self.get_random_3l_for_blacktea(song)
+            return {
+                "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
+                "check_func": lambda song_name: random_3l.lower() in song_name.lower()
+            }
+        
+        random_index = random.randint(0, 4)
         if random_index == 0:
             producers = song.get("producers", "N/A")
             producers = [
@@ -2739,15 +2761,7 @@ class Music(commands.Cog, name="Music"):
                 "description": f"Name a **Juice WRLD** song produced by **{producer}**",
                 "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
             }
-        
-        def default_return():
-            random_3l = self.get_random_3l_for_blacktea(song)
-            return {
-                "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
-                "check_func": lambda song_name: random_3l.lower() in song_name.lower()
-            }
-
-        if random_index == 1:
+        elif random_index == 1:
             ALBUMS = {
                 'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
                 'LND':                  {'name': 'Legends Never Die', 'color': '#F700FF'},
@@ -2787,7 +2801,7 @@ class Music(commands.Cog, name="Music"):
                 "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
                 "check_func": lambda song_name: self.blacktea_check_category(song_name, f"{category}{era_name}")
             }
-        if random_index == 2:
+        elif random_index == 2:
             date_leaked = song.get("date_leaked", "")
             end_line_index = date_leaked.rfind("\n")
             real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
@@ -2799,6 +2813,20 @@ class Music(commands.Cog, name="Music"):
             return {
                 "description": f"Name a **Juice WRLD** song that leaked in **{year}**",
                 "check_func": lambda song_name: self.blacktea_check_leaked(song_name, year.lower())
+            }
+        elif random_index == 3:
+            groupbuy_info = song.get("groupbuy_info", {})
+            price = groupbuy_info.get("price", "")
+            if len(price) == 0:
+                return default_return()
+            
+            numerical_price = ''.join(filter(str.isdigit, price))
+            if not numerical_price:
+                return default_return()
+
+            return {
+                "description": f"Name a **Juice WRLD** song that was groupbuyed for **{price}** or higher",
+                "check_func": lambda song_name: self.blacktea_check_groupbuy_price(song_name, numerical_price)
             }
         else:
             return default_return()
