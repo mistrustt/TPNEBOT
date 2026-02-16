@@ -2716,6 +2716,9 @@ class Music(commands.Cog, name="Music"):
                 for p in re.split(r"&|,| and ", producers)
                 if p.strip()
             ]
+            if len(producers) > 5:
+                return default_return()
+            
             producer = random.choice(producers) if producers else None
 
             return {
