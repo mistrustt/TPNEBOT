@@ -2742,7 +2742,7 @@ class Music(commands.Cog, name="Music"):
 
     # Returns embed description, correct answer, check function
     def get_random_blacktea_category_data(self, song):
-        def default_return():
+        def default_return(song):
             random_3l = self.get_random_3l_for_blacktea(song)
             while not random_3l:
                 song = self.get_random_song_for_blacktea()
@@ -2805,7 +2805,7 @@ class Music(commands.Cog, name="Music"):
             era_full = ALBUMS.get(era_name, {}).get("name", era_name)
 
             if category == "recording_session" or era_name == "GB&GR (AE)" or era_name == "GB&GR (5YAE)" or era_name == "MAINSTREAM":
-                return default_return()
+                return default_return(song)
 
             return {
                 "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
@@ -2816,7 +2816,7 @@ class Music(commands.Cog, name="Music"):
             end_line_index = date_leaked.rfind("\n")
             real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
             if not real_date_leaked or len(real_date_leaked) < 3:
-                return default_return()
+                return default_return(song)
             # month = real_date_leaked[0].strip()
             year = real_date_leaked[2].strip()
 
@@ -2828,18 +2828,18 @@ class Music(commands.Cog, name="Music"):
             groupbuy_info = song.get("groupbuy_info", {})
             price = groupbuy_info.get("price", "")
             if len(price) == 0:
-                return default_return()
+                return default_return(song)
             
             numerical_price = ''.join(filter(str.isdigit, price))
             if not numerical_price:
-                return default_return()
+                return default_return(song)
 
             return {
                 "description": f"Name a **Juice WRLD** song that was groupbuyed for **{price}** or higher",
                 "check_func": lambda song_name: self.blacktea_check_groupbuy_price(song_name, numerical_price)
             }
         else:
-            return default_return()
+            return default_return(song)
     @commands.command(name="syncblacktea", aliases=["sbt"])
     @commands.is_owner()
     async def syncblacktea(self, ctx: commands.Context):
