@@ -2681,11 +2681,6 @@ class Music(commands.Cog, name="Music"):
             self.song_index[name] = valid_songs
             return valid_songs
                         
-    @commands.command(name="blackteatest")
-    async def blackteatest(self, ctx: commands.Context, *, query: str):
-        songs = self.find_songs_by_name(query)
-        await ctx.reply(len(songs))
-
     def blacktea_check_producer(self, song_name, producer):
         songs = self.find_songs_by_name(song_name)
         if not songs:
@@ -2726,7 +2721,8 @@ class Music(commands.Cog, name="Music"):
             # month = real_date_leaked[0].strip()
             # day = real_date_leaked[1].strip()
             year = real_date_leaked[2].strip()
-            return year.lower() == leaked_date if year else False
+            if year and year.lower() == leaked_date.lower():
+                return True
         return False
     
     def blacktea_check_groupbuy_price(self, song_name, leaked_date):
