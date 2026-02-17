@@ -1994,14 +1994,14 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(view=layout_view)
 
         elif len(song_list) > 1:
-            results = sorted(song_list, key=lambda s: s.get("track_titles") if len(s.get("track_titles")) > 0 else [s.get("name", "Unknown")])[:25]
+            results = sorted(song_list, key=lambda s: s.get("track_titles"))[:25]
             song_map = {str(song["id"]): song for song in results}
 
             options = [
                 discord.SelectOption(
-                    label=(
+                    label=((
                         lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles"))[:100],
+                    )(song.get("track_titles"))[:100]) if len(song.get("track_titles", [])) > 0 else song.get("name", "Unknown"),
                     value=str(song["id"]),
                 )
                 for song in results
