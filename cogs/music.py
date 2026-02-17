@@ -1994,7 +1994,7 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(view=layout_view)
 
         elif len(song_list) > 1:
-            results = sorted(song_list, key=lambda s: s.get("track_titles") if s.get("track_titles") else [s.get("name", "Unknown")])[:25]
+            results = sorted(song_list, key=lambda s: s.get("track_titles") if len(s.get("track_titles")) > 0 else [s.get("name", "Unknown")])[:25]
             song_map = {str(song["id"]): song for song in results}
 
             options = [
