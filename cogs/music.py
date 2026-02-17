@@ -2681,6 +2681,10 @@ class Music(commands.Cog, name="Music"):
             self.song_index[name] = valid_songs
             return valid_songs
                         
+    @commands.command(name="blackteatest")
+    async def blackteatest(self, ctx: commands.Context, *, query: str):
+        songs = self.find_songs_by_name(query)
+        await ctx.reply(songs)
 
     def blacktea_check_producer(self, song_name, producer):
         songs = self.find_songs_by_name(song_name)
