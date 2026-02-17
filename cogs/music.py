@@ -2001,7 +2001,7 @@ class Music(commands.Cog, name="Music"):
                 discord.SelectOption(
                     label=(
                         lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles") if len(song.get("track_titles") > 0) else "Unknown")[:100],
+                    )(song.get("track_titles") if len(song.get("track_titles")) > 0 else "Unknown")[:100],
                     value=str(song["id"]),
                 )
                 for song in results
