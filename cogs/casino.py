@@ -4348,13 +4348,35 @@ class Casino(commands.Cog):
                     )
                     total = len([c for c in cards if card_values[c] <= current_value])
 
-                if favorable == 0:
+                if favorable == 0 or total == 0:
                     return Decimal("0")
 
                 probability = Decimal(favorable) / Decimal(total)
-                return (
-                    Decimal("1.0") / probability if probability != 0 else Decimal("0")
-                )
+
+                # Fair multiplier (1 / probability) before house edge
+                fair_mult = Decimal("1.0") / probability if probability != 0 else Decimal("0")
+
+                # Apply a house edge (default ~4%) to produce deterministic casino multipliers
+                house_edge = Decimal("0.04")
+                multiplier = fair_mult * (Decimal("1.0") - house_edge)
+
+                # Clamp multipliers into typical ranges used by casinos:
+                # - Middle / ~50% chances -> ~1.9x-2.0x
+                # - Strong favorites (high probability) -> ~1.02x-1.5x
+                # - Riskier guesses (low probability) -> ~2.0x-5.0x
+                if Decimal("1.95") <= fair_mult <= Decimal("2.05"):
+                    min_m, max_m = Decimal("1.90"), Decimal("2.00")
+                elif fair_mult <= Decimal("1.5"):
+                    min_m, max_m = Decimal("1.02"), Decimal("1.50")
+                else:
+                    min_m, max_m = Decimal("2.00"), Decimal("5.00")
+
+                if multiplier < min_m:
+                    multiplier = min_m
+                if multiplier > max_m:
+                    multiplier = max_m
+
+                return multiplier
 
             def calculate_probs(card):
                 current_value = card_values[card]
