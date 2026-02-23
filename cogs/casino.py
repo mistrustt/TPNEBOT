@@ -2954,6 +2954,7 @@ class Casino(commands.Cog):
                     "`column2`: 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35\n"
                     "`column3`: 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36\n\n"
                     "**Other bets:** `red`, `black`, `odd`, `even`, `high`, `low`, `dozen1`, `dozen2`, `dozen3`\n"
+                    "**Green:** `green` (payout ×14 for 0 or 00)\n"
                     "**Single numbers:** `0`–`36`, or `00` (payout ×36).\n\n"
                     "Example: `!roulette 100 red`"
                 ),
