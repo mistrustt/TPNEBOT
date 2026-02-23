@@ -590,6 +590,10 @@ class DiscordBot(commands.Bot):
                     f"{ctx.author} (ID: {ctx.author.id}) tried to execute an owner command in DMs."
                 )
             return
+        elif isinstance(error, commands.CheckFailure):
+            pass
+        elif isinstance(error, commands.CheckAnyFailure):
+            pass
         elif isinstance(error, Exception):
             dev_channel_id = int(os.getenv("DEVELOPER_CHANNEL_ID"))
             dev_channel = self.get_channel(dev_channel_id)

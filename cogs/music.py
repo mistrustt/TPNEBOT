@@ -44,6 +44,7 @@ class Music(commands.Cog, name="Music"):
         self.cache_songs.start()
 
         self.valid_names = []
+        self.producer_counts = {}
         self.ongoing_blacktea = []
 
         self.standard_colors = {
@@ -204,7 +205,7 @@ class Music(commands.Cog, name="Music"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
-        await self.sync_names()
+        await self.sync_blacktea()
 
     async def update_user_index(self, lastfm_username: str):
         """Fetch and index recent listening data for a user."""
@@ -1998,9 +1999,9 @@ class Music(commands.Cog, name="Music"):
 
             options = [
                 discord.SelectOption(
-                    label=(
+                    label=((
                         lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles"))[:100],
+                    )(song.get("track_titles"))[:100]) if len(song.get("track_titles", [])) > 0 else song.get("name", "Unknown"),
                     value=str(song["id"]),
                 )
                 for song in results
@@ -2600,10 +2601,28 @@ class Music(commands.Cog, name="Music"):
 
     ### TODO: make all blacktea commands under a class or something for better organization
 
-    async def sync_names(self):
+    async def sync_blacktea(self):
         self.valid_names = []
+        self.producer_counts = {}
+
         songs = Cache.get_songs()
         for song in songs:
+            producers = song.get("producers", "N/A")
+            producers = [p.strip() for p in re.split(r"&|,| and ", producers) if p.strip()]
+
+            era = song.get("era", {})
+            era_name = era.get("name", "N/A")
+            if era_name == "POST": # ignore posthumus cuz thats gay!
+                continue
+            if len(producers) > 5: # also ignore songs with a ton of producers
+                continue
+
+            for producer in producers:
+                if producer in self.producer_counts:
+                    self.producer_counts[producer] += 1
+                else:
+                    self.producer_counts[producer] = 1
+
             track_titles = song.get("track_titles", [])
             for title in track_titles:
                 acceptable_alt_name_list = self.get_acceptable_track_names(title)
@@ -2644,58 +2663,96 @@ class Music(commands.Cog, name="Music"):
                     return result
         return None
 
-    # TODO: Make this faster somehow
-    def find_song_by_name(self, name):
-        songs = Cache.get_songs()
-        for song in songs:
-            track_titles = song.get("track_titles", [])
-            for title in track_titles:
-                acceptable_name_list = self.get_acceptable_track_names(title)
-                for acceptable_name in acceptable_name_list:
-                    if acceptable_name.lower() == name.lower():
-                        return song
+    def find_songs_by_name(self, name):
+        if not hasattr(self, "song_index"):
+            self.song_index = {}
 
+        if name in self.song_index:
+            return self.song_index[name]
+        else:
+            songs = Cache.get_songs()
+            valid_songs = []
+            for song in songs:
+                track_titles = song.get("track_titles", [])
+                for title in track_titles:
+                    for acceptable_name in self.get_acceptable_track_names(title):
+                        if acceptable_name == name:
+                            valid_songs.append(song)
+            self.song_index[name] = valid_songs
+            return valid_songs
+                        
     def blacktea_check_producer(self, song_name, producer):
-        song = self.find_song_by_name(song_name)
-        if not song:
+        songs = self.find_songs_by_name(song_name)
+        if not songs:
             return False
-        
-        producers = song.get("producers", "N/A")
-        producers = [
-            p.strip()
-            for p in re.split(r"&|,| and ", producers)
-            if p.strip()
-        ]
-        return producer in producers
+
+        for song in songs:
+            producers = song.get("producers", "N/A")
+            producers = [p.strip() for p in re.split(r"&|,| and ", producers) if p.strip()]
+            if producer in producers:
+                return True
+
+        return False
 
     def blacktea_check_category(self, song_name, category_era):
-        song = self.find_song_by_name(song_name)
-        if not song:
+        songs = self.find_songs_by_name(song_name)
+        if not songs:
             return False
         
-        category = song.get("category", "")
-        era = song.get("era", {})
-        era_name = era.get("name", "")
-        return f'{category}{era_name}' == category_era
+        for song in songs:
+            category = song.get("category", "")
+            era = song.get("era", {})
+            era_name = era.get("name", "")
+            if f'{category}{era_name}' == category_era:
+                return True
+        return False
     
     def blacktea_check_leaked(self, song_name, leaked_date):
-        song = self.find_song_by_name(song_name)
-        if not song:
+        songs = self.find_songs_by_name(song_name)
+        if not songs:
             return False
-        
-        date_leaked = song.get("date_leaked", "")
-        end_line_index = date_leaked.rfind("\n")
-        real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
-        if real_date_leaked and len(real_date_leaked) < 3:
+
+        for song in songs:
+            date_leaked = song.get("date_leaked", "")
+            end_line_index = date_leaked.rfind("\n")
+            real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+            if real_date_leaked and len(real_date_leaked) < 3:
+                return False
+            # month = real_date_leaked[0].strip()
+            # day = real_date_leaked[1].strip()
+            year = real_date_leaked[2].strip()
+            if year and year.lower() == leaked_date.lower():
+                return True
+        return False
+    
+    def blacktea_check_groupbuy_price(self, song_name, leaked_date):
+        songs = self.find_songs_by_name(song_name)
+        if not songs:
             return False
-        # month = real_date_leaked[0].strip()
-        # day = real_date_leaked[1].strip()
-        year = real_date_leaked[2].strip()
-        return year.lower() == leaked_date    
+
+        for song in songs:
+            groupbuy_info = song.get("groupbuy_info", {})
+            price = groupbuy_info.get("price", "")
+            numerical_price = ''.join(filter(str.isdigit, price))
+            if not numerical_price:
+                return False
+            
+            return int(numerical_price) >= int(leaked_date)
+        return False
 
     # Returns embed description, correct answer, check function
     def get_random_blacktea_category_data(self, song):
-        random_index = random.randint(0, 3)
+        def default_return(song):
+            random_3l = self.get_random_3l_for_blacktea(song)
+            while not random_3l:
+                song = self.get_random_song_for_blacktea()
+                random_3l = self.get_random_3l_for_blacktea(song)
+            return {
+                "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
+                "check_func": lambda song_name: random_3l.lower() in song_name.lower()
+            }
+        
+        random_index = random.randint(0, 4)
         if random_index == 0:
             producers = song.get("producers", "N/A")
             producers = [
@@ -2703,13 +2760,18 @@ class Music(commands.Cog, name="Music"):
                 for p in re.split(r"&|,| and ", producers)
                 if p.strip()
             ]
-            producer = random.choice(producers) if producers else None
 
+            producer = random.choice(producers) if producers else None
+            if producer in self.producer_counts:
+                count = self.producer_counts[producer]
+                if count < 6: # Adjust this number to how common you want the producer questions to be, this is just a safeguard to prevent really common producers from dominating the category
+                    return self.get_random_blacktea_category_data(song)
+            
             return {
                 "description": f"Name a **Juice WRLD** song produced by **{producer}**",
                 "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
             }
-        if random_index == 1:
+        elif random_index == 1:
             ALBUMS = {
                 'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
                 'LND':                  {'name': 'Legends Never Die', 'color': '#F700FF'},
@@ -2741,14 +2803,20 @@ class Music(commands.Cog, name="Music"):
 
             # TODO: fix this doesnt work
             era_full = ALBUMS.get(era_name, {}).get("name", era_name)
+
+            if category == "recording_session" or era_name == "GB&GR (AE)" or era_name == "GB&GR (5YAE)" or era_name == "MAINSTREAM":
+                return default_return(song)
+
             return {
                 "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
                 "check_func": lambda song_name: self.blacktea_check_category(song_name, f"{category}{era_name}")
             }
-        if random_index == 2:
+        elif random_index == 2:
             date_leaked = song.get("date_leaked", "")
             end_line_index = date_leaked.rfind("\n")
             real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+            if not real_date_leaked or len(real_date_leaked) < 3:
+                return default_return(song)
             # month = real_date_leaked[0].strip()
             year = real_date_leaked[2].strip()
 
@@ -2756,21 +2824,35 @@ class Music(commands.Cog, name="Music"):
                 "description": f"Name a **Juice WRLD** song that leaked in **{year}**",
                 "check_func": lambda song_name: self.blacktea_check_leaked(song_name, year.lower())
             }
-        else:
-            random_3l = self.get_random_3l_for_blacktea(song)
+        elif random_index == 3:
+            groupbuy_info = song.get("groupbuy_info", {})
+            price = groupbuy_info.get("price", "")
+            if len(price) == 0:
+                return default_return(song)
+            
+            numerical_price = ''.join(filter(str.isdigit, price))
+            if not numerical_price:
+                return default_return(song)
+
             return {
-                "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
-                "check_func": lambda song_name: random_3l.lower() in song_name.lower()
+                "description": f"Name a **Juice WRLD** song that was groupbuyed for **{price}** or higher",
+                "check_func": lambda song_name: self.blacktea_check_groupbuy_price(song_name, numerical_price)
             }
-
-    @commands.command(name="syncvalidnames", aliases=["syncnames"])
+        else:
+            return default_return(song)
+    @commands.command(name="syncblacktea", aliases=["sbt"])
     @commands.is_owner()
-    async def syncvalidnames(self, ctx: commands.Context):
-        songs = Cache.get_songs()
+    async def syncblacktea(self, ctx: commands.Context):
+        await ctx.message.add_reaction('🔄')
 
+        songs = Cache.get_songs()
         old_names_length = len(self.valid_names)
-        await self.sync_names()
+        old_prods_length = len(self.producer_counts)
+        await self.sync_blacktea()
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
+        await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
+
+        await ctx.message.add_reaction('✅')
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
@@ -2886,14 +2968,6 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
     async def heardle(self, ctx: commands.Context):
-        if ctx.author.id == 567401702190350347 and random.random() < 0.35:
-            await Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                f"You are too old for this command. Age detected: {random.randint(30, 40)}",
-            )
-            return
-
         if ctx.author.id in self.ongoing_heardle:
             await Embeds.send_error_embed(
                 ctx.channel, ctx.author, "You already have an ongoing game of Heardle!"
@@ -2943,7 +3017,7 @@ class Music(commands.Cog, name="Music"):
                             if cover_response.status == 200:
                                 image_data = await cover_response.read()
                                 image = Image.open(BytesIO(image_data))
-                                blurred_image = image.filter(ImageFilter.GaussianBlur(radius=15))  # Adjust radius for intensity                            
+                                blurred_image = image.filter(ImageFilter.GaussianBlur(radius=25))  # Adjust radius for intensity                            
                                 blurred_image.save(image_file_name)
                             elif album_art_response.status == 200:
                                 image_data = await album_art_response.read()

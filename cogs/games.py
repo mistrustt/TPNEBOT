@@ -63,7 +63,7 @@ async def fetch_wyr_question() -> str | None:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "google/gemini-2.0-flash-exp:free",  # model name
+        "model": "google/gemma-3-27b-it:free",  # model name
         "messages": [
             {
                 "role": "user",
