@@ -3110,7 +3110,7 @@ class Casino(commands.Cog):
         outcome_description = f"The ball landed on **{color_label} {spin_result}**."
 
         if choice == "green" and is_green:
-            winnings = amount * Decimal(36)
+            winnings = amount * Decimal(14)
             outcome_description += " You bet on Green."
         elif choice == "red" and is_red:
             winnings = amount * Decimal(2)
@@ -3179,13 +3179,9 @@ class Casino(commands.Cog):
             winnings = amount * Decimal(3)
             outcome_description += " You bet on Column 3."
         elif (
-            choice.isdigit()
-            and isinstance(spin_result, int)
-            and int(choice) == spin_result
+            (choice.isdigit() and isinstance(spin_result, int) and int(choice) == spin_result)
+            or (choice == "00" and spin_result == "00")
         ):
-            winnings = amount * Decimal(36)
-            outcome_description += " 🎉 You bet on that number!"
-        elif choice == "00" and spin_result == "00":
             winnings = amount * Decimal(36)
             outcome_description += " 🎉 You bet on that number!"
         else:
