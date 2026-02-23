@@ -32,7 +32,7 @@ COINMARKETCAP_API_URL = (
 )
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-llmmodel = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+llmmodel = "arcee-ai/trinity-large-preview:free"
 
 NASA_API_KEY = os.getenv("NASA_API_KEY")
 
