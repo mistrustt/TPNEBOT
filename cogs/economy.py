@@ -1578,6 +1578,7 @@ class Economy(commands.Cog):
             ("Playboi Carti", 3, 3.0, 5.0),
             ("Young Thug", 3, 3.0, 5.0),
             ("Gunna", 6, 1.8, 3.0),
+            ("CqllMeToxic", 10, 1.0, 1.2),
             ("Mysterious Stranger", 1, 7.5, 10.0),
         ]
 
