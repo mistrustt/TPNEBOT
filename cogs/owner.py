@@ -832,11 +832,11 @@ class Owner(commands.Cog, name="Owner"):
                 "q": Decimal("1000000000000000"),
                 "qu": Decimal("1000000000000000000"),
                 "s": Decimal("1000000000000000000000"),
-                "octillion": Decimal("1e27"),
+                "o": Decimal("1e27"),
             }
 
             multiplier_match = re.match(
-                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s)?$", amount_input
+                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s|o)?$", amount_input
             )
             if not multiplier_match:
                 raise ValueError("Invalid amount format.")
