@@ -832,6 +832,7 @@ class Owner(commands.Cog, name="Owner"):
                 "q": Decimal("1000000000000000"),
                 "qu": Decimal("1000000000000000000"),
                 "s": Decimal("1000000000000000000000"),
+                "octillion": Decimal("1e27"),
             }
 
             multiplier_match = re.match(
