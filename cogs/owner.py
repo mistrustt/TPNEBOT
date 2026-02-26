@@ -150,6 +150,7 @@ class Owner(commands.Cog, name="Owner"):
             284439598422163476,  # E
             1095747082599530627, # envy
             657182369240973312, # chaos
+            1219090700407279656, # toxic
         ]
         self.whitelist_private = [
             284439598422163476,  # E
