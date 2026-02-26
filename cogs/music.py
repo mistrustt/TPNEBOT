@@ -3447,7 +3447,7 @@ class Music(commands.Cog, name="Music"):
         """Fetch song data from Genius API."""
         search_url = "https://api.genius.com/search"
         headers = {"Authorization": f"Bearer {GENIUS_API_TOKEN}"}
-        params = {"q": song_name}
+        params = {"q": song_name + " Juice WRLD"}
 
         async with self.session.get(search_url, headers=headers, params=params) as response:
             if response.status != 200:
