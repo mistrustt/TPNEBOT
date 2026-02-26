@@ -3477,11 +3477,10 @@ class Music(commands.Cog, name="Music"):
             response1_data = await response1.json()
 
             song1_genius_data = await self.get_genius_data(response1_data.get("song", {}).get("name", ""))
-            song1_id = song1_genius_data.get("id", None)
-
             if not song1_genius_data:
                 await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
                 return
+            song1_id = song1_genius_data.get("id", None)
             if not song1_id:
                 await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract song ID. Please try again later.")
                 return
@@ -3493,10 +3492,10 @@ class Music(commands.Cog, name="Music"):
                     response2_data = await response2.json()
 
                     song2_genius_data = await self.get_genius_data(response2_data.get("song", {}).get("name", ""))
-                    song2_id = song2_genius_data.get("id", None)
                     if not song2_id:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
                         return
+                    song2_id = song2_genius_data.get("id", None)
                     if not song2_genius_data:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
                         return
