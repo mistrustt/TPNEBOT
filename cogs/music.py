@@ -3513,13 +3513,16 @@ class Music(commands.Cog, name="Music"):
             song2_title = self.get_most_acceptable_track_name(song2_genius_data.get("full_title", "Unknown Title"))
             song1_pageviews = song1_genius_data.get("stats", {}).get("pageviews", 0)
             song2_pageviews = song2_genius_data.get("stats", {}).get("pageviews", 0)
+
+            song1_title = song1_title[:song1_title.rfind("by")].strip() if "by" in song1_title else song1_title
+            song2_title = song2_title[:song2_title.rfind("by")].strip() if "by" in song2_title else song2_title
             
             embed = discord.Embed(
                 description=f"Do you think **{song1_title}** has *more* or *less* views than **{song2_title}**?",
                 color=ctx.author.color
             )
             embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
-            embed.set_footer(text="| info from genius.com", icon_url=song1_genius_data.get("song_art_image_thumbnail_url", ""))
+            # embed.set_footer(text="info from genius.com", icon_url=song1_genius_data.get("song_art_image_url", ""))
             message = await ctx.send(embed=embed)
             await message.add_reaction("⬆️")
             await message.add_reaction("⬇️")
@@ -3532,7 +3535,7 @@ class Music(commands.Cog, name="Music"):
                 reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=30)
                 if (reaction.emoji == "⬆️" and song1_pageviews > song2_pageviews) or (reaction.emoji == "⬇️" and song1_pageviews < song2_pageviews):
                     # TODO: use some format lib to format the page views to big num (1.2m instead of 1200000, 100k instead of 100000 etc)
-                    # or maybe not idk
+                    # or maybe not
                     await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
                 else:
                     await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
