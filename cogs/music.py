@@ -3486,9 +3486,9 @@ class Music(commands.Cog, name="Music"):
                 await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract song ID. Please try again later.")
                 return
             
-            song2 = song1_id
+            song2_id = song1_id
             retry = 0
-            while song2 == song1_id:
+            while song2_id == song1_id:
                 async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response2:
                     response2_data = await response2.json()
 
