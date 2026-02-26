@@ -3442,6 +3442,7 @@ class Music(commands.Cog, name="Music"):
             f"Total pledges counted ({selected_channel.mention}): **${pledge_count:,}**",
             delete_after=None
         )
+        
     async def get_genius_data(self, song_name: str):
         """Fetch song data from Genius API."""
         search_url = "https://api.genius.com/search"
@@ -3473,7 +3474,9 @@ class Music(commands.Cog, name="Music"):
             return
         
         async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response1:
-            song1_genius_data = self.get_genius_data(await response1.json().get("song", {}).get("name", ""))
+            response1_data = await response1.json()
+
+            song1_genius_data = self.get_genius_data(response1_data.get("song", {}).get("name", ""))
             song1_id = song1_genius_data.get("id", None)
 
             if not song1_genius_data:
@@ -3487,7 +3490,9 @@ class Music(commands.Cog, name="Music"):
             retry = 0
             while song2 == song1_id:
                 async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response2:
-                    song2_genius_data = self.get_genius_data(await response2.json().get("song", {}).get("name", ""))
+                    response2_data = await response2.json()
+
+                    song2_genius_data = self.get_genius_data(response2_data.get("song", {}).get("name", ""))
                     song2_id = song2_genius_data.get("id", None)
                     if not song2_id:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
