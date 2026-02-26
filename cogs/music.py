@@ -3476,7 +3476,7 @@ class Music(commands.Cog, name="Music"):
         async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response1:
             response1_data = await response1.json()
 
-            song1_genius_data = self.get_genius_data(response1_data.get("song", {}).get("name", ""))
+            song1_genius_data = await self.get_genius_data(response1_data.get("song", {}).get("name", ""))
             song1_id = song1_genius_data.get("id", None)
 
             if not song1_genius_data:
@@ -3492,7 +3492,7 @@ class Music(commands.Cog, name="Music"):
                 async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response2:
                     response2_data = await response2.json()
 
-                    song2_genius_data = self.get_genius_data(response2_data.get("song", {}).get("name", ""))
+                    song2_genius_data = await self.get_genius_data(response2_data.get("song", {}).get("name", ""))
                     song2_id = song2_genius_data.get("id", None)
                     if not song2_id:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
