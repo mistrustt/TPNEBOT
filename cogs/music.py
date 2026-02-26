@@ -3442,22 +3442,6 @@ class Music(commands.Cog, name="Music"):
             f"Total pledges counted ({selected_channel.mention}): **${pledge_count:,}**",
             delete_after=None
         )
-
-class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self.base_url = "https://juicewrldapi.com/juicewrld/cover"
-        self.extensions = ["png", "jpg", "jpeg"]
-    
-    async def check_cover_exists(self, session: aiohttp.ClientSession, song_name: str, extension: str) -> tuple[bool, str]:
-        """Check if a Juice WRLD song cover exists."""
-        url = f"{self.base_url}/{song_name}.{extension}"
-        try:
-            async with session.head(url, timeout=5) as response:
-                return (response.status == 200, url)
-        except:
-            return (False, url)
-    
     async def get_genius_data(self, song_name: str):
         """Fetch song data from Genius API."""
         search_url = "https://api.genius.com/search"
@@ -3549,6 +3533,21 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
                 await Embeds.send_warning_embed(ctx.channel, ctx.author, "You took too long to react! Please try again.")
                 self.ongoing_higherlower.remove(ctx.author.id)
                 return
+
+class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.base_url = "https://juicewrldapi.com/juicewrld/cover"
+        self.extensions = ["png", "jpg", "jpeg"]
+    
+    async def check_cover_exists(self, session: aiohttp.ClientSession, song_name: str, extension: str) -> tuple[bool, str]:
+        """Check if a Juice WRLD song cover exists."""
+        url = f"{self.base_url}/{song_name}.{extension}"
+        try:
+            async with session.head(url, timeout=5) as response:
+                return (response.status == 200, url)
+        except:
+            return (False, url)
 
     @commands.command(name="cover", help="Search for available covers of a song")
     async def cover(self, ctx: commands.Context, *, song_name: str = None):
