@@ -3500,7 +3500,7 @@ class Music(commands.Cog, name="Music"):
                     if not song2_id:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
                         return
-                    if len(song2_id) == 0 and retry > 5:
+                    if not song2_id and retry > 5:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
                         return
                     retry += 1
