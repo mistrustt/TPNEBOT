@@ -3493,11 +3493,11 @@ class Music(commands.Cog, name="Music"):
                     response2_data = await response2.json()
 
                     song2_genius_data = await self.get_genius_data(response2_data.get("song", {}).get("name", ""))
-                    if not song2_id:
+                    if not song2_genius_data:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
                         return
                     song2_id = song2_genius_data.get("id", None)
-                    if not song2_genius_data:
+                    if not song2_id:
                         await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
                         return
                     if len(song2_id) == 0 and retry > 5:
