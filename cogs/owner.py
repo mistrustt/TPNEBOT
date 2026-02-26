@@ -2443,8 +2443,14 @@ class Owner(commands.Cog, name="Owner"):
                 self.value = True
                 for child in self.children:
                     child.disabled = True
+                embed = discord.Embed(
+                    description=f"{ctx.author.mention}, shutting down! ✅",
+                    color=ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple(),
+                )
                 await interaction.response.edit_message(
-                    content="Shutting down...", view=self
+                    embed=embed, view=self
                 )
                 self.stop()
 
@@ -2455,8 +2461,14 @@ class Owner(commands.Cog, name="Owner"):
                 self.value = False
                 for child in self.children:
                     child.disabled = True
+                embed = discord.Embed(
+                    description=f"{ctx.author.mention}, shutdown cancelled! ❌",
+                    color=ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple(),
+                )
                 await interaction.response.edit_message(
-                    content="Shutdown cancelled.", view=self
+                    embed=embed, view=self
                 )
                 self.stop()
 
@@ -2474,7 +2486,7 @@ class Owner(commands.Cog, name="Owner"):
 
         view = ConfirmView(timeout=30)
         embed = discord.Embed(
-            description=f"{ctx.author.mention}, are you sure you want to shut down?",
+            description=f"{ctx.author.mention}, are you sure you want to shut down? ℹ️",
             color=ctx.author.top_role.color
             if ctx.author.top_role
             else discord.Color.blurple(),
