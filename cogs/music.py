@@ -3454,6 +3454,13 @@ class Music(commands.Cog, name="Music"):
                 return None
             data = await response.json()
             hits = data.get("response", {}).get("hits", [])
+
+            # get songs only
+            valid_hits = []
+            for hit in hits:
+                if hit.get("primary_artist").get("is_verified", False) == True:
+                    valid_hits.append(hit)
+
             if len(hits) == 0:
                 return None
             api_path = hits[0].get("result", {}).get("api_path", "")
