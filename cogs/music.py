@@ -3509,17 +3509,17 @@ class Music(commands.Cog, name="Music"):
                 
             # were using the genius title rather than api title because if we get wrong song from genius,
             # the user can still guess based on song retrieved from geniu  
-            song1_title = song1_genius_data.get("full_title", "Unknown Title")
-            song2_title = song2_genius_data.get("full_title", "Unknown Title")
+            song1_title = self.get_most_acceptable_track_name(song1_genius_data.get("full_title", "Unknown Title"))
+            song2_title = self.get_most_acceptable_track_name(song2_genius_data.get("full_title", "Unknown Title"))
             song1_pageviews = song1_genius_data.get("stats", {}).get("pageviews", 0)
             song2_pageviews = song2_genius_data.get("stats", {}).get("pageviews", 0)
             
             embed = discord.Embed(
-                description=f"Do you think **{song1_title}** has more (⬆️) or less (⬇️) pageviews than **{song2_title}**?",
+                description=f"Do you think **{song1_title}** has more (⬆️) or less (⬇️) views than **{song2_title}**?",
                 color=ctx.author.color
             )
             embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
-            embed.set_footer(text="Data from genius", icon_url=song1_genius_data.get("song_art_image_thumbnail_url", ""))
+            embed.set_footer(text="| info from genius.com", icon_url=song1_genius_data.get("song_art_image_thumbnail_url", ""))
             message = await ctx.send(embed=embed)
             await message.add_reaction("⬆️")
             await message.add_reaction("⬇️")
