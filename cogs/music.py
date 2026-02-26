@@ -3463,7 +3463,8 @@ class Music(commands.Cog, name="Music"):
             async with self.session.get(song_url, headers=headers) as song_response:
                 if song_response.status != 200:
                     return None
-                return await song_response.json().get("response", {}).get("song", {})
+                song_response_json = await song_response.json()
+                return song_response_json.get("response", {}).get("song", {})
 
         return None
 
