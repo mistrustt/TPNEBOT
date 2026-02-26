@@ -29,6 +29,7 @@ HEARDLE_CLIP_DURATION = 10
 DEFAULT_SNIPPET_DURATION = 15
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 MAX_NAME_TRANSFORMATIONS = 6
+GENIUS_API_TOKEN = os.getenv("GENIUS_API_TOKEN")
 
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
@@ -46,6 +47,7 @@ class Music(commands.Cog, name="Music"):
         self.valid_names = []
         self.producer_counts = {}
         self.ongoing_blacktea = []
+        self.ongoing_higherlower = []
 
         self.standard_colors = {
             "black": "#000000",
@@ -2360,6 +2362,7 @@ class Music(commands.Cog, name="Music"):
         self.ongoing_heardle = []
         self.snippet_debounce = {}
         self.ongoing_blacktea = []
+        self.ongoing_higherlower = []
 
         files = []
         self.assert_download_cache()
@@ -3455,6 +3458,98 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
         except:
             return (False, url)
     
+    async def get_genius_data(self, song_name: str):
+        """Fetch song data from Genius API."""
+        search_url = "https://api.genius.com/search"
+        headers = {"Authorization": f"Bearer {GENIUS_API_TOKEN}"}
+        params = {"q": song_name}
+
+        async with self.session.get(search_url, headers=headers, params=params) as response:
+            if response.status != 200:
+                return None
+            data = await response.json()
+            hits = data.get("response", {}).get("hits", [])
+            if len(hits) == 0:
+                return None
+            api_path = hits[0].get("result", {}).get("api_path", "")
+            if not api_path:
+                return None
+            song_url = f"https://api.genius.com{api_path}"
+            async with self.session.get(song_url, headers=headers) as song_response:
+                if song_response.status != 200:
+                    return None
+                return await song_response.json().get("response", {}).get("song", {})
+
+        return None
+
+    @commands.command(name="higherlower", help="Play a game of Higher or Lower with Juice WRLD song streams or whatever")
+    async def higherlower(self, ctx: commands.Context):
+        if ctx.author.id in self.ongoing_higherlower:
+            await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Higher or Lower!")
+            return
+        
+        async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response1:
+            song1_genius_data = self.get_genius_data(await response1.json().get("song", {}).get("name", ""))
+            song1_id = song1_genius_data.get("id", None)
+
+            if not song1_genius_data:
+                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+                return
+            if not song1_id:
+                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract song ID. Please try again later.")
+                return
+            
+            song2 = song1_id
+            retry = 0
+            while song2 == song1_id:
+                async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response2:
+                    song2_genius_data = self.get_genius_data(await response2.json().get("song", {}).get("name", ""))
+                    song2_id = song2_genius_data.get("id", None)
+                    if not song2_id:
+                        await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
+                        return
+                    if not song2_genius_data:
+                        await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
+                        return
+                    if len(song2_id) == 0 and retry > 5:
+                        await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+                        return
+                    retry += 1
+
+            self.ongoing_higherlower.append(ctx.author.id)
+                
+            # were using the genius title rather than api title because if we get wrong song from genius,
+            # the user can still guess based on song retrieved from geniu  
+            song1_title = song1_genius_data.get("full_title", "Unknown Title")
+            song2_title = song2_genius_data.get("full_title", "Unknown Title")
+            song1_pageviews = song1_genius_data.get("stats", {}).get("pageviews", 0)
+            song2_pageviews = song2_genius_data.get("stats", {}).get("pageviews", 0)
+            
+            embed = discord.Embed(
+                description=f"Do you think **{song1_title}** has more (⬆️) or less (⬇️) pageviews than **{song2_title}**?",
+                color=ctx.author.color
+            )
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+            embed.set_footer(text="Data from genius", icon_url=song1_genius_data.get("song_art_image_thumbnail_url", ""))
+            message = await ctx.send(embed=embed)
+            await message.add_reaction("⬆️")
+            await message.add_reaction("⬇️")
+            def check(reaction, user):
+                return user == ctx.author and str(reaction.emoji) in ["⬆️", "⬇️"] and reaction.message.id == message.id
+            try:    
+                # TODO: add data row and stats similar to headle (!hstats for heardle so like !highlowstats or something like that)
+                # TODO: make game continue system after: Automatically play again but add an X reaction to quit
+
+                reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=30)
+                if (reaction.emoji == "⬆️" and song1_pageviews > song2_pageviews) or (reaction.emoji == "⬇️" and song1_pageviews < song2_pageviews):
+                    await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews} pageviews while **{song2_title}** has {song2_pageviews} pageviews.")
+                else:
+                    await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews} pageviews while **{song2_title}** has {song2_pageviews} pageviews.")
+            except asyncio.TimeoutError:
+                await Embeds.send_warning_embed(ctx.channel, ctx.author, "You took too long to react! Please try again.")
+                self.ongoing_higherlower.remove(ctx.author.id)
+                return
+
     @commands.command(name="cover", help="Search for available covers of a song")
     async def cover(self, ctx: commands.Context, *, song_name: str = None):
         """Search for song covers in the Juice WRLD API database."""
