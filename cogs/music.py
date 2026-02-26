@@ -3515,7 +3515,7 @@ class Music(commands.Cog, name="Music"):
             song2_pageviews = song2_genius_data.get("stats", {}).get("pageviews", 0)
             
             embed = discord.Embed(
-                description=f"Do you think **{song1_title}** has more (⬆️) or less (⬇️) views than **{song2_title}**?",
+                description=f"Do you think **{song1_title}** has *more* or *less* views than **{song2_title}**?",
                 color=ctx.author.color
             )
             embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
@@ -3531,9 +3531,11 @@ class Music(commands.Cog, name="Music"):
 
                 reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=30)
                 if (reaction.emoji == "⬆️" and song1_pageviews > song2_pageviews) or (reaction.emoji == "⬇️" and song1_pageviews < song2_pageviews):
-                    await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews} pageviews while **{song2_title}** has {song2_pageviews} pageviews.")
+                    # TODO: use some format lib to format the page views to big num (1.2m instead of 1200000, 100k instead of 100000 etc)
+                    # or maybe not idk
+                    await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
                 else:
-                    await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews} pageviews while **{song2_title}** has {song2_pageviews} pageviews.")
+                    await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
             except asyncio.TimeoutError:
                 await Embeds.send_warning_embed(ctx.channel, ctx.author, "You took too long to react! Please try again.")
                 self.ongoing_higherlower.remove(ctx.author.id)
