@@ -29,7 +29,7 @@ HEARDLE_CLIP_DURATION = 10
 DEFAULT_SNIPPET_DURATION = 15
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
 MAX_NAME_TRANSFORMATIONS = 6
-GENIUS_API_TOKEN = os.getenv("GENIUS_API_TOKEN")
+GENIUS_API_TOKEN = os.getenv("GENIUS_API_KEY")
 
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
