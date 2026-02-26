@@ -517,23 +517,6 @@ class DiscordBot(commands.Bot):
             return
         elif isinstance(error, commands.errors.UnexpectedQuoteError):
             return
-        elif isinstance(error, commands.errors.CommandInvokeError):
-            if ctx.author.id in self.cool_guys:
-                tb = error.original.__traceback__
-                stack_summary = traceback.extract_tb(tb)
-                last_call = stack_summary[-1]
-
-                file_name = last_call.filename[last_call.filename.rfind(os.sep)+1:]
-                line_num = last_call.lineno
-                last_line = last_call.line.strip() if last_call.line else "Unknown"
-                error = error.original
-
-                embed = discord.Embed(
-                    title="An error occurred while executing the command!",
-                    description=f"`File \"{file_name}\":{line_num}\n{last_line}\n{type(error).__name__}: {error}`",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=10)
         elif isinstance(error, commands.NoPrivateMessage):
             embed = discord.Embed(
                 description="This command cannot be used in DMs!",
@@ -660,6 +643,23 @@ class DiscordBot(commands.Bot):
                         )
                         await dev_channel.send(embed=part_embed)
             else:
+                if isinstance(error, commands.errors.CommandInvokeError) and ctx.author.id in self.cool_guys:
+                    tb = error.original.__traceback__
+                    stack_summary = traceback.extract_tb(tb)
+                    last_call = stack_summary[-1]
+
+                    file_name = last_call.filename[last_call.filename.rfind(os.sep)+1:]
+                    line_num = last_call.lineno
+                    last_line = last_call.line.strip() if last_call.line else "Unknown"
+                    error = error.original
+
+                    embed = discord.Embed(
+                        title="An error occurred while executing the command!",
+                        description=f"`File \"{file_name}\":{line_num}\n{last_line}\n{type(error).__name__}: {error}`",
+                        color=discord.Color.red(),
+                    )
+                    await ctx.reply(embed=embed, delete_after=10)
+
                 self.logger.error(
                     "Developer channel not found. Full error:\n" + detailed_error
                 )
