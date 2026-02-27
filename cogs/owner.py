@@ -2639,7 +2639,7 @@ class Owner(commands.Cog, name="Owner"):
 
         if not command_exists:
             await Embeds.send_error_embed(
-                ctx, f"The command `{command_name}` does not exist."
+                ctx.channel, ctx.author, f"The command `{command_name}` does not exist."
             )
             return
 
@@ -2649,14 +2649,14 @@ class Owner(commands.Cog, name="Owner"):
 
         if current_status:
             await Embeds.send_error_embed(
-                ctx, f"The `{command_name}` command is already enabled globally."
+                ctx.channel, ctx.author, f"The `{command_name}` command is already enabled globally."
             )
         else:
             await self.bot.database.set_command_status(
                 command_name, enabled=True, channel_id=None
             )
             await Embeds.send_success_embed(
-                ctx, f"The `{command_name}` command has been enabled globally."
+                ctx.channel, ctx.author, f"The `{command_name}` command has been enabled globally."
             )
 
     @command_cog.command(
@@ -2669,7 +2669,7 @@ class Owner(commands.Cog, name="Owner"):
 
         if not command_exists:
             await Embeds.send_error_embed(
-                ctx, f"The command `{command_name}` does not exist."
+                ctx.channel, ctx.author, f"The command `{command_name}` does not exist."
             )
             return
 
@@ -2679,14 +2679,14 @@ class Owner(commands.Cog, name="Owner"):
 
         if not current_status:
             await Embeds.send_error_embed(
-                ctx, f"The `{command_name}` command is already disabled globally."
+                ctx.channel, ctx.author, f"The `{command_name}` command is already disabled globally."
             )
         else:
             await self.bot.database.set_command_status(
                 command_name, enabled=False, channel_id=None
             )
             await Embeds.send_success_embed(
-                ctx, f"The `{command_name}` command has been disabled globally."
+                ctx.channel, ctx.author, f"The `{command_name}` command has been disabled globally."
             )
 
     @commands.group(name="bank", invoke_without_command=True, hidden=True)
