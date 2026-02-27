@@ -33,6 +33,7 @@ from database.models import (
 )
 from database.manager import ItemType
 import importlib.util
+from utils.embeds import Embeds
 
 logger = logging.getLogger("discord_bot")
 
@@ -2616,16 +2617,29 @@ class Owner(commands.Cog, name="Owner"):
 
         return False
 
-    @commands.command(
-        name="e", aliases=["enable"], help="Enable a command bot-wide.", hidden=True
-    )
+    @commands.group(name="command", aliases=["cmd"], invoke_without_command=True, hidden=True)
     @commands.is_owner()
+    async def command(self, ctx: Context):
+        """Manage bot commands."""
+        if ctx.invoked_subcommand is None:
+            embed = discord.Embed(
+                title="Command Management",
+                description="Available subcommands: `enable`, `disable`",
+                color=discord.Color.blurple(),
+            )
+            await ctx.reply(embed=embed)
+
+    @command.command(
+        name="enable", help="Enable a command bot-wide.", hidden=True
+    )
     async def enable_bot_command(self, ctx: Context, *, command_name: str):
         """Enable a command bot-wide."""
         command_exists = await self._check_command_exists(command_name)
 
         if not command_exists:
-            await ctx.send(f"The command `{command_name}` does not exist.")
+            await Embeds.send_error_embed(
+                ctx, f"The command `{command_name}` does not exist."
+            )
             return
 
         current_status = await self.bot.database.get_command_status(
@@ -2633,15 +2647,19 @@ class Owner(commands.Cog, name="Owner"):
         )
 
         if current_status:
-            await ctx.send(f"The `{command_name}` command is already enabled globally.")
+            await Embeds.send_error_embed(
+                ctx, f"The `{command_name}` command is already enabled globally."
+            )
         else:
             await self.bot.database.set_command_status(
                 command_name, enabled=True, channel_id=None
             )
-            await ctx.send(f"The `{command_name}` command has been enabled globally.")
+            await Embeds.send_success_embed(
+                ctx, f"The `{command_name}` command has been enabled globally."
+            )
 
-    @commands.command(
-        name="d", aliases=["disable"], help="Disable a command bot-wide.", hidden=True
+    @command.command(
+        name="disable", help="Disable a command bot-wide.", hidden=True
     )
     @commands.is_owner()
     async def disable_bot_command(self, ctx: Context, *, command_name: str):
@@ -2649,7 +2667,9 @@ class Owner(commands.Cog, name="Owner"):
         command_exists = await self._check_command_exists(command_name)
 
         if not command_exists:
-            await ctx.send(f"The command `{command_name}` does not exist.")
+            await Embeds.send_error_embed(
+                ctx, f"The command `{command_name}` does not exist."
+            )
             return
 
         current_status = await self.bot.database.get_command_status(
@@ -2657,14 +2677,16 @@ class Owner(commands.Cog, name="Owner"):
         )
 
         if not current_status:
-            await ctx.send(
-                f"The `{command_name}` command is already disabled globally."
+            await Embeds.send_error_embed(
+                ctx, f"The `{command_name}` command is already disabled globally."
             )
         else:
             await self.bot.database.set_command_status(
                 command_name, enabled=False, channel_id=None
             )
-            await ctx.send(f"The `{command_name}` command has been disabled globally.")
+            await Embeds.send_success_embed(
+                ctx, f"The `{command_name}` command has been disabled globally."
+            )
 
     @commands.group(name="bank", invoke_without_command=True, hidden=True)
     @commands.is_owner()
