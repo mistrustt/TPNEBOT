@@ -2619,7 +2619,7 @@ class Owner(commands.Cog, name="Owner"):
 
     @commands.group(name="command", aliases=["cmd"], invoke_without_command=True, hidden=True)
     @commands.is_owner()
-    async def command(self, ctx: Context):
+    async def command_cog(self, ctx: Context):
         """Manage bot commands."""
         if ctx.invoked_subcommand is None:
             embed = discord.Embed(
@@ -2629,9 +2629,10 @@ class Owner(commands.Cog, name="Owner"):
             )
             await ctx.reply(embed=embed)
 
-    @command.command(
+    @command_cog.command(
         name="enable", help="Enable a command bot-wide.", hidden=True
     )
+    @commands.is_owner()
     async def enable_bot_command(self, ctx: Context, *, command_name: str):
         """Enable a command bot-wide."""
         command_exists = await self._check_command_exists(command_name)
@@ -2658,7 +2659,7 @@ class Owner(commands.Cog, name="Owner"):
                 ctx, f"The `{command_name}` command has been enabled globally."
             )
 
-    @command.command(
+    @command_cog.command(
         name="disable", help="Disable a command bot-wide.", hidden=True
     )
     @commands.is_owner()
