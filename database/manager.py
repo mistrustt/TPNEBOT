@@ -1495,7 +1495,7 @@ class DatabaseManager:
         creating a wallet if needed.
         """
         wallet = await self.get_wallet_by_user_id(user_id)
-        return wallet.wallet_id
+        return (wallet.wallet_id + "_1")
 
     async def freeze_wallet(self, wallet_id: str):
         """Freeze a wallet to block outgoing transactions."""
