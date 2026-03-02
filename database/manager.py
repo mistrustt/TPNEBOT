@@ -79,6 +79,7 @@ ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owne
 
 _LAST_REBALANCE_AT: Optional[datetime] = None  # module-level memo
 
+CASINO_VERS = ""
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -1495,7 +1496,7 @@ class DatabaseManager:
         creating a wallet if needed.
         """
         wallet = await self.get_wallet_by_user_id(user_id)
-        return wallet.wallet_id
+        return f"{wallet.wallet_id}{CASINO_VERS}"
 
     async def freeze_wallet(self, wallet_id: str):
         """Freeze a wallet to block outgoing transactions."""

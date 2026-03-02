@@ -3458,7 +3458,8 @@ class Music(commands.Cog, name="Music"):
             # get songs only
             valid_hits = []
             for hit in hits:
-                if hit.get("primary_artist").get("is_verified", False) == True:
+                result = hit.get("result", {})
+                if result.get("primary_artist", {}).get("is_verified", False) == True:
                     valid_hits.append(hit)
 
             if len(hits) == 0:
