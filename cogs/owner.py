@@ -2824,42 +2824,51 @@ class Owner(commands.Cog, name="Owner"):
     async def admin_bank_reset(self, ctx: Context, member: discord.Member):
         """Reset a user's bank and wallet balance to zero."""
         try:
-            member_id = member.id
-            member_wallet_id = await self.bot.database.get_wallet_id_for_user(member_id)
-            bank_balance = Decimal(
-                str(await self.bot.database.get_bank_balance(member_wallet_id))
-            )
-            wallet_balance = Decimal(
-                str(await self.bot.database.get_wallet_balance(member_wallet_id))
-            )
-
-            if bank_balance >= 0:
+            member_wallet_id = await self.bot.database.get_wallet_id_for_user(member.id)
+            
+            bank_balance = Decimal(str(await self.bot.database.get_bank_balance(member_wallet_id)))
+            
+            if bank_balance != 0:
                 await self.bot.database.withdraw_from_bank(
                     member_wallet_id,
                     bank_balance,
-                    f"Admin Audit - Reset by {ctx.author.name}",
+                    f"Admin Audit - Reset (Bank Clear) by {ctx.author.name}",
                 )
 
-            if wallet_balance >= 0:
-                try:
-                    await self.bot.database.process_treasury_transaction(
-                        member_wallet_id,
-                        -wallet_balance,
-                        f"Admin Audit - Reset by {ctx.author.name}",
-                    )
-                except ValueError as e:
-                    embed = discord.Embed(
-                        description=f"🚫 Transaction failed: {e}",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
-                    return
+            total_wallet_balance = Decimal(str(await self.bot.database.get_wallet_balance(member_wallet_id)))
+
+            if total_wallet_balance != 0:
+                await self.bot.database.process_treasury_transaction(
+                    member_wallet_id,
+                    -total_wallet_balance,
+                    f"Admin Audit - Reset (Full Wipe) by {ctx.author.name}",
+                )
 
             await self.bot.database.validate_economy()
 
             embed = discord.Embed(
-                description=f"Reset {member.display_name}'s wallet and bank balance.",
+                description=f"✅ Successfully reset **{member.display_name}** to {self.currency_name} **0**.",
                 color=discord.Color.orange(),
+            )
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(embed=discord.Embed(description=f"❌ Error: {e}", color=discord.Color.red()))
+
+    @adminbank.command(name="refund", hidden=True)
+    @commands.is_owner()
+    async def admin_bank_refund(self, ctx: Context, member: discord.Member, txid: str):
+        """Refund a transaction."""
+
+        try:
+            #concept
+            #await self.bot.database.refund_transaction(txid, f"Admin Audit - Refund by {ctx.author.name}")
+            #await self.bot.database.validate_economy()
+
+            embed = discord.Embed(
+                description=f"✅ Successfully refunded transaction **{txid}** for user **{member.display_name}**.",
+                color=discord.Color.green(),
             )
             embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
             await ctx.send(embed=embed)
@@ -2873,9 +2882,10 @@ class Owner(commands.Cog, name="Owner"):
     async def mint(self, ctx: Context, amount: str):
         """Mint to currency supply."""
         try:
-            amount = await self.amount_handler(amount, 999999999999999999999999)
+            treasury = await self.bot.database.get_treasury_balance()
+            amount = await self.amount_handler(amount, treasury)
             await self.bot.database.mint_currency(
-                amount, f"Admin Audit - Burn by {ctx.author.name}"
+                amount, f"Admin Audit - Mint by {ctx.author.name}"
             )
             await self.bot.database.validate_economy()
 
