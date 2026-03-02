@@ -127,9 +127,6 @@ def _importable_cog(path: str) -> bool:
 def _fmt_list(items: Iterable[str]) -> str:
     return ", ".join(items) if items else "—"
 
-
-
-
 class Owner(commands.Cog, name="Owner"):
     def __init__(self, bot) -> None:
         self.bot = bot
