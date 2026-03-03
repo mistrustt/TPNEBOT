@@ -4042,13 +4042,32 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Deletes MP3 files if the filter is enabled in the server."""
+        """Deletes MP3 files if the filter is enabled in the server. and also purge sharkyz messages cuz he asked me to make dis cuz he lazy af lol"""
 
         if message.author.bot or not message.guild:
             return
 
         if message.author.id not in self.allowed_mp3_bypass_ids:
             await self.handle_antimp3_check(message)
+        
+        if message.author.id == 1219090700407279656 and message.guild.id == 1424157737188589610:
+            if message.content.lower() == "shark":
+                try:
+                    deleted = await message.channel.purge(
+                        limit=5,
+                        check=lambda m: m.author.id == 1219090700407279656
+                    )
+                    logger.info(f"Deleted {len(deleted)} messages from user {message.author}")
+                    
+                    embed = discord.Embed(
+                        description=f"Deleted **{len(deleted)}** messages from {message.author.mention}",
+                        color=discord.Color.blue()
+                    )
+                    await message.channel.send(embed=embed, delete_after=5)
+                except Exception as e:
+                    logger.error(f"Failed to delete messages: {e}")
+
+
 
 
 async def setup(bot) -> None:
