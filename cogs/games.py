@@ -63,7 +63,7 @@ async def fetch_wyr_question() -> str | None:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "openai/gpt-oss-120b:free",  # model name
+        "model": "google/gemma-3n-e4b-it:free",  # model name
         "messages": [
             {
                 "role": "user",
