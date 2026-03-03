@@ -5463,6 +5463,18 @@ class Casino(commands.Cog):
                 await ctx.reply(embed=embed)
                 return
 
+            max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
+            if bet_amount > max_allowed:
+                bet_amount = max_allowed
+                await ctx.reply(
+                    embed=discord.Embed(
+                        description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                        f"**{await self.formatter(bet_amount)} {self.currency_name}**.",
+                        color=discord.Color.orange(),
+                    ),
+                    delete_after=5,
+                )
+
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id,
