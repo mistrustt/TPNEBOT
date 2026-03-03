@@ -4050,12 +4050,12 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.id not in self.allowed_mp3_bypass_ids:
             await self.handle_antimp3_check(message)
         
-        if message.author.id == 1219090700407279656 and message.guild.id == 1424157737188589610:
+        if message.author.id == 992339587458416650 and message.guild.id == 1270962480742666311:
             if message.content.lower() == "shark":
                 try:
                     deleted = await message.channel.purge(
-                        limit=5,
-                        check=lambda m: m.author.id == 1219090700407279656
+                        limit=100,
+                        check=lambda m: m.author.id == 992339587458416650
                     )
                     logger.info(f"Deleted {len(deleted)} messages from user {message.author}")
                     
