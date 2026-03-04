@@ -4053,14 +4053,26 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.id == 992339587458416650 and message.guild.id == 1270962480742666311:
             if message.content.lower() == "shark":
                 try:
-                    deleted = await message.channel.purge(
-                        limit=100,
-                        check=lambda m: m.author.id == 992339587458416650
-                    )
-                    logger.info(f"Deleted {len(deleted)} messages from user {message.author}")
+                    messages_to_delete = []
+                    async for msg in message.channel.history(limit=99):
+                        if msg.author.id == 992339587458416650:
+                            messages_to_delete.append(msg)
+                    
+                    deleted_count = 0
+                    if messages_to_delete:
+                        try:
+                            await message.channel.delete_messages(messages_to_delete)
+                            deleted_count = len(messages_to_delete)
+                        except discord.HTTPException:
+                            for msg in messages_to_delete:
+                                try:
+                                    await msg.delete()
+                                    deleted_count += 1
+                                except (discord.NotFound, discord.Forbidden):
+                                    pass
                     
                     embed = discord.Embed(
-                        description=f"Deleted **{len(deleted)}** messages from {message.author.mention}",
+                        description=f"Deleted **{deleted_count}** messages from {message.author.mention}.",
                         color=discord.Color.blue()
                     )
                     await message.channel.send(embed=embed, delete_after=5)
