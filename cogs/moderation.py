@@ -4054,7 +4054,7 @@ class Moderation(commands.Cog, name="Moderation"):
             if message.content.lower() == "shark":
                 try:
                     messages_to_delete = [message]  # include the "shark" message
-                    async for msg in message.channel.history(limit=None, before=message):
+                    async for msg in message.channel.history(limit=100, before=message):
                         if msg.author.id == 992339587458416650:
                             messages_to_delete.append(msg)
                             if len(messages_to_delete) >= 100:  # 99 + the shark message
