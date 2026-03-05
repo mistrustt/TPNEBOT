@@ -4053,28 +4053,37 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.id == 1219090700407279656 and message.guild.id == 1270962480742666311:
             if message.content.lower() == "shark":
                 try:
-                    messages_to_delete = [message]  # include the "shark" message
+                    from datetime import datetime, timezone, timedelta
+                    
+                    bulk_delete = [message]
+                    old_messages = []
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+                    
                     async for msg in message.channel.history(limit=None, before=message):
                         if msg.author.id == 1219090700407279656:
-                            messages_to_delete.append(msg)
-                            if len(messages_to_delete) >= 100:  # 99 + the shark message
+                            if msg.created_at > cutoff:
+                                bulk_delete.append(msg)
+                            else:
+                                old_messages.append(msg)
+                            
+                            if len(bulk_delete) + len(old_messages) >= 100:  # 99 + shark message
                                 break
                     
                     deleted_count = 0
-                    if len(messages_to_delete) == 1:
-                        await message.delete()
-                        deleted_count = 1
-                    elif len(messages_to_delete) > 1:
+                    
+                    if len(bulk_delete) > 1:
+                        await message.channel.delete_messages(bulk_delete)
+                        deleted_count += len(bulk_delete)
+                    elif len(bulk_delete) == 1:
+                        await bulk_delete[0].delete()
+                        deleted_count += 1
+                    
+                    for msg in old_messages:
                         try:
-                            await message.channel.delete_messages(messages_to_delete)
-                            deleted_count = len(messages_to_delete)
-                        except discord.HTTPException:
-                            for msg in messages_to_delete:
-                                try:
-                                    await msg.delete()
-                                    deleted_count += 1
-                                except (discord.NotFound, discord.Forbidden):
-                                    pass
+                            await msg.delete()
+                            deleted_count += 1
+                        except (discord.NotFound, discord.Forbidden):
+                            pass
                     
                     embed = discord.Embed(
                         description=f"Deleted **{deleted_count}** messages from {message.author.mention}",
