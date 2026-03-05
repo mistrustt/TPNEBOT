@@ -43,6 +43,7 @@ class Music(commands.Cog, name="Music"):
 
         self.latest_surfaces = []
         self.cache_songs.start()
+        self.is_blacktea_synced = False 
 
         self.valid_names = []
         self.producer_counts = {}
@@ -2843,8 +2844,15 @@ class Music(commands.Cog, name="Music"):
             }
         else:
             return default_return(song)
+        
+    async def check_is_envy(ctx: commands.Context):
+        if ctx.author.id == 1095747082599530627:
+            return True
+        else:
+            return False
+
     @commands.command(name="syncblacktea", aliases=["sbt"])
-    @commands.is_owner()
+    @commands.check_any(commands.is_owner(), check_is_envy)
     async def syncblacktea(self, ctx: commands.Context):
         await ctx.message.add_reaction('🔄')
 
@@ -2858,11 +2866,14 @@ class Music(commands.Cog, name="Music"):
         await ctx.message.add_reaction('✅')
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
-    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True), check_is_envy)
     async def blacktea(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_blacktea :
             await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
             return
+        
+        if not self.is_blacktea_synced:
+            await self.sync_blacktea()
 
         players = []
         used_words = []
