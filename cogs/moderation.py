@@ -4050,12 +4050,12 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.id not in self.allowed_mp3_bypass_ids:
             await self.handle_antimp3_check(message)
         
-        if message.author.id == 1219090700407279656 and message.guild.id == 1270962480742666311 and message.channel.id == 1477017408785874945:
+        if message.author.id == 992339587458416650 and message.guild.id == 1270962480742666311 and message.channel.id == 1477017408785874945:
             if message.content.lower() == "shark":
                 try:
                     messages_to_delete = [message]
                     async for msg in message.channel.history(limit=500, before=message):
-                        if msg.author.id == 1219090700407279656:
+                        if msg.author.id == 992339587458416650:
                             messages_to_delete.append(msg)
                             if len(messages_to_delete) >= 100:
                                 break
