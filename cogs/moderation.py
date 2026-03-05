@@ -4054,12 +4054,17 @@ class Moderation(commands.Cog, name="Moderation"):
             if message.content.lower() == "shark":
                 try:
                     messages_to_delete = [message]  # include the "shark" message
-                    async for msg in message.channel.history(limit=99, before=message):
+                    async for msg in message.channel.history(limit=None, before=message):
                         if msg.author.id == 1219090700407279656:
                             messages_to_delete.append(msg)
+                            if len(messages_to_delete) >= 100:  # 99 + the shark message
+                                break
                     
                     deleted_count = 0
-                    if messages_to_delete:
+                    if len(messages_to_delete) == 1:
+                        await message.delete()
+                        deleted_count = 1
+                    elif len(messages_to_delete) > 1:
                         try:
                             await message.channel.delete_messages(messages_to_delete)
                             deleted_count = len(messages_to_delete)
@@ -4070,6 +4075,12 @@ class Moderation(commands.Cog, name="Moderation"):
                                     deleted_count += 1
                                 except (discord.NotFound, discord.Forbidden):
                                     pass
+                    
+                    embed = discord.Embed(
+                        description=f"Deleted **{deleted_count}** messages from {message.author.mention}",
+                        color=discord.Color.blue()
+                    )
+                    await message.channel.send(embed=embed, delete_after=5)
                     
                 except Exception as e:
                     logger.error(f"Failed to delete messages: {e}")
