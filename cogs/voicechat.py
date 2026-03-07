@@ -795,24 +795,84 @@ class Voicechat(commands.Cog):
             return
 
     async def ensure_voice(self, ctx):
-        """Ensure the bot joins the user's voice channel if not already connected and deafens itself"""
-        if (
-            ctx.guild.id in self.voice_clients
-            and self.voice_clients[ctx.guild.id].is_connected()
-        ):
-            return self.voice_clients[ctx.guild.id]
+        """Ensure the bot joins the user's voice channel if not already connected and deafens itself.
 
-        if ctx.author.voice:
-            voice_channel = ctx.author.voice.channel
-            vc = await voice_channel.connect()
-            self.voice_clients[ctx.guild.id] = vc
+        Discord's voice subsystem can raise ``discord.errors.ConnectionClosed``
+        (4017 in the logs) when the gateway/voice handshake fails.  That
+        error is coming from the library and usually indicates a temporary
+        failure on Discord's side (invalid region, token, etc).  If we do not
+        catch it the exception bubbles up and the calling command will crash
+        out of its coroutine.  ``ensure_voice`` is used by every command that
+        needs a voice connection, so we guard the connect call and clean up
+        any state when we hit a problem.
+        """
+        # if we already have a valid client, just return it
+        existing = self.voice_clients.get(ctx.guild.id)
+        if existing and existing.is_connected():
+            return existing
 
-            await ctx.guild.me.edit(deafen=True)
-
-            return vc
-        else:
-            await ctx.send("You must be in a voice channel to use this command.")
+        # user must be in voice in order to connect
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            await ctx.send(
+                "You must be in a voice channel to use this command.",
+                delete_after=5,
+            )
             return None
+
+        voice_channel = ctx.author.voice.channel
+        try:
+            vc = await voice_channel.connect()
+        except discord.errors.ConnectionClosed as exc:
+            # discord.py surfaces websocket close codes via the exception; 4017
+            # is commonly hit when the channel is *E2EE only* which the library
+            # doesn't support.  The user-facing message should explain that.
+            logging.error(
+                "Failed to connect to voice in guild %s (%s): %s",
+                ctx.guild.id,
+                ctx.guild.name,
+                exc,
+            )
+            # make sure we don't keep a stale entry around
+            self.voice_clients.pop(ctx.guild.id, None)
+
+            # pick a friendly explanation based on the code/message
+            msg = (
+                "I couldn't connect to the voice channel. "
+                "This might be a Discord outage or a temporary network issue; "
+                "please try again later."
+            )
+            if getattr(exc, "code", None) == 4017 or "E2EE" in str(exc):
+                msg = (
+                    "That channel requires end-to-end encryption (E2EE), "
+                    "which is not supported by bot clients. "
+                    "Try using a non-E2EE channel or disable the setting."
+                )
+            await ctx.send(msg, delete_after=10)
+            return None
+        except Exception as exc:  # cover any other unexpected errors
+            logging.exception(
+                "Unexpected error while connecting to voice in guild %s",
+                ctx.guild.id,
+            )
+            self.voice_clients.pop(ctx.guild.id, None)
+            await ctx.send(
+                "An unexpected error occurred when trying to join voice."
+                " Please contact an administrator.",
+                delete_after=5,
+            )
+            return None
+
+        # success path: store and deafen
+        self.voice_clients[ctx.guild.id] = vc
+        try:
+            await ctx.guild.me.edit(deafen=True)
+        except discord.Forbidden:
+            # permission problems shouldn't prevent playback, just warn
+            logging.warning(
+                "Unable to deafen bot in guild %s (missing permission)",
+                ctx.guild.id,
+            )
+        return vc
 
     async def play_next(self, ctx):
         """Plays the next song in the queue if available"""
@@ -896,6 +956,12 @@ class Voicechat(commands.Cog):
 
         vc = await self.ensure_voice(ctx)
         if not vc:
+            # couldn't join; delete the file we just saved so we don't leak disk space
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                logging.exception("failed to remove orphaned upload %s", file_path)
             return
 
         if ctx.guild.id not in self.queues:

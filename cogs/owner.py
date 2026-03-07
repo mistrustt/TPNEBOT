@@ -2338,43 +2338,31 @@ class Owner(commands.Cog, name="Owner"):
                                 return False
                             return True
 
-                        @discord.ui.button(
-                            label="⟨ Previous", style=discord.ButtonStyle.secondary
-                        )
+                        @discord.ui.button(label="⟨ Previous", style=discord.ButtonStyle.secondary)
                         async def previous(
                             self,
-                            button: discord.ui.Button,
                             interaction: discord.Interaction,
+                            button: discord.ui.Button,
                         ):
                             if self.current > 0:
                                 self.current -= 1
                                 embed = self.embeds[self.current]
-                                embed.set_footer(
-                                    text=f"Page {self.current+1} / {len(self.embeds)}"
-                                )
-                                await interaction.response.edit_message(
-                                    embed=embed, view=self
-                                )
+                                embed.set_footer(text=f"Page {self.current+1} / {len(self.embeds)}")
+                                await interaction.response.edit_message(embed=embed, view=self)
                             else:
                                 await interaction.response.defer()
 
-                        @discord.ui.button(
-                            label="Next ⟩", style=discord.ButtonStyle.secondary
-                        )
+                        @discord.ui.button(label="Next ⟩", style=discord.ButtonStyle.secondary)
                         async def next(
                             self,
-                            button: discord.ui.Button,
                             interaction: discord.Interaction,
+                            button: discord.ui.Button,
                         ):
                             if self.current < len(self.embeds) - 1:
                                 self.current += 1
                                 embed = self.embeds[self.current]
-                                embed.set_footer(
-                                    text=f"Page {self.current+1} / {len(self.embeds)}"
-                                )
-                                await interaction.response.edit_message(
-                                    embed=embed, view=self
-                                )
+                                embed.set_footer(text=f"Page {self.current+1} / {len(self.embeds)}")
+                                await interaction.response.edit_message(embed=embed, view=self)
                             else:
                                 await interaction.response.defer()
 
