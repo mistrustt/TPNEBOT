@@ -121,6 +121,10 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
+        if member.id == 1396419405239549962 and member.guild.id == 1270962480742666311:
+            await member.ban(reason="PERM BANNED.")
+            return
+
         jailed = await self.bot.database.get_jailed_user(member.guild.id, member.id)
         if jailed:
             role = member.guild.get_role(jailed.jail_role_id)
