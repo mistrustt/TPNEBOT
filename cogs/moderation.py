@@ -4049,30 +4049,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if message.author.id not in self.allowed_mp3_bypass_ids:
             await self.handle_antimp3_check(message)
-        
-        if message.author.id == 992339587458416650 and message.guild.id == 1270962480742666311 and message.channel.name == "chat":
-            if message.content.lower() == "shark":
-                try:
-                    messages_to_delete = [message]
-                    async for msg in message.channel.history(limit=None, before=message):
-                        if msg.author.id == 992339587458416650:
-                            messages_to_delete.append(msg)
-                            if len(messages_to_delete) >= 100:
-                                break
-
-                    if len(messages_to_delete) > 1:
-                        await message.channel.delete_messages(messages_to_delete)
-                    else:
-                        await message.delete()
-
-                    embed = discord.Embed(
-                        description=f"Deleted **{len(messages_to_delete)}** messages from {message.author.mention}.",
-                        color=discord.Color.blue()
-                    )
-                    await message.channel.send(embed=embed, delete_after=1)
-
-                except Exception as e:
-                    logger.error(f"Failed to delete messages: {e}")
 
 
 
