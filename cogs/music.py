@@ -2852,7 +2852,7 @@ class Music(commands.Cog, name="Music"):
             return False
 
     @commands.command(name="syncblacktea", aliases=["sbt"])
-    @commands.check_any(commands.is_owner(), check_is_envy)
+    @commands.check_any(commands.is_owner(), commands.check(check_is_envy))
     async def syncblacktea(self, ctx: commands.Context):
         await ctx.message.add_reaction('🔄')
 
@@ -2866,7 +2866,7 @@ class Music(commands.Cog, name="Music"):
         await ctx.message.add_reaction('✅')
 
     @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
-    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True), check_is_envy)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True), commands.check(check_is_envy))
     async def blacktea(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_blacktea :
             await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
