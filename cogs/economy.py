@@ -1172,10 +1172,14 @@ class Economy(commands.Cog):
                 "q": Decimal("1000000000000000"),
                 "qu": Decimal("1000000000000000000"),
                 "s": Decimal("1000000000000000000000"),
+                "se": Decimal("1000000000000000000000000"),
+                "o": Decimal("1000000000000000000000000000"),
+                "n": Decimal("1000000000000000000000000000000"),
+                "d": Decimal("1000000000000000000000000000000000"),
             }
 
             multiplier_match = re.match(
-                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s)?$", amount_input
+                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s|se|o|n|d)?$", amount_input
             )
             if not multiplier_match:
                 raise ValueError("Invalid amount format.")
@@ -2681,10 +2685,13 @@ class Economy(commands.Cog):
                 "q": Decimal("1000000000000000"),
                 "qu": Decimal("1000000000000000000"),
                 "s": Decimal("1000000000000000000000"),
+                "se": Decimal("1000000000000000000000000"),
+                "o": Decimal("1000000000000000000000000000"),
+                "n": Decimal("1000000000000000000000000000000"),
+                "d": Decimal("1000000000000000000000000000000000"),
             }
-
             multiplier_match = re.match(
-                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s)?$", amount_input
+                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s|se|o|n|d)?$", amount_input
             )
             if not multiplier_match:
                 raise ValueError("Invalid amount format.")
