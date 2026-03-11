@@ -2597,7 +2597,12 @@ class Economy(commands.Cog):
         await self.bot.database.process_treasury_transaction(
             wallet_id, -spend, f"Buy {symbol}"
         )
-        coins = (spend / price).quantize(Decimal("0.00000001"))
+        try:
+            coins = (spend / price).quantize(Decimal("0.00000001"))
+        except InvalidOperation:
+            return await ctx.reply(
+                f"Invalid amount for {symbol}. Please try again.", delete_after=5
+            )
         await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
 
         embed = discord.Embed(
