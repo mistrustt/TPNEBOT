@@ -1284,13 +1284,14 @@ class Economy(commands.Cog):
                     cost = asset.amount * asset.purchase_price
                     pnl = value - cost
                     pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
+                    fmt_pct = f"{'+' if pnl >= 0 else ''}{pnl_pct:.2f}%"
                     symbol = "📈" if pnl >= 0 else "📉"
                     embed.add_field(
                         name=asset.symbol,
                         value=(
                             f"Amount: **{await self.short_formatter(asset.amount)}**\n"
-                            f"Value: **{await self.short_formatter(value)} {self.currency_name}** "
-                            f"P/L: {symbol} **{await self.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
+                            f"Value: **{self.currency_name} {await self.short_formatter(value)}**\n"
+                            f"P/L: {symbol} **{self.currency_name} {await self.short_formatter(pnl)}** ({fmt_pct:.2f}%) "
                         ),
                         inline=False,
                     )
