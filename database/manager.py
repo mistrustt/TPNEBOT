@@ -1,5 +1,5 @@
 from sqlalchemy.future import select
-from sqlalchemy import update, delete, text, exists, case, literal_column
+from sqlalchemy import update, delete, text, exists, case, literal_column, distinct
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -2250,99 +2250,118 @@ class DatabaseManager:
         return True
 
     async def get_economic_factors(self) -> dict:
-        """
-        No more automatic minting.  We still auto-burn if health > MAX_HW
-        to prevent runaway inflation, but we *never* create new coins;
-        instead we rely on in-game sinks (see Part 2).
-        """
         supply = await self.get_supply_record()
         treasury, total_supply = supply.treasury, supply.total_supply
 
-        if total_supply == 0:
+        if total_supply <= 0:
             return {
                 "treasury_health": Decimal("0"),
                 "risk_scalar": Decimal("0"),
                 "fee_rate": Decimal("0"),
                 "passive_income_rate": Decimal("0"),
+                "treasury_balance": Decimal("0"),
+                "total_supply": Decimal("0"),
+                "velocity_of_money": Decimal("0"),
+                "liquidity_ratio": Decimal("0"),
+                "volatility_index": Decimal("0"),
             }
 
         treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
 
+        # Load cached/latest metrics
+        metrics = getattr(self, "_latest_metrics", {})
+        velocity_of_money = metrics.get("transaction_volume", Decimal("0")) / (metrics.get("circulating_supply", Decimal("1")) or Decimal("1"))
+        liquidity_ratio = (metrics.get("circulating_supply", Decimal("0")) / total_supply).quantize(Decimal("0.0001"))
+        volatility_index = metrics.get("volatility_index", Decimal("0.02"))
+
         TARGET = Decimal("0.50")
-        MIN_HW = Decimal("0.30")  # start minting below this
-        MAX_HW = Decimal("0.90")  # burn above 90 %
-        STEP = Decimal("0.05")  # burn 5 % of excess
-        CAP = total_supply * Decimal("0.02")  #   …max 2 % of supply
+        MIN_HW = Decimal("0.30")
+        MAX_HW = Decimal("0.90")
+        STEP = Decimal("0.05")
+        CAP = total_supply * Decimal("0.02")
         COOLDOWN = timedelta(hours=1)
 
         global _LAST_REBALANCE_AT
         now = discord.utils.utcnow()
 
-        need_rebalance = (treasury_health < MIN_HW or treasury_health > MAX_HW) and (
-            _LAST_REBALANCE_AT is None or now - _LAST_REBALANCE_AT > COOLDOWN
+        need_rebalance = (
+            (treasury_health < MIN_HW or treasury_health > MAX_HW)
+            and (_LAST_REBALANCE_AT is None or now - _LAST_REBALANCE_AT > COOLDOWN)
         )
 
-        # --- gradual mint/burn ------------------------------------------------
         if need_rebalance:
-            gap = (TARGET * total_supply) - treasury  # + = need mint
+            gap = (TARGET * total_supply) - treasury
             adj = min(abs(gap) * STEP, CAP).quantize(Decimal("0.01"))
 
             if adj > 0:
-                if gap > 0:  # mint
-                    await self.mint_currency(
-                        adj, f"Auto-mint {adj} (health {treasury_health:.2%})"
-                    )
-                else:  # burn
-                    await self.burn_currency(
-                        adj, f"Auto-burn {adj} (health {treasury_health:.2%})"
-                    )
-                _LAST_REBALANCE_AT = now
-                # refresh values after action
-                supply = await self.get_supply_record()
-                treasury = supply.treasury
-                total_supply = supply.total_supply
-                treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
+                try:
+                    if gap > 0:
+                        pass
+                    else:
+                        await self.burn_currency(adj, f"Auto-burn {adj} (health {treasury_health:.2%})")
+                        logger.info(f"[AUTO-REBALANCE] Burning {adj} units due to high treasury health.")
+                    _LAST_REBALANCE_AT = now
+                    supply = await self.get_supply_record()
+                    treasury, total_supply = supply.treasury, supply.total_supply
+                    treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
+                except Exception as e:
+                    logger.error(f"[AUTO-REBALANCE ERROR]: {e}")
 
-        # health-dependent fee / passive income (unchanged logic)
         BASE_FEE = Decimal("0.01")
         BASE_PASS = Decimal("0.005")
+        MAX_FEE_RATE = Decimal("0.10")
+        MIN_FEE_RATE = Decimal("0.001")
+
         if treasury_health < TARGET:
             d = TARGET - treasury_health
-            fee = (BASE_FEE * (1 + d**2)).quantize(Decimal("0.0001"))
+            fee_base = (BASE_FEE * (1 + d**2)).quantize(Decimal("0.0001"))
             passive = (BASE_PASS * (1 - d)).quantize(Decimal("0.0001"))
-            risk = (treasury_health / TARGET).quantize(Decimal("0.0001"))  # 0→1
+            risk = (treasury_health / TARGET).quantize(Decimal("0.0001"))
         else:
-            fee = BASE_FEE
+            fee_base = BASE_FEE
             passive = BASE_PASS
-            risk = (Decimal("1.0") + (treasury_health - TARGET)).quantize(
-                Decimal("0.0001")
-            )
+            risk = (Decimal("1.0") + (treasury_health - TARGET)).quantize(Decimal("0.0001"))
+
+        # Adjust fee based on volatility
+        fee = fee_base * (1 + volatility_index * Decimal("0.5"))
+        fee = max(MIN_FEE_RATE, min(MAX_FEE_RATE, fee))
 
         return {
             "treasury_health": treasury_health,
             "risk_scalar": risk,
             "fee_rate": fee,
             "passive_income_rate": passive,
+            "treasury_balance": treasury,
+            "total_supply": total_supply,
+            "target_ratio": TARGET,
+            "min_health_threshold": MIN_HW,
+            "max_health_threshold": MAX_HW,
+            "velocity_of_money": velocity_of_money,
+            "liquidity_ratio": liquidity_ratio,
+            "volatility_index": volatility_index,
         }
+
 
     async def get_max_gamble_amount(
         self, user_id: int, raise_if_limited: bool = False
     ) -> Decimal:
         """
-        Much stricter risk control:
+        Calculates the maximum amount a user can gamble based on dynamic risk controls.
 
-        • Base budget = 0.25–1.0 % of treasury (depends on health).
-        • *Absolute* ceiling = 2 % of treasury.
-        • Whales (>1 % of supply) lose 75 % of budget.
-        • Newcomer floor = min(100, 2 % of own balance).
+        Risk model includes:
+        - Dynamic base bet size scaled to treasury health.
+        - Absolute cap on treasury exposure.
+        - Whale mitigation (players exceeding 1% of total supply).
+        - Minimum floor for newcomers.
         """
-        # ---- constants -------------------------------------------------------
-        MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2 %
-        WHALE_THRESHOLD = Decimal("0.01")  # 1 % of supply
-        WHALE_PENALTY = Decimal("0.75")  # −75 %
-        MIN_ABSOLUTE_FLOOR = Decimal("100.00")  # newcomer min (subject to user bal)
 
-        # ---- user balances ---------------------------------------------------
+        # ---- constants -------------------------------------------------------
+        MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2% of treasury
+        WHALE_THRESHOLD = Decimal("0.01")        # 1% of total supply
+        WHALE_PENALTY = Decimal("0.75")          # Lose 75% of budget
+        MIN_ABSOLUTE_FLOOR = Decimal("100.00")   # Floor value for small players
+
+        # ---- fetch user data -------------------------------------------------
         wallet = await self.get_wallet_by_user_id(user_id)
         wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
         bank_bal = await self.get_bank_balance(wallet.wallet_id)
@@ -2354,53 +2373,135 @@ class DatabaseManager:
         total_supply = supply.total_supply
 
         if treasury <= 0 or total_supply <= 0:
-            return Decimal("0.00")  # house broke / not initialised
+            return Decimal("0.00")  # Economy not initialized or broken
 
         # ---- dynamic base coefficient ---------------------------------------
         factors = await self.get_economic_factors()
-        health = factors["treasury_health"]  # 0-1 Decimal
+        health = factors["treasury_health"]
 
-        # map health ⇒ base coefficient (quadratic taper)
-        # ≥ 60 %   → 1 %
-        # 30 %     → 0.25 %
-        # 25 %↓    → 0.125 %
+        # Map health to base coefficient using piecewise quadratic scaling
         if health >= Decimal("0.60"):
-            base_coeff = Decimal("0.01")
+            base_coeff = Decimal("0.01")  # 1%
         elif health >= Decimal("0.30"):
-            # quadratic between 0.25 %–1 %
-            t = (health - Decimal("0.30")) / Decimal("0.30")  # 0-1
+            # Quadratic interpolation between 0.25% and 1%
+            t = (health - Decimal("0.30")) / Decimal("0.30")  # Normalized [0..1]
             base_coeff = (
-                Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * t**2
+                Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (t ** 2)
             )
         else:
-            base_coeff = Decimal("0.00125")  # 0.125 %
+            base_coeff = Decimal("0.00125")  # 0.125%
 
-        # ---- whale adjustment -----------------------------------------------
+        # ---- apply whale penalty --------------------------------------------
         user_ratio = (user_total / total_supply).quantize(Decimal("0.0001"))
         if user_ratio > WHALE_THRESHOLD:
-            base_coeff *= Decimal("1.0") - WHALE_PENALTY  # ×0.25
+            base_coeff *= Decimal("1.0") - WHALE_PENALTY  # Reduce by 75%
 
-        # ---- compute limits --------------------------------------------------
+        # ---- calculate tentative limit --------------------------------------
         by_treasury = (treasury * base_coeff).quantize(Decimal("0.01"))
         hard_cap = (treasury * MAX_TREASURY_EXPOSURE).quantize(Decimal("0.01"))
-
         provisional = min(by_treasury, hard_cap, user_total)
 
-        # adaptive floor: 100 or 2 % of player’s own money, whichever is lower
+        # ---- enforce adaptive minimum floor ---------------------------------
         adaptive_floor = min(
-            MIN_ABSOLUTE_FLOOR, (user_total * Decimal("0.02")).quantize(Decimal("0.01"))
+            MIN_ABSOLUTE_FLOOR,
+            (user_total * Decimal("0.02")).quantize(Decimal("0.01")),
         )
-
         final_limit = max(provisional, adaptive_floor)
 
-        # ---- optional rejection ---------------------------------------------
+        # ---- optional enforcement -------------------------------------------
         if raise_if_limited and user_total > final_limit:
             raise ValueError(
                 f"You’re limited to **{final_limit} {self.currency_name}** "
-                f"this hand due to risk controls."
+                f"this hand by risk management."
             )
 
         return final_limit
+
+    async def collect_daily_economy_snapshot(self):
+        """
+        Collects a snapshot of key economy metrics using existing tables.
+        Can be used for logging, alerting, or feeding into predictive models.
+        """
+        today = discord.utils.utcnow().date()
+        yesterday_start = today - timedelta(days=1)
+        yesterday_end = today
+
+        async with self.async_sessionmaker() as session:
+            # Supply info
+            supply = await session.get(Supply, 1)
+            treasury_balance = supply.treasury
+            total_supply = supply.total_supply
+            circulating_supply = supply.circulating
+
+            # Wallet summary
+            wallet_sum_result = await session.execute(select(func.sum(Wallet.balance)))
+            wallet_total = wallet_sum_result.scalar() or Decimal("0.00")
+
+            bank_sum_result = await session.execute(select(func.sum(BankAccount.balance)))
+            bank_total = bank_sum_result.scalar() or Decimal("0.00")
+
+            avg_wallet_balance = Decimal("0.00")
+            wallet_count_result = await session.execute(select(func.count(Wallet.wallet_id)))
+            wallet_count = wallet_count_result.scalar()
+            if wallet_count and wallet_count > 0:
+                avg_wallet_balance = (wallet_total / wallet_count).quantize(Decimal("0.01"))
+
+            # Transaction volume (yesterday)
+            volume_stmt = select(func.sum(Transaction.amount)).where(
+                Transaction.timestamp >= yesterday_start,
+                Transaction.timestamp < yesterday_end
+            )
+            volume_result = await session.execute(volume_stmt)
+            transaction_volume = volume_result.scalar() or Decimal("0.00")
+
+            # Active users (distinct senders/receivers yesterday)
+            active_users_stmt = select(
+                func.count(distinct(Transaction.from_user_id)).label('senders'),
+                func.count(distinct(Transaction.to_user_id)).label('receivers')
+            ).where(
+                Transaction.timestamp >= yesterday_start,
+                Transaction.timestamp < yesterday_end
+            )
+            active_users_result = await session.execute(active_users_stmt)
+            row = active_users_result.fetchone()
+            active_users = (row.senders or 0) + (row.receivers or 0)
+
+            # Volatility estimate (standard deviation of balances across wallets)
+            balances_stmt = select(Wallet.balance)
+            balances_result = await session.execute(balances_stmt)
+            balances = [r[0] for r in balances_result.fetchall()]
+            if len(balances) > 1:
+                mean_balance = sum(balances) / len(balances)
+                variance = sum((x - mean_balance)**2 for x in balances) / (len(balances) - 1)
+                volatility_index = Decimal(variance.sqrt()) if variance >= 0 else Decimal("0.00")
+            else:
+                volatility_index = Decimal("0.00")
+
+            # Log or persist as needed
+            logger.info({
+                "date": str(today),
+                "treasury_balance": float(treasury_balance),
+                "total_supply": float(total_supply),
+                "circulating_supply": float(circulating_supply),
+                "avg_wallet_balance": float(avg_wallet_balance),
+                "transaction_volume": float(transaction_volume),
+                "active_users": active_users,
+                "volatility_index": float(volatility_index),
+            })
+
+            # Optionally store in Redis/file/local cache for use in dynamic adjustments
+            self._latest_metrics = {
+                "date": today,
+                "treasury_balance": treasury_balance,
+                "total_supply": total_supply,
+                "circulating_supply": circulating_supply,
+                "avg_wallet_balance": avg_wallet_balance,
+                "transaction_volume": transaction_volume,
+                "active_users": active_users,
+                "volatility_index": volatility_index,
+            }
+
+        logger.info("[DAILY SNAPSHOT] Economy metrics collected.")
 
     async def set_mines_multi(self, data: list):
         """
