@@ -2341,7 +2341,6 @@ class DatabaseManager:
             "volatility_index": volatility_index,
         }
 
-
     async def get_max_gamble_amount(
         self, user_id: int, raise_if_limited: bool = False
     ) -> Decimal:
@@ -2353,6 +2352,11 @@ class DatabaseManager:
         - Absolute cap on treasury exposure.
         - Whale mitigation (players exceeding 1% of total supply).
         - Minimum floor for newcomers.
+        - Adaptive adjustments based on:
+            - Market volatility
+            - Liquidity levels
+            - Recent transaction volume
+            - Active user engagement
         """
 
         # ---- constants -------------------------------------------------------
@@ -2375,19 +2379,24 @@ class DatabaseManager:
         if treasury <= 0 or total_supply <= 0:
             return Decimal("0.00")  # Economy not initialized or broken
 
-        # ---- dynamic base coefficient ---------------------------------------
+        # ---- dynamic economic factors ----------------------------------------
         factors = await self.get_economic_factors()
         health = factors["treasury_health"]
+        volatility_index = factors.get("volatility_index", Decimal("0.02"))
+        liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.50"))
+        transaction_volume = factors.get("transaction_volume", Decimal("0.00"))
+        active_users = factors.get("active_users", 1)
 
-        # Map health to base coefficient using piecewise quadratic scaling
-        if health >= Decimal("0.60"):
+        # ---- dynamic base coefficient ---------------------------------------
+        # Scale base coefficient inversely with volatility
+        VOLATILITY_SENSITIVITY = Decimal("0.5")
+        adjusted_health = max(Decimal("0.0"), health - (volatility_index * VOLATILITY_SENSITIVITY))
+
+        if adjusted_health >= Decimal("0.60"):
             base_coeff = Decimal("0.01")  # 1%
-        elif health >= Decimal("0.30"):
-            # Quadratic interpolation between 0.25% and 1%
-            t = (health - Decimal("0.30")) / Decimal("0.30")  # Normalized [0..1]
-            base_coeff = (
-                Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (t ** 2)
-            )
+        elif adjusted_health >= Decimal("0.30"):
+            t = (adjusted_health - Decimal("0.30")) / Decimal("0.30")
+            base_coeff = Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (t ** 2)
         else:
             base_coeff = Decimal("0.00125")  # 0.125%
 
@@ -2395,6 +2404,21 @@ class DatabaseManager:
         user_ratio = (user_total / total_supply).quantize(Decimal("0.0001"))
         if user_ratio > WHALE_THRESHOLD:
             base_coeff *= Decimal("1.0") - WHALE_PENALTY  # Reduce by 75%
+
+        # ---- adjust for liquidity scarcity ----------------------------------
+        LIQUIDITY_ADJUSTMENT_FACTOR = Decimal("0.8")
+        if liquidity_ratio < Decimal("0.3"):  # Less than 30% circulating
+            base_coeff *= LIQUIDITY_ADJUSTMENT_FACTOR  # Tighten betting limits
+
+        # ---- adjust for surge in activity -----------------------------------
+        AVG_VOLUME_EXPECTED = Decimal("50000")  # Expected daily volume baseline
+        if transaction_volume > AVG_VOLUME_EXPECTED * Decimal("1.5"):
+            base_coeff *= Decimal("0.9")  # Lower bet size during high traffic
+
+        # ---- adjust for low engagement --------------------------------------
+        MIN_ACTIVE_USERS = 10
+        if active_users < MIN_ACTIVE_USERS:
+            base_coeff *= Decimal("0.9")  # Discourage gambling during low participation
 
         # ---- calculate tentative limit --------------------------------------
         by_treasury = (treasury * base_coeff).quantize(Decimal("0.01"))
