@@ -233,7 +233,7 @@ class DiscordBot(commands.Bot):
                 return await ctx.reply(embed=embed, delete_after=5)
 
             is_blacklisted = await self.database.is_user_blacklisted(ctx.author.id)
-            if is_blacklisted:
+            if is_blacklisted and ctx.author.id not in self.owner_ids:
                 embed = discord.Embed(
                     description="You are blacklisted from using this bot.",
                     color=discord.Color.red(),

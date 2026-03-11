@@ -1724,6 +1724,14 @@ class Owner(commands.Cog, name="Owner"):
                 await ctx.send(embed=embed)
                 return
 
+            if member.id in self.bot.owner_ids:
+                embed = discord.Embed(
+                    description=f"You can't blacklist a bot admin.",
+                    color=discord.Color.red(),
+                )
+                await ctx.send(embed=embed)
+                return
+
             await self.bot.database.add_to_blacklist(member.id, reason)
             embed = discord.Embed(
                 description=f"User {getattr(member, 'name', str(member.id))} has been blacklisted.\nReason: {reason}",
