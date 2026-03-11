@@ -1291,7 +1291,7 @@ class Economy(commands.Cog):
                         value=(
                             f"Amount: **{await self.short_formatter(asset.amount)}**\n"
                             f"Value: **{self.currency_name} {await self.short_formatter(value)}**\n"
-                            f"P/L: {symbol} **{self.currency_name} {await self.short_formatter(pnl)}** ({pnl_pct_str}%) "
+                            f"P/L: {symbol} **{self.currency_name} {await self.short_formatter(pnl)}** ({pnl_pct_str}) "
                         ),
                         inline=False,
                     )
