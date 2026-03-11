@@ -1712,11 +1712,11 @@ class Casino(commands.Cog):
         amount_input = amount_input.strip().lower()
 
         if amount_input == "all" or amount_input == "max":
-            amount = user_balance
+            amount = (user_balance).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         elif amount_input == "half":
-            amount = user_balance / Decimal("2")
+            amount = (user_balance / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         elif amount_input == "quarter":
-            amount = user_balance / Decimal("4")
+            amount = (user_balance / Decimal("4")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         elif amount_input.endswith("%"):
             percentage_match = re.match(r"^([0-9]+(\.[0-9]+)?)%$", amount_input)
