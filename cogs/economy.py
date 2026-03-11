@@ -1243,8 +1243,7 @@ class Economy(commands.Cog):
 
             assets = await self.bot.database.get_crypto_assets(member.id)
             filtered = [a for a in assets if a.amount >= Decimal("0.01")]
-            if not filtered:
-                embed.add_field(name="No Crypto Assets", value="You don't have any crypto assets.", inline=False)
+
 
             color = discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel):
@@ -1256,6 +1255,7 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             embed = discord.Embed(
+
                 color=color,
             )
             embed.set_author(
@@ -1273,6 +1273,9 @@ class Economy(commands.Cog):
                 value=f"{self.currency_name} **{await self.short_formatter(bank_balance)}**",
                 inline=False
             )
+
+            if not filtered:
+                embed.add_field(name="No Crypto Assets", value="You don't have any crypto assets.", inline=False)
 
             for asset in filtered[:5]:
                 price = await self.bot.database.get_crypto_price(asset.symbol)
