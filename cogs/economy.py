@@ -1281,11 +1281,6 @@ class Economy(commands.Cog):
                         ),
                         inline=False,
                     )
-                    total_asset_value = sum(
-                        asset.amount * (await self.bot.database.get_crypto_price(asset.symbol) or Decimal("0"))
-                        for asset in assets
-                        if asset.amount >= Decimal("0.01")
-                    )
                 else:
                     embed.add_field(
                         name=asset.symbol, value="Price data unavailable", inline=False
@@ -1325,7 +1320,7 @@ class Economy(commands.Cog):
                 )
 
             embed.set_footer(
-                text=f"Total Balance: {await self.formatter(wallet_balance + bank_balance + total_asset_value)}"
+                text=f"Total Balance: {await self.formatter(wallet_balance + bank_balance)}"
             )
 
             await ctx.reply(embed=embed)
