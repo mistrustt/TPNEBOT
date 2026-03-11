@@ -1919,15 +1919,17 @@ class Economy(commands.Cog):
         """Take out a loan. Pay it back with interest!"""
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        treasury = await self.bot.database.get_treasury_balance()
+        safe_loan_amount = await self.bot.database.get_max_loan_amount(user_id)
 
-        safe_loan_amount = Decimal("10000000")
+        amount = await self.amount_handler(amount, treasury)
 
         try:
             amount_decimal = Decimal(amount)
             if amount_decimal <= 0:
                 raise ValueError("Loan amount must be greater than zero.")
             if amount_decimal > safe_loan_amount:
-                raise ValueError(f"Loan amount cannot exceed {self.currency_name} {await self.formatter(safe_loan_amount)}.")
+                raise ValueError(f"Loan amount cannot exceed {self.currency_name} **{await self.formatter(safe_loan_amount)}**.")
             interest_rate = Decimal("0.10")
             total_repay = (amount_decimal * (Decimal("1") + interest_rate)).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
