@@ -40,6 +40,7 @@ from .models import (
     Reputation,
     Wallet,
     Block,
+    Loan,
     Item,
     ItemType,
     ShopItem,
@@ -2441,6 +2442,36 @@ class DatabaseManager:
 
         return final_limit
 
+    async def get_max_loan_amount(self, user_id: int) -> Decimal:
+        """
+        Calculate the maximum safe loan amount a user can take based on their balance and economic factors.
+        Uses a similar risk model to gambling limits but with more leniency.
+        """
+        wallet = await self.get_wallet_by_user_id(user_id)
+        wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
+        bank_bal = await self.get_bank_balance(wallet.wallet_id)
+        user_total = wallet_bal + bank_bal
+
+        supply = await self.get_supply_record()
+        treasury = supply.treasury
+        total_supply = supply.total_supply
+
+        if treasury <= 0 or total_supply <= 0:
+            return Decimal("0.00")
+
+        factors = await self.get_economic_factors()
+        health = factors["treasury_health"]
+
+        if health < Decimal("0.25"):
+            base_coeff = Decimal("0.001")  # 0.1% of treasury
+        elif health < Decimal("0.50"):
+            base_coeff = Decimal("0.002")  # 0.2% of treasury 
+        else:
+            base_coeff = Decimal("0.005")  # 0.5% of treasury
+
+        max_loan = (treasury * base_coeff).quantize(Decimal("0.01"))
+        return min(max_loan, user_total * Decimal("2.0"))  # Cap at 2x user's total balance
+
     async def collect_daily_economy_snapshot(self):
         """
         Collects a snapshot of key economy metrics using existing tables.
@@ -2526,6 +2557,22 @@ class DatabaseManager:
             }
 
         logger.info("[DAILY SNAPSHOT] Economy metrics collected.")
+
+    async def add_loan_record(
+        self, user_id: int, principal: Decimal, interest_rate: Decimal, total_repay: Decimal, due_date: datetime, status: str = "active"
+    ):
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                loan = Loan(
+                    user_id=user_id,
+                    principal=principal,
+                    interest_rate=interest_rate,
+                    total_repay=total_repay,
+                    due_date=due_date,
+                    status=status
+                )
+                session.add(loan)
+                await session.commit()
 
     async def set_mines_multi(self, data: list):
         """

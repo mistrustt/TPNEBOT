@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import os
 import hmac
 import discord
@@ -1911,6 +1912,58 @@ class Economy(commands.Cog):
         embed = discord.Embed(description=result_message, color=color)
         embed.set_author(name="Work", icon_url=self.utils.get_avatar_url(ctx.author))
         await ctx.reply(embed=embed)
+
+    @commands.command(name="loan", description="Take out a loan. Pay it back with interest!")
+    @commands.is_owner()
+    async def loan(self, ctx: commands.Context, amount: str):
+        """Take out a loan. Pay it back with interest!"""
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+
+        safe_loan_amount = Decimal("10000000")
+
+        try:
+            amount_decimal = Decimal(amount)
+            if amount_decimal <= 0:
+                raise ValueError("Loan amount must be greater than zero.")
+            if amount_decimal > safe_loan_amount:
+                raise ValueError(f"Loan amount cannot exceed {self.currency_name} {await self.formatter(safe_loan_amount)}.")
+            interest_rate = Decimal("0.10")
+            total_repay = (amount_decimal * (Decimal("1") + interest_rate)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id, amount=amount_decimal, description="Loan Disbursement"
+            )
+            await self.bot.database.add_loan_record(
+                user_id=user_id,
+                principal=amount_decimal,
+                total_repay=total_repay,
+                interest_rate=interest_rate,
+                due_date=discord.utils.utcnow() + timedelta(days=7),
+                status="active",
+            )
+            color = (
+                discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel)
+                else (
+                    ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple()
+                )
+            )
+            embed = discord.Embed(
+                description=(
+                    f"You have taken out a loan of {self.currency_name} **{await self.formatter(amount_decimal)}**.\n"
+                    f"Total to repay (with 10% interest): {self.currency_name} **{await self.formatter(total_repay)}**."
+                ),
+                color=color,
+            )
+            embed.set_author(name="Loan", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(
         name="scout",

@@ -424,6 +424,26 @@ class Bounty(Base):
             f"reward={self.reward} active={self.active}>"
         )
 
+class Loan(Base):
+    __tablename__ = "loans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    principal = Column(
+        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
+    )
+    interest_rate = Column(Numeric(precision=5, scale=2), nullable=False, default=Decimal("0.00"))
+    total_repay = Column(
+        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
+    )
+    due_date = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, nullable=False, default="active")
+
+    def __repr__(self):
+        return (
+            f"<Loan id={self.id} user_id={self.user_id} "
+            f"principal={self.principal} interest_rate={self.interest_rate} due_date={self.due_date} total_repay={self.total_repay} status={self.status}>"
+        )
 
 class UserRoleHistory(Base):
     __tablename__ = "user_role_history"
