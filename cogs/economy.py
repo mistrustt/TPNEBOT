@@ -1284,8 +1284,14 @@ class Economy(commands.Cog):
                     cost = asset.amount * asset.purchase_price
                     pnl = value - cost
                     pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
-                    pnl_pct_str = f"{'+' if pnl >= 0 else ''}{pnl_pct:.2f}%"
-                    symbol = "📈" if pnl >= 0 else "📉"
+                    pnl_pct_rounded = pnl_pct.quantize(Decimal('0.01'))
+
+                    if pnl > 0:
+                        pnl_pct_str = f"+{pnl_pct_rounded}%"
+                    else:
+                        pnl_pct_str = f"{pnl_pct_rounded}%"
+
+                    symbol = "📈" if pnl > 0 else ("📉" if pnl < 0 else "")
                     embed.add_field(
                         name=asset.symbol,
                         value=(
