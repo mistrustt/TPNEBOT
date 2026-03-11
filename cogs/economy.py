@@ -2647,10 +2647,10 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:
-        if not isinstance(amount_input, str):
+        if not isinstance(input_str, str):
             raise ValueError("Invalid amount input type.")
 
-        amount_input = amount_input.strip().lower()
+        amount_input = input_str.strip().lower()
 
         if amount_input == "all" or amount_input == "max":
             amount = balance
