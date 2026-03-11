@@ -355,16 +355,34 @@ class Voicechat(commands.Cog):
     )
     async def vc(self, ctx: Context):
         """Lists all available voice channel commands."""
-        if ctx.invoked_subcommand is None:
-            subcommands = [command.name for command in self.vc.commands]
-            subcommands = ", ".join(subcommands)
-            embed = discord.Embed(
-                title="Voice Channel Commands",
-                description="Manage your private voice channel.",
-                color=discord.Color.blurple(),
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
             )
-            embed.add_field(name="Commands", value=f"{subcommands}")
-            await ctx.reply(embed=embed, delete_after=5)
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}vc {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}vc {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="Voice Channel Management — Available Commands",
+            description=description,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Use {prefix}vc <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @vc.command(
         name="allow",

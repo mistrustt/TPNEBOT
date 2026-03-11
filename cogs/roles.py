@@ -1151,17 +1151,34 @@ class RoleTools(commands.Cog, name="Roles"):
     )
     @commands.has_permissions(manage_roles=True)
     async def autorole(self, ctx: Context):
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}autorole {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}autorole {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
         embed = discord.Embed(
-            title="Autorole Commands",
-            description=(
-                "`autorole add <role>` — add a role to give on join\n"
-                "`autorole remove <role>` — remove a role\n"
-                "`autorole list` — list configured autoroles\n"
-                "`autorole clear` — remove all autoroles"
-            ),
+            title="Autorole — Available Commands",
+            description=description,
             color=discord.Color.blurple(),
         )
-        await ctx.send(embed=embed)
+        embed.set_footer(text=f"Use {prefix}autorole <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @autorole.command(name="add", description="Add a role to autoroles.")
     @commands.has_permissions(manage_roles=True)

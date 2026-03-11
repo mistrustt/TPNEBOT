@@ -226,15 +226,34 @@ class Music(commands.Cog, name="Music"):
     @commands.group(name="lf", invoke_without_command=True)
     async def lastfm(self, ctx: Context) -> None:
         """Last.fm command group"""
-        embed = discord.Embed(
-            title="Last.fm", description="List of available subcommands"
-        )
-        subcommands = [subcommand.name for subcommand in ctx.command.commands]
-        if subcommands:
-            embed.add_field(
-                name="Subcommands", value=", ".join(subcommands), inline=False
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
             )
-        await ctx.reply(embed=embed)
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}lastfm {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}lastfm {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="Last.fm — Available Commands",
+            description=description,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Use {prefix}lastfm <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @lastfm.command(name="set")
     async def set_lastfm(self, ctx: Context, username: str) -> None:

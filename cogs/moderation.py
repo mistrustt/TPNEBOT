@@ -2163,10 +2163,9 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.send(embed=embed, delete_after=5)
 
-    @commands.group(
+    @commands.command(
         name="mutesetup",
-        description="Creates and configures the mute roles for the server.",
-        invoke_without_command=True,
+        description="Creates and configures the mute roles for the server."
     )
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
@@ -3793,7 +3792,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.send(f"Cleared all alts for {member.display_name}.")
 
     @commands.group(
-        name="restrictcommand",
+        name="restrict",
         aliases=["rc"],
         description="Manage command restrictions for specific roles.",
         invoke_without_command=True,
@@ -3801,22 +3800,38 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def restrictcommand(self, ctx: Context):
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}restrict {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}restrict {name}`{aliases}")
+
+        if not lines:
+            description = "No subcommands available."
+        else:
+            description = "\n".join(lines)
+
         embed = discord.Embed(
-            title="Command Restriction Subcommands",
-            description="Displays the subcommands for the restrict command",
+            title="Restrict — Available Commands",
+            description=description,
             color=discord.Color.blurple(),
         )
-        embed.add_field(
-            name="Available Subcommands:",
-            value=(
-                "`add <command> <role>` - Restrict a command to a specific role\n"
-                "`remove <command> <role>` - Remove restriction for a role\n"
-                "`list [command/role]` - List restricted commands\n"
-                "`reset` - Remove all command restrictions"
-            ),
-            inline=False,
-        )
-        await ctx.send(embed=embed)
+        embed.set_footer(text=f"Use {prefix}restrict <subcommand> for details.")
+
+        await ctx.reply(embed=embed, mention_author=False)
 
     @restrictcommand.command(
         name="add",

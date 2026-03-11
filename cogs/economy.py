@@ -2500,7 +2500,7 @@ class Economy(commands.Cog):
         )
         await ctx.reply(embed=embed)
 
-    @commands.group(name="invest", aliases=["coin"], invoke_without_command=True)
+    @commands.group(name="invest", aliases=["coin","coins"], invoke_without_command=True)
     async def invest(self, ctx: commands.Context):
         prefix = await self.bot.get_prefix(ctx.message)
         if isinstance(prefix, list):
@@ -3063,10 +3063,7 @@ class Economy(commands.Cog):
             else:
                 lines.append(f"`{prefix}bounty {name}`{aliases}")
 
-        if not lines:
-            description = "No subcommands available."
-        else:
-            description = "\n".join(lines)
+        description = "\n".join(lines) if lines else "No subcommands available."
 
         embed = discord.Embed(
             title="Bounty — Available Commands",
@@ -3074,7 +3071,6 @@ class Economy(commands.Cog):
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Use {prefix}bounty <subcommand> for details.")
-
         await ctx.reply(embed=embed, mention_author=False)
 
     @bounty.command(name="set", description="Set a bounty on another user")

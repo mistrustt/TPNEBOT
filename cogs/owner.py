@@ -928,18 +928,34 @@ class Owner(commands.Cog, name="Owner"):
     )
     @commands.is_owner()
     async def todolist(self, ctx: Context):
-        """Displays the available subcommands for managing your todo list."""
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}todo {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}todo {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
         embed = discord.Embed(
-            title="Todo",
-            description="Available subcommands for managing your todo list:",
+            title="Todo — Available Commands",
+            description=description,
             color=discord.Color.blurple(),
         )
-        subcommands = [subcommand.name for subcommand in ctx.command.commands]
-        if subcommands:
-            embed.add_field(
-                name="Subcommands", value=", ".join(subcommands), inline=False
-            )
-        await ctx.reply(embed=embed)
+        embed.set_footer(text=f"Use {prefix}todo <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @todolist.command(name="add", hidden=True)
     @commands.is_owner()
@@ -1201,12 +1217,34 @@ class Owner(commands.Cog, name="Owner"):
     )
     @commands.is_owner()
     async def gamesession(self, ctx: Context):
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}gamesession {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}gamesession {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
         embed = discord.Embed(
-            title="Game Sessions",
-            description="Available subcommands: list, show, events, end",
+            title="Game Sessions — Available Commands",
+            description=description,
             color=discord.Color.blurple(),
         )
-        await ctx.send(embed=embed)
+        embed.set_footer(text=f"Use {prefix}gamesession <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @gamesession.command(name="list", hidden=True)
     @commands.is_owner()
@@ -2614,13 +2652,34 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def command_cog(self, ctx: Context):
         """Manage bot commands."""
-        if ctx.invoked_subcommand is None:
-            embed = discord.Embed(
-                title="Command Management",
-                description="Available subcommands: `enable`, `disable`",
-                color=discord.Color.blurple(),
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
             )
-            await ctx.reply(embed=embed)
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}command {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}command {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="Command Management",
+            description=description,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Use {prefix}command <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @command_cog.command(
         name="enable", help="Enable a command bot-wide.", hidden=True
