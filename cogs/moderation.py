@@ -3686,7 +3686,7 @@ class Moderation(commands.Cog, name="Moderation"):
         invoke_without_command=True,
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def alts(self, ctx: commands.Context, *, identifier: str):
         """List all accounts linked to a user."""
 
@@ -3743,7 +3743,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @alts.command(name="add", description="Add an alt for a user via snowflake.")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def add(self, ctx: Context, main_id: int, alt_id: int):
         """Add an alt for a user."""
         not_implemented = False
@@ -3765,7 +3765,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @alts.command(name="remove", description="Remove an alt for a user via snowflake.")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def remove(self, ctx: Context, member: discord.Member, alt: discord.Member):
         """Remove an alt for a user."""
         not_implemented = False
@@ -3780,7 +3780,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @alts.command(name="clear", description="Clear all known alts for a user.")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def clear(self, ctx: Context, member: discord.Member):
         """Clear all alts for a user."""
         not_implemented = False
