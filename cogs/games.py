@@ -202,12 +202,21 @@ class Games(commands.Cog, name="Games"):
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def coinflip(self, ctx: Context):
         """Flip a coin, not really much else to it."""
-        frames = ["<:coin:1359823671581085847>", "🪙", "<:coin:1359823671581085847>", "🪙", "<:coin:1359823671581085847>"]
+        frames = [
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+        ]
         embed = discord.Embed(description="Flipping...", color=discord.Color.gold())
         msg = await ctx.reply(embed=embed)
 
-        for frame in frames:
-            await asyncio.sleep(0.4)
+        for i, frame in enumerate(frames):
+            # slow down towards the end to simulate the coin losing momentum cuz thats fkn tuff
+            delay = 0.2 + (i * 0.07)
+            await asyncio.sleep(delay)
             embed.description = f"{frame} Flipping..."
             await msg.edit(embed=embed)
 
