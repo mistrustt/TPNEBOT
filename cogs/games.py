@@ -1,4 +1,5 @@
 import os
+import random
 import discord
 import aiohttp
 import asyncio
@@ -196,6 +197,36 @@ class Games(commands.Cog, name="Games"):
 
             # schedule without blocking
             ctx.bot.loop.create_task(end_game())
+
+    @commands.command(name="coinflip", aliases=["cf"], description="Flip a coin!")
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def coinflip(self, ctx: Context):
+        """Flip a coin, not really much else to it."""
+        frames = [
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+            "<:coin:1359823671581085847>", "🪙",
+        ]
+        embed = discord.Embed(description="Flipping...", color=discord.Color.gold())
+        msg = await ctx.reply(embed=embed)
+
+        for i, frame in enumerate(frames):
+            # slow down towards the end to simulate the coin losing momentum cuz thats fkn tuff
+            delay = 0.2 + (i * 0.07)
+            await asyncio.sleep(delay)
+            embed.description = f"{frame} Flipping..."
+            await msg.edit(embed=embed)
+
+        result = random.choice(["Heads", "Tails"])
+        emoji = "<:coin:1359823671581085847>" if result == "Heads" else "🪙"
+        embed.description = f"{emoji} **{result}!**"
+        embed.color = discord.Color.green()
+        await msg.edit(embed=embed)
+
+
 
 
 async def setup(bot):
