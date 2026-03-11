@@ -1256,12 +1256,22 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             embed = discord.Embed(
-                description=f"Wallet Balance: :credit_card:\n> {self.currency_name} **{await self.short_formatter(wallet_balance)}**\n\nBank Balance: :bank:\n> {self.currency_name} **{await self.short_formatter(bank_balance)}**",
                 color=color,
             )
             embed.set_author(
                 name=f"{member.display_name}'s Balance",
                 icon_url=self.utils.get_avatar_url(member),
+            )
+
+            embed.add_field(
+                name="Wallet",
+                value=f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**",
+                inline=False
+            )
+            embed.add_field(
+                name="Bank",
+                value=f"{self.currency_name} **{await self.short_formatter(bank_balance)}**",
+                inline=False
             )
 
             for asset in filtered[:5]:
