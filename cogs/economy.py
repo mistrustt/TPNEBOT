@@ -1231,17 +1231,20 @@ class Economy(commands.Cog):
         """Check your current balance."""
         try:
             member = member or ctx.author
-            id = await self.bot.database.get_wallet_id_for_user(member.id)
+            wallet_id = await self.bot.database.get_wallet_id_for_user(member.id)
 
-            wallet_balance = await self.bot.database.get_wallet_balance_by_user_id(
-                member.id
-            )
+            wallet_balance = await self.bot.database.get_wallet_balance_by_user_id(member.id)
             wallet_balance = Decimal(wallet_balance)
             wallet_balance = wallet_balance if wallet_balance is not None else 0
 
-            bank_balance = await self.bot.database.get_bank_balance(id)
+            bank_balance = await self.bot.database.get_bank_balance(wallet_id)
             bank_balance = Decimal(bank_balance)
             bank_balance = bank_balance if bank_balance is not None else 0
+
+            assets = await self.bot.database.get_crypto_assets(member.id)
+            filtered = [a for a in assets if a.amount >= Decimal("0.01")]
+            if not filtered:
+                embed.add_field(name="No Crypto Assets", value="You don't have any crypto assets.", inline=False)
 
             color = discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel):
@@ -1260,9 +1263,33 @@ class Economy(commands.Cog):
                 name=f"{member.display_name}'s Balance",
                 icon_url=self.utils.get_avatar_url(member),
             )
-            embed.set_footer(
-                text=f"Total Balance: {await self.formatter(wallet_balance + bank_balance)}"
-            )
+
+            for asset in filtered[:5]:
+                price = await self.bot.database.get_crypto_price(asset.symbol)
+                if price:
+                    value = asset.amount * price
+                    cost = asset.amount * asset.purchase_price
+                    pnl = value - cost
+                    pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
+                    symbol = "📈" if pnl >= 0 else "📉"
+                    embed.add_field(
+                        name=asset.symbol,
+                        value=(
+                            f"Amount: **{await self.short_formatter(asset.amount)}**\n"
+                            f"Value: **{await self.short_formatter(value)} {self.currency_name}** "
+                            f"P/L: {symbol} **{await self.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
+                        ),
+                        inline=False,
+                    )
+                    total_asset_value = sum(
+                        asset.amount * (await self.bot.database.get_crypto_price(asset.symbol) or Decimal("0"))
+                        for asset in assets
+                        if asset.amount >= Decimal("0.01")
+                    )
+                else:
+                    embed.add_field(
+                        name=asset.symbol, value="Price data unavailable", inline=False
+                    )
 
             # Fetch last 5 transactions
             user_transactions = await self.bot.database.get_transactions_by_user_id(
@@ -1296,6 +1323,10 @@ class Economy(commands.Cog):
                     value="\n".join(transactions_text),
                     inline=False
                 )
+
+            embed.set_footer(
+                text=f"Total Balance: {await self.formatter(wallet_balance + bank_balance + total_asset_value)}"
+            )
 
             await ctx.reply(embed=embed)
         except ValueError as e:
