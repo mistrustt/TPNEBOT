@@ -2496,7 +2496,7 @@ class Economy(commands.Cog):
         )
 
         await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 999999999
+            ctx.author.id, ctx.command.qualified_name, 31556926
         )
         await ctx.reply(embed=embed)
 
@@ -2533,7 +2533,7 @@ class Economy(commands.Cog):
 
     @invest.command(
         name="balance",
-        aliases=["bal", "port"],
+        aliases=["bal", "pf"],
         description="View your cryptocurrency portfolio",
     )
     async def invest_portfolio(self, ctx: commands.Context):
@@ -2575,7 +2575,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @invest.command(name="buy", description="Buy cryptocurrency with your balance")
-    async def invest_buy(self, ctx: commands.Context, amount: str, currency: str):
+    async def invest_buy(self, ctx: commands.Context, currency: str, amount: str ):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -2617,7 +2617,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @invest.command(name="sell", description="Sell cryptocurrency for your balance")
-    async def invest_sell(self, ctx: commands.Context, amount: str, currency: str):
+    async def invest_sell(self, ctx: commands.Context, currency: str, amount: str):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         symbol = currency.upper()
