@@ -2570,49 +2570,6 @@ class Economy(commands.Cog):
         embed.set_footer(text=f"Use {prefix}invest <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @invest.command(
-        name="balance",
-        aliases=["bal", "pf"],
-        description="View your cryptocurrency portfolio",
-    )
-    async def invest_portfolio(self, ctx: commands.Context):
-        user_id = ctx.author.id
-        assets = await self.bot.database.get_crypto_assets(user_id)
-        filtered = [a for a in assets if a.amount >= Decimal("0.01")]
-        if not filtered:
-            return await ctx.reply(
-                "You don't have any significant cryptocurrency holdings.",
-                delete_after=5,
-            )
-
-        embed = discord.Embed(title="🗂️ Crypto Portfolio", color=discord.Color.gold())
-        total_usd = Decimal("0")
-
-        for asset in filtered[:5]:
-            price = await self.bot.database.get_crypto_price(asset.symbol)
-            if price:
-                value = asset.amount * price
-                cost = asset.amount * asset.purchase_price
-                pnl = value - cost
-                pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
-                symbol = "📈" if pnl >= 0 else "📉"
-                embed.add_field(
-                    name=asset.symbol,
-                    value=(
-                        f"Amount: **{await self.short_formatter(asset.amount)}**\n"
-                        f"Value: **{await self.short_formatter(value)} {self.currency_name}** "
-                        f"P/L: {symbol} **{await self.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
-                    ),
-                    inline=False,
-                )
-            else:
-                embed.add_field(
-                    name=asset.symbol, value="Price data unavailable", inline=False
-                )
-
-        embed.set_footer(text=f"Total Portfolio ≈ ${total_usd}")
-        await ctx.reply(embed=embed)
-
     @invest.command(name="buy", description="Buy cryptocurrency with your balance")
     async def invest_buy(self, ctx: commands.Context, currency: str, amount: str ):
         user_id = ctx.author.id
@@ -2637,15 +2594,15 @@ class Economy(commands.Cog):
                 delete_after=5,
             )
 
-        await self.bot.database.process_treasury_transaction(
-            wallet_id, -spend, f"Buy {symbol}"
-        )
         try:
             coins = (spend / price).quantize(Decimal("0.00000001"))
         except InvalidOperation:
             return await ctx.reply(
                 f"Invalid amount for {symbol}. Please try again.", delete_after=5
             )
+        await self.bot.database.process_treasury_transaction(
+            wallet_id, -spend, f"Buy {symbol}"
+        )        
         await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
 
         embed = discord.Embed(
