@@ -2642,32 +2642,73 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:
-        s = input_str.strip().lower()
-        if s == "all":
-            return balance
-        if s == "half":
-            return (balance / 2).quantize(Decimal("0.00000001"))
-        if s == "quarter":
-            return (balance / 4).quantize(Decimal("0.00000001"))
-        if s.endswith("%"):
-            try:
-                pct = Decimal(s.strip("%"))
-                if not (Decimal("1") <= pct <= Decimal("100")):
-                    raise ValueError()
-                return (balance * (pct / 100)).quantize(Decimal("0.00000001"))
-            except:
-                raise ValueError("Invalid percentage format. Use 1%–100%.")
-        try:
-            amt = Decimal(s).quantize(Decimal("0.00000001"))
-            if amt <= 0 or amt > balance:
-                raise ValueError()
-            return amt
-        except InvalidOperation:
-            pass
-        raise ValueError(
-            "Invalid amount. Use 'all', 'half', 'quarter', a percentage, or a valid number."
-        )
+        if not isinstance(amount_input, str):
+            raise ValueError("Invalid amount input type.")
 
+        amount_input = amount_input.strip().lower()
+
+        if amount_input == "all" or amount_input == "max":
+            amount = balance
+        elif amount_input == "half":
+            amount = balance / Decimal("2")
+        elif amount_input == "quarter":
+            amount = balance / Decimal("4")
+
+        elif amount_input.endswith("%"):
+            percentage_match = re.match(r"^([0-9]+(\.[0-9]+)?)%$", amount_input)
+            if percentage_match:
+                try:
+                    percentage = Decimal(percentage_match.group(1))
+                    if Decimal("1") <= percentage <= Decimal("100"):
+                        amount = balance * (percentage / Decimal("100"))
+                    else:
+                        raise ValueError("Percentage must be between 1% and 100%.")
+                except InvalidOperation:
+                    raise ValueError("Invalid percentage value.")
+            else:
+                raise ValueError("Invalid percentage format.")
+        else:
+            multipliers = {
+                "k": Decimal("1000"),
+                "m": Decimal("1000000"),
+                "b": Decimal("1000000000"),
+                "t": Decimal("1000000000000"),
+                "q": Decimal("1000000000000000"),
+                "qu": Decimal("1000000000000000000"),
+                "s": Decimal("1000000000000000000000"),
+            }
+
+            multiplier_match = re.match(
+                r"^([0-9]+(\.[0-9]+)?)(k|m|b|t|q|qu|s)?$", amount_input
+            )
+            if not multiplier_match:
+                raise ValueError("Invalid amount format.")
+
+            try:
+                number = Decimal(multiplier_match.group(1))
+                if multiplier_match.group(3):
+                    multiplier = multipliers[multiplier_match.group(3)]
+                    amount = number * multiplier
+                else:
+                    amount = number
+            except (InvalidOperation, KeyError):
+                raise ValueError("Invalid amount.")
+
+        if amount.is_nan():
+            raise ValueError("Invalid amount.")
+
+        try:
+            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            raise ValueError("Invalid amount.")
+
+        if amount > balance:
+            raise ValueError("Insufficient Funds.")
+        if amount <= Decimal("0"):
+            raise ValueError("Amount must be greater than 0.")
+
+        return amount
+    
     @commands.command(
         name="deposit",
         aliases=["dep", "dp", "depo"],
