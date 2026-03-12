@@ -794,15 +794,6 @@ class BalanceView(discord.ui.View):
                 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="Back to Balance", style=discord.ButtonStyle.secondary)
-    async def back_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        # This would typically go back to the balance view, but since we're already there,
-        # we'll just acknowledge the interaction
-        await interaction.response.defer()
-
-
 class TransactionPaginator(discord.ui.View):
     def __init__(self, cog, transactions, member, requesting_user):
         super().__init__(timeout=60)
