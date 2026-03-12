@@ -2772,7 +2772,6 @@ class Economy(commands.Cog):
             value=f"**{await self.short_formatter(spend)} {self.currency_name}**",
             inline=True
         )
-        embed.set_footer(text=f"Transaction ID: Buy {symbol}")
         await ctx.reply(embed=embed)
 
     @crypto.command(name="sell", description="Sell cryptocurrency for your balance")
@@ -2836,7 +2835,60 @@ class Economy(commands.Cog):
             value=pnl_text,
             inline=False
         )
-        embed.set_footer(text=f"Transaction ID: Sell {symbol}")
+        await ctx.reply(embed=embed)
+
+    @crypto.command(name="transfer", description="Transfer cryptocurrency to another user")
+    async def crypto_transfer(self, ctx: commands.Context, recipient: discord.Member, currency: str, amount: str):
+        sender_id = ctx.author.id
+        receiver_id = recipient.id
+        
+        if sender_id == receiver_id:
+            return await ctx.reply("You cannot transfer crypto to yourself.", delete_after=5)
+        
+        symbol = currency.upper()
+        asset = await self.bot.database.get_crypto_asset(sender_id, symbol)
+        if not asset or asset.amount <= 0:
+            return await ctx.reply(f"You have no '{symbol}' to transfer.", delete_after=5)
+
+        balance_coins = asset.amount
+        try:
+            transfer_amt = await self.crypto_amount_handler(amount, balance_coins)
+        except ValueError as e:
+            return await ctx.reply(str(e), delete_after=5)
+
+        try:
+            txid = await self.bot.database.transfer_crypto_asset(
+                sender_id,
+                receiver_id,
+                symbol,
+                transfer_amt,
+                f"Transfer to {recipient.display_name}"
+            )
+        except ValueError as e:
+            return await ctx.reply(str(e), delete_after=5)
+
+        embed = discord.Embed(
+            title="✅ Crypto Transfer",
+            description=f"Successfully transferred **{symbol}** to **{recipient.display_name}**",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(
+            name="Amount Transferred",
+            value=f"**{await self.short_formatter(transfer_amt)} {symbol}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Recipient",
+            value=f"**{recipient.display_name}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Transaction ID",
+            value=f"`{txid}`",
+            inline=True
+        )
+        embed.set_footer(text="No fees applied")
         await ctx.reply(embed=embed)
 
     async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:
