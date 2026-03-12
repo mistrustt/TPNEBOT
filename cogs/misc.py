@@ -26,26 +26,26 @@ class Misc(commands.Cog, name="Misc"):
         self.fake = Faker()
         
         # Centralized Juul flavor bank
-        self.JUUL_FLAVORS = ["classic", "mint", "fruit", "berry", "tropical", "cool", "spicy", "dessert"]
+        self.JUUL_FLAVORS = ["classic", "mint", "fruit", "berry", "tropical", "ice", "thc", "dessert"]
         self.JUUL_FLAVOR_EMOJIS = {
             "classic": "🚬",
             "mint": "🍃",
             "fruit": "🍓",
             "berry": "🫐",
             "tropical": "🍍",
-            "cool": "❄️",
-            "spicy": "🌶️",
+            "ice": "❄️",
+            "thc": "🍀",
             "dessert": "🍰"
         }
         self.JUUL_FLAVOR_RESPONSES = {
-            "classic": "You take a hit from the classic juul. 😮‍💨",
-            "mint": "You take a refreshing mint hit. 🌬️😮‍💨",
+            "classic": "You take a hit from the classic juul. 🚬😮‍💨",
+            "mint": "You take a refreshing mint hit. 🍃😮‍💨",
             "fruit": "You enjoy a sweet fruit flavor. 🍓😮‍💨",
             "berry": "You savor the berry blast. 🫐😮‍💨",
             "tropical": "You taste the tropical paradise. 🍍😮‍💨",
-            "cool": "You feel the cool breeze. ❄️😮‍💨",
-            "spicy": "You feel the spicy kick. 🌶️😮‍💨",
-            "dessert": "You indulge in dessert flavors. 🍰😮‍💨"
+            "ice": "You take a refreshing ice hit. ❄️😮‍💨",
+            "thc": "You hit the cart and feel the effects. 🫨😮‍💨",
+            "dessert": "You enjoy a hit of dessert flavors. 🍰😮‍💨"
         }
 
     @commands.Cog.listener()

@@ -639,6 +639,38 @@ class Supply(Base):
     )
 
 
+class EconomicMetricsHistory(Base):
+    __tablename__ = "economic_metrics_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    timestamp = Column(TIMESTAMP(timezone=True), default=func.now(), nullable=False)
+
+    # Supply metrics
+    total_supply = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
+    circulating_supply = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
+    treasury_balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
+
+    # Economic ratios
+    treasury_health = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+    liquidity_ratio = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+    velocity_of_money = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+    volatility_index = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+
+    # Activity metrics
+    transaction_volume = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
+    active_users = Column(Integer, default=0)
+    avg_wallet_balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
+
+    # Rates
+    fee_rate = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+    passive_income_rate = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+
+    __table_args__ = (
+        UniqueConstraint('date', name='uq_economic_metrics_date'),
+    )
+
+
 class MinesSettings(Base):
     __tablename__ = "mines_settings"
 

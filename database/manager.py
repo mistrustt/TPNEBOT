@@ -37,6 +37,7 @@ from .models import (
     CryptoAsset,
     CryptoPrice,
     Supply,
+    EconomicMetricsHistory,
     Reputation,
     Wallet,
     Block,
@@ -5616,6 +5617,110 @@ class DatabaseManager:
                 if nuke_msg is not None
                 else "TOXIC HUMANS IS NEVER COMING!!! - DENKOV"
             )
+
+    async def get_dynamic_reward_multiplier(self) -> Decimal:
+        """
+        Calculate dynamic reward multiplier based on economic conditions.
+
+        When liquidity is low, rewards are increased to encourage circulation.
+        When liquidity is high, rewards are normalized.
+        """
+        factors = await self.get_economic_factors()
+        liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
+
+        # Base multiplier
+        BASE_MULTIPLIER = Decimal("1.0")
+
+        # Increase rewards when liquidity is low
+        if liquidity_ratio < Decimal("0.3"):
+            # Low liquidity - increase rewards significantly
+            return BASE_MULTIPLIER * Decimal("1.5")
+        elif liquidity_ratio < Decimal("0.5"):
+            # Moderate liquidity - modest reward increase
+            return BASE_MULTIPLIER * Decimal("1.2")
+        elif liquidity_ratio > Decimal("0.8"):
+            # High liquidity - reduce rewards slightly
+            return BASE_MULTIPLIER * Decimal("0.9")
+        else:
+            # Normal liquidity - standard rewards
+            return BASE_MULTIPLIER
+
+    async def check_economic_circuit_breaker(self) -> dict:
+        """
+        Check if economic circuit breakers should be triggered based on velocity and other metrics.
+
+        Returns a dictionary with breaker status and reason.
+        """
+        factors = await self.get_economic_factors()
+        velocity = factors.get("velocity_of_money", Decimal("0"))
+        liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
+        volatility = factors.get("volatility_index", Decimal("0.02"))
+
+        # Define thresholds
+        VELOCITY_CRISIS_THRESHOLD = Decimal("0.05")  # Very low money velocity
+        LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.1")  # Very low liquidity
+        VOLATILITY_CRISIS_THRESHOLD = Decimal("0.1")  # High volatility
+
+        circuit_breaker_triggered = False
+        reason = []
+
+        if velocity < VELOCITY_CRISIS_THRESHOLD:
+            circuit_breaker_triggered = True
+            reason.append("Low velocity of money")
+
+        if liquidity_ratio < LIQUIDITY_CRISIS_THRESHOLD:
+            circuit_breaker_triggered = True
+            reason.append("Low liquidity")
+
+        if volatility > VOLATILITY_CRISIS_THRESHOLD:
+            circuit_breaker_triggered = True
+            reason.append("High volatility")
+
+        return {
+            "triggered": circuit_breaker_triggered,
+            "reasons": reason,
+            "velocity": velocity,
+            "liquidity_ratio": liquidity_ratio,
+            "volatility": volatility
+        }
+
+    async def get_enhanced_fee_rate(self, transaction_type: str = "standard") -> Decimal:
+        """
+        Calculate enhanced fee rate based on multiple economic factors.
+
+        Args:
+            transaction_type: Type of transaction ('standard', 'high_value', 'gambling')
+        """
+        factors = await self.get_economic_factors()
+        base_fee = factors.get("fee_rate", Decimal("0.01"))
+        volatility = factors.get("volatility_index", Decimal("0.02"))
+        liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
+        velocity = factors.get("velocity_of_money", Decimal("0.1"))
+
+        # Adjust fee based on transaction type
+        if transaction_type == "high_value":
+            # Higher fees for high-value transactions during volatile times
+            fee = base_fee * (1 + volatility * Decimal("2.0"))
+        elif transaction_type == "gambling":
+            # Special fee structure for gambling
+            fee = base_fee * (1 + (Decimal("1.0") - liquidity_ratio))
+        else:
+            # Standard transaction fees
+            fee = base_fee * (1 + volatility * Decimal("0.5"))
+
+        # Additional adjustment based on velocity
+        if velocity < Decimal("0.05"):
+            # Low velocity indicates economic slowdown - reduce fees to stimulate activity
+            fee *= Decimal("0.8")
+        elif velocity > Decimal("0.5"):
+            # High velocity indicates hot market - increase fees to cool down
+            fee *= Decimal("1.2")
+
+        # Ensure fee stays within reasonable bounds
+        MAX_FEE = Decimal("0.20")  # 20%
+        MIN_FEE = Decimal("0.001")  # 0.1%
+
+        return max(MIN_FEE, min(MAX_FEE, fee))
 
     async def delete_all_data_for_user(self, user_id: int):
         """Deletes all data in the database for a specific user."""
