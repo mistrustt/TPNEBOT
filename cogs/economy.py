@@ -757,6 +757,14 @@ class BalanceView(discord.ui.View):
             return False
         return True
 
+    def __init__(self, cog, member, requesting_user, original_embed):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.member = member
+        self.requesting_user = requesting_user
+        self.original_embed = original_embed
+        self.back_button.disabled = True
+
     @discord.ui.button(label="View Crypto Assets", style=discord.ButtonStyle.primary)
     async def assets_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -839,7 +847,18 @@ class BalanceView(discord.ui.View):
             )
         
         embed.set_footer(text=f"Portfolio for {self.member.display_name}")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        # Enable back button and update view
+        self.back_button.disabled = False
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.red, disabled=True)
+    async def back_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        # Disable back button and re-enable assets button
+        self.back_button.disabled = True
+        await interaction.response.edit_message(embed=self.original_embed, view=self)
 
 class TransactionPaginator(discord.ui.View):
     def __init__(self, cog, transactions, member, requesting_user):
@@ -1321,7 +1340,7 @@ class Economy(commands.Cog):
             # Add Assets button if user has crypto assets
             view = None
             if filtered:
-                view = BalanceView(self, member, ctx.author)
+                view = BalanceView(self, member, ctx.author, embed)
 
             # Fetch last 5 transactions
             user_transactions = await self.bot.database.get_transactions_by_user_id(
