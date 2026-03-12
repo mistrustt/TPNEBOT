@@ -2590,7 +2590,7 @@ class DatabaseManager:
             )
             return result.scalars().all()
         
-    async def update_loan_status_for_user(self, user_id: int, new_status: str):
+    async def update_loan_for_user(self, user_id: int, new_status: str, new_principal: Decimal = None, new_interest_rate: Decimal = None, new_total_repay: Decimal = None, new_due_date: datetime = None):
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -2600,12 +2600,20 @@ class DatabaseManager:
                 if not active_loan:
                     raise ValueError("No active loan found for user.")
                 active_loan.status = new_status
+                if new_principal is not None:
+                    active_loan.principal = new_principal
+                if new_interest_rate is not None:
+                    active_loan.interest_rate = new_interest_rate
+                if new_total_repay is not None:
+                    active_loan.total_repay = new_total_repay
+                if new_due_date is not None:
+                    active_loan.due_date = new_due_date
             await session.commit()
 
     async def date_check_loans(self):
         """
         Check all active loans and mark those past due as 'defaulted'.
-        Add penalty of 1% of loan amount to the total_repay amount for defaulted loans each day it is not repaid.
+        Add penalty of 10% of loan amount to the total_repay amount for defaulted loans each day it is not repaid.
         If the loan is not paid back in 7 days after the due date, freeze the user's wallet.
         This can be scheduled to run periodically (e.g., every hour).
         """
@@ -2620,7 +2628,7 @@ class DatabaseManager:
                     days_overdue = (now - loan.due_date).days
                     if days_overdue > 0:
                         loan.status = "overdue"
-                        loan.total_repay += (loan.principal * Decimal("0.01") * days_overdue).quantize(Decimal("0.01"))
+                        loan.total_repay += (loan.principal * Decimal("0.1") * days_overdue).quantize(Decimal("0.1"))
                     if days_overdue >= 7:
                         loan.status = "defaulted"
                         wallet = await self.get_wallet_by_user_id(loan.user_id) # Ensure wallet exists

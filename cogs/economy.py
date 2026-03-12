@@ -2005,6 +2005,7 @@ class Economy(commands.Cog):
         """Repay part or all of an active loan."""
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = str(await self.bot.database.get_wallet_balance(wallet_id))
         active_loan = await self.bot.database.get_active_loans_for_user(user_id)
         if not active_loan:
             embed = discord.Embed(
@@ -2016,8 +2017,11 @@ class Economy(commands.Cog):
         amount = await self.amount_handler(amount, loan.total_repay)
         try:
             amount_decimal = Decimal(amount)
+        
             if amount_decimal <= 0:
                 raise ValueError("Repayment amount must be greater than zero.")
+            if amount_decimal > Decimal(balance):
+                raise ValueError("You do not have enough funds to make this repayment.")
             if amount_decimal > loan.total_repay:
                 raise ValueError(f"Repayment amount cannot exceed {self.currency_name} **{await self.formatter(loan.total_repay)}**.")
             await self.bot.database.process_treasury_transaction(
@@ -2027,8 +2031,8 @@ class Economy(commands.Cog):
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
             new_status = "repaid" if new_total_repay <= 0 else "active"
-            await self.bot.database.update_loan_status_for_user(
-                user_id=ctx.author.id, new_status=new_status
+            await self.bot.database.update_loan_for_user(
+                user_id=ctx.author.id, new_status=new_status, new_total_repay=new_total_repay
             )
             color = (
                 discord.Color.blurple()
@@ -2042,8 +2046,8 @@ class Economy(commands.Cog):
             embed = discord.Embed(
                 description=(
                     f"You have repaid {self.currency_name} **{await self.formatter(amount_decimal)}** of your loan.\n"
-                    f"Remaining balance to repay: {self.currency_name} **{await self.formatter(new_total_repay)}**."
-                    f"{' Your loan is now fully repaid!' if new_status == 'repaid' else ''}"
+                    f"Remaining balance to repay: {self.currency_name} **{await self.formatter(new_total_repay)}**.\n"
+                    f"{'**Your loan is now fully repaid!**' if new_status == 'repaid' else ''}"
                 ),
                 color=color,
             )
