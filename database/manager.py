@@ -5404,6 +5404,33 @@ class DatabaseManager:
                 if result.rowcount == 0:
                     session.add(Juul(guild_id=guild_id, steals=1))
 
+    async def set_juul_flavor(self, guild_id: int, flavor: str):
+        """
+        Set the flavor of the Juul for a guild.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Juul).where(Juul.guild_id == guild_id)
+                )
+                juul = result.scalar_one_or_none()
+
+                if juul:
+                    juul.flavor = flavor
+                else:
+                    juul = Juul(guild_id=guild_id, flavor=flavor)
+                    session.add(juul)
+
+    async def get_juul_flavor(self, guild_id: int) -> str:
+        """
+        Read-only helper. Returns the flavor of the Juul for a guild.
+        """
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Juul.flavor).where(Juul.guild_id == guild_id)
+            )
+            return result.scalar_one_or_none() or "classic"
+
     async def get_auto_roles(self, guild_id: int) -> list[int]:
         async with self.async_sessionmaker() as session:
             result = await session.execute(

@@ -374,8 +374,8 @@ class Misc(commands.Cog, name="Misc"):
                     or self.bot.get_user(user_id)
                     or await self.bot.fetch_user(user_id)
                 )
-                display_name = user.display_name if user else f"Unknown {user_id}"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                display_name = user.display_name if user else f"Unknown {user_id}"
                 bottom_list.append(f"{emoji} **{display_name}** (`{flames:,} flames`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -782,6 +782,7 @@ class Misc(commands.Cog, name="Misc"):
     @commands.guild_only()
     async def juul(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
+        flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if juul and juul.holder_id:
             user = ctx.guild.get_member(juul.holder_id) or await self.bot.fetch_user(
                 juul.holder_id
@@ -790,13 +791,30 @@ class Misc(commands.Cog, name="Misc"):
         else:
             holder = "Nobody"
 
+        # Flavor emojis mapping
+        flavor_emojis = {
+            "classic": "-cigarette",
+            "mint": "🍃",
+            "fruit": "🍓",
+            "berry": "🫐",
+            "tropical": "🍍",
+            "cool": "❄️",
+            "spicy": "🌶️",
+            "dessert": "🍰"
+        }
+        
+        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+
         embed = discord.Embed(
-            title=f"{ctx.guild.name} Juul Stats", color=discord.Color.blurple()
+            title=f"{ctx.guild.name} Juul Stats {flavor_emoji}",
+            color=discord.Color.blurple()
         )
-        embed.add_field(name="Holder", value=holder)
-        embed.add_field(name="Hits", value=juul.hits if juul else 0)
-        embed.add_field(name="Passes", value=juul.passes if juul else 0)
-        embed.add_field(name="Steals", value=juul.steals if juul else 0)
+        embed.add_field(name="Holder", value=holder, inline=True)
+        embed.add_field(name="Flavor", value=f"{flavor.capitalize()} {flavor_emoji}", inline=True)
+        embed.add_field(name="Hits", value=juul.hits if juul else 0, inline=True)
+        embed.add_field(name="Passes", value=juul.passes if juul else 0, inline=True)
+        embed.add_field(name="Steals", value=juul.steals if juul else 0, inline=True)
+        embed.add_field(name="Status", value="Locked 🔒" if (juul and juul.locked) else "Unlocked 🔓", inline=True)
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
         )
@@ -805,6 +823,7 @@ class Misc(commands.Cog, name="Misc"):
     @juul.command(name="hit")
     async def juul_hit(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
+        flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if not juul or juul.holder_id != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
@@ -814,9 +833,24 @@ class Misc(commands.Cog, name="Misc"):
             )
 
         await self.bot.database.increment_juul_hits(ctx.guild.id)
+        
+        # Flavor-specific responses
+        flavor_responses = {
+            "classic": "You take a hit from the classic juul. 😮‍💨",
+            "mint": "You take a refreshing mint hit. 🌬️😮‍💨",
+            "fruit": "You enjoy a sweet fruit flavor. 🍓😮‍💨",
+            "berry": "You savor the berry blast. 🫐😮‍💨",
+            "tropical": "You taste the tropical paradise. 🍍😮‍💨",
+            "cool": "You feel the cool breeze. ❄️😮‍💨",
+            "spicy": "You feel the spicy kick. 🌶️😮‍💨",
+            "dessert": "You indulge in dessert flavors. 🍰😮‍💨"
+        }
+        
+        response = flavor_responses.get(flavor, "You take a hit from the juul. 😮‍💨")
+        
         await ctx.send(
             embed=discord.Embed(
-                description="You take a hit from the juul. 😮‍💨",
+                description=response,
                 color=discord.Color.green(),
             )
         )
@@ -824,6 +858,7 @@ class Misc(commands.Cog, name="Misc"):
     @juul.command(name="pass")
     async def juul_pass(self, ctx: Context, member: discord.Member):
         juul = await self.bot.database.get_juul(ctx.guild.id)
+        flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if member.id == ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
@@ -842,9 +877,24 @@ class Misc(commands.Cog, name="Misc"):
 
         await self.bot.database.set_juul_holder(ctx.guild.id, member.id)
         await self.bot.database.increment_juul_passes(ctx.guild.id)
+        
+        # Flavor emojis mapping
+        flavor_emojis = {
+            "classic": "-cigarette",
+            "mint": "🍃",
+            "fruit": "🍓",
+            "berry": "🫐",
+            "tropical": "🍍",
+            "cool": "❄️",
+            "spicy": "🌶️",
+            "dessert": "🍰"
+        }
+        
+        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        
         await ctx.send(
             embed=discord.Embed(
-                description=f"You passed the juul to {member.mention}.",
+                description=f"You passed the {flavor} juul {flavor_emoji} to {member.mention}.",
                 color=discord.Color.green(),
             )
         )
@@ -852,6 +902,7 @@ class Misc(commands.Cog, name="Misc"):
     @juul.command(name="steal")
     async def juul_steal(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
+        flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if juul and juul.holder_id == ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
@@ -871,9 +922,24 @@ class Misc(commands.Cog, name="Misc"):
 
         await self.bot.database.set_juul_holder(ctx.guild.id, ctx.author.id)
         await self.bot.database.increment_juul_steals(ctx.guild.id)
+        
+        # Flavor emojis mapping
+        flavor_emojis = {
+            "classic": "-cigarette",
+            "mint": "🍃",
+            "fruit": "🍓",
+            "berry": "🫐",
+            "tropical": "🍍",
+            "cool": "❄️",
+            "spicy": "🌶️",
+            "dessert": "🍰"
+        }
+        
+        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        
         await ctx.send(
             embed=discord.Embed(
-                description=f"{ctx.author.mention} has stolen the juul from {ctx.guild.get_member(juul.holder_id).mention if juul and juul.holder_id else 'nobody'}!",
+                description=f"{ctx.author.mention} has stolen the {flavor} juul {flavor_emoji} from {ctx.guild.get_member(juul.holder_id).mention if juul and juul.holder_id else 'nobody'}!",
                 color=discord.Color.green(),
             )
         )
@@ -882,6 +948,7 @@ class Misc(commands.Cog, name="Misc"):
     @commands.has_permissions(manage_messages=True)
     async def juul_lock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
+        flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if not juul or juul.holder_id != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
@@ -891,9 +958,24 @@ class Misc(commands.Cog, name="Misc"):
             )
 
         await self.bot.database.set_juul_lock(ctx.guild.id, True)
+        
+        # Flavor emojis mapping
+        flavor_emojis = {
+            "classic": "-cigarette",
+            "mint": "🍃",
+            "fruit": "🍓",
+            "berry": "🫐",
+            "tropical": "🍍",
+            "cool": "❄️",
+            "spicy": "🌶️",
+            "dessert": "🍰"
+        }
+        
+        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        
         await ctx.send(
             embed=discord.Embed(
-                description="The juul has been locked! No one can steal it now.",
+                description=f"The {flavor} juul {flavor_emoji} has been locked! No one can steal it now.",
                 color=discord.Color.green(),
             )
         )
@@ -911,7 +993,95 @@ class Misc(commands.Cog, name="Misc"):
             )
 
         await self.bot.database.set_juul_lock(ctx.guild.id, False)
-        await ctx.send("Juul unlocked.")
+        await ctx.send(
+            embed=discord.Embed(
+                description="The juul has been unlocked! Anyone can steal it now.",
+                color=discord.Color.green(),
+            )
+        )
+
+    @juul.command(name="flavor", aliases=["flavour"])
+    async def juul_flavor(self, ctx: Context, flavor: str = None):
+        """Check or change the Juul flavor."""
+        if flavor is None:
+            # Just show current flavor
+            current_flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
+            
+            # Flavor emojis mapping
+            flavor_emojis = {
+                "classic": "-cigarette",
+                "mint": "🍃",
+                "fruit": "🍓",
+                "berry": "🫐",
+                "tropical": "🍍",
+                "cool": "❄️",
+                "spicy": "🌶️",
+                "dessert": "🍰"
+            }
+            
+            flavor_emoji = flavor_emojis.get(current_flavor, "-cigarette")
+            
+            embed = discord.Embed(
+                title="Juul Flavor",
+                description=f"Current flavor: **{current_flavor.capitalize()}** {flavor_emoji}",
+                color=discord.Color.blurple()
+            )
+            embed.add_field(
+                name="Available Flavors",
+                value="`classic`, `mint`, `fruit`, `berry`, `tropical`, `cool`, `spicy`, `dessert`",
+                inline=False
+            )
+            await ctx.reply(embed=embed)
+            return
+
+        # Check if user is holding the juul
+        juul = await self.bot.database.get_juul(ctx.guild.id)
+        if not juul or juul.holder_id != ctx.author.id:
+            return await ctx.send(
+                embed=discord.Embed(
+                    description="🚫 You need to be holding the juul to change its flavor.",
+                    color=discord.Color.red(),
+                )
+            )
+
+        # Normalize flavor input
+        flavor = flavor.lower()
+        
+        # Valid flavors
+        valid_flavors = ["classic", "mint", "fruit", "berry", "tropical", "cool", "spicy", "dessert"]
+        
+        if flavor not in valid_flavors:
+            embed = discord.Embed(
+                title="Invalid Flavor",
+                description=f"🚫 That flavor doesn't exist!\n\nAvailable flavors: `{'`, `'.join(valid_flavors)}`",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Set the new flavor
+        await self.bot.database.set_juul_flavor(ctx.guild.id, flavor)
+        
+        # Flavor emojis mapping
+        flavor_emojis = {
+            "classic": "-cigarette",
+            "mint": "🍃",
+            "fruit": "🍓",
+            "berry": "🫐",
+            "tropical": "🍍",
+            "cool": "❄️",
+            "spicy": "🌶️",
+            "dessert": "🍰"
+        }
+        
+        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        
+        embed = discord.Embed(
+            title="Flavor Changed!",
+            description=f"The juul flavor has been changed to **{flavor.capitalize()}** {flavor_emoji}",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
 
     @commands.command(
         name="tz", aliases=["timezone", "time"], help="Show your current timezone."
