@@ -2025,8 +2025,8 @@ class Economy(commands.Cog):
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
             new_status = "repaid" if new_total_repay <= 0 else "active"
-            await self.bot.database.update_loan_record(
-                loan_id=loan.id, total_repay=new_total_repay, status=new_status
+            await self.bot.database.update_loan_status_for_user(
+                user_id=ctx.author.id, new_status=new_status
             )
             color = (
                 discord.Color.blurple()
