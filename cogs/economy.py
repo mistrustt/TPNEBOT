@@ -2774,7 +2774,7 @@ class Economy(commands.Cog):
             coins = (spend / price).quantize(Decimal("0.00000001"))
         except InvalidOperation:
             return await ctx.reply(
-                f"Invalid calculation result for {symbol}. The division produced an invalid value.", delete_after=5
+                f"Invalid price calculation result for {symbol}.", delete_after=5
             )
         await self.bot.database.process_treasury_transaction(
             wallet_id, -spend, f"Buy {symbol}"
