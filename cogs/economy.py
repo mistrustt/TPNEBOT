@@ -1916,28 +1916,28 @@ class Economy(commands.Cog):
     @commands.group(name="loan", invoke_without_command=True, description="Take out a loan. Pay it back with interest!")
     async def loan(self, ctx: commands.Context):
         """Group command for managing loans."""
-        user_id = ctx.author.id
-        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
-        if not active_loan:
+        if ctx.invoked_subcommand is None:
+            user_id = ctx.author.id
+            active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+            if not active_loan:
+                embed = discord.Embed(
+                    description="You have no active loans.",
+                    color=discord.Color.red(),
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+
+            await self.bot.database.date_check_loans()
+
+            loan = active_loan[0]
             embed = discord.Embed(
-                description="You have no active loans.",
-                color=discord.Color.red(),
+                description=(
+                    f"Total Repayable: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
+                    f"Current Status: {loan.status}"
+                ),
+                color=discord.Color.blurple(),
             )
-            return await ctx.reply(embed=embed, delete_after=5)
-
-        await self.bot.database.date_check_loans()
-
-        loan = active_loan[0]
-        embed = discord.Embed(
-            description=(
-                f"Loan ID: {loan.id}\n"
-                f"Total Repayable: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
-                f"Current Status: {loan.status}"
-            ),
-            color=discord.Color.blurple(),
-        )
-        embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(ctx.author))
-        await ctx.reply(embed=embed)
+            embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
 
     @loan.command(name="take", description="Take out a new loan.")
     async def loan_take(self, ctx: commands.Context, amount: str):
