@@ -769,7 +769,19 @@ class BalanceView(discord.ui.View):
                 "No crypto assets to display.", ephemeral=True
             )
             
-        embed = discord.Embed(title="🗂️ Crypto Portfolio", color=discord.Color.gold())
+        embed = discord.Embed(
+            title="💼 Crypto Portfolio",
+            color=discord.Color.gold(),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        # Calculate totals
+        total_value = Decimal("0")
+        total_cost = Decimal("0")
+        total_pnl = Decimal("0")
+        
+        # Build asset details
+        asset_details = []
         for asset in filtered:
             price = await self.cog.bot.database.get_crypto_price(asset.symbol)
             if price:
@@ -777,21 +789,56 @@ class BalanceView(discord.ui.View):
                 cost = asset.amount * asset.purchase_price
                 pnl = value - cost
                 pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
+                
+                total_value += value
+                total_cost += cost
+                total_pnl += pnl
+                
                 symbol = "📈" if pnl >= 0 else "📉"
-                embed.add_field(
-                    name=asset.symbol,
-                    value=(
-                        f"Amount: **{await self.cog.short_formatter(asset.amount)}**\n"
-                        f"Value: **{await self.cog.short_formatter(value)} {self.cog.currency_name}**\n"
-                        f"P/L: {symbol} **{await self.cog.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
-                    ),
-                    inline=False,
-                )
+                asset_details.append({
+                    "symbol": asset.symbol,
+                    "amount": asset.amount,
+                    "price": price,
+                    "value": value,
+                    "cost": cost,
+                    "pnl": pnl,
+                    "pnl_pct": pnl_pct,
+                    "icon": symbol
+                })
             else:
                 embed.add_field(
                     name=asset.symbol, value="Price data unavailable", inline=False
                 )
-                
+        
+        # Add portfolio summary at top
+        portfolio_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else Decimal("0")
+        portfolio_icon = "📈" if total_pnl >= 0 else "📉"
+        
+        embed.add_field(
+            name="📊 Portfolio Summary",
+            value=(
+                f"Total Value: **{await self.cog.short_formatter(total_value)} {self.cog.currency_name}**\n"
+                f"Total Cost: **{await self.cog.short_formatter(total_cost)} {self.cog.currency_name}**\n"
+                f"{portfolio_icon} Total P/L: **{await self.cog.short_formatter(total_pnl)}** ({portfolio_pnl_pct:.2f}%)"
+            ),
+            inline=False
+        )
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Divider
+        
+        # Add individual asset details
+        for asset_info in asset_details:
+            embed.add_field(
+                name=f"{asset_info['icon']} {asset_info['symbol']}",
+                value=(
+                    f"Amount: **{await self.cog.short_formatter(asset_info['amount'])}**\n"
+                    f"Price: **{await self.cog.short_formatter(asset_info['price'])}**\n"
+                    f"Value: **{await self.cog.short_formatter(asset_info['value'])}**\n"
+                    f"P/L: **{await self.cog.short_formatter(asset_info['pnl'])}** ({asset_info['pnl_pct']:.2f}%)"
+                ),
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Portfolio for {self.member.display_name}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class TransactionPaginator(discord.ui.View):
@@ -900,80 +947,7 @@ class TransactionPaginator(discord.ui.View):
         embed = await self.get_page_embed(self.current_page)
         await interaction.response.edit_message(embed=embed, view=self)
 
-
-class PortfolioView(ui.View):
-    """Pagination view for displaying crypto portfolio."""
-
-    def __init__(
-        self,
-        cog: "Economy",
-        interaction: discord.Interaction,
-        assets: List,
-        per_page: int = 5,
-    ):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.interaction = interaction
-        self.assets = [a for a in assets if a.amount >= Decimal("0.01")]
-        self.per_page = per_page
-        self.current_page = 0
-        self.max_pages = max(1, (len(self.assets) + per_page - 1) // per_page)
-        if self.max_pages <= 1:
-            for child in self.children:
-                child.disabled = True
-
-    @ui.button(label="Previous", style=discord.ButtonStyle.gray, emoji="⬅️")
-    async def previous_button(
-        self, button: ui.Button, interaction: discord.Interaction
-    ):
-        if interaction.user.id != self.interaction.user.id:
-            return await interaction.response.send_message(
-                "This isn't your portfolio.", ephemeral=True
-            )
-        self.current_page = (self.current_page - 1) % self.max_pages
-        await self.update_message(interaction)
-
-    @ui.button(label="Next", style=discord.ButtonStyle.gray, emoji="➡️")
-    async def next_button(self, button: ui.Button, interaction: discord.Interaction):
-        if interaction.user.id != self.interaction.user.id:
-            return await interaction.response.send_message(
-                "This isn't your portfolio.", ephemeral=True
-            )
-        self.current_page = (self.current_page + 1) % self.max_pages
-        await self.update_message(interaction)
-
-    async def update_message(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="🗂️ Crypto Portfolio", color=discord.Color.gold())
-        start = self.current_page * self.per_page
-        for asset in self.assets[start : start + self.per_page]:
-            price = await self.cog.bot.database.get_crypto_price(asset.symbol)
-            if price:
-                value = asset.amount * price
-                cost = asset.amount * asset.purchase_price
-                pnl = value - cost
-                pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
-                symbol = "📈" if pnl >= 0 else "📉"
-                embed.add_field(
-                    name=asset.symbol,
-                    value=(
-                        f"Amount: **{asset.amount:.8f}**\n"
-                        f"Value: **{value:.2f} {self.cog.currency_name}**\n"
-                        f"P/L: {symbol} **{pnl:.2f}** ({pnl_pct:.2f}%)"
-                    ),
-                    inline=False,
-                )
-            else:
-                embed.add_field(
-                    name=asset.symbol, value="Price data unavailable", inline=False
-                )
-
-        if self.max_pages > 1:
-            embed.set_footer(text=f"Page {self.current_page+1}/{self.max_pages}")
-        await interaction.response.edit_message(embed=embed, view=self)
-
-
 U64_RANGE = 1 << 64
-
 
 def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> int:
     """
@@ -984,11 +958,9 @@ def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> 
     digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
     return int.from_bytes(digest[:8], "big")
 
-
 def _rehash_u64(u64: int) -> int:
     """Deterministically 'stretch' to a fresh 64-bit value for rejection sampling."""
     return int.from_bytes(hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big")
-
 
 def _rand_below_unbiased(u64: int, n: int) -> int:
     """
@@ -1000,7 +972,6 @@ def _rand_below_unbiased(u64: int, n: int) -> int:
     while u64 >= limit:
         u64 = _rehash_u64(u64)
     return u64 % n
-
 
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -2714,8 +2685,8 @@ class Economy(commands.Cog):
         )
         await ctx.reply(embed=embed)
 
-    @commands.group(name="invest", aliases=["coin","coins"], invoke_without_command=True)
-    async def invest(self, ctx: commands.Context):
+    @commands.group(name="crypto", aliases=["coin","coins"], invoke_without_command=True)
+    async def crypto(self, ctx: commands.Context):
         prefix = await self.bot.get_prefix(ctx.message)
         if isinstance(prefix, list):
             prefix = prefix[0]
@@ -2731,22 +2702,22 @@ class Economy(commands.Cog):
             )
             desc = (cmd.help or cmd.description or "").strip()
             if desc:
-                lines.append(f"`{prefix}invest {name}`{aliases} — {desc}")
+                lines.append(f"`{prefix}crypto {name}`{aliases} — {desc}")
             else:
-                lines.append(f"`{prefix}invest {name}`{aliases}")
+                lines.append(f"`{prefix}crypto {name}`{aliases}")
 
         description = "\n".join(lines) if lines else "No subcommands available."
 
         embed = discord.Embed(
-            title="Invest — Available Commands",
+            title="Crypto — Available Commands",
             description=description,
             color=discord.Color.blurple(),
         )
-        embed.set_footer(text=f"Use {prefix}invest <subcommand> for details.")
+        embed.set_footer(text=f"Use {prefix}crypto <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @invest.command(name="buy", description="Buy cryptocurrency with your balance")
-    async def invest_buy(self, ctx: commands.Context, currency: str, amount: str ):
+    @crypto.command(name="buy", description="Buy cryptocurrency with your balance")
+    async def crypto_buy(self, ctx: commands.Context, currency: str, amount: str ):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -2781,14 +2752,31 @@ class Economy(commands.Cog):
         await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
 
         embed = discord.Embed(
-            description=f"✅ Purchased **{await self.short_formatter(coins)} {symbol}** "
-            f"for **{self.currency_name} {await self.short_formatter(spend)}** ",
+            title="✅ Crypto Purchase",
+            description=f"Successfully purchased **{symbol}**",
             color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
         )
+        embed.add_field(
+            name="Amount Bought",
+            value=f"**{await self.short_formatter(coins)} {symbol}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Price per Coin",
+            value=f"**{await self.short_formatter(price)} {self.currency_name}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Total Cost",
+            value=f"**{await self.short_formatter(spend)} {self.currency_name}**",
+            inline=True
+        )
+        embed.set_footer(text=f"Transaction ID: Buy {symbol}")
         await ctx.reply(embed=embed)
 
-    @invest.command(name="sell", description="Sell cryptocurrency for your balance")
-    async def invest_sell(self, ctx: commands.Context, currency: str, amount: str):
+    @crypto.command(name="sell", description="Sell cryptocurrency for your balance")
+    async def crypto_sell(self, ctx: commands.Context, currency: str, amount: str):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         symbol = currency.upper()
@@ -2814,11 +2802,41 @@ class Economy(commands.Cog):
         )
         await self.bot.database.update_crypto_amount(user_id, symbol, -sell_amt)
 
+        # Calculate P/L for this sale
+        cost_basis = float(asset.purchase_price * sell_amt)
+        pnl = proceeds - cost_basis
+        pnl_percentage = (pnl / cost_basis * 100) if cost_basis != 0 else 0
+        pnl_emoji = "📈" if pnl >= 0 else "📉"
+        pnl_color = discord.Color.green() if pnl >= 0 else discord.Color.red()
+        pnl_text = f"**{pnl_emoji} {await self.short_formatter(pnl)} {self.currency_name}** ({pnl_percentage:+.2f}%)"
+
         embed = discord.Embed(
-            description=f"✅ Sold **{await self.short_formatter(sell_amt)} {symbol}** "
-            f"for **{self.currency_name} {await self.short_formatter(proceeds)}** ",
-            color=discord.Color.red(),
+            title="✅ Crypto Sale",
+            description=f"Successfully sold **{symbol}**",
+            color=pnl_color,
+            timestamp=discord.utils.utcnow()
         )
+        embed.add_field(
+            name="Amount Sold",
+            value=f"**{await self.short_formatter(sell_amt)} {symbol}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Price per Coin",
+            value=f"**{await self.short_formatter(price)} {self.currency_name}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Total Proceeds",
+            value=f"**{await self.short_formatter(proceeds)} {self.currency_name}**",
+            inline=True
+        )
+        embed.add_field(
+            name="Profit/Loss",
+            value=pnl_text,
+            inline=False
+        )
+        embed.set_footer(text=f"Transaction ID: Sell {symbol}")
         await ctx.reply(embed=embed)
 
     async def crypto_amount_handler(self, input_str: str, balance: Decimal) -> Decimal:

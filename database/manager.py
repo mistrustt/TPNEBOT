@@ -1834,7 +1834,7 @@ class DatabaseManager:
     async def process_treasury_transaction(
         self, wallet_id: str, amount: Decimal, description: str
     ):
-        factors = await self.get_economic_factors()
+        factors = await self.get_economic
         fee_rate = factors["fee_rate"]
 
         amount = amount.quantize(Decimal("0.01"), ROUND_HALF_UP)
@@ -3206,6 +3206,90 @@ class DatabaseManager:
 
                 await session.commit()
                 return asset
+
+    async def transfer_crypto_asset(
+        self,
+        sender_user_id: int,
+        receiver_user_id: int,
+        symbol: str,
+        amount: Decimal,
+        description: str = "Crypto transfer",
+    ):
+        """Transfer crypto assets from one user to another."""
+        symbol = symbol.upper()
+        amount = amount.quantize(Decimal("0.00000000"), ROUND_HALF_UP)
+
+        if amount <= 0:
+            raise ValueError("Transfer amount must be positive.")
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                # Get sender and receiver crypto assets
+                sender_result = await session.execute(
+                    select(CryptoAsset).where(
+                        CryptoAsset.user_id == sender_user_id,
+                        CryptoAsset.symbol == symbol,
+                    )
+                )
+                sender_asset = sender_result.scalar_one_or_none()
+
+                receiver_result = await session.execute(
+                    select(CryptoAsset).where(
+                        CryptoAsset.user_id == receiver_user_id,
+                        CryptoAsset.symbol == symbol,
+                    )
+                )
+                receiver_asset = receiver_result.scalar_one_or_none()
+
+                if not sender_asset:
+                    raise ValueError(f"No {symbol} asset found for sender")
+                if sender_asset.amount < amount:
+                    raise ValueError("Insufficient crypto balance")
+
+                # Create receiver asset if doesn't exist
+                if not receiver_asset:
+                    receiver_asset = CryptoAsset(
+                        user_id=receiver_user_id,
+                        symbol=symbol,
+                        amount=Decimal("0"),
+                    )
+                    session.add(receiver_asset)
+                    await session.flush()
+
+                # Transfer amount
+                sender_asset.amount -= amount
+                receiver_asset.amount += amount
+
+                # Record transaction
+                txid = str(uuid.uuid4())
+                session.add(
+                    Transaction(
+                        id=txid,
+                        from_user_id=sender_user_id,
+                        to_user_id=receiver_user_id,
+                        amount=amount,
+                        description=description,
+                        timestamp=discord.utils.utcnow(),
+                    )
+                )
+
+                # Create blockchain block
+                onchain_txs = [
+                    {
+                        "id": txid,
+                        "from_user_id": sender_user_id,
+                        "to_user_id": receiver_user_id,
+                        "amount": str(amount),
+                        "description": description,
+                        "signer_user_id": sender_user_id,
+                    }
+                ]
+                await self.blockchain.create_block_atomic(
+                    session, onchain_txs, validator_user_id=sender_user_id
+                )
+
+            await self.update_supply()
+        return txid
 
     async def delete_crypto_asset(self, user_id: int, symbol: str):
         """Delete a crypto asset entry."""

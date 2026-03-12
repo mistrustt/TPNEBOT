@@ -2181,16 +2181,16 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    crypto = app_commands.Group(
-        name="crypto",
-        description="Cryptocurrency command group",
+    coinmarketcap = app_commands.Group(
+        name="coinmarketcap",
+        description="CoinMarketCap command group",
         allowed_installs=app_commands.AppInstallationType(guild=True, user=True),
         allowed_contexts=app_commands.AppCommandContext(
             guild=True, dm_channel=True, private_channel=True
         ),
     )
 
-    @crypto.command(name="price", description="Get the price of a cryptocurrency.")
+    @coinmarketcap.command(name="price", description="Get the price of a cryptocurrency.")
     @app_commands.checks.cooldown(rate=1, per=5.0)
     @app_commands.choices(
         coin=[
@@ -2246,7 +2246,7 @@ class General(commands.Cog, name="General"):
             ) as response:
                 if response.status == 429:
                     await interaction.response.send_message(
-                        "Crypto API limit reached. Please try again later.",
+                        "CoinMarketCap API limit reached. Please try again later.",
                         ephemeral=True,
                     )
                     return
