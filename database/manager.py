@@ -1834,7 +1834,7 @@ class DatabaseManager:
     async def process_treasury_transaction(
         self, wallet_id: str, amount: Decimal, description: str
     ):
-        factors = await self.get_economic
+        factors = await self.get_economic_factors()
         fee_rate = factors["fee_rate"]
 
         amount = amount.quantize(Decimal("0.01"), ROUND_HALF_UP)
