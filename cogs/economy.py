@@ -1948,8 +1948,6 @@ class Economy(commands.Cog):
         safe_loan_amount = await self.bot.database.get_max_loan_amount(user_id)
         active_loan = await self.bot.database.get_active_loans_for_user(user_id)
 
-        amount = await self.amount_handler(amount, safe_loan_amount)
-
         await self.bot.database.date_check_loans()
 
         try:
@@ -1962,7 +1960,16 @@ class Economy(commands.Cog):
                 raise ValueError(f"Loan amount cannot exceed {self.currency_name} **{await self.formatter(safe_loan_amount)}**.")
             if amount_decimal > treasury:
                 raise ValueError("The treasury does not have enough funds to cover this loan at the moment. Please try a smaller amount or come back later.")
+
+            try:
+                amount = await self.amount_handler(amount, safe_loan_amount)
+            except ValueError as e:
+                embed = discord.Embed(description=str(e), color=discord.Color.red())
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+        
             interest_rate = Decimal("0.10")
+
             total_repay = (amount_decimal * (Decimal("1") + interest_rate)).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
@@ -2014,7 +2021,12 @@ class Economy(commands.Cog):
             )
             return await ctx.reply(embed=embed, delete_after=5)
         loan = active_loan[0]
-        amount = await self.amount_handler(amount, loan.total_repay)
+        try:
+            amount = await self.amount_handler(amount, loan.total_repay)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
         try:
             amount_decimal = Decimal(amount)
         
