@@ -41,6 +41,7 @@ from .models import (
     Wallet,
     Block,
     Loan,
+    LoanPayment,
     Item,
     ItemType,
     ShopItem,
@@ -2609,6 +2610,115 @@ class DatabaseManager:
                 if new_due_date is not None:
                     active_loan.due_date = new_due_date
             await session.commit()
+
+    async def make_loan_payment(
+        self, 
+        user_id: int, 
+        payment_amount: Decimal, 
+        payment_method: str = None, 
+        notes: str = None
+    ):
+        """
+        Record a partial or full loan payment. Updates the loan's amount_paid field
+        and creates a LoanPayment record. Automatically marks loan as 'paid' if fully repaid.
+        
+        Args:
+            user_id: Discord user ID
+            payment_amount: Amount to pay (must be > 0 and <= remaining balance)
+            payment_method: Optional payment method description
+            notes: Optional notes about the payment
+            
+        Returns:
+            dict with payment details and new balance
+            
+        Raises:
+            ValueError: If no active loan exists or payment amount is invalid
+        """
+        if payment_amount <= 0:
+            raise ValueError("Payment amount must be greater than 0.")
+        
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue"]))
+                )
+                active_loan = result.scalar_one_or_none()
+                if not active_loan:
+                    raise ValueError("No active loan found for user.")
+                
+                remaining_balance = active_loan.total_repay - active_loan.amount_paid
+                if payment_amount > remaining_balance:
+                    raise ValueError(f"Payment amount exceeds remaining balance of {remaining_balance}.")
+                
+                # Create payment record
+                payment = LoanPayment(
+                    loan_id=active_loan.id,
+                    user_id=user_id,
+                    payment_amount=payment_amount,
+                    payment_method=payment_method,
+                    notes=notes
+                )
+                session.add(payment)
+                
+                # Update loan amount paid
+                active_loan.amount_paid += payment_amount
+                
+                # Check if fully paid
+                if active_loan.amount_paid >= active_loan.total_repay:
+                    active_loan.status = "paid"
+                    active_loan.amount_paid = active_loan.total_repay  # Ensure exact match
+                    
+            await session.commit()
+            
+            return {
+                "payment_amount": payment_amount,
+                "previous_paid": active_loan.amount_paid - payment_amount,
+                "new_amount_paid": active_loan.amount_paid,
+                "remaining_balance": active_loan.total_repay - active_loan.amount_paid,
+                "loan_status": active_loan.status
+            }
+
+    async def get_loan_payment_history(self, user_id: int) -> list[LoanPayment]:
+        """
+        Retrieve all payment records for a user's loans.
+        
+        Args:
+            user_id: Discord user ID
+            
+        Returns:
+            List of LoanPayment records ordered by payment_date descending
+        """
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(LoanPayment)
+                .join(Loan, LoanPayment.loan_id == Loan.id)
+                .where(Loan.user_id == user_id)
+                .order_by(LoanPayment.payment_date.desc())
+            )
+            return result.scalars().all()
+
+    async def get_loan_remaining_balance(self, user_id: int) -> Decimal:
+        """
+        Calculate the remaining balance on a user's active loan.
+        
+        Args:
+            user_id: Discord user ID
+            
+        Returns:
+            Decimal representing remaining balance (total_repay - amount_paid)
+            
+        Raises:
+            ValueError: If no active loan exists
+        """
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue"]))
+            )
+            active_loan = result.scalar_one_or_none()
+            if not active_loan:
+                raise ValueError("No active loan found for user.")
+            
+            return active_loan.total_repay - active_loan.amount_paid
 
     async def date_check_loans(self):
         """

@@ -212,16 +212,47 @@ class Music(commands.Cog, name="Music"):
 
     async def update_user_index(self, lastfm_username: str):
         """Fetch and index recent listening data for a user."""
-        url_recent = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={lastfm_username}&api_key={LASTFM_API_KEY}&format=json"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url_recent) as response:
-                recent_tracks = await response.json()
+        url_recent = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={quote(lastfm_username)}&api_key={LASTFM_API_KEY}&format=json"
+        
+        async def _safe_lastfm_request(url: str, error_context: str = "Last.fm API request"):
+            """Make a safe Last.fm API request with error handling.
+            
+            Args:
+                url: The API endpoint URL
+                error_context: Description for logging purposes
+                
+            Returns:
+                dict: The JSON response data, or None if request failed
+            """
+            try:
+                async with self.session.get(url) as response:
+                    if response.status != 200:
+                        logger.warning(f"{error_context}: Last.fm API returned status {response.status}")
+                        return None
+                    
+                    data = await response.json()
+                    return data
+                    
+            except (aiohttp.ClientError, aiohttp.ContentTypeError) as e:
+                logger.error(f"{error_context}: {type(e).__name__} - {e}")
+                return None
+            except (KeyError, TypeError, ValueError) as e:
+                logger.error(f"{error_context}: Response parsing error - {type(e).__name__} - {e}")
+                return None
 
-                return (
-                    recent_tracks["recenttracks"]["track"]
-                    if "recenttracks" in recent_tracks
-                    else []
-                )
+        result = await _safe_lastfm_request(url_recent)
+        if result is not None:
+            recent_tracks = result.get("recenttracks", {})
+            tracks = recent_tracks.get("track", [])
+            
+            if not isinstance(tracks, list):
+                logger.debug(f"Invalid tracks format for user {lastfm_username}")
+                return []
+            
+            return tracks
+        else:
+            logger.warning(f"Last.fm API request failed for user {lastfm_username}")
+            return []
 
     @commands.group(name="lf", invoke_without_command=True)
     async def lastfm(self, ctx: Context) -> None:
@@ -416,16 +447,17 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply("No recent tracks found.")
             return
 
-        track = recent_tracks[0]
-        track_name = track["name"]
-        artist_name = track["artist"]["#text"]
+        track = recent_tracks[0] if recent_tracks else {}
+        track_name = track.get("name", "Unknown Track")
+        artist_name = track.get("artist", {}).get("#text", "Unknown Artist")
 
         async def get_track_playcount(lastfm_username, artist_name, track_name):
-            url = f"http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key={LASTFM_API_KEY}&artist={artist_name}&track={track_name}&username={lastfm_username}&format=json"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    track_info = await response.json()
-                    return track_info.get("track", {}).get("userplaycount", "N/A")
+            """Fetch track playcount using the safe Last.fm request helper."""
+            url = f"http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key={LASTFM_API_KEY}&artist={quote(artist_name)}&track={quote(track_name)}&username={lastfm_username}&format=json"
+            response_data = await self._safe_lastfm_request(url, "Get track playcount")
+            if response_data:
+                return response_data.get("track", {}).get("userplaycount", "N/A")
+            return "N/A"
 
         playcount = await get_track_playcount(lastfm_username, artist_name, track_name)
 
@@ -458,34 +490,32 @@ class Music(commands.Cog, name="Music"):
                 )
                 return
 
-        url = f"http://ws.audioscrobbler.com/2.0/?method=user.gettoptracks&user={lastfm_username}&api_key={LASTFM_API_KEY}&format=json&limit=10"
+        url = f"http://ws.audioscrobbler.com/2.0/?method=user.gettoptracks&user={quote(lastfm_username)}&api_key={LASTFM_API_KEY}&format=json&limit=10"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                data = await response.json()
+        response_data = await self._safe_lastfm_request(url, "Get top tracks")
+        if not response_data:
+            await ctx.reply("Couldn't retrieve top tracks. Please try again later.")
+            return
 
-                if "toptracks" not in data or "track" not in data["toptracks"]:
-                    await ctx.reply(
-                        "Couldn't retrieve top tracks. Please try again later."
-                    )
-                    return
+        tracks = response_data.get("toptracks", {}).get("track", [])
+        if not tracks:
+            await ctx.reply("Couldn't retrieve top tracks. Please try again later.")
+            return
 
-                tracks = data["toptracks"]["track"]
-                description = "\n".join(
-                    [
-                        f"{i+1}. [{track['name']}]({track['url']}) - `{track['playcount']}` plays"
-                        for i, track in enumerate(tracks)
-                    ]
-                )
+        description = "\n".join(
+            [
+                f"{i+1}. [{track.get('name', 'Unknown')}]({track.get('url', '#')}) - `{track.get('playcount', '0')}` plays"
+                for i, track in enumerate(tracks)
+            ]
+        )
 
-                embed = discord.Embed(
-                    title=f"{lastfm_username}'s Top 10 Tracks",
-                    description=description,
-                    color=embed_color,
-                )
-                embed.set_footer(text="Data from Last.fm")
-                await ctx.reply(embed=embed)
-
+        embed = discord.Embed(
+            title=f"{lastfm_username}'s Top 10 Tracks",
+            description=description,
+            color=embed_color,
+        )
+        embed.set_footer(text="Data from Last.fm")
+        await ctx.reply(embed=embed)
     @lastfm.command(name="topartists", aliases=["tar"])
     async def top_artists(self, ctx: Context):
         """Display the user's top artists on Last.fm."""
@@ -508,25 +538,36 @@ class Music(commands.Cog, name="Music"):
                 )
                 return
 
-            url = f"http://ws.audioscrobbler.com/2.0/?method=user.gettopartists&user={lastfm_username}&api_key={LASTFM_API_KEY}&format=json&limit=10"
+            url = f"http://ws.audioscrobbler.com/2.0/?method=user.gettopartists&user={quote(lastfm_username)}&api_key={LASTFM_API_KEY}&format=json&limit=10"
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+            try:
+                async with self.session.get(url) as response:
+                    if response.status != 200:
+                        logger.warning(f"Last.fm API returned status {response.status} for top artists")
+                        await ctx.reply("Couldn't retrieve top artists. Please try again later.")
+                        return
+                    
                     top_artists_data = await response.json()
 
                     artists = top_artists_data.get("topartists", {}).get("artist", [])
-                    if not artists:
-                        await ctx.reply(
-                            "Couldn't retrieve top artists. Please try again later."
-                        )
+                    if not artists or not isinstance(artists, list):
+                        logger.debug(f"No top artists found for {lastfm_username}")
+                        await ctx.reply("Couldn't retrieve top artists. Please try again later.")
                         return
 
-                    description = "\n".join(
-                        [
-                            f"{i+1}. [{artist['name']}](https://www.last.fm/music/{artist['name'].replace(' ', '+')}) - `{artist['playcount']}` plays"
-                            for i, artist in enumerate(artists)
-                        ]
-                    )
+                    # Safely build description with defensive programming
+                    description_lines = []
+                    for i, artist in enumerate(artists):
+                        if not isinstance(artist, dict):
+                            continue
+                        artist_name = artist.get("name", "Unknown Artist")
+                        playcount = artist.get("playcount", 0)
+                        artist_url = f"https://www.last.fm/music/{artist_name.replace(' ', '+')}"
+                        description_lines.append(
+                            f"{i+1}. [{artist_name}]({artist_url}) - `{playcount}` plays"
+                        )
+                    
+                    description = "\n".join(description_lines)
 
                     embed = discord.Embed(
                         title=f"{lastfm_username}'s Top 10 Artists",
@@ -535,6 +576,10 @@ class Music(commands.Cog, name="Music"):
                     )
                     embed.set_footer(text="Data from Last.fm")
                     await ctx.reply(embed=embed)
+                    
+            except (aiohttp.ClientError, KeyError, TypeError, ValueError) as e:
+                logger.error(f"Error fetching top artists for {lastfm_username}: {type(e).__name__} - {e}")
+                await ctx.reply("An error occurred while fetching your top artists. Please try again later.")
 
     @lastfm.command(name="whoknows", aliases=["wk"])
     async def who_knows(self, ctx: Context, *, artist_name: str):
@@ -545,29 +590,54 @@ class Music(commands.Cog, name="Music"):
 
         async def fetch_playcount(lastfm_username):
             """Fetch user playcount for an artist from Last.fm."""
-            url = f"https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={artist_name}&username={lastfm_username}&api_key={LASTFM_API_KEY}&format=json"
+            url = f"https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={quote(artist_name)}&username={lastfm_username}&api_key={LASTFM_API_KEY}&format=json"
+            response_data = await self._safe_lastfm_request(url, f"Fetch playcount for {lastfm_username}")
+            if response_data:
+                try:
+                    return int(response_data.get("artist", {}).get("stats", {}).get("userplaycount", 0))
+                except (ValueError, TypeError):
+                    return 0
+            return 0
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+        async def fetch_artist_image(artist_name, lastfm_username):
+            """Fetch artist image from Last.fm."""
+            url = f"https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={quote(artist_name)}&username={lastfm_username}&api_key={LASTFM_API_KEY}&format=json"
+
+            try:
+                async with self.session.get(url) as response:
                     if response.status != 200:
+                        logger.warning(f"Last.fm API returned status {response.status} for artist {artist_name}")
                         return None
 
                     data = await response.json()
-                    return int(
-                        data.get("artist", {}).get("stats", {}).get("userplaycount", 0)
-                    )
-
-        async def fetch_artist_image(lastfm_username):
-            """Fetch user playcount for an artist from Last.fm."""
-            url = f"https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist={artist_name}&username={lastfm_username}&api_key={LASTFM_API_KEY}&format=json"
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
+                    
+                    # Safely extract image URL with defensive programming
+                    artist_data = data.get("artist", {})
+                    image_list = artist_data.get("image", [])
+                    
+                    # Check if image list exists and has enough elements
+                    if not isinstance(image_list, list) or len(image_list) < 4:
+                        logger.debug(f"No large image available for artist {artist_name}")
+                        # Try to get any available image
+                        for image_size in image_list:
+                            if isinstance(image_size, dict) and image_size.get("#text"):
+                                return image_size.get("#text")
                         return None
-
-                    data = await response.json()
-                    return data["artist"]["image"][3]["#text"]
+                    
+                    image_url = image_list[3].get("#text", "") if isinstance(image_list[3], dict) else ""
+                    
+                    if not image_url:
+                        logger.debug(f"No image URL available for artist {artist_name}")
+                        # Fallback to smaller sizes
+                        for i in range(len(image_list)):
+                            if isinstance(image_list[i], dict) and image_list[i].get("#text"):
+                                return image_list[i].get("#text")
+                    
+                    return image_url if image_url else None
+                    
+            except (aiohttp.ClientError, KeyError, IndexError, TypeError, ValueError) as e:
+                logger.error(f"Error fetching artist image for {artist_name}: {type(e).__name__} - {e}")
+                return None
 
         tasks = []
         valid_members = []
@@ -604,12 +674,23 @@ class Music(commands.Cog, name="Music"):
             description=description,
             color=embed_color,
         )
-        embed.set_thumbnail(url=await fetch_artist_image(lastfm_username))
-        embed.add_field(
-            name="Your Playcount",
-            value=f"`{await fetch_playcount(lastfm_username)}`",
-            inline=False,
-        )
+        artist_image_url = await fetch_artist_image(lastfm_username)
+        if artist_image_url:
+            embed.set_thumbnail(url=artist_image_url)
+        
+        try:
+            user_playcount = await fetch_playcount(lastfm_username)
+            embed.add_field(
+                name="Your Playcount",
+                value=f"`{user_playcount}`",
+                inline=False,
+            )
+        except Exception:
+            embed.add_field(
+                name="Your Playcount",
+                value="`N/A`",
+                inline=False,
+            )
         await ctx.reply(embed=embed)
 
     @commands.command(name="np")
@@ -644,8 +725,8 @@ class Music(commands.Cog, name="Music"):
             async def get_image_url(data, size="medium"):
                 images = data.get("user", {}).get("image", [])
                 for image in images:
-                    if image["size"] == size:
-                        return image["#text"]
+                    if image.get("size") == size:
+                        return image.get("#text")
                 return None
 
             async def get_recent_tracks(lastfm_username: str):
@@ -676,7 +757,7 @@ class Music(commands.Cog, name="Music"):
             lastfm_avatar_url = await get_image_url(user_data, "large")
 
             recent_tracks = await get_recent_tracks(lastfm_username)
-            if not recent_tracks["recenttracks"]["track"]:
+            if not recent_tracks or not recent_tracks.get("recenttracks", {}).get("track"):
                 await ctx.reply(
                     embed=discord.Embed(
                         title="Error",
@@ -686,11 +767,11 @@ class Music(commands.Cog, name="Music"):
                 )
                 return
 
-            track = recent_tracks["recenttracks"]["track"][0]
-            track_name = track["name"]
-            artist_name = track["artist"]["#text"]
-            album_name = track["album"]["#text"]
-            track_url = track["url"]
+            track = recent_tracks.get("recenttracks", {}).get("track", [{}])[0]
+            track_name = track.get("name", "Unknown Track")
+            artist_name = track.get("artist", {}).get("#text", "Unknown Artist")
+            album_name = track.get("album", {}).get("#text", "Unknown Album")
+            track_url = track.get("url", "#")
 
             track_info = await get_track_info(artist_name, track_name, lastfm_username)
 
@@ -704,10 +785,10 @@ class Music(commands.Cog, name="Music"):
                 )
                 return
 
-            playcount = track_info["track"].get("userplaycount", "N/A")
+            playcount = track_info.get("track", {}).get("userplaycount", "N/A") if track_info else "N/A"
             total_scrobbles = (
-                user_data["user"]["playcount"]
-                if "playcount" in user_data["user"]
+                user_data.get("user", {}).get("playcount", "N/A")
+                if user_data
                 else "N/A"
             )
 
@@ -717,8 +798,9 @@ class Music(commands.Cog, name="Music"):
             )
 
             if "image" in track and track["image"]:
-                thumbnail_url = track["image"][-1]["#text"]
-                embed.set_thumbnail(url=thumbnail_url)
+                thumbnail_url = track.get("image", [{}])[-1].get("#text", None)
+                if thumbnail_url:
+                    embed.set_thumbnail(url=thumbnail_url)
 
             embed.add_field(
                 name="Track:",
@@ -1237,8 +1319,7 @@ class Music(commands.Cog, name="Music"):
                         else:
                             duration_seconds = duration_as_seconds
                         start_time_str = now_playing.get(
-                            "timestamp"
-                        ) or now_playing.get("start_time")
+                            "timestamp")
                         position = now_playing.get("position", 0)
 
                         if cover_url:
@@ -1533,7 +1614,7 @@ class Music(commands.Cog, name="Music"):
                     if response.status == 200:
                         data = await response.json()
                         if data and data.get("user"):
-                            user_data = data["user"]
+                            user_data = data.get("user", {})
                             embed = discord.Embed(
                                 title="Account Linked Successfully",
                                 description=f'Your Discord account has been linked to **{user_data.get("username", "Unknown")}**',
@@ -1557,7 +1638,7 @@ class Music(commands.Cog, name="Music"):
                     try:
                         error_data = await response.json()
                         if error_data and error_data.get("error"):
-                            error_message = error_data["error"]
+                            error_message = error_data.get("error", "Unknown error")
                     except:
                         if response.status == 400:
                             error_message = "Bad request. Please check your pairing code and try again."
@@ -1899,7 +1980,7 @@ class Music(commands.Cog, name="Music"):
                         row = discord.ui.ActionRow()
                         for path in downloads[i:i + 5]:
                             ext = path.rsplit('.', 1)[-1].upper()
-                            label = f'OG {ext}'
+                            label = f'OG {ext}' if 'Original Files' in path else ext
                             row.add_item(
                                 discord.ui.Button(
                                     label=label,
@@ -2021,9 +2102,9 @@ class Music(commands.Cog, name="Music"):
 
             options = [
                 discord.SelectOption(
-                    label=((
+                    label=(
                         lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles"))[:100]) if len(song.get("track_titles", [])) > 0 else song.get("name", "Unknown"),
+                    )(song.get("track_titles"))[:100],
                     value=str(song["id"]),
                 )
                 for song in results
@@ -2958,10 +3039,10 @@ class Music(commands.Cog, name="Music"):
                     break
                 category_data = self.get_random_blacktea_category_data(song)
                 embed = discord.Embed(
-                    description=category_data["description"],
-                    color = player["color"].value if player["color"] else discord.Color.default().value,
+                    description=category_data.get("description", "No description available"),
+                    color = player.get("color", discord.Color.default()).value if player.get("color") else discord.Color.default().value,
                 )
-                embed.set_author(name=player["display_name"], icon_url=player["avatar_url"])
+                embed.set_author(name=player.get("display_name", "Unknown Player"), icon_url=player.get("avatar_url", ""))
                 message = await ctx.send(player["mention"], embed=embed)
                 created_messages.append(message)
 
@@ -3438,7 +3519,6 @@ class Music(commands.Cog, name="Music"):
 
                 if selected_index < 0 or selected_index >= len(pledges_channels):
                     return None, "Invalid selection. Command cancelled."
-
                 await msg.delete()
                 selected_channel = pledges_channels[selected_index]
                 await response.delete()
@@ -3670,7 +3750,7 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
                 
                 class CoverContainer(discord.ui.Container):
                     def __init__(self, covers, song_name, total_covers, current_page, total_pages):
-                        super().__init__(accent_color=0x2B2D31)
+                        super().__init__(accent_color=0xffffff)
                         
                         self.add_item(discord.ui.TextDisplay(
                             f"### 🎵 Found {total_covers} Cover(s) for: {song_name}"
@@ -3830,7 +3910,7 @@ class GroupbuySongSelect(discord.ui.Select):
         self.song_map = song_map
         
         super().__init__(
-            placeholder='Select a song...', 
+            placeholder='Select a song...',
             min_values=1, 
             max_values=1, 
             options=options
@@ -3848,8 +3928,6 @@ class GroupbuySongSelect(discord.ui.Select):
                 embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
                 return await itn.response.send_message(embed=embed, ephemeral=True)
         
-            return await itn.response.send_message(view=layout_view, embed=None, ephemeral=True)
-
         if song['groupbuy_info']['price'] == '':
             embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
             return await itn.response.edit_message(embed=embed, view=None)

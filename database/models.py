@@ -436,14 +436,37 @@ class Loan(Base):
     total_repay = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
+    amount_paid = Column(
+        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
+    )
     due_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(String, nullable=False, default="active")
+
+    payments = relationship("LoanPayment", back_populates="loan", cascade="all, delete-orphan")
 
     def __repr__(self):
         return (
             f"<Loan id={self.id} user_id={self.user_id} "
-            f"principal={self.principal} interest_rate={self.interest_rate} due_date={self.due_date} total_repay={self.total_repay} status={self.status}>"
+            f"principal={self.principal} interest_rate={self.interest_rate} due_date={self.due_date} total_repay={self.total_repay} amount_paid={self.amount_paid} status={self.status}>"
         )
+
+class LoanPayment(Base):
+    __tablename__ = "loan_payments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    loan_id = Column(Integer, ForeignKey("loans.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(BigInteger, nullable=False)
+    payment_amount = Column(
+        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
+    )
+    payment_date = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
+    payment_method = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+
+    loan = relationship("Loan", back_populates="payments")
+
+    def __repr__(self):
+        return f"<LoanPayment id={self.id} loan_id={self.loan_id} user_id={self.user_id} amount={self.payment_amount} date={self.payment_date}>"
 
 class Job(Base):
     __tablename__ = "jobs"

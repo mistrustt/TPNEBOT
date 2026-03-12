@@ -1839,14 +1839,33 @@ class Economy(commands.Cog):
             await self.bot.database.date_check_loans()
 
             loan = active_loan[0]
+            remaining_balance = loan.total_repay - loan.amount_paid
+            payment_percentage = (loan.amount_paid / loan.total_repay * 100) if loan.total_repay > 0 else 0
+            
+            color = (
+                discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel)
+                else (
+                    ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple()
+                )
+            )
             embed = discord.Embed(
+                title="Loan Status",
                 description=(
-                    f"Total Repayable: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
-                    f"Current Status: {loan.status}"
+                    f"Principal: {self.currency_name} **{await self.formatter(loan.principal)}**\n"
+                    f"Total to Repay: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
+                    f"Amount Paid: {self.currency_name} **{await self.formatter(loan.amount_paid)}**\n"
+                    f"Remaining Balance: {self.currency_name} **{await self.formatter(remaining_balance)}**\n"
+                    f"Progress: **{payment_percentage:.1f}%** paid\n"
+                    f"Status: **{loan.status}**\n"
+                    f"Due Date: {loan.due_date.strftime('%Y-%m-%d') if hasattr(loan.due_date, 'strftime') else loan.due_date}"
                 ),
-                color=discord.Color.blurple(),
+                color=color,
             )
             embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed.set_footer(text=f"Interest Rate: {loan.interest_rate * 100:.1f}%")
             await ctx.reply(embed=embed)
 
     @loan.command(name="take", aliases=["get"], description="Take out a new loan.")
@@ -1942,18 +1961,25 @@ class Economy(commands.Cog):
                 raise ValueError("Repayment amount must be greater than zero.")
             if amount_decimal > Decimal(balance):
                 raise ValueError("You do not have enough funds to make this repayment.")
-            if amount_decimal > loan.total_repay:
-                raise ValueError(f"Repayment amount cannot exceed {self.currency_name} **{await self.formatter(loan.total_repay)}**.")
+            
+            # Calculate remaining balance to validate against
+            remaining_balance = loan.total_repay - loan.amount_paid
+            if amount_decimal > remaining_balance:
+                raise ValueError(f"Repayment amount cannot exceed remaining balance of {self.currency_name} **{await self.formatter(remaining_balance)}**.")
+            
+            # Process the payment using the new payment system
+            payment_result = await self.bot.database.make_loan_payment(
+                user_id=user_id,
+                payment_amount=amount_decimal,
+                payment_method="discord_bot",
+                notes=f"Payment via loan repay command"
+            )
+            
+            # Deduct from wallet
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id, amount=-amount_decimal, description="Loan Repayment"
             )
-            new_total_repay = (loan.total_repay - amount_decimal).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            new_status = "repaid" if new_total_repay <= 0 else "active"
-            await self.bot.database.update_loan_for_user(
-                user_id=ctx.author.id, new_status=new_status, new_total_repay=new_total_repay
-            )
+            
             color = (
                 discord.Color.blurple()
                 if isinstance(ctx.channel, discord.DMChannel)
@@ -1965,9 +1991,9 @@ class Economy(commands.Cog):
             )
             embed = discord.Embed(
                 description=(
-                    f"You have repaid {self.currency_name} **{await self.formatter(amount_decimal)}** of your loan.\n"
-                    f"Remaining balance to repay: {self.currency_name} **{await self.formatter(new_total_repay)}**.\n"
-                    f"{'**Your loan is now fully repaid!**' if new_status == 'repaid' else ''}"
+                    f"You have repaid {self.currency_name} **{await self.formatter(payment_result['payment_amount'])}** of your loan.\n"
+                    f"Remaining balance to repay: {self.currency_name} **{await self.formatter(payment_result['remaining_balance'])}**.\n"
+                    f"{'**Your loan is now fully repaid!**' if payment_result['loan_status'] == 'paid' else ''}"
                 ),
                 color=color,
             )
@@ -1976,6 +2002,83 @@ class Economy(commands.Cog):
         except ValueError as e:
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
+
+    @loan.command(name="history", description="View your loan payment history.")
+    async def loan_history(self, ctx: commands.Context):
+        """View your loan payment history."""
+        user_id = ctx.author.id
+        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+        
+        if not active_loan:
+            # Check for paid loans
+            paid_loans = await self.bot.database.get_paid_loans_for_user(user_id)
+            if not paid_loans:
+                embed = discord.Embed(
+                    description="You have no loan history.",
+                    color=discord.Color.red(),
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+            loan = paid_loans[0]
+        else:
+            loan = active_loan[0]
+        
+        payment_history = await self.bot.database.get_loan_payment_history(loan.id)
+        
+        if not payment_history:
+            embed = discord.Embed(
+                description="No payment history found for this loan.",
+                color=discord.Color.orange(),
+            )
+            return await ctx.reply(embed=embed)
+        
+        # Build payment history embed
+        color = (
+            discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel)
+            else (
+                ctx.author.top_role.color
+                if ctx.author.top_role
+                else discord.Color.blurple()
+            )
+        )
+        embed = discord.Embed(
+            title="Loan Payment History",
+            color=color,
+        )
+        embed.set_author(name=ctx.author.display_name, icon_url=self.utils.get_avatar_url(ctx.author))
+        
+        # Group payments by method
+        manual_payments = [p for p in payment_history if p.payment_method == "manual"]
+        auto_payments = [p for p in payment_history if p.payment_method == "auto"]
+        discord_bot_payments = [p for p in payment_history if p.payment_method == "discord_bot"]
+        
+        total_paid = sum(p.payment_amount for p in payment_history)
+        
+        embed.add_field(
+            name="Loan Details",
+            value=f"Principal: {self.currency_name} **{await self.formatter(loan.principal)}**\n"
+                  f"Total to Repay: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
+                  f"Amount Paid: {self.currency_name} **{await self.formatter(total_paid)}**\n"
+                  f"Status: **{loan.status}**",
+            inline=True,
+        )
+        
+        # Show recent payments
+        recent_payments = payment_history[:5]  # Last 5 payments
+        if recent_payments:
+            payments_text = ""
+            for i, payment in enumerate(recent_payments, 1):
+                date_str = payment.payment_date.strftime("%Y-%m-%d %H:%M") if hasattr(payment.payment_date, 'strftime') else str(payment.payment_date)
+                payments_text += f"{i}. {self.currency_name} **{await self.formatter(payment.payment_amount)}** on {date_str}\n"
+                if payment.notes:
+                    payments_text += f"   _{payment.notes}_\n"
+            embed.add_field(
+                name=f"Recent Payments ({len(payment_history)} total)",
+                value=payments_text,
+                inline=False,
+            )
+        
+        await ctx.reply(embed=embed)
 
     @commands.command(
         name="scout",
