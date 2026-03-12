@@ -1849,7 +1849,7 @@ class Economy(commands.Cog):
             embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
 
-    @loan.command(name="take", description="Take out a new loan.")
+    @loan.command(name="take", aliases=["get"], description="Take out a new loan.")
     async def loan_take(self, ctx: commands.Context, amount: str):
         """Take out a loan. Pay it back with interest!"""
         user_id = ctx.author.id
@@ -1915,7 +1915,7 @@ class Economy(commands.Cog):
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
 
-    @loan.command(name="repay", description="Repay an active loan.")
+    @loan.command(name="repay", aliases=["pay"], description="Repay an active loan.")
     async def loan_repay(self, ctx: commands.Context, amount: str):
         """Repay part or all of an active loan."""
         user_id = ctx.author.id
