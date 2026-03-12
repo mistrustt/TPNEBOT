@@ -2803,7 +2803,7 @@ class Economy(commands.Cog):
         await self.bot.database.update_crypto_amount(user_id, symbol, -sell_amt)
 
         # Calculate P/L for this sale
-        cost_basis = float(asset.purchase_price * sell_amt)
+        cost_basis = Decimal(asset.purchase_price * sell_amt)
         pnl = proceeds - cost_basis
         pnl_percentage = (pnl / cost_basis * 100) if cost_basis != 0 else 0
         pnl_emoji = "📈" if pnl >= 0 else "📉"
