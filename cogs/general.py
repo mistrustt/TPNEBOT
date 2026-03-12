@@ -20,7 +20,7 @@ from utils.misc import MiscUtils
 from urllib.parse import urlparse
 from typing import List
 from discord.ext.commands import Context
-from datetime import datetime
+from datetime import datetime, timezone
 from PIL import ImageFont, Image, ImageDraw, ImageFilter
 import random
 
@@ -2397,46 +2397,40 @@ class General(commands.Cog, name="General"):
                         )
                     else:
                         color = discord.Color.blurple()
-                        if isinstance(ctx.channel, discord.DMChannel):
-                            color = discord.Color.blurple()
-                        else:
-                            color = (
-                                ctx.author.top_role.color
-                                if ctx.author.top_role
-                                else discord.Color.blurple()
-                            )
+                        if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:
+                            color = ctx.author.top_role.color
+                        
                         embed = discord.Embed(
-                            title=f"WHOIS IP Address Information (Basic) - {ip_address}",
+                            title=f"🌐 WHOIS Information - {ip_address}",
+                            description=f"📍 **Location**: {data.get('city', 'N/A')}, {data.get('region', 'N/A')}, {data.get('country_name', 'N/A')}",
                             color=color,
+                            timestamp=datetime.now(timezone.utc)
                         )
+                        embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/149/149049.png")
+                        
+                        # Network Information
                         embed.add_field(
-                            name="IP Address", value=ip_address, inline=False
+                            name="🔹 Network",
+                            value=f"**Organization**: {data.get('org', 'N/A')}\n**ASN**: {data.get('asn', 'N/A')}",
+                            inline=False
                         )
+                        
+                        # Location Details
                         embed.add_field(
-                            name="City", value=data.get("city"), inline=True
+                            name="📌 Details",
+                            value=f"**Postal Code**: {data.get('postal', 'N/A')}\n**Timezone**: {data.get('timezone', 'N/A')}",
+                            inline=True
                         )
+                        
+                        # Coordinates
                         embed.add_field(
-                            name="Region", value=data.get("region"), inline=True
+                            name="🗺️ Coordinates",
+                            value=f"**Latitude**: {data.get('latitude', 'N/A')}\n**Longitude**: {data.get('longitude', 'N/A')}",
+                            inline=True
                         )
-                        embed.add_field(
-                            name="Country", value=data.get("country_name"), inline=True
-                        )
-                        embed.add_field(
-                            name="Postal Code", value=data.get("postal"), inline=True
-                        )
-                        embed.add_field(
-                            name="Latitude", value=data.get("latitude"), inline=True
-                        )
-                        embed.add_field(
-                            name="Longitude", value=data.get("longitude"), inline=True
-                        )
-                        embed.add_field(
-                            name="Timezone", value=data.get("timezone"), inline=True
-                        )
-                        embed.add_field(name="ASN", value=data.get("asn"), inline=True)
-                        embed.add_field(
-                            name="Organization", value=data.get("org"), inline=True
-                        )
+                        
+                        embed.set_footer(text="Data provided by ipapi.co", icon_url="https://ipapi.co/favicon.ico")
+                        embed.set_author(name=f"Requested by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
 
                         await ctx.reply(embed=embed)
                 else:
