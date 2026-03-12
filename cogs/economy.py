@@ -1998,7 +1998,7 @@ class Economy(commands.Cog):
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="repay", description="Repay an active loan.")
+    @loan.command(name="repay", description="Repay an active loan.")
     async def loan_repay(self, ctx: commands.Context, amount: str):
         """Repay part or all of an active loan."""
         user_id = ctx.author.id
