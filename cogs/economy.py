@@ -1960,6 +1960,8 @@ class Economy(commands.Cog):
                 raise ValueError("Loan amount must be greater than zero.")
             if amount_decimal > safe_loan_amount:
                 raise ValueError(f"Loan amount cannot exceed {self.currency_name} **{await self.formatter(safe_loan_amount)}**.")
+            if amount_decimal > treasury:
+                raise ValueError("The treasury does not have enough funds to cover this loan at the moment. Please try a smaller amount or come back later.")
             interest_rate = Decimal("0.10")
             total_repay = (amount_decimal * (Decimal("1") + interest_rate)).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
