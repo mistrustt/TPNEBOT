@@ -1913,19 +1913,49 @@ class Economy(commands.Cog):
         embed.set_author(name="Work", icon_url=self.utils.get_avatar_url(ctx.author))
         await ctx.reply(embed=embed)
 
-    @commands.command(name="loan", description="Take out a loan. Pay it back with interest!")
-    @commands.is_owner()
-    async def loan(self, ctx: commands.Context, amount: str):
+    @commands.group(name="loan", invoke_without_command=True, description="Take out a loan. Pay it back with interest!")
+    async def loan(self, ctx: commands.Context):
+        """Group command for managing loans."""
+        user_id = ctx.author.id
+        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+        if not active_loan:
+            embed = discord.Embed(
+                description="You have no active loans.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        await self.bot.database.date_check_loans()
+
+        loan = active_loan[0]
+        embed = discord.Embed(
+            description=(
+                f"Loan ID: {loan.id}\n"
+                f"Total Repayable: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
+                f"Current Status: {loan.status}"
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(ctx.author))
+        await ctx.reply(embed=embed)
+
+    @loan.command(name="take", description="Take out a new loan.")
+    async def loan_take(self, ctx: commands.Context, amount: str):
         """Take out a loan. Pay it back with interest!"""
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         treasury = await self.bot.database.get_treasury_balance()
         safe_loan_amount = await self.bot.database.get_max_loan_amount(user_id)
+        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
 
         amount = await self.amount_handler(amount, treasury)
 
+        await self.bot.database.date_check_loans()
+
         try:
             amount_decimal = Decimal(amount)
+            if active_loan:
+                raise ValueError("You already have an active loan. Please repay it before taking out another.")
             if amount_decimal <= 0:
                 raise ValueError("Loan amount must be greater than zero.")
             if amount_decimal > safe_loan_amount:
@@ -1958,10 +1988,64 @@ class Economy(commands.Cog):
                 description=(
                     f"You have taken out a loan of {self.currency_name} **{await self.formatter(amount_decimal)}**.\n"
                     f"Total to repay (with 10% interest): {self.currency_name} **{await self.formatter(total_repay)}**."
+                    f"Please repay your loan within **7 days** to avoid penalties."
                 ),
                 color=color,
             )
             embed.set_author(name="Loan", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @commands.command(name="repay", description="Repay an active loan.")
+    async def loan_repay(self, ctx: commands.Context, amount: str):
+        """Repay part or all of an active loan."""
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+        if not active_loan:
+            embed = discord.Embed(
+                description="You have no active loans to repay.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+        loan = active_loan[0]
+        amount = await self.amount_handler(amount, loan.total_repay)
+        try:
+            amount_decimal = Decimal(amount)
+            if amount_decimal <= 0:
+                raise ValueError("Repayment amount must be greater than zero.")
+            if amount_decimal > loan.total_repay:
+                raise ValueError(f"Repayment amount cannot exceed {self.currency_name} **{await self.formatter(loan.total_repay)}**.")
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id, amount=-amount_decimal, description="Loan Repayment"
+            )
+            new_total_repay = (loan.total_repay - amount_decimal).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            new_status = "repaid" if new_total_repay <= 0 else "active"
+            await self.bot.database.update_loan_record(
+                loan_id=loan.id, total_repay=new_total_repay, status=new_status
+            )
+            color = (
+                discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel)
+                else (
+                    ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple()
+                )
+            )
+            embed = discord.Embed(
+                description=(
+                    f"You have repaid {self.currency_name} **{await self.formatter(amount_decimal)}** of your loan.\n"
+                    f"Remaining balance to repay: {self.currency_name} **{await self.formatter(new_total_repay)}**."
+                    f"{' Your loan is now fully repaid!' if new_status == 'repaid' else ''}"
+                ),
+                color=color,
+            )
+            embed.set_author(name="Loan Repayment", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
         except ValueError as e:
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())

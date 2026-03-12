@@ -2561,18 +2561,72 @@ class DatabaseManager:
     async def add_loan_record(
         self, user_id: int, principal: Decimal, interest_rate: Decimal, total_repay: Decimal, due_date: datetime, status: str = "active"
     ):
+        """
+        Add a new loan record to the database for a user. Ensure one loan per user for simplicity.
+        """
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                loan = Loan(
+                existing_loan = await session.execute(
+                    select(Loan).where(Loan.user_id == user_id, Loan.status == "active")
+                )
+                if existing_loan.scalar_one_or_none():
+                    raise ValueError("User already has an active loan.")
+
+                new_loan = Loan(
                     user_id=user_id,
                     principal=principal,
                     interest_rate=interest_rate,
                     total_repay=total_repay,
                     due_date=due_date,
-                    status=status
+                    status=status,
                 )
-                session.add(loan)
-                await session.commit()
+                session.add(new_loan)
+            await session.commit()
+
+    async def get_active_loans_for_user(self, user_id: int) -> list[Loan]:
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Loan).where(Loan.user_id == user_id, Loan.status == "active")
+            )
+            return result.scalars().all()
+        
+    async def update_loan_status_for_user(self, user_id: int, new_status: str):
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Loan).where(Loan.user_id == user_id, Loan.status == "active")
+                )
+                active_loan = result.scalar_one_or_none()
+                if not active_loan:
+                    raise ValueError("No active loan found for user.")
+                active_loan.status = new_status
+            await session.commit()
+
+    async def date_check_loans(self):
+        """
+        Check all active loans and mark those past due as 'defaulted'.
+        Add penalty of 1% of loan amount to the total_repay amount for defaulted loans each day it is not repaid.
+        If the loan is not paid back in 7 days after the due date, freeze the user's wallet.
+        This can be scheduled to run periodically (e.g., every hour).
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                now = discord.utils.utcnow()
+                result = await session.execute(
+                    select(Loan).where(Loan.status == "active", Loan.due_date < now)
+                )
+                overdue_loans = result.scalars().all()
+                for loan in overdue_loans:
+                    days_overdue = (now - loan.due_date).days
+                    if days_overdue > 0:
+                        loan.status = "overdue"
+                        loan.total_repay += (loan.principal * Decimal("0.01") * days_overdue).quantize(Decimal("0.01"))
+                    if days_overdue >= 7:
+                        loan.status = "defaulted"
+                        wallet = await self.get_wallet_by_user_id(loan.user_id) # Ensure wallet exists
+                        await self.freeze_wallet(wallet) 
+            await session.commit()
+
 
     async def set_mines_multi(self, data: list):
         """
