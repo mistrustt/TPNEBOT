@@ -2969,10 +2969,12 @@ class Economy(commands.Cog):
         if amount.is_nan():
             raise ValueError("Invalid amount.")
 
-        try:
-            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        except InvalidOperation:
-            raise ValueError("Invalid amount.")
+        # Only quantize if not using exact balance (all/max)
+        if amount_input not in ("all", "max"):
+            try:
+                amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            except InvalidOperation:
+                raise ValueError("Invalid amount.")
 
         if amount > balance:
             raise ValueError("Insufficient Funds.")
