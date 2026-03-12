@@ -2725,11 +2725,14 @@ class DatabaseManager:
         Check all active loans and mark those past due as 'defaulted'.
         Add penalty of 10% of loan amount to the total_repay amount for defaulted loans each day it is not repaid.
         If the loan is not paid back in 7 days after the due date, freeze the user's wallet.
+        Automatically unfreeze the wallet 7 days after defaulting.
         This can be scheduled to run periodically (e.g., every hour).
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 now = discord.utils.utcnow()
+                
+                # Process overdue loans (existing logic)
                 result = await session.execute(
                     select(Loan).where(Loan.status == "active", Loan.due_date < now)
                 )
@@ -2741,8 +2744,26 @@ class DatabaseManager:
                         loan.total_repay += (loan.principal * Decimal("0.1") * days_overdue).quantize(Decimal("0.1"))
                     if days_overdue >= 7:
                         loan.status = "defaulted"
-                        wallet = await self.get_wallet_by_user_id(loan.user_id) # Ensure wallet exists
-                        await self.freeze_wallet(wallet) 
+                        loan.defaulted_date = now  # Track when defaulted
+                        wallet = await self.get_wallet_by_user_id(loan.user_id)  # Ensure wallet exists
+                        await self.freeze_wallet(wallet)
+                
+                # NEW: Process defaulted loans for unfreeze after 7 days
+                result = await session.execute(
+                    select(Loan).where(
+                        Loan.status == "defaulted",
+                        Loan.defaulted_date != None,
+                        Loan.wallet_unfrozen == False
+                    )
+                )
+                defaulted_loans = result.scalars().all()
+                for loan in defaulted_loans:
+                    days_defaulted = (now - loan.defaulted_date).days
+                    if days_defaulted >= 7:
+                        wallet = await self.get_wallet_by_user_id(loan.user_id)
+                        await self.unfreeze_wallet(wallet)
+                        loan.wallet_unfrozen = True  # Prevent repeated unfreeze
+                
             await session.commit()
 
 
