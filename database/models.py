@@ -445,6 +445,20 @@ class Loan(Base):
             f"principal={self.principal} interest_rate={self.interest_rate} due_date={self.due_date} total_repay={self.total_repay} status={self.status}>"
         )
 
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    title = Column(String, nullable=False)
+    salary = Column(
+        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
+    )
+    last_worked = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        return f"<Job user_id={self.user_id} title='{self.title}' salary={self.salary}>"
+
 class UserRoleHistory(Base):
     __tablename__ = "user_role_history"
 

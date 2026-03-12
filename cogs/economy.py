@@ -688,20 +688,40 @@ class UseItemPaginator(View):
             return embed
 
     async def prev_button_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "This is not your embed!", ephemeral=True
+            )
+            return
         self.current_page = max(0, self.current_page - 1)
         self.update_buttons()
         await self.send_page(interaction)
 
     async def next_button_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "This is not your embed!", ephemeral=True
+            )
+            return
         self.current_page = min(self.max_page, self.current_page + 1)
         self.update_buttons()
         await self.send_page(interaction)
 
     async def refresh_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "This is not your embed!", ephemeral=True
+            )
+            return
         await asyncio.sleep(0.5)
         await self.send_page(interaction)
 
     async def use_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "This is not your embed!", ephemeral=True
+            )
+            return
         entry = self.entries[self.current_page]
         item_id = entry.get("id")
         try:
@@ -720,6 +740,67 @@ class UseItemPaginator(View):
             await interaction.followup.send(message, ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(str(e), ephemeral=True)
+
+
+class BalanceView(discord.ui.View):
+    def __init__(self, cog, member, requesting_user):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.member = member
+        self.requesting_user = requesting_user
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requesting_user.id:
+            await interaction.response.send_message(
+                "This isn't your embed!", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="View Crypto Assets", style=discord.ButtonStyle.primary)
+    async def assets_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        assets = await self.cog.bot.database.get_crypto_assets(self.member.id)
+        filtered = [a for a in assets if a.amount >= Decimal("0.01")]
+        
+        if not filtered:
+            return await interaction.response.send_message(
+                "No crypto assets to display.", ephemeral=True
+            )
+            
+        embed = discord.Embed(title="🗂️ Crypto Portfolio", color=discord.Color.gold())
+        for asset in filtered:
+            price = await self.cog.bot.database.get_crypto_price(asset.symbol)
+            if price:
+                value = asset.amount * price
+                cost = asset.amount * asset.purchase_price
+                pnl = value - cost
+                pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
+                symbol = "📈" if pnl >= 0 else "📉"
+                embed.add_field(
+                    name=asset.symbol,
+                    value=(
+                        f"Amount: **{asset.amount:.8f}**\n"
+                        f"Value: **{value:.2f} {self.cog.currency_name}**\n"
+                        f"P/L: {symbol} **{pnl:.2f}** ({pnl_pct:.2f}%)"
+                    ),
+                    inline=False,
+                )
+            else:
+                embed.add_field(
+                    name=asset.symbol, value="Price data unavailable", inline=False
+                )
+                
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Back to Balance", style=discord.ButtonStyle.secondary)
+    async def back_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        # This would typically go back to the balance view, but since we're already there,
+        # we'll just acknowledge the interaction
+        await interaction.response.defer()
 
 
 class TransactionPaginator(discord.ui.View):
@@ -1275,37 +1356,10 @@ class Economy(commands.Cog):
                 inline=False
             )
 
-            if not filtered:
-                embed.add_field(name="No Crypto Assets", value="You don't have any crypto assets.", inline=False)
-
-            for asset in filtered[:5]:
-                price = await self.bot.database.get_crypto_price(asset.symbol)
-                if price:
-                    value = asset.amount * price
-                    cost = asset.amount * asset.purchase_price
-                    pnl = value - cost
-                    pnl_pct = (pnl / cost * 100) if cost > 0 else Decimal("0")
-                    pnl_pct_rounded = pnl_pct.quantize(Decimal('0.01'))
-
-                    if pnl > 0:
-                        pnl_pct_str = f"+{pnl_pct_rounded}%"
-                    else:
-                        pnl_pct_str = f"{pnl_pct_rounded}%"
-
-                    symbol = "📈" if pnl > 0 else ("📉" if pnl < 0 else "")
-                    embed.add_field(
-                        name=asset.symbol,
-                        value=(
-                            f"Amount: **{await self.short_formatter(asset.amount)}**\n"
-                            f"Value: **{self.currency_name} {await self.short_formatter(value)}**\n"
-                            f"P/L: {symbol} **{self.currency_name} {await self.short_formatter(pnl)}** ({pnl_pct_str}) "
-                        ),
-                        inline=False,
-                    )
-                else:
-                    embed.add_field(
-                        name=asset.symbol, value="Price data unavailable", inline=False
-                    )
+            # Add Assets button if user has crypto assets
+            view = None
+            if filtered:
+                view = BalanceView(self, member, ctx.author)
 
             # Fetch last 5 transactions
             user_transactions = await self.bot.database.get_transactions_by_user_id(
@@ -1344,7 +1398,10 @@ class Economy(commands.Cog):
                 text=f"Total Balance: {await self.formatter(wallet_balance + bank_balance)}"
             )
 
-            await ctx.reply(embed=embed)
+            if view:
+                await ctx.reply(embed=embed, view=view)
+            else:
+                await ctx.reply(embed=embed)
         except ValueError as e:
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
             embed.set_author(
@@ -1759,159 +1816,21 @@ class Economy(commands.Cog):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(name="work", description="Perform a job and earn rewards.")
-    async def work(self, ctx: commands.Context):
-        """Perform a job and earn rewards based on your streak."""
-        user_id = ctx.author.id
-        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        balance = Decimal(
-            str(await self.bot.database.get_wallet_balance(wallet_id))
-        ).quantize(Decimal("0.01"))
-        work_streak = await self.bot.database.get_work_streak(user_id)
-        if work_streak is None:
-            work_streak = 0
-
-        jobs = [
-            {"job": "delivering pizzas", "pay": (Decimal("20000"), Decimal("45000"))},
-            {
-                "job": "trading cryptocurrency",
-                "pay": (Decimal("400000"), Decimal("850000")),
-            },
-            {
-                "job": "selling mp3 files",
-                "pay": (Decimal("2210000"), Decimal("6500000")),
-            },
-            {"job": "walking dogs", "pay": (Decimal("100"), Decimal("9990"))},
-            {
-                "job": "selling fashion designs",
-                "pay": (Decimal("70000"), Decimal("2000000")),
-            },
-            {"job": "selling lemonade", "pay": (Decimal("50"), Decimal("300"))},
-            {"job": "livestreaming", "pay": (Decimal("30000"), Decimal("100000"))},
-            {
-                "job": "acting as a stunt double",
-                "pay": (Decimal("100000"), Decimal("350000")),
-            },
-            {
-                "job": "working as a theme park mascot",
-                "pay": (Decimal("15000"), Decimal("60000")),
-            },
-            {
-                "job": "writing viral X posts",
-                "pay": (Decimal("20000"), Decimal("55000")),
-            },
-            {
-                "job": "programming a new app",
-                "pay": (Decimal("100000"), Decimal("500000")),
-            },
-            {
-                "job": "teaching an online class",
-                "pay": (Decimal("50000"), Decimal("150000")),
-            },
-            {"job": "scamming", "pay": (Decimal("20000"), Decimal("9000000"))},
-            {"job": "building PCs", "pay": (Decimal("120000"), Decimal("300000"))},
-            {
-                "job": "playing guitar at a local gig",
-                "pay": (Decimal("30000"), Decimal("120000")),
-            },
-            {
-                "job": "selling rare sneakers",
-                "pay": (Decimal("40000"), Decimal("200000")),
-            },
-        ]
-
-        weights = [5, 10, 3, 2, 8, 4, 15, 5, 3, 4, 7, 5, 6, 6, 4, 7]
-
-        async def weighted_choice(jobs, weights):
-            cumulative_sum = 0
-            cumulative_weights = []
-            for weight in weights:
-                cumulative_sum += weight
-                cumulative_weights.append(cumulative_sum)
-            random_value = await self.fair_randbelow(user_id, cumulative_sum)
-            for i, cw in enumerate(cumulative_weights):
-                if random_value < cw:
-                    return jobs[i]
-            return jobs[-1]
-
-        job = await weighted_choice(jobs, weights)
-        job_name = job["job"]
-        pay_range = job["pay"]
-
-        base_pay = secrets.randbelow(int(pay_range[1] - pay_range[0])) + int(
-            pay_range[0]
-        )
-        base_pay = Decimal(base_pay)
-
-        streak_bonus = Decimal(work_streak) * Decimal("5000")
-
-        work_bonus = Decimal(secrets.randbelow(9500) + 500)
-
-        total_pay = base_pay + streak_bonus
-
-        outcome = await self.fair_randbelow(user_id, 100)
-
-        result_message = ""
-        new_streak = work_streak
-
-        if outcome < 10:
-            result_message = f"Unfortunately, you were let go while {job_name}. Better luck with your next job!"
-            total_pay = Decimal("0")
-            new_streak = 0
-        elif outcome < 25:
-            total_pay += work_bonus
-            bonus_message = {
-                "delivering pizzas": "You delivered all the pizzas early and got hella cheddar.",
-                "trading cryptocurrency": "The market surged at just the right time and your trades paid off!",
-                "selling mp3 files": "Your groupbuy finished early with more participants than expected!",
-                "walking dogs": "The dogs were exceptionally well-behaved today and the owners rewarded you!",
-                "selling fashion designs": "A high-profile client loved your work and referred you to their network!",
-                "selling lemonade": "You set up shop on the hottest day of the week and sold out completely!",
-                "livestreaming": "A popular streamer raided your channel and fans showered you with donations!",
-                "acting as a stunt double": "Your perfect execution impressed the director who offered a performance bonus!",
-                "working as a theme park mascot": "Your character performance went viral on social media, earning you recognition!",
-                "writing viral X posts": "A celebrity amplified your content, bringing in sponsorship opportunities!",
-                "programming a new app": "Your app got featured on the store's front page, driving premium subscriptions!",
-                "teaching an online class": "Students gave such positive feedback that enrollment doubled for your next session!",
-                "scamming": "You found a particularly gullible mark who fell for every upsell!",
-                "building PCs": "A client ordered multiple high-margin custom builds after seeing your craftsmanship!",
-                "playing guitar at a local gig": "The venue owner was so impressed they booked you for a recurring weekly spot!",
-                "selling rare sneakers": "You authenticated a rare pair that sold for much more than expected!",
-            }.get(
-                job_name,
-                "Your exceptional work earned you special recognition and a bonus!",
-            )
-            result_message = f"While {job_name}, you went above and beyond and earned a bonus of {self.currency_name} **{await self.formatter(work_bonus)}**!\n\n{bonus_message}\n\nTotal earnings: {self.currency_name} **{await self.formatter(total_pay)}**"
-            new_streak += 1
-        else:
-            result_message = f"You earned {self.currency_name} **{await self.formatter(total_pay)}** by {job_name}."
-            new_streak += 1
-
-        try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=total_pay, description="Work Payment"
-            )
-        except ValueError as e:
+    @commands.group(name="job", description="Job commands to earn some money.")
+    async def job(self, ctx: commands.Context):
+        """Group command for jobs."""
+        if ctx.invoked_subcommand is None:
             embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                description="Available job commands:",  
+                color=discord.Color.blurple(),
             )
-            await ctx.reply(embed=embed, delete_after=5)
-            return
+            embed.set_author(name="Jobs", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
 
-        await self.bot.database.update_work_streak(user_id, new_streak)
-        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 3600)
-        color = (
-            discord.Color.blurple()
-            if isinstance(ctx.channel, discord.DMChannel)
-            else (
-                ctx.author.top_role.color
-                if ctx.author.top_role
-                else discord.Color.blurple()
-            )
-        )
-        embed = discord.Embed(description=result_message, color=color)
-        embed.set_author(name="Work", icon_url=self.utils.get_avatar_url(ctx.author))
-        await ctx.reply(embed=embed)
+
+    @job.command(name="apply", description="Apply for a job to earn some money.")
+    async def job_apply(self, ctx: commands.Context, job_name: str):
+        return
 
     @commands.group(name="loan", description="Take out a loan. Pay it back with interest!")
     async def loan(self, ctx: commands.Context):
