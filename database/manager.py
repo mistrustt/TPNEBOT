@@ -2746,7 +2746,7 @@ class DatabaseManager:
                         loan.status = "defaulted"
                         loan.defaulted_date = now  # Track when defaulted
                         wallet = await self.get_wallet_by_user_id(loan.user_id)  # Ensure wallet exists
-                        await self.freeze_wallet(wallet)
+                        await self.freeze_wallet(wallet.wallet_id)
                 
                 # NEW: Process defaulted loans for unfreeze after 7 days
                 result = await session.execute(
@@ -2761,7 +2761,7 @@ class DatabaseManager:
                     days_defaulted = (now - loan.defaulted_date).days
                     if days_defaulted >= 7:
                         wallet = await self.get_wallet_by_user_id(loan.user_id)
-                        await self.unfreeze_wallet(wallet)
+                        await self.unfreeze_wallet(wallet.wallet_id)
                         loan.wallet_unfrozen = True  # Prevent repeated unfreeze
                 
             await session.commit()
