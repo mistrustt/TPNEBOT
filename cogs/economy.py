@@ -1913,7 +1913,7 @@ class Economy(commands.Cog):
         embed.set_author(name="Work", icon_url=self.utils.get_avatar_url(ctx.author))
         await ctx.reply(embed=embed)
 
-    @commands.group(name="loan", invoke_without_command=True, description="Take out a loan. Pay it back with interest!")
+    @commands.group(name="loan", description="Take out a loan. Pay it back with interest!")
     async def loan(self, ctx: commands.Context):
         """Group command for managing loans."""
         if ctx.invoked_subcommand is None:
