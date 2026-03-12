@@ -2917,7 +2917,7 @@ class Economy(commands.Cog):
         amount_input = input_str.strip().lower()
 
         if amount_input == "all" or amount_input == "max":
-            amount = (balance).quantize(Decimal("0.01"))
+            amount = balance  # Use exact balance without quantizing to avoid precision issues
         elif amount_input == "half":
             amount = (balance / Decimal("2")).quantize(Decimal("0.01"))
         elif amount_input == "quarter":
