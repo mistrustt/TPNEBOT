@@ -1948,7 +1948,7 @@ class Economy(commands.Cog):
         safe_loan_amount = await self.bot.database.get_max_loan_amount(user_id)
         active_loan = await self.bot.database.get_active_loans_for_user(user_id)
 
-        amount = await self.amount_handler(amount, treasury)
+        amount = await self.amount_handler(amount, safe_loan_amount)
 
         await self.bot.database.date_check_loans()
 
