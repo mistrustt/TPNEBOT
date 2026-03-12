@@ -24,6 +24,29 @@ class Misc(commands.Cog, name="Misc"):
         self.geolocator = Nominatim(user_agent="timezone_bot")
         self.timezone_finder = TimezoneFinder()
         self.fake = Faker()
+        
+        # Centralized Juul flavor bank
+        self.JUUL_FLAVORS = ["classic", "mint", "fruit", "berry", "tropical", "cool", "spicy", "dessert"]
+        self.JUUL_FLAVOR_EMOJIS = {
+            "classic": "🚬",
+            "mint": "🍃",
+            "fruit": "🍓",
+            "berry": "🫐",
+            "tropical": "🍍",
+            "cool": "❄️",
+            "spicy": "🌶️",
+            "dessert": "🍰"
+        }
+        self.JUUL_FLAVOR_RESPONSES = {
+            "classic": "You take a hit from the classic juul. 😮‍💨",
+            "mint": "You take a refreshing mint hit. 🌬️😮‍💨",
+            "fruit": "You enjoy a sweet fruit flavor. 🍓😮‍💨",
+            "berry": "You savor the berry blast. 🫐😮‍💨",
+            "tropical": "You taste the tropical paradise. 🍍😮‍💨",
+            "cool": "You feel the cool breeze. ❄️😮‍💨",
+            "spicy": "You feel the spicy kick. 🌶️😮‍💨",
+            "dessert": "You indulge in dessert flavors. 🍰😮‍💨"
+        }
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -791,19 +814,8 @@ class Misc(commands.Cog, name="Misc"):
         else:
             holder = "Nobody"
 
-        # Flavor emojis mapping
-        flavor_emojis = {
-            "classic": "-cigarette",
-            "mint": "🍃",
-            "fruit": "🍓",
-            "berry": "🫐",
-            "tropical": "🍍",
-            "cool": "❄️",
-            "spicy": "🌶️",
-            "dessert": "🍰"
-        }
-        
-        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        # Use centralized flavor bank
+        flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(flavor, "classic")
 
         embed = discord.Embed(
             title=f"{ctx.guild.name} Juul Stats {flavor_emoji}",
@@ -835,18 +847,7 @@ class Misc(commands.Cog, name="Misc"):
         await self.bot.database.increment_juul_hits(ctx.guild.id)
         
         # Flavor-specific responses
-        flavor_responses = {
-            "classic": "You take a hit from the classic juul. 😮‍💨",
-            "mint": "You take a refreshing mint hit. 🌬️😮‍💨",
-            "fruit": "You enjoy a sweet fruit flavor. 🍓😮‍💨",
-            "berry": "You savor the berry blast. 🫐😮‍💨",
-            "tropical": "You taste the tropical paradise. 🍍😮‍💨",
-            "cool": "You feel the cool breeze. ❄️😮‍💨",
-            "spicy": "You feel the spicy kick. 🌶️😮‍💨",
-            "dessert": "You indulge in dessert flavors. 🍰😮‍💨"
-        }
-        
-        response = flavor_responses.get(flavor, "You take a hit from the juul. 😮‍💨")
+        response = self.JUUL_FLAVOR_RESPONSES.get(flavor, "You take a hit from the juul. 😮‍💨")
         
         await ctx.send(
             embed=discord.Embed(
@@ -878,19 +879,8 @@ class Misc(commands.Cog, name="Misc"):
         await self.bot.database.set_juul_holder(ctx.guild.id, member.id)
         await self.bot.database.increment_juul_passes(ctx.guild.id)
         
-        # Flavor emojis mapping
-        flavor_emojis = {
-            "classic": "-cigarette",
-            "mint": "🍃",
-            "fruit": "🍓",
-            "berry": "🫐",
-            "tropical": "🍍",
-            "cool": "❄️",
-            "spicy": "🌶️",
-            "dessert": "🍰"
-        }
-        
-        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        # Use centralized flavor bank
+        flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(flavor, "-cigarette")
         
         await ctx.send(
             embed=discord.Embed(
@@ -923,19 +913,8 @@ class Misc(commands.Cog, name="Misc"):
         await self.bot.database.set_juul_holder(ctx.guild.id, ctx.author.id)
         await self.bot.database.increment_juul_steals(ctx.guild.id)
         
-        # Flavor emojis mapping
-        flavor_emojis = {
-            "classic": "-cigarette",
-            "mint": "🍃",
-            "fruit": "🍓",
-            "berry": "🫐",
-            "tropical": "🍍",
-            "cool": "❄️",
-            "spicy": "🌶️",
-            "dessert": "🍰"
-        }
-        
-        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        # Use centralized flavor bank
+        flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(flavor, "-cigarette")
         
         await ctx.send(
             embed=discord.Embed(
@@ -959,19 +938,8 @@ class Misc(commands.Cog, name="Misc"):
 
         await self.bot.database.set_juul_lock(ctx.guild.id, True)
         
-        # Flavor emojis mapping
-        flavor_emojis = {
-            "classic": "-cigarette",
-            "mint": "🍃",
-            "fruit": "🍓",
-            "berry": "🫐",
-            "tropical": "🍍",
-            "cool": "❄️",
-            "spicy": "🌶️",
-            "dessert": "🍰"
-        }
-        
-        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        # Use centralized flavor bank
+        flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(flavor, "-cigarette")
         
         await ctx.send(
             embed=discord.Embed(
@@ -1007,19 +975,8 @@ class Misc(commands.Cog, name="Misc"):
             # Just show current flavor
             current_flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
             
-            # Flavor emojis mapping
-            flavor_emojis = {
-                "classic": "-cigarette",
-                "mint": "🍃",
-                "fruit": "🍓",
-                "berry": "🫐",
-                "tropical": "🍍",
-                "cool": "❄️",
-                "spicy": "🌶️",
-                "dessert": "🍰"
-            }
-            
-            flavor_emoji = flavor_emojis.get(current_flavor, "-cigarette")
+            # Use centralized flavor bank
+            flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(current_flavor, "-cigarette")
             
             embed = discord.Embed(
                 title="Juul Flavor",
@@ -1047,13 +1004,11 @@ class Misc(commands.Cog, name="Misc"):
         # Normalize flavor input
         flavor = flavor.lower()
         
-        # Valid flavors
-        valid_flavors = ["classic", "mint", "fruit", "berry", "tropical", "cool", "spicy", "dessert"]
-        
-        if flavor not in valid_flavors:
+        # Use centralized flavor bank
+        if flavor not in self.JUUL_FLAVORS:
             embed = discord.Embed(
                 title="Invalid Flavor",
-                description=f"🚫 That flavor doesn't exist!\n\nAvailable flavors: `{'`, `'.join(valid_flavors)}`",
+                description=f"🚫 That flavor doesn't exist!\n\nAvailable flavors: `{'`, `'.join(self.JUUL_FLAVORS)}`",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed)
@@ -1062,19 +1017,8 @@ class Misc(commands.Cog, name="Misc"):
         # Set the new flavor
         await self.bot.database.set_juul_flavor(ctx.guild.id, flavor)
         
-        # Flavor emojis mapping
-        flavor_emojis = {
-            "classic": "-cigarette",
-            "mint": "🍃",
-            "fruit": "🍓",
-            "berry": "🫐",
-            "tropical": "🍍",
-            "cool": "❄️",
-            "spicy": "🌶️",
-            "dessert": "🍰"
-        }
-        
-        flavor_emoji = flavor_emojis.get(flavor, "-cigarette")
+        # Use centralized flavor bank
+        flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(flavor, "-cigarette")
         
         embed = discord.Embed(
             title="Flavor Changed!",
