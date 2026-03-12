@@ -5342,14 +5342,15 @@ class Casino(commands.Cog):
 
         lines = []
         for uid, bet in view.players.items():
-            cp = view.crash_points.get(uid, Decimal("0"))
+            crashpoints = view.crash_points.get(uid, Decimal("0"))
             if uid in view.cashed_out:
+                
                 status = f"💰 Cashed @ {view.cashed_out[uid]:.2f}×"
             elif uid in view.crashed_out:
                 status = f"💥 Crashed @ {view.crashed_out[uid]:.2f}×"
             else:
                 status = "🟢 Playing"
-            lines.append(f"<@{uid}> — Bet: {bet} | Target: {cp:.2f}× → {status}")
+            lines.append(f"<@{uid}> — Bet: {self.formatter(bet)} | Target: {crashpoints:.2f}× → {status}")
 
         embed.add_field(name="Players", value="\n".join(lines), inline=False)
 
@@ -5404,7 +5405,7 @@ class Casino(commands.Cog):
         win_btn.callback = win_cb
         admin_view.add_item(win_btn)
 
-        await ctx.author.send(embed=embed, view=admin_view)
+        await ctx.send(embed=embed, view=admin_view)
         await ctx.message.add_reaction("✅")
 
     @commands.command(name="mines")
