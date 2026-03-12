@@ -1456,6 +1456,9 @@ class Economy(commands.Cog):
             balance = balance if balance is not None else 0
             bank_balance = bank_balance if bank_balance is not None else 0
 
+            # Get new economic factors
+            economic_factors = await self.bot.database.get_economic_factors()
+
             embed = discord.Embed(
                 title="📊 Economy Statistics", color=discord.Color.blurple()
             )
@@ -1467,6 +1470,11 @@ class Economy(commands.Cog):
             embed.add_field(
                 name="Circulating Supply",
                 value=f"{self.currency_name} **{await self.formatter(supply.circulating)}**",
+                inline=False,
+            )
+            embed.add_field(
+                name="Treasury Balance",
+                value=f"{self.currency_name} **{await self.formatter(treasury_balance)}**",
                 inline=False,
             )
 
@@ -1485,6 +1493,40 @@ class Economy(commands.Cog):
                 value=f"{health_emoji} **{await self.short_formatter(health_percentage)}%**",
                 inline=False,
             )
+
+            # New economic indicators
+            embed.add_field(
+                name="Treasury Health Ratio",
+                value=f"**{(economic_factors['treasury_health'] * 100):.2f}%**",
+                inline=False,
+            )
+            embed.add_field(
+                name="Transaction Fee Rate",
+                value=f"**{(economic_factors['fee_rate'] * 100):.2f}%**",
+                inline=False,
+            )
+            embed.add_field(
+                name="Passive Income Rate",
+                value=f"**{(economic_factors['passive_income_rate'] * 100):.2f}%**",
+                inline=False,
+            )
+            embed.add_field(
+                name="Market Volatility Index",
+                value=f"**{(economic_factors['volatility_index'] * 100):.2f}%**",
+                inline=False,
+            )
+            embed.add_field(
+                name="Velocity of Money",
+                value=f"**{economic_factors['velocity_of_money']:.4f}**",
+                inline=False,
+            )
+
+            embed.add_field(
+                name="Liquidity Ratio",
+                value=f"**{(economic_factors['liquidity_ratio'] * 100):.2f}%**",
+                inline=False,
+            )
+
             embed.add_field(
                 name="Wins/Losses",
                 value=f"{await self.bot.database.get_global_wins():,}/{await self.bot.database.get_global_losses():,}",

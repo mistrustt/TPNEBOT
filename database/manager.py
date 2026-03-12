@@ -91,6 +91,7 @@ class DatabaseManager:
         )
         self.blockchain = Blockchain(self.async_sessionmaker)
         self.keymanager = KeyManager()
+        self._latest_metrics = {}
 
     async def initialize(self):
         try:
@@ -2272,9 +2273,36 @@ class DatabaseManager:
 
         # Load cached/latest metrics
         metrics = getattr(self, "_latest_metrics", {})
-        velocity_of_money = metrics.get("transaction_volume", Decimal("0")) / (metrics.get("circulating_supply", Decimal("1")) or Decimal("1"))
-        liquidity_ratio = (metrics.get("circulating_supply", Decimal("0")) / total_supply).quantize(Decimal("0.0001"))
-        volatility_index = metrics.get("volatility_index", Decimal("0.02"))
+
+        # Try to get pre-calculated metrics, fallback to direct calculation
+        if metrics and metrics.get("liquidity_ratio") is not None and metrics.get("velocity_of_money") is not None:
+            liquidity_ratio = metrics.get("liquidity_ratio", Decimal("0"))
+            velocity_of_money = metrics.get("velocity_of_money", Decimal("0"))
+            volatility_index = metrics.get("volatility_index", Decimal("0.02"))
+        else:
+            # Fallback calculations when metrics are not available
+            logger.debug("Using fallback calculations for economic metrics")
+
+            # Calculate liquidity ratio
+            liquidity_ratio = (supply.circulating / total_supply).quantize(Decimal("0.0001")) if total_supply > 0 else Decimal("0")
+
+            # Get volatility index from metrics or use default
+            volatility_index = metrics.get("volatility_index", Decimal("0.02"))
+
+            # Calculate velocity of money with protection against division by zero
+            async with self.async_sessionmaker() as session:
+                # Transaction volume (last 24 hours)
+                yesterday = discord.utils.utcnow() - timedelta(days=1)
+                volume_stmt = select(func.sum(Transaction.amount)).where(
+                    Transaction.timestamp >= yesterday
+                )
+                volume_result = await session.execute(volume_stmt)
+                transaction_volume = volume_result.scalar() or Decimal("0.00")
+
+                if supply.circulating > 0:
+                    velocity_of_money = (transaction_volume / supply.circulating).quantize(Decimal("0.0001"))
+                else:
+                    velocity_of_money = Decimal("0")
 
         TARGET = Decimal("0.50")
         MIN_HW = Decimal("0.30")
@@ -2545,6 +2573,15 @@ class DatabaseManager:
                 "volatility_index": float(volatility_index),
             })
 
+            # Calculate additional economic metrics
+            liquidity_ratio = (circulating_supply / total_supply).quantize(Decimal("0.0001")) if total_supply > 0 else Decimal("0")
+
+            # Calculate velocity of money with protection against division by zero
+            if circulating_supply > 0:
+                velocity_of_money = (transaction_volume / circulating_supply).quantize(Decimal("0.0001"))
+            else:
+                velocity_of_money = Decimal("0")
+
             # Optionally store in Redis/file/local cache for use in dynamic adjustments
             self._latest_metrics = {
                 "date": today,
@@ -2555,6 +2592,8 @@ class DatabaseManager:
                 "transaction_volume": transaction_volume,
                 "active_users": active_users,
                 "volatility_index": volatility_index,
+                "liquidity_ratio": liquidity_ratio,
+                "velocity_of_money": velocity_of_money,
             }
 
         logger.info("[DAILY SNAPSHOT] Economy metrics collected.")

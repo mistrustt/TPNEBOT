@@ -157,6 +157,15 @@ class DiscordBot(commands.Bot):
         cutoff = discord.utils.utcnow() - timedelta(days=365)
         await self.database.purge_stats_before(cutoff.date())
 
+    @tasks.loop(hours=24)
+    async def economic_metrics_collection_task(self) -> None:
+        await self.wait_until_ready()
+        try:
+            await self.database.collect_daily_economy_snapshot()
+            self.logger.info("Economic metrics collected successfully")
+        except Exception as e:
+            self.logger.error(f"Error collecting economic metrics: {e}")
+
     def is_coolguy(self, user_id: int):
         return user_id in self.cool_guys
 
@@ -185,6 +194,13 @@ class DiscordBot(commands.Bot):
             self.logger.info("Blockchain initialized successfully.")
             self.logger.info("Database Tables initialized successfully.")
 
+            # Collect initial economic metrics
+            try:
+                await self.database.collect_daily_economy_snapshot()
+                self.logger.info("Initial economic metrics collected successfully")
+            except Exception as e:
+                self.logger.error(f"Error collecting initial economic metrics: {e}")
+
             self.logger.info("Loading cogs...")
             await self.load_cogs()
 
@@ -196,6 +212,7 @@ class DiscordBot(commands.Bot):
             self.status_task.start()
             self.cache_songs.start()
             self.stats_retention_task.start()
+            self.economic_metrics_collection_task.start()
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")
