@@ -1924,7 +1924,7 @@ class Economy(commands.Cog):
                 description=(
                     f"You have taken out a loan of {self.currency_name} **{await self.formatter(amount_decimal)}**.\n"
                     f"Total to repay (with 10% interest): {self.currency_name} **{await self.formatter(total_repay)}**.\n"
-                    f"Please repay your loan within **7 days** to avoid penalties."
+                    f"Please repay your loan within **7 days** to avoid `penalties.`"
                 ),
                 color=color,
             )
