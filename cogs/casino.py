@@ -5350,7 +5350,7 @@ class Casino(commands.Cog):
                 status = f"💥 Crashed @ {view.crashed_out[uid]:.2f}×"
             else:
                 status = "🟢 Playing"
-            lines.append(f"<@{uid}> — Bet: {self.formatter(bet)} | Target: {crashpoints:.2f}× → {status}")
+            lines.append(f"<@{uid}> — Bet: {self.currency_name}** {await self.formatter(bet)}** | Target: {crashpoints:.2f}× → {status}")
 
         embed.add_field(name="Players", value="\n".join(lines), inline=False)
 
