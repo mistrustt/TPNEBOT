@@ -2759,6 +2759,17 @@ class Economy(commands.Cog):
                 delete_after=5,
             )
 
+        # Prevent InvalidOperation by validating values before quantize
+        if spend <= Decimal("0"):
+            return await ctx.reply("Invalid amount: must be greater than 0", delete_after=5)
+        
+        if price <= Decimal("0"):
+            return await ctx.reply("Invalid price: must be greater than 0", delete_after=5)
+        
+        # Check for NaN or Infinity which would cause quantize to fail
+        if not spend.is_finite() or not price.is_finite():
+            return await ctx.reply("Invalid numeric value detected", delete_after=5)
+
         try:
             coins = (spend / price).quantize(Decimal("0.00000001"))
         except InvalidOperation:
