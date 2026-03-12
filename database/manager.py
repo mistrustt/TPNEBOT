@@ -2615,7 +2615,6 @@ class DatabaseManager:
         self, 
         user_id: int, 
         payment_amount: Decimal, 
-        payment_method: str = None, 
         notes: str = None
     ):
         """
@@ -2625,7 +2624,6 @@ class DatabaseManager:
         Args:
             user_id: Discord user ID
             payment_amount: Amount to pay (must be > 0 and <= remaining balance)
-            payment_method: Optional payment method description
             notes: Optional notes about the payment
             
         Returns:
@@ -2654,8 +2652,8 @@ class DatabaseManager:
                 payment = LoanPayment(
                     loan_id=active_loan.id,
                     user_id=user_id,
+                    payment_method="manual",  # Could be extended to support different methods
                     payment_amount=payment_amount,
-                    payment_method=payment_method,
                     notes=notes
                 )
                 session.add(payment)

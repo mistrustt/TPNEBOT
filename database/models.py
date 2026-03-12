@@ -831,6 +831,7 @@ class Juul(Base):
     passes = Column(Integer, default=0)
     steals = Column(Integer, default=0)
     locked = Column(Boolean, default=False)
+    flavor = Column(String, default="classic")
 
 
 class UserAlt(Base):

@@ -1961,7 +1961,6 @@ class Economy(commands.Cog):
             payment_result = await self.bot.database.make_loan_payment(
                 user_id=user_id,
                 payment_amount=amount_decimal,
-                payment_method="discord_bot",
                 notes=f"Payment via loan repay command"
             )
             
@@ -2001,7 +2000,7 @@ class Economy(commands.Cog):
         
         if not active_loan:
             # Check for paid loans
-            paid_loans = await self.bot.database.get_paid_loans_for_user(user_id)
+            paid_loans = await self.bot.database.get_loan_payment_history(user_id)
             if not paid_loans:
                 embed = discord.Embed(
                     description="You have no loan history.",
@@ -2012,9 +2011,7 @@ class Economy(commands.Cog):
         else:
             loan = active_loan[0]
         
-        payment_history = await self.bot.database.get_loan_payment_history(loan.id)
-        
-        if not payment_history:
+        if not paid_loans:
             embed = discord.Embed(
                 description="No payment history found for this loan.",
                 color=discord.Color.orange(),
@@ -2036,13 +2033,7 @@ class Economy(commands.Cog):
             color=color,
         )
         embed.set_author(name=ctx.author.display_name, icon_url=self.utils.get_avatar_url(ctx.author))
-        
-        # Group payments by method
-        manual_payments = [p for p in payment_history if p.payment_method == "manual"]
-        auto_payments = [p for p in payment_history if p.payment_method == "auto"]
-        discord_bot_payments = [p for p in payment_history if p.payment_method == "discord_bot"]
-        
-        total_paid = sum(p.payment_amount for p in payment_history)
+        total_paid = sum(p.payment_amount for p in paid_loans)
         
         embed.add_field(
             name="Loan Details",
@@ -2054,7 +2045,7 @@ class Economy(commands.Cog):
         )
         
         # Show recent payments
-        recent_payments = payment_history[:5]  # Last 5 payments
+        recent_payments = paid_loans[:5]  # Last 5 payments
         if recent_payments:
             payments_text = ""
             for i, payment in enumerate(recent_payments, 1):
@@ -2063,7 +2054,7 @@ class Economy(commands.Cog):
                 if payment.notes:
                     payments_text += f"   _{payment.notes}_\n"
             embed.add_field(
-                name=f"Recent Payments ({len(payment_history)} total)",
+                name=f"Recent Payments ({len(paid_loans)} total)",
                 value=payments_text,
                 inline=False,
             )
