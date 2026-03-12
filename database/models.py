@@ -439,6 +439,7 @@ class Loan(Base):
     amount_paid = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
+    defaulted_date = Column(DateTime(timezone=True), nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(String, nullable=False, default="active")
 
