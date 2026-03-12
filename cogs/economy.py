@@ -781,9 +781,9 @@ class BalanceView(discord.ui.View):
                 embed.add_field(
                     name=asset.symbol,
                     value=(
-                        f"Amount: **{self.cog.short_formatter(asset.amount)}**\n"
-                        f"Value: **{self.cog.short_formatter(value)} {self.cog.currency_name}**\n"
-                        f"P/L: {symbol} **{self.cog.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
+                        f"Amount: **{await self.cog.short_formatter(asset.amount)}**\n"
+                        f"Value: **{await self.cog.short_formatter(value)} {self.cog.currency_name}**\n"
+                        f"P/L: {symbol} **{await self.cog.short_formatter(pnl)}** ({pnl_pct:.2f}%)"
                     ),
                     inline=False,
                 )
