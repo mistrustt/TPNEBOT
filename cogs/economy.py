@@ -3959,9 +3959,7 @@ class Economy(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=paginator)
 
-    @app_commands.command(
-        name="use", description="Browse and use items from your inventory"
-    )
+    @app_commands.command(name="use", description="Browse and use items from your inventory")
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     async def use_item(self, interaction: Interaction):
@@ -4073,9 +4071,7 @@ class Economy(commands.Cog):
                 f"Failed to create trade: {str(e)}", ephemeral=True
             )
 
-    @app_commands.command(
-        name="effects", description="View your active effects from items"
-    )
+    @app_commands.command(name="effects", description="View your active effects from items")
     @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     async def view_effects(self, interaction: Interaction):
@@ -4125,9 +4121,7 @@ class Economy(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="pendingtrades", description="View your pending trade requests"
-    )
+    @app_commands.command(name="trades", description="View your pending trade requests")
     @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     async def pending_trades(self, interaction: Interaction):
@@ -4172,18 +4166,43 @@ class Economy(commands.Cog):
 
     # ==================== VIP Commands ====================
 
-    vip_group = app_commands.Group(
-        name="vip",
-        description="VIP tier commands for loyal players",
-    )
+    @commands.group(name="vip", description="VIP tier information and benefits")
+    async def vip_group(self, ctx: commands.Context):
+        """Group command for VIP tier information."""
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}vip {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}vip {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="VIP — Available Commands",
+            description=description,
+            color=discord.Color.gold(),
+        )
+        embed.set_footer(text=f"Use {prefix}vip <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
 
     @vip_group.command(name="status", description="View your VIP tier status and progress")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
-    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
-    async def vip_status(self, interaction: Interaction):
+    async def vip_status(self, ctx: commands.Context):
         """View your current VIP tier status."""
         try:
-            vip_info = await self.bot.database.get_rakeback_info(interaction.user.id)
+            vip_info = await self.bot.database.get_rakeback_info(ctx.author.id)
             current_tier = vip_info.get("current_tier")
             next_tier = vip_info.get("next_tier")
             total_wagered = vip_info.get("total_wagered", Decimal("0"))
@@ -4192,7 +4211,7 @@ class Economy(commands.Cog):
             if current_tier is None:
                 # Ensure default VIP tiers exist
                 await self.bot.database.ensure_default_vip_tiers()
-                vip_info = await self.bot.database.get_rakeback_info(interaction.user.id)
+                vip_info = await self.bot.database.get_rakeback_info(ctx.author.id)
                 current_tier = vip_info.get("current_tier")
                 next_tier = vip_info.get("next_tier")
                 total_wagered = vip_info.get("total_wagered", Decimal("0"))
@@ -4276,19 +4295,17 @@ class Economy(commands.Cog):
                     inline=True,
                 )
 
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await ctx.reply(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in vip_status: {e}")
-            await interaction.response.send_message(
+            await ctx.reply(
                 "An error occurred while fetching your VIP status.",
                 ephemeral=True,
             )
 
     @vip_group.command(name="tiers", description="View all VIP tiers and their benefits")
-    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
-    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
-    async def vip_tiers(self, interaction: Interaction):
+    async def vip_tiers(self, ctx: commands.Context):
         """Display all VIP tiers with benefits."""
         try:
             tiers = await self.bot.database.get_all_vip_tiers()
@@ -4327,27 +4344,23 @@ class Economy(commands.Cog):
                     inline=True,
                 )
 
-            await interaction.response.send_message(embed=embed)
+            await ctx.reply(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in vip_tiers: {e}")
-            await interaction.response.send_message(
-                "An error occurred while fetching VIP tiers.",
-                ephemeral=True,
+            await ctx.reply(
+                "An error occurred while fetching VIP tiers."
             )
 
     @vip_group.command(name="leaderboard", description="View top players by total wagered")
-    @app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
-    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
-    async def vip_leaderboard(self, interaction: Interaction):
+    async def vip_leaderboard(self, ctx: commands.Context):
         """Display top VIP players by total wagered."""
         try:
             leaderboard = await self.bot.database.get_vip_leaderboard(limit=10)
 
             if not leaderboard:
-                await interaction.response.send_message(
+                await ctx.reply(
                     "No VIP data available yet.",
-                    ephemeral=True,
                 )
                 return
 
@@ -4381,24 +4394,53 @@ class Economy(commands.Cog):
 
             embed.description = "\n".join(description_lines)
 
-            await interaction.response.send_message(embed=embed)
+            await ctx.reply(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in vip_leaderboard: {e}")
-            await interaction.response.send_message(
+            await ctx.reply(
                 "An error occurred while fetching the leaderboard.",
-                ephemeral=True,
             )
 
     # ==================== Rakeback Commands ====================
 
-    @app_commands.command(name="rakeback", description="Claim your accumulated rakeback")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
-    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
-    async def claim_rakeback(self, interaction: Interaction):
+    @commands.group(name="rakeback", description="Manage your rakeback earnings")
+    async def rakeback_group(self, ctx: commands.Context):
+        """Group command for rakeback management."""
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}rakeback {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}rakeback {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="Rakeback — Available Commands",
+            description=description,
+            color=discord.Color.green(),
+        )
+        embed.set_footer(text=f"Use {prefix}rakeback <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @rakeback_group.command(name="claim", description="Claim your accumulated rakeback")
+    async def claim_rakeback(self, ctx: commands.Context):
         """Claim accumulated rakeback."""
         try:
-            balance = await self.bot.database.get_rakeback_balance(interaction.user.id)
+            balance = await self.bot.database.get_rakeback_balance(ctx.author.id)
 
             if balance <= Decimal("0"):
                 embed = discord.Embed(
@@ -4406,10 +4448,10 @@ class Economy(commands.Cog):
                     description="You have no accumulated rakeback to claim.\n\nPlay more games to earn rakeback on your wagers!",
                     color=discord.Color.orange(),
                 )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await ctx.reply(embed=embed, ephemeral=True)
                 return
 
-            claimed = await self.bot.database.claim_rakeback(interaction.user.id)
+            claimed = await self.bot.database.claim_rakeback(ctx.author.id)
 
             if claimed > 0:
                 formatted_amount = await self.formatter(claimed)
@@ -4418,27 +4460,23 @@ class Economy(commands.Cog):
                     description=f"You claimed **{formatted_amount}** {self.currency_name}!",
                     color=discord.Color.green(),
                 )
-                await interaction.response.send_message(embed=embed)
+                await ctx.reply(embed=embed)
             else:
-                await interaction.response.send_message(
+                await ctx.reply(
                     "No rakeback available to claim.",
-                    ephemeral=True,
                 )
 
         except Exception as e:
             logger.error(f"Error in claim_rakeback: {e}")
-            await interaction.response.send_message(
+            await ctx.reply(
                 "An error occurred while claiming rakeback.",
-                ephemeral=True,
             )
 
-    @app_commands.command(name="rakebackinfo", description="View your rakeback information")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
-    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
-    async def rakeback_info(self, interaction: Interaction):
+    @rakeback_group.command(name="info", description="View your rakeback information")
+    async def rakeback_info(self, ctx: commands.Context):
         """View your rakeback balance and history."""
         try:
-            vip_info = await self.bot.database.get_rakeback_info(interaction.user.id)
+            vip_info = await self.bot.database.get_rakeback_info(ctx.author.id)
             current_tier = vip_info.get("current_tier")
             accumulated = vip_info.get("accumulated", Decimal("0"))
             total_claimed = vip_info.get("total_claimed", Decimal("0"))
@@ -4493,13 +4531,12 @@ class Economy(commands.Cog):
 
             embed.set_footer(text="Use /rakeback to claim your accumulated rakeback!")
 
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await ctx.reply(embed=embed, ephemeral=True)
 
         except Exception as e:
             logger.error(f"Error in rakeback_info: {e}")
-            await interaction.response.send_message(
-                "An error occurred while fetching rakeback info.",
-                ephemeral=True,
+            await ctx.reply(
+                "An error occurred while fetching rakeback info."
             )
 
 

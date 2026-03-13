@@ -341,9 +341,7 @@ class Moderation(commands.Cog, name="Moderation"):
         )
 
     @app_commands.command(name="report", description="Report a user.")
-    @app_commands.describe(
-        identifier="User ID or mention", reason="Reason for the report"
-    )
+    @app_commands.describe(identifier="User ID or mention", reason="Reason for the report")
     async def report(
         self, interaction: discord.Interaction, identifier: str, *, reason: str
     ):
