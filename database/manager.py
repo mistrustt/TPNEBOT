@@ -6414,23 +6414,27 @@ class DatabaseManager:
         cutoff = discord.utils.utcnow() - timedelta(hours=hours)
 
         async with self.async_sessionmaker() as session:
-            # Get all transfers in the time window
+            # Query the Transaction table for historical P2P transfers
+            # This includes all historical data, not just recent TransferHistory
             stmt = (
-                select(TransferHistory)
-                .where(TransferHistory.created_at >= cutoff)
-                .where(TransferHistory.amount >= min_amount)
+                select(Transaction)
+                .where(Transaction.timestamp >= cutoff)
+                .where(Transaction.amount >= min_amount)
+                .where(Transaction.from_user_id.isnot(None))
+                .where(Transaction.to_user_id.isnot(None))
             )
-            if guild_id is not None:
-                stmt = stmt.where(TransferHistory.guild_id == guild_id)
             result = await session.execute(stmt)
-            transfers = list(result.scalars().all())
+            transactions = list(result.scalars().all())
 
         # Build a directed graph: user -> set of users they sent money to
         graph: dict[int, set[int]] = {}
-        for t in transfers:
-            if t.sender_id not in graph:
-                graph[t.sender_id] = set()
-            graph[t.sender_id].add(t.receiver_id)
+        for t in transactions:
+            sender_id = t.from_user_id
+            receiver_id = t.to_user_id
+            if sender_id and receiver_id:
+                if sender_id not in graph:
+                    graph[sender_id] = set()
+                graph[sender_id].add(receiver_id)
 
         # If user has no outgoing transfers, no cycles possible
         if user_id not in graph:
