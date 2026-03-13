@@ -3365,7 +3365,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(name="lock", help="Locks a specified channel.")
     @commands.guild_only()
-    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_channels=True))
     @commands.bot_has_permissions(manage_channels=True)
     async def lock_channel(
         self,
