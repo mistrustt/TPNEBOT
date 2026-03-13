@@ -2700,18 +2700,30 @@ class DatabaseManager:
             row = active_users_result.fetchone()
             active_users = (row.senders or 0) + (row.receivers or 0)
 
-            # Volatility estimate (coefficient of variation of balances across wallets)
-            # Using CV (std_dev / mean) gives a normalized relative volatility measure
+            # Volatility estimate using a robust, bounded measure
+            # Instead of CV (which can be unbounded with skewed distributions),
+            # we use a modified Gini-inspired measure that's capped at 1.0
             balances_stmt = select(Wallet.balance)
             balances_result = await session.execute(balances_stmt)
             balances = [r[0] for r in balances_result.fetchall()]
+
             if len(balances) > 1 and sum(balances) > 0:
-                mean_balance = sum(balances) / len(balances)
-                if mean_balance > 0:
-                    variance = sum((x - mean_balance)**2 for x in balances) / (len(balances) - 1)
-                    std_dev = Decimal(variance.sqrt()) if variance >= 0 else Decimal("0.00")
-                    # Coefficient of variation (normalized volatility)
-                    volatility_index = (std_dev / mean_balance).quantize(Decimal("0.0001"))
+                # Use log-based measure for bounded volatility (0 to ~1.5)
+                # This is more robust to outliers than CV
+                import math
+
+                # Filter out zero balances to avoid log issues
+                positive_balances = [float(b) for b in balances if b > 0]
+
+                if len(positive_balances) > 1:
+                    # Calculate variance of log balances (bounded measure)
+                    log_balances = [math.log(b + 1) for b in positive_balances]
+                    mean_log = sum(log_balances) / len(log_balances)
+                    variance_log = sum((x - mean_log)**2 for x in log_balances) / len(log_balances)
+
+                    # This gives a bounded measure: typically 0 to 2 for most distributions
+                    # Values > 0.5 indicate high inequality/volatility
+                    volatility_index = Decimal(str(variance_log)).quantize(Decimal("0.0001"))
                 else:
                     volatility_index = Decimal("0.00")
             else:
@@ -2954,12 +2966,20 @@ class DatabaseManager:
             })
 
         # Volatility-based recommendations
-        if volatility_index > 0.05:
+        # With log-variance measure: 0-0.3 is low, 0.3-0.6 is moderate, >0.6 is high
+        if volatility_index > 0.6:
             recommendations["recommendations"].append({
                 "type": "volatility",
                 "priority": "high",
-                "message": "High market volatility. Consider reducing position sizes and using stop-losses.",
-                "action": "reduce_exposure"
+                "message": "High wealth inequality detected. Economic distribution is uneven.",
+                "action": "monitor_distribution"
+            })
+        elif volatility_index > 0.3:
+            recommendations["recommendations"].append({
+                "type": "volatility",
+                "priority": "medium",
+                "message": "Moderate wealth inequality. Monitor economic distribution trends.",
+                "action": "track_distribution"
             })
 
         # Risk tolerance based recommendations
@@ -3081,8 +3101,9 @@ class DatabaseManager:
         # Velocity of money (25% weight) - higher is generally better
         velocity_score = min(25, velocity_of_money * 50)  # Cap at 25 points
 
-        # Volatility index (20% weight) - lower is better
-        volatility_score = 20 * (1 - min(1, volatility_index * 5))  # Invert and scale
+        # Volatility index (20% weight) - lower is better, now uses log-variance (0 to ~2)
+        # Score decreases linearly from 20 to 0 as volatility increases from 0 to 1
+        volatility_score = 20 * max(Decimal("0"), 1 - min(volatility_index, Decimal("1")))
 
         # Calculate total score (0-100)
         total_score = treasury_score + liquidity_score + velocity_score + volatility_score
@@ -6628,7 +6649,7 @@ class DatabaseManager:
         # Define thresholds
         VELOCITY_CRISIS_THRESHOLD = Decimal("0.05")  # Very low money velocity
         LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.1")  # Very low liquidity
-        VOLATILITY_CRISIS_THRESHOLD = Decimal("0.1")  # High volatility
+        VOLATILITY_CRISIS_THRESHOLD = Decimal("0.5")  # High inequality (log-variance scale)
 
         circuit_breaker_triggered = False
         reason = []
