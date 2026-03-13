@@ -1461,22 +1461,22 @@ class Economy(commands.Cog):
                 economic_factors = await self.bot.database.get_economic_factors()
 
                 embed = discord.Embed(
-                    title="📊 Economy Statistics", color=discord.Color.blurple()
+                    title="📊 Economy Overview",
+                    description="Current state of the server economy",
+                    color=discord.Color.blurple()
+                )
+
+                # Supply section
+                embed.add_field(
+                    name="💵 Supply",
+                    value=f"**Total:** {self.currency_name} {await self.formatter(supply.total_supply)}\n"
+                          f"**Circulating:** {self.currency_name} {await self.formatter(supply.circulating)}",
+                    inline=True,
                 )
                 embed.add_field(
-                    name="Total Supply",
-                    value=f"{self.currency_name} **{await self.formatter(supply.total_supply)}**",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Circulating Supply",
-                    value=f"{self.currency_name} **{await self.formatter(supply.circulating)}**",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Treasury Balance",
+                    name="🏦 Treasury",
                     value=f"{self.currency_name} **{await self.formatter(treasury_balance)}**",
-                    inline=False,
+                    inline=True,
                 )
 
                 total_supply = supply.total_supply
@@ -1485,59 +1485,32 @@ class Economy(commands.Cog):
                     if total_supply > 0
                     else 0
                 )
-                health_percentage = (
-                    (treasury_balance / total_supply * 100) if total_supply > 0 else 0
-                )
-                health_emoji = "⚠️" if health_percentage < 20 else "📈"
+
+                # Rates section
+                fee_pct = economic_factors['fee_rate'] * 100
+                passive_pct = economic_factors['passive_income_rate'] * 100
                 embed.add_field(
-                    name="Economy Health",
-                    value=f"{health_emoji} **{await self.short_formatter(health_percentage)}%**",
-                    inline=False,
+                    name="⚙️ Rates",
+                    value=f"**Fee:** {fee_pct:.2f}%\n**Passive Income:** {passive_pct:.2f}%",
+                    inline=True,
                 )
 
-                # New economic indicators
+                # Stats section
+                global_wins = await self.bot.database.get_global_wins()
+                global_losses = await self.bot.database.get_global_losses()
+                win_rate = (global_wins / (global_wins + global_losses) * 100) if (global_wins + global_losses) > 0 else 0
                 embed.add_field(
-                    name="Treasury Health Ratio",
-                    value=f"**{(economic_factors['treasury_health'] * 100):.2f}%**",
-                    inline=False,
+                    name="🎲 Global Stats",
+                    value=f"**Wins:** {global_wins:,}\n**Losses:** {global_losses:,}\n**Win Rate:** {win_rate:.1f}%",
+                    inline=True,
                 )
                 embed.add_field(
-                    name="Transaction Fee Rate",
-                    value=f"**{(economic_factors['fee_rate'] * 100):.2f}%**",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Passive Income Rate",
-                    value=f"**{(economic_factors['passive_income_rate'] * 100):.2f}%**",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Market Volatility Index",
-                    value=f"**{(economic_factors['volatility_index'] * 100):.2f}%**",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Velocity of Money",
-                    value=f"**{economic_factors['velocity_of_money']:.4f}**",
-                    inline=False,
+                    name="💼 Your Portfolio",
+                    value=f"**{percentage:.4f}%** of total supply\n({self.currency_name} {await self.formatter(balance + bank_balance)})",
+                    inline=True,
                 )
 
-                embed.add_field(
-                    name="Liquidity Ratio",
-                    value=f"**{(economic_factors['liquidity_ratio'] * 100):.2f}%**",
-                    inline=False,
-                )
-
-                embed.add_field(
-                    name="Wins/Losses",
-                    value=f"{await self.bot.database.get_global_wins():,}/{await self.bot.database.get_global_losses():,}",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="Your Holdings",
-                    value=f"**{percentage:.2f}%** of Total Supply",
-                    inline=False,
-                )
+                embed.set_footer(text="💡 Use !economy health for detailed analysis • !economy trends for historical data")
 
                 await ctx.reply(embed=embed)
 
