@@ -2138,20 +2138,20 @@ class Economy(commands.Cog):
         """View your loan payment history."""
         user_id = ctx.author.id
         active_loan = await self.bot.database.get_active_loans_for_user(user_id)
-        
-        if not active_loan:
-            # Check for paid loans
-            paid_loans = await self.bot.database.get_loan_payment_history(user_id)
-            if not paid_loans:
-                embed = discord.Embed(
-                    description="You have no loan history.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.reply(embed=embed, delete_after=5)
-            loan = paid_loans[0]
-        else:
+        paid_loans = await self.bot.database.get_loan_payment_history(user_id)
+
+        if not active_loan and not paid_loans:
+            embed = discord.Embed(
+                description="You have no loan history.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        if active_loan:
             loan = active_loan[0]
-        
+        else:
+            loan = paid_loans[0]
+
         if not paid_loans:
             embed = discord.Embed(
                 description="No payment history found for this loan.",
