@@ -6400,7 +6400,15 @@ class DatabaseManager:
         guild_id: int = None,
     ) -> List[List[int]]:
         """
-        Detect circular transfer patterns using DFS.
+        Detect circular transfer patterns that may indicate hidden alt accounts.
+
+        This scans ALL transfers (not just known links) to find cycles where
+        money flows back to the originator through multiple accounts. Such
+        patterns may reveal previously unknown alt relationships.
+
+        When a cycle is found, all participants are flagged for owner review
+        so they can investigate and potentially link the accounts.
+
         Returns list of cycles found, where each cycle is a list of user IDs.
         """
         cutoff = discord.utils.utcnow() - timedelta(hours=hours)
@@ -6417,12 +6425,16 @@ class DatabaseManager:
             result = await session.execute(stmt)
             transfers = list(result.scalars().all())
 
-        # Build a directed graph: user -> list of users they sent money to
+        # Build a directed graph: user -> set of users they sent money to
         graph: dict[int, set[int]] = {}
         for t in transfers:
             if t.sender_id not in graph:
                 graph[t.sender_id] = set()
             graph[t.sender_id].add(t.receiver_id)
+
+        # If user has no outgoing transfers, no cycles possible
+        if user_id not in graph:
+            return []
 
         cycles = []
         visited_cycles = set()
@@ -6430,7 +6442,7 @@ class DatabaseManager:
         def find_cycles_dfs(
             start: int, current: int, path: List[int], visited: set
         ) -> None:
-            """DFS helper to find cycles."""
+            """DFS helper to find cycles where money returns to origin."""
             if len(path) > depth + 1:
                 return
 
@@ -6448,7 +6460,7 @@ class DatabaseManager:
 
             for neighbor in neighbors:
                 if neighbor == start and len(path) >= 2:
-                    # Complete cycle
+                    # Complete cycle found
                     cycle_key = tuple(sorted(path + [start]))
                     if cycle_key not in visited_cycles:
                         cycles.append(path + [start])
@@ -6459,7 +6471,6 @@ class DatabaseManager:
             visited.remove(current)
 
         # Start DFS from the target user
-        if user_id in graph:
-            find_cycles_dfs(user_id, user_id, [user_id], set())
+        find_cycles_dfs(user_id, user_id, [user_id], set())
 
         return cycles
