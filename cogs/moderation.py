@@ -3072,7 +3072,7 @@ class Moderation(commands.Cog, name="Moderation"):
         name="nuke", description="Deletes and recreates the current channel"
     )
     @commands.guild_only()
-    @commands.has_permissions(administrator=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_channels=True))
     @commands.bot_has_permissions(manage_channels=True)
     async def nuke(self, ctx: Context):
         """Nukes a channel with a confirmation via buttons."""
