@@ -4402,41 +4402,7 @@ class Economy(commands.Cog):
                 "An error occurred while fetching the leaderboard.",
             )
 
-    # ==================== Rakeback Commands ====================
-
-    @commands.group(name="rakeback", description="Manage your rakeback earnings", invoke_without_command=True)
-    async def rakeback_group(self, ctx: commands.Context):
-        """Group command for rakeback management."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
-
-        subcmds = getattr(ctx.command, "commands", []) or []
-        lines = []
-        for cmd in sorted(subcmds, key=lambda c: c.name):
-            name = cmd.name
-            aliases = (
-                f" (or: {', '.join(cmd.aliases)})"
-                if getattr(cmd, "aliases", None)
-                else ""
-            )
-            desc = (cmd.help or cmd.description or "").strip()
-            if desc:
-                lines.append(f"`{prefix}rakeback {name}`{aliases} — {desc}")
-            else:
-                lines.append(f"`{prefix}rakeback {name}`{aliases}")
-
-        description = "\n".join(lines) if lines else "No subcommands available."
-
-        embed = discord.Embed(
-            title="Rakeback — Available Commands",
-            description=description,
-            color=discord.Color.green(),
-        )
-        embed.set_footer(text=f"Use {prefix}rakeback <subcommand> for details.")
-        await ctx.reply(embed=embed, mention_author=False)
-
-    @rakeback_group.command(name="claim", description="Claim your accumulated rakeback")
+    @vip_group.command(name="claim", description="Claim your accumulated rakeback")
     async def claim_rakeback(self, ctx: commands.Context):
         """Claim accumulated rakeback."""
         try:
@@ -4471,74 +4437,6 @@ class Economy(commands.Cog):
             await ctx.reply(
                 "An error occurred while claiming rakeback.",
             )
-
-    @rakeback_group.command(name="info", description="View your rakeback information")
-    async def rakeback_info(self, ctx: commands.Context):
-        """View your rakeback balance and history."""
-        try:
-            vip_info = await self.bot.database.get_rakeback_info(ctx.author.id)
-            current_tier = vip_info.get("current_tier")
-            accumulated = vip_info.get("accumulated", Decimal("0"))
-            total_claimed = vip_info.get("total_claimed", Decimal("0"))
-            total_rakeback_earned = vip_info.get("total_rakeback_earned", Decimal("0"))
-            rakeback_rate = vip_info.get("rakeback_rate", Decimal("0.01"))
-            last_claim = vip_info.get("last_claim")
-
-            embed = discord.Embed(
-                title="📈 Rakeback Information",
-                color=discord.Color.blue(),
-            )
-
-            tier_name = current_tier.name if current_tier else "Bronze"
-            embed.add_field(
-                name="Current Tier",
-                value=f"**{tier_name}**",
-                inline=True,
-            )
-            embed.add_field(
-                name="Rakeback Rate",
-                value=f"**{float(rakeback_rate) * 100:.1f}%**",
-                inline=True,
-            )
-            embed.add_field(
-                name="Accumulated",
-                value=f"💰 **{await self.formatter(accumulated)}**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Total Earned",
-                value=f"📊 **{await self.formatter(total_rakeback_earned)}**",
-                inline=True,
-            )
-            embed.add_field(
-                name="Total Claimed",
-                value=f"✅ **{await self.formatter(total_claimed)}**",
-                inline=True,
-            )
-
-            if last_claim:
-                time_since = datetime.utcnow() - last_claim
-                hours = time_since.total_seconds() / 3600
-                if hours < 24:
-                    last_claim_str = f"{int(hours)} hours ago"
-                else:
-                    last_claim_str = f"{int(hours / 24)} days ago"
-                embed.add_field(
-                    name="Last Claim",
-                    value=f"🕒 {last_claim_str}",
-                    inline=True,
-                )
-
-            embed.set_footer(text="Use /rakeback to claim your accumulated rakeback!")
-
-            await ctx.reply(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Error in rakeback_info: {e}")
-            await ctx.reply(
-                "An error occurred while fetching rakeback info."
-            )
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Economy(bot))
