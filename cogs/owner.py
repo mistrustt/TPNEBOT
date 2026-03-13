@@ -3151,9 +3151,8 @@ class Owner(commands.Cog, name="Owner"):
         """Refund a transaction."""
 
         try:
-            #concept
-            #await self.bot.database.refund_transaction(txid, f"Admin Audit - Refund by {ctx.author.name}")
-            #await self.bot.database.validate_economy()
+            await self.bot.database.refund_transaction(txid, f"Admin Audit - Refund by {ctx.author.name}")
+            await self.bot.database.validate_economy()
 
             embed = discord.Embed(
                 description=f"✅ Successfully refunded transaction **{txid}** for user **{member.display_name}**.",
