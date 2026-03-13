@@ -2005,7 +2005,18 @@ class DatabaseManager:
             await self.update_supply()
         return tid_main
 
-    async def refund_transaction(self, txid: str, reason: str):
+    async def refund_transaction(self, txid: str, reason: str, treasury_fallback: bool = True):
+        """
+        Refund a transaction.
+
+        Args:
+            txid: The transaction ID to refund
+            reason: The reason for the refund
+            treasury_fallback: If True, treasury will cover if receiver has insufficient funds
+
+        Returns:
+            The refund transaction ID
+        """
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 tx = await session.get(Transaction, txid)
@@ -2014,21 +2025,48 @@ class DatabaseManager:
                 if tx.amount == 0:
                     raise ValueError("Cannot refund zero-amount transaction.")
 
-                # Reverse the transaction
+                from_wallet_id = await self.get_wallet_id_for_user(tx.from_user_id)
+                to_wallet_id = await self.get_wallet_id_for_user(tx.to_user_id)
+
+                # Always give money back to the original sender
                 await self._atomic_balance_change(
                     session,
                     "wallets",
                     "wallet_id",
-                    await self.get_wallet_id_for_user(tx.from_user_id),
+                    from_wallet_id,
                     +tx.amount,
                 )
-                await self._atomic_balance_change(
-                    session,
-                    "wallets",
-                    "wallet_id",
-                    await self.get_wallet_id_for_user(tx.to_user_id),
-                    -tx.amount,
-                )
+
+                # Try to take money from the receiver
+                try:
+                    await self._atomic_balance_change(
+                        session,
+                        "wallets",
+                        "wallet_id",
+                        to_wallet_id,
+                        -tx.amount,
+                    )
+                except ValueError as e:
+                    # Receiver has insufficient funds
+                    if treasury_fallback:
+                        # Treasury will cover the shortfall
+                        supply = await session.get(Supply, 1)
+                        if supply and supply.treasury >= tx.amount:
+                            supply.treasury -= tx.amount
+                            logger.warning(
+                                f"Refund {txid}: Receiver had insufficient funds. "
+                                f"Treasury covered {tx.amount}. Reason: {reason}"
+                            )
+                        else:
+                            # Create money (mint) if treasury is also insufficient
+                            logger.warning(
+                                f"Refund {txid}: Treasury insufficient. Minting {tx.amount}. "
+                                f"Reason: {reason}"
+                            )
+                    else:
+                        raise ValueError(
+                            f"Cannot refund: receiver has insufficient funds and treasury fallback is disabled."
+                        ) from e
 
                 # Record refund transaction
                 refund_txid = str(uuid.uuid4())
