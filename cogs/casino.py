@@ -377,6 +377,8 @@ class MinesGridLayout(discord.ui.LayoutView):
         bet_amount: Decimal,
         bot,
         PF: dict,
+        formatted_bet: str,
+        currency_name: str,
         session_id=None,
         num_bombs: int = 5,
     ):
@@ -388,6 +390,8 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.PF = PF
         self.session_id = session_id
         self.num_bombs = num_bombs
+        self.formatted_bet = formatted_bet
+        self.currency_name = currency_name
 
         self.bomb_emoji = "<:bombs:1278849752301309994>"
         self.gem_emoji = "<:gems:1278849818025918497>"
@@ -401,8 +405,9 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.container = MinesContainer(
             num_bombs=num_bombs,
             bet_amount=bet_amount,
+            formatted_bet=formatted_bet,
+            currency_name=currency_name,
             remaining_safe_cells=self.remaining_safe_cells,
-            bot=bot,
         )
         self.add_item(self.container)
 
@@ -489,8 +494,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
 
         # Update container text
-        self.container.game_text.content = f"### 💥 BOOM! Game Over\nYou lost **{await casino.formatter(self.bet_amount)}** {casino.currency_name}\n\n{final_grid}"
-        self.container.game_text.color = discord.Color.red()
+        self.container.game_text.content = f"### 💥 BOOM! Game Over\nYou lost **{self.formatted_bet}** {self.currency_name}\n\n{final_grid}"
 
         # Remove cashout button
         self.container.cashout_row.children[0].disabled = True
@@ -519,10 +523,11 @@ class MinesGridLayout(discord.ui.LayoutView):
         multiplier = await self._calculate_multiplier()
 
         # Update game stats
+        potential_win = await casino.formatter(self.bet_amount * Decimal(str(multiplier)))
         self.container.stats_text.content = (
             f"💎 **Remaining Gems:** {self.remaining_safe_cells}\n"
             f"📈 **Multiplier:** x{multiplier:.3g}\n"
-            f"💰 **Potential Win:** {await casino.formatter(self.bet_amount * Decimal(str(multiplier)))} {casino.currency_name}"
+            f"💰 **Potential Win:** {potential_win} {self.currency_name}"
         )
 
         if self.remaining_safe_cells == 0:
@@ -569,9 +574,10 @@ class MinesGridLayout(discord.ui.LayoutView):
         final_grid = self._create_final_grid()
 
         # Update container
+        formatted_winnings = await casino.formatter(winnings)
         self.container.game_text.content = (
             f"### 🎉 PERFECT! All Gems Cleared!\n"
-            f"You won **{await casino.formatter(winnings)}** {casino.currency_name} at {multiplier:.2f}x!\n\n{final_grid}"
+            f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!\n\n{final_grid}"
         )
         self.container.cashout_row.children[0].disabled = True
 
@@ -698,9 +704,10 @@ class MinesGridLayout(discord.ui.LayoutView):
         final_grid = self._create_final_grid()
 
         # Update container
+        formatted_winnings = await casino.formatter(winnings)
         self.container.game_text.content = (
             f"### 💰 Cashed Out!\n"
-            f"You won **{await casino.formatter(winnings)}** {casino.currency_name} at {multiplier:.2f}x!\n\n{final_grid}"
+            f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!\n\n{final_grid}"
         )
         self.container.cashout_row.children[0].disabled = True
 
@@ -746,15 +753,14 @@ class MinesContainer(discord.ui.Container):
         self,
         num_bombs: int,
         bet_amount: Decimal,
+        formatted_bet: str,
+        currency_name: str,
         remaining_safe_cells: int,
-        bot,
     ):
         super().__init__(accent_color=0xFCD34D)  # Gold accent
-        self.bot = bot
         self.num_bombs = num_bombs
         self.bet_amount = bet_amount
-
-        casino: Casino = bot.get_cog("Casino")
+        self.currency_name = currency_name
 
         # Title
         self.game_text = discord.ui.TextDisplay(
@@ -770,7 +776,7 @@ class MinesContainer(discord.ui.Container):
         self.stats_text = discord.ui.TextDisplay(
             f"💎 **Remaining Gems:** {remaining_safe_cells}\n"
             f"📈 **Multiplier:** x1.0\n"
-            f"💰 **Bet:** {casino.currency_name} {casino.formatter(bet_amount)}"
+            f"💰 **Bet:** {currency_name} {formatted_bet}"
         )
         self.add_item(self.stats_text)
 
@@ -5567,7 +5573,7 @@ class Casino(commands.Cog):
             if bet_amount > balance:
                 container = discord.ui.Container(accent_color=0xFEE2E2)
                 container.add_item(discord.ui.TextDisplay(
-                    f"❌ You do not have enough balance. Current balance: **{await self.formatter(balance)}** **{self.currency_name}**"
+                    f"❌ You do not have enough balance. Current balance: **{self.currency_name} {await self.formatter(balance)}** "
                 ))
                 view = discord.ui.LayoutView()
                 view.add_item(container)
@@ -5579,7 +5585,7 @@ class Casino(commands.Cog):
                 bet_amount = max_allowed
                 container = discord.ui.Container(accent_color=0xFEF3C7)
                 container.add_item(discord.ui.TextDisplay(
-                    f"⚠️ High-roller limit applied. Bet adjusted to: **{await self.formatter(bet_amount)} {self.currency_name}**"
+                    f"⚠️ High-roller limit applied. Bet adjusted to: **{self.currency_name} {await self.formatter(bet_amount)}**"
                 ))
                 view = discord.ui.LayoutView()
                 view.add_item(container)
@@ -5630,6 +5636,9 @@ class Casino(commands.Cog):
             init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
             multiplier = float(init_multi) if init_multi else 1.0
 
+            # Format bet amount for display (formatter is async)
+            formatted_bet = await self.formatter(bet_amount)
+
             # Create the new container-based game view
             game_view = MinesGridLayout(
                 bomb_positions=bomb_positions,
@@ -5637,6 +5646,8 @@ class Casino(commands.Cog):
                 bet_amount=bet_amount,
                 bot=self.bot,
                 PF=PF,
+                formatted_bet=formatted_bet,
+                currency_name=self.currency_name,
                 session_id=session_id,
                 num_bombs=num_bombs,
             )

@@ -4074,7 +4074,7 @@ class Economy(commands.Cog):
             )
 
     @app_commands.command(
-        name="vieweffects", description="View your active effects from items"
+        name="effects", description="View your active effects from items"
     )
     @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
