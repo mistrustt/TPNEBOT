@@ -2178,7 +2178,7 @@ class Economy(commands.Cog):
         
         embed.add_field(
             name="Loan Details",
-            value=f"Principal: {self.currency_name} **{await self.formatter(loan.principal)}**\n"
+            value=f"Principal: {self.currency_name} **{await self.formatter(loan.payment_amount)}**\n"
                   f"Total to Repay: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
                   f"Amount Paid: {self.currency_name} **{await self.formatter(total_paid)}**\n"
                   f"Status: **{loan.status}**",
