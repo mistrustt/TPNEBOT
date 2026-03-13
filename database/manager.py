@@ -77,6 +77,10 @@ from .models import (
     SuspiciousActivityType,
     TransferHistory,
     Job,
+    VIPTier,
+    UserVIP,
+    RakebackBalance,
+    RakebackTransaction,
 )
 from .blockchain import Blockchain, KeyManager
 from datetime import datetime, timedelta, timezone
@@ -4733,6 +4737,7 @@ class DatabaseManager:
                 "luck_boost",
                 "earning_boost",
                 "cooldown_reduction",
+                "rtp_boost",
             ):
                 # Create timed effect
                 if effect_duration:
@@ -4752,6 +4757,7 @@ class DatabaseManager:
                         "luck_boost": f"{effect_value}x luck boost",
                         "earning_boost": f"{effect_value}x earning boost",
                         "cooldown_reduction": f"{effect_value}% cooldown reduction",
+                        "rtp_boost": f"{effect_value}% RTP boost",
                     }
                     response["message"] = (
                         f"Activated {effect_names.get(effect, effect)} for {duration_str}!"
@@ -7014,3 +7020,447 @@ class DatabaseManager:
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(Job))
             return result.scalars().all()
+
+    # ==================== VIP System Methods ====================
+
+    async def ensure_default_vip_tiers(self) -> None:
+        """Ensure default VIP tiers exist in the database."""
+        default_tiers = [
+            {"name": "Bronze", "level": 1, "min_wagered": Decimal("0"), "rakeback_rate": Decimal("0.0100"), "rtp_bonus": Decimal("0")},
+            {"name": "Silver", "level": 2, "min_wagered": Decimal("100000"), "rakeback_rate": Decimal("0.0200"), "rtp_bonus": Decimal("0.0050")},
+            {"name": "Gold", "level": 3, "min_wagered": Decimal("500000"), "rakeback_rate": Decimal("0.0300"), "rtp_bonus": Decimal("0.0100")},
+            {"name": "Platinum", "level": 4, "min_wagered": Decimal("2000000"), "rakeback_rate": Decimal("0.0500"), "rtp_bonus": Decimal("0.0150")},
+            {"name": "Diamond", "level": 5, "min_wagered": Decimal("10000000"), "rakeback_rate": Decimal("0.1000"), "rtp_bonus": Decimal("0.0200")},
+        ]
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                for tier_data in default_tiers:
+                    existing = await session.execute(
+                        select(VIPTier).where(VIPTier.level == tier_data["level"])
+                    )
+                    if not existing.scalar_one_or_none():
+                        tier = VIPTier(**tier_data)
+                        session.add(tier)
+            await session.commit()
+
+    async def get_user_vip(self, user_id: int) -> UserVIP:
+        """Get or create user VIP record with tier info."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(UserVIP).where(UserVIP.user_id == user_id)
+            )
+            user_vip = result.scalar_one_or_none()
+
+            if not user_vip:
+                # Create new VIP record with default tier
+                user_vip = UserVIP(user_id=user_id, tier_id=1)
+                session.add(user_vip)
+                await session.commit()
+                await session.refresh(user_vip)
+
+            return user_vip
+
+    async def get_vip_tier(self, tier_id: int) -> Optional[VIPTier]:
+        """Get a specific VIP tier by ID."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(VIPTier).where(VIPTier.id == tier_id)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_all_vip_tiers(self) -> List[VIPTier]:
+        """Get all VIP tiers ordered by level."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(VIPTier).order_by(VIPTier.level)
+            )
+            return list(result.scalars().all())
+
+    async def get_total_wagered_all_games(self, user_id: int) -> Decimal:
+        """Calculate total wagered across all games from GameHistory."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(func.coalesce(func.sum(GameHistory.wagered), Decimal("0")))
+                .where(GameHistory.user_id == user_id)
+            )
+            return result.scalar() or Decimal("0")
+
+    async def get_vip_tier_by_wagered(self, total_wagered: Decimal) -> VIPTier:
+        """Determine VIP tier based on total wagered amount."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(VIPTier)
+                .where(VIPTier.min_wagered <= total_wagered)
+                .order_by(VIPTier.level.desc())
+                .limit(1)
+            )
+            tier = result.scalar_one_or_none()
+            if not tier:
+                # Return Bronze tier as default
+                result = await session.execute(
+                    select(VIPTier).where(VIPTier.level == 1)
+                )
+                tier = result.scalar_one_or_none()
+            return tier
+
+    async def get_vip_tier_by_user(self, user_id: int) -> VIPTier:
+        """Determine VIP tier based on total wagered from GameHistory."""
+        total_wagered = await self.get_total_wagered_all_games(user_id)
+        return await self.get_vip_tier_by_wagered(total_wagered)
+
+    async def record_rakeback(self, user_id: int, wagered: Decimal, game_name: str) -> Decimal:
+        """
+        Record rakeback after game. Returns rakeback amount.
+        Does NOT update total_wagered (computed from GameHistory instead).
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                # Get or create user VIP record
+                result = await session.execute(
+                    select(UserVIP).where(UserVIP.user_id == user_id)
+                )
+                user_vip = result.scalar_one_or_none()
+
+                if not user_vip:
+                    user_vip = UserVIP(user_id=user_id, tier_id=1)
+                    session.add(user_vip)
+
+                # Get current tier and calculate rakeback
+                tier_result = await session.execute(
+                    select(VIPTier).where(VIPTier.id == user_vip.tier_id)
+                )
+                tier = tier_result.scalar_one_or_none()
+                rakeback_rate = tier.rakeback_rate if tier else Decimal("0.01")
+                rakeback_amount = (wagered * rakeback_rate).quantize(Decimal("0.01"))
+
+                # Add rakeback to user's accumulated balance
+                rakeback_result = await session.execute(
+                    select(RakebackBalance).where(RakebackBalance.user_id == user_id)
+                )
+                rakeback_balance = rakeback_result.scalar_one_or_none()
+
+                if not rakeback_balance:
+                    rakeback_balance = RakebackBalance(user_id=user_id, accumulated=rakeback_amount)
+                    session.add(rakeback_balance)
+                else:
+                    rakeback_balance.accumulated = (rakeback_balance.accumulated or Decimal("0")) + rakeback_amount
+
+                # Update total rakeback earned
+                user_vip.total_rakeback_earned = (user_vip.total_rakeback_earned or Decimal("0")) + rakeback_amount
+
+                # Create rakeback transaction record
+                transaction = RakebackTransaction(
+                    user_id=user_id,
+                    game_name=game_name,
+                    wagered_amount=wagered,
+                    rakeback_rate=rakeback_rate,
+                    rakeback_amount=rakeback_amount,
+                    vip_tier_id=user_vip.tier_id,
+                )
+                session.add(transaction)
+
+                # Check for tier upgrade based on GameHistory
+                total_wagered = await self.get_total_wagered_all_games(user_id)
+                new_tier = await self.get_vip_tier_by_wagered(total_wagered + wagered)
+                if new_tier and new_tier.id != user_vip.tier_id:
+                    user_vip.tier_id = new_tier.id
+
+            await session.commit()
+            return rakeback_amount
+
+    # Alias for backward compatibility with casino.py
+    async def update_user_wagered(self, user_id: int, amount: Decimal, game_name: str) -> Decimal:
+        """Alias for record_rakeback for backward compatibility."""
+        return await self.record_rakeback(user_id, amount, game_name)
+
+    async def recalculate_user_vip_tier(self, user_id: int) -> Optional[VIPTier]:
+        """Recalculate and update user's VIP tier based on total wagered from GameHistory."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(UserVIP).where(UserVIP.user_id == user_id)
+                )
+                user_vip = result.scalar_one_or_none()
+
+                if not user_vip:
+                    return None
+
+                # Get total wagered from GameHistory
+                total_wagered = await self.get_total_wagered_all_games(user_id)
+                new_tier = await self.get_vip_tier_by_wagered(total_wagered)
+                if new_tier and new_tier.id != user_vip.tier_id:
+                    user_vip.tier_id = new_tier.id
+                    await session.commit()
+                    return new_tier
+
+                current_tier = await session.execute(
+                    select(VIPTier).where(VIPTier.id == user_vip.tier_id)
+                )
+                return current_tier.scalar_one_or_none()
+
+    # ==================== Rakeback Methods ====================
+
+    async def get_rakeback_balance(self, user_id: int) -> Decimal:
+        """Get accumulated unclaimed rakeback."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(RakebackBalance).where(RakebackBalance.user_id == user_id)
+            )
+            balance = result.scalar_one_or_none()
+            return balance.accumulated if balance else Decimal("0")
+
+    async def add_rakeback(
+        self, user_id: int, amount: Decimal, game_name: str, wagered: Decimal, rate: Decimal
+    ) -> None:
+        """Add rakeback to user's accumulated balance."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(RakebackBalance).where(RakebackBalance.user_id == user_id)
+                )
+                balance = result.scalar_one_or_none()
+
+                if not balance:
+                    balance = RakebackBalance(user_id=user_id, accumulated=amount)
+                    session.add(balance)
+                else:
+                    balance.accumulated = (balance.accumulated or Decimal("0")) + amount
+
+                # Create transaction record
+                transaction = RakebackTransaction(
+                    user_id=user_id,
+                    game_name=game_name,
+                    wagered_amount=wagered,
+                    rakeback_rate=rate,
+                    rakeback_amount=amount,
+                )
+                session.add(transaction)
+
+            await session.commit()
+
+    async def claim_rakeback(self, user_id: int) -> Decimal:
+        """Claim all accumulated rakeback. Returns amount claimed."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(RakebackBalance).where(RakebackBalance.user_id == user_id)
+                )
+                balance = result.scalar_one_or_none()
+
+                if not balance or balance.accumulated <= Decimal("0"):
+                    return Decimal("0")
+
+                claim_amount = balance.accumulated
+                balance.accumulated = Decimal("0")
+                balance.last_claim = discord.utils.utcnow()
+                balance.total_claimed = (balance.total_claimed or Decimal("0")) + claim_amount
+
+                # Credit to wallet
+                wallet_id = await self.get_wallet_id_for_user(user_id)
+                await self.process_treasury_transaction(
+                    wallet_id, claim_amount, "Rakeback Claim"
+                )
+
+            await session.commit()
+            return claim_amount
+
+    async def get_rakeback_history(self, user_id: int, limit: int = 50) -> List[RakebackTransaction]:
+        """Get rakeback transaction history for a user."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(RakebackTransaction)
+                .where(RakebackTransaction.user_id == user_id)
+                .order_by(RakebackTransaction.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_rakeback_info(self, user_id: int) -> dict:
+        """Get complete rakeback information for a user."""
+        # Get total wagered from GameHistory
+        total_wagered = await self.get_total_wagered_all_games(user_id)
+
+        async with self.async_sessionmaker() as session:
+            # Get VIP info
+            vip_result = await session.execute(
+                select(UserVIP).where(UserVIP.user_id == user_id)
+            )
+            user_vip = vip_result.scalar_one_or_none()
+
+            # Get tier
+            tier = None
+            if user_vip:
+                tier_result = await session.execute(
+                    select(VIPTier).where(VIPTier.id == user_vip.tier_id)
+                )
+                tier = tier_result.scalar_one_or_none()
+
+            # Get rakeback balance
+            balance_result = await session.execute(
+                select(RakebackBalance).where(RakebackBalance.user_id == user_id)
+            )
+            balance = balance_result.scalar_one_or_none()
+
+            # Get next tier
+            next_tier = None
+            if tier:
+                next_result = await session.execute(
+                    select(VIPTier).where(VIPTier.level == tier.level + 1)
+                )
+                next_tier = next_result.scalar_one_or_none()
+
+            return {
+                "total_wagered": total_wagered,
+                "total_rakeback_earned": user_vip.total_rakeback_earned if user_vip else Decimal("0"),
+                "accumulated": balance.accumulated if balance else Decimal("0"),
+                "total_claimed": balance.total_claimed if balance else Decimal("0"),
+                "last_claim": balance.last_claim if balance else None,
+                "current_tier": tier,
+                "next_tier": next_tier,
+                "rakeback_rate": tier.rakeback_rate if tier else Decimal("0.01"),
+            }
+
+    # ==================== RTP Methods ====================
+
+    async def get_effective_rtp(self, user_id: int) -> Decimal:
+        """
+        Calculate effective RTP adjustment from VIP tier and active RTP boosts.
+        Returns percentage points (e.g., 1.5 = 1.5% RTP boost).
+        """
+        async with self.async_sessionmaker() as session:
+            # Get VIP tier RTP bonus
+            vip_result = await session.execute(
+                select(UserVIP).where(UserVIP.user_id == user_id)
+            )
+            user_vip = vip_result.scalar_one_or_none()
+
+            vip_rtp_bonus = Decimal("0")
+            if user_vip:
+                tier_result = await session.execute(
+                    select(VIPTier).where(VIPTier.id == user_vip.tier_id)
+                )
+                tier = tier_result.scalar_one_or_none()
+                if tier:
+                    vip_rtp_bonus = tier.rtp_bonus or Decimal("0")
+
+            # Get active RTP boost effects
+            now = discord.utils.utcnow()
+            effects_result = await session.execute(
+                select(ActiveEffect)
+                .where(
+                    ActiveEffect.user_id == user_id,
+                    ActiveEffect.effect_type == "rtp_boost",
+                    ActiveEffect.expires_at > now,
+                )
+            )
+            active_effects = effects_result.scalars().all()
+
+            boost_rtp = sum(effect.effect_value for effect in active_effects)
+
+            return vip_rtp_bonus + boost_rtp
+
+    async def get_adjusted_house_edge(self, user_id: int, base_edge: Decimal = Decimal("0.04")) -> Decimal:
+        """
+        Get house edge adjusted for VIP tier and active RTP boosts.
+        Minimum 1% house edge to ensure sustainability.
+        """
+        rtp_adjustment = await self.get_effective_rtp(user_id)
+        # Convert RTP percentage points to edge reduction
+        # e.g., 2% RTP boost means we reduce house edge by 2%
+        adjusted = base_edge - (rtp_adjustment / 100)
+
+        # Ensure minimum 1% house edge
+        MIN_HOUSE_EDGE = Decimal("0.01")
+        return max(MIN_HOUSE_EDGE, adjusted)
+
+    async def get_vip_leaderboard(self, limit: int = 10) -> List[dict]:
+        """Get top users by total wagered (aggregated from GameHistory)."""
+        async with self.async_sessionmaker() as session:
+            # Aggregate total wagered from GameHistory
+            stmt = (
+                select(
+                    GameHistory.user_id,
+                    func.coalesce(func.sum(GameHistory.wagered), Decimal("0")).label("total_wagered")
+                )
+                .group_by(GameHistory.user_id)
+                .order_by(func.sum(GameHistory.wagered).desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+            leaderboard = []
+            for row in rows:
+                user_id = row.user_id
+                total_wagered = row.total_wagered
+                # Get user's VIP tier
+                user_vip = await session.execute(
+                    select(UserVIP).where(UserVIP.user_id == user_id)
+                )
+                vip = user_vip.scalar_one_or_none()
+                tier = None
+                if vip:
+                    tier_result = await session.execute(
+                        select(VIPTier).where(VIPTier.id == vip.tier_id)
+                    )
+                    tier = tier_result.scalar_one_or_none()
+
+                leaderboard.append({
+                    "user_id": user_id,
+                    "total_wagered": total_wagered,
+                    "tier": tier,
+                })
+
+            return leaderboard
+
+    async def set_user_vip_tier(self, user_id: int, tier_id: int) -> bool:
+        """Manually set a user's VIP tier (admin only)."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                # Verify tier exists
+                tier_result = await session.execute(
+                    select(VIPTier).where(VIPTier.id == tier_id)
+                )
+                if not tier_result.scalar_one_or_none():
+                    return False
+
+                # Get or create user VIP
+                result = await session.execute(
+                    select(UserVIP).where(UserVIP.user_id == user_id)
+                )
+                user_vip = result.scalar_one_or_none()
+
+                if not user_vip:
+                    user_vip = UserVIP(user_id=user_id, tier_id=tier_id)
+                    session.add(user_vip)
+                else:
+                    user_vip.tier_id = tier_id
+
+            await session.commit()
+            return True
+
+    async def reset_user_vip(self, user_id: int) -> bool:
+        """Reset user's VIP progress to default (admin only)."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(UserVIP).where(UserVIP.user_id == user_id)
+                )
+                user_vip = result.scalar_one_or_none()
+
+                if user_vip:
+                    user_vip.tier_id = 1
+                    user_vip.total_rakeback_earned = Decimal("0")
+
+                # Reset rakeback balance
+                balance_result = await session.execute(
+                    select(RakebackBalance).where(RakebackBalance.user_id == user_id)
+                )
+                balance = balance_result.scalar_one_or_none()
+                if balance:
+                    balance.accumulated = Decimal("0")
+                    balance.total_claimed = Decimal("0")
+
+            await session.commit()
+            return True

@@ -30,6 +30,7 @@ from database.models import (
     CommandLatencyDaily,
     CommandErrorDaily,
     DailyUserExposure,
+    RakebackBalance,
 )
 from database.manager import ItemType, EffectType
 import importlib.util
@@ -3789,6 +3790,227 @@ class Owner(commands.Cog, name="Owner"):
         if len(cycles) > 5:
             embed.set_footer(text=f"Showing 5 of {len(cycles)} cycles found")
         await ctx.send(embed=embed)
+
+    # ==================== VIP Admin Commands ====================
+
+    @commands.command(name="setviptier", hidden=True)
+    @commands.is_owner()
+    async def set_vip_tier(
+        self,
+        ctx: Context,
+        user: discord.User,
+        tier_name: str,
+    ):
+        """Manually set a user's VIP tier.
+
+        Usage: !setviptier <user> <tier_name>
+        Tier names: Bronze, Silver, Gold, Platinum, Diamond
+        """
+        try:
+            # Get tier by name
+            tier_name = tier_name.capitalize()
+            tiers = await self.bot.database.get_all_vip_tiers()
+            tier = next((t for t in tiers if t.name == tier_name), None)
+
+            if not tier:
+                valid_tiers = ", ".join(t.name for t in tiers)
+                return await ctx.send(
+                    f"Invalid tier name. Valid tiers: {valid_tiers}"
+                )
+
+            success = await self.bot.database.set_user_vip_tier(user.id, tier.id)
+
+            if success:
+                embed = discord.Embed(
+                    title="VIP Tier Updated",
+                    description=f"Set {user.mention}'s VIP tier to **{tier.name}**.",
+                    color=discord.Color.green(),
+                )
+                embed.add_field(name="Tier ID", value=str(tier.id), inline=True)
+                embed.add_field(name="Level", value=str(tier.level), inline=True)
+                embed.add_field(name="Rakeback Rate", value=f"{float(tier.rakeback_rate) * 100:.0f}%", inline=True)
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("Failed to update VIP tier.")
+
+        except Exception as e:
+            logger.error(f"Error in set_vip_tier: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @commands.command(name="resetvip", hidden=True)
+    @commands.is_owner()
+    async def reset_vip(self, ctx: Context, user: discord.User):
+        """Reset a user's VIP progress to default.
+
+        Usage: !resetvip <user>
+        """
+        try:
+            success = await self.bot.database.reset_user_vip(user.id)
+
+            if success:
+                embed = discord.Embed(
+                    title="VIP Progress Reset",
+                    description=f"Reset {user.mention}'s VIP progress to Bronze.",
+                    color=discord.Color.green(),
+                )
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("Failed to reset VIP progress.")
+
+        except Exception as e:
+            logger.error(f"Error in reset_vip: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @commands.command(name="vipconfig", hidden=True)
+    @commands.is_owner()
+    async def vip_config(self, ctx: Context):
+        """Display VIP tier configuration.
+
+        Usage: !vipconfig
+        """
+        try:
+            tiers = await self.bot.database.get_all_vip_tiers()
+
+            if not tiers:
+                await self.bot.database.ensure_default_vip_tiers()
+                tiers = await self.bot.database.get_all_vip_tiers()
+
+            embed = discord.Embed(
+                title="VIP Tier Configuration",
+                color=discord.Color.gold(),
+            )
+
+            for tier in tiers:
+                min_wagered_str = f"{float(tier.min_wagered):,.0f}"
+                rakeback_pct = float(tier.rakeback_rate) * 100
+                rtp_pct = float(tier.rtp_bonus) * 100
+
+                embed.add_field(
+                    name=f"Level {tier.level}: {tier.name}",
+                    value=(
+                        f"**Min Wagered:** {min_wagered_str}\n"
+                        f"**Rakeback:** {rakeback_pct:.0f}%\n"
+                        f"**RTP Bonus:** +{rtp_pct:.1f}%\n"
+                        f"**ID:** {tier.id}"
+                    ),
+                    inline=False,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in vip_config: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @commands.command(name="getvipwagered", hidden=True)
+    @commands.is_owner()
+    async def get_vip_wagered(
+        self,
+        ctx: Context,
+        user: discord.User,
+    ):
+        """Get a user's total wagered amount (computed from GameHistory).
+
+        Usage: !getvipwagered <user>
+        """
+        try:
+            # Get total wagered from GameHistory
+            total_wagered = await self.bot.database.get_total_wagered_all_games(user.id)
+            vip_info = await self.bot.database.get_rakeback_info(user.id)
+            current_tier = vip_info.get("current_tier")
+
+            embed = discord.Embed(
+                title="VIP Wagered Info",
+                description=f"{user.mention}'s total wagered (from GameHistory): **{float(total_wagered):,.0f}**",
+                color=discord.Color.blue(),
+            )
+
+            if current_tier:
+                embed.add_field(
+                    name="Current Tier",
+                    value=f"**{current_tier.name}** (Level {current_tier.level})",
+                    inline=False,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in get_vip_wagered: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @commands.command(name="addrakeback", hidden=True)
+    @commands.is_owner()
+    async def add_rakeback(
+        self,
+        ctx: Context,
+        user: discord.User,
+        amount: str,
+    ):
+        """Add rakeback to a user's balance (for testing).
+
+        Usage: !addrakeback <user> <amount>
+        """
+        try:
+            amount_decimal = Decimal(amount.replace(",", "").replace("_", ""))
+
+            # Add rakeback directly
+            async with self.bot.database.async_sessionmaker() as session:
+                from database.models import RakebackBalance
+                from datetime import datetime
+
+                result = await session.execute(
+                    select(RakebackBalance).where(RakebackBalance.user_id == user.id)
+                )
+                balance = result.scalar_one_or_none()
+
+                if not balance:
+                    balance = RakebackBalance(user_id=user.id, accumulated=amount_decimal)
+                    session.add(balance)
+                else:
+                    balance.accumulated = (balance.accumulated or Decimal("0")) + amount_decimal
+
+                await session.commit()
+
+            embed = discord.Embed(
+                title="Rakeback Added",
+                description=f"Added **{float(amount_decimal):,.0f}** rakeback to {user.mention}'s balance.",
+                color=discord.Color.green(),
+            )
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in add_rakeback: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @commands.command(name="initviptiers", hidden=True)
+    @commands.is_owner()
+    async def init_vip_tiers(self, ctx: Context):
+        """Initialize default VIP tiers.
+
+        Usage: !initviptiers
+        """
+        try:
+            await self.bot.database.ensure_default_vip_tiers()
+            tiers = await self.bot.database.get_all_vip_tiers()
+
+            embed = discord.Embed(
+                title="VIP Tiers Initialized",
+                description=f"Created {len(tiers)} default VIP tiers.",
+                color=discord.Color.green(),
+            )
+
+            for tier in tiers:
+                embed.add_field(
+                    name=f"{tier.name}",
+                    value=f"Level {tier.level} | {float(tier.rakeback_rate) * 100:.0f}% rakeback",
+                    inline=True,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in init_vip_tiers: {e}")
+            await ctx.send(f"Error: {e}")
 
 
 async def setup(bot) -> None:

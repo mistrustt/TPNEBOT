@@ -1446,6 +1446,48 @@ class Casino(commands.Cog):
             return {k: self._json_safe(v) for k, v in value.items()}
         return value
 
+    async def calculate_house_edge(self, user_id: int, base_edge: Decimal = Decimal("0.04")) -> Decimal:
+        """
+        Get house edge adjusted for VIP tier and active RTP boosts.
+        Minimum 1% house edge to ensure sustainability.
+
+        Args:
+            user_id: Discord user ID
+            base_edge: Base house edge (default 4%)
+
+        Returns:
+            Adjusted house edge as a decimal (e.g., 0.03 = 3%)
+        """
+        try:
+            adjusted_edge = await self.bot.database.get_adjusted_house_edge(user_id, base_edge)
+            return adjusted_edge
+        except Exception as e:
+            self.bot.logger.error(f"Error calculating house edge for {user_id}: {e}")
+            return base_edge
+
+    async def process_game_result(self, user_id: int, game_name: str, wagered: Decimal) -> Decimal:
+        """
+        Called after game resolves to accumulate rakeback.
+        Updates user's total wagered and adds rakeback to their balance.
+
+        Args:
+            user_id: Discord user ID
+            game_name: Name of the game played
+            wagered: Amount wagered in the game
+
+        Returns:
+            Rakeback amount earned from this wager
+        """
+        if wagered <= 0:
+            return Decimal("0")
+
+        try:
+            rakeback = await self.bot.database.update_user_wagered(user_id, wagered, game_name)
+            return rakeback
+        except Exception as e:
+            self.bot.logger.error(f"Error processing game result for {user_id}: {e}")
+            return Decimal("0")
+
     async def _create_game_session(
         self,
         ctx: Context | None,
@@ -4322,6 +4364,9 @@ class Casino(commands.Cog):
                 reason="hilo_bet",
             )
 
+            # Calculate dynamic house edge based on VIP tier and active RTP boosts
+            house_edge = await self.calculate_house_edge(user_id)
+
             cards = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
             card_values = {card: idx for idx, card in enumerate(cards)}
             current_card = await self.fair_choice(ctx.author.id, cards[1:-1])
@@ -4337,9 +4382,10 @@ class Casino(commands.Cog):
                 "has_played": False,
                 "skips_used": 0,
                 "session_id": session_id,
+                "house_edge": house_edge,
             }
 
-            def calculate_multiplier(current_card, action):
+            def calculate_multiplier(current_card, action, edge=house_edge):
                 current_value = card_values[current_card]
                 if action == "higher":
                     favorable = len(
@@ -4360,9 +4406,8 @@ class Casino(commands.Cog):
                 # Fair multiplier (1 / probability) before house edge
                 fair_mult = Decimal("1.0") / probability if probability != 0 else Decimal("0")
 
-                # Apply a house edge (default ~4%) to produce deterministic casino multipliers
-                house_edge = Decimal("0.04")
-                multiplier = fair_mult * (Decimal("1.0") - house_edge)
+                # Apply dynamic house edge based on VIP tier and RTP boosts
+                multiplier = fair_mult * (Decimal("1.0") - edge)
 
                 # Clamp multipliers into typical ranges used by casinos:
                 # - Middle / ~50% chances -> ~1.9x-2.0x
@@ -4474,6 +4519,9 @@ class Casino(commands.Cog):
                 if game_state["view"]:
                     for child in game_state["view"].children:
                         child.disabled = True
+
+                # Process rakeback for the wagered amount
+                await self.process_game_result(user_id, "hilo", game_state["bet_amount"])
 
                 if win:
                     revealed_seed, new_hash = await self.bot.database.increment_win(

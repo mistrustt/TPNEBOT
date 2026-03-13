@@ -370,6 +370,7 @@ class EffectType(enum.Enum):
     LUCK_BOOST = "luck_boost"  # Better RNG outcomes
     EARNING_BOOST = "earning_boost"  # General earning multiplier
     COOLDOWN_REDUCTION = "cooldown_reduction"  # Reduce cooldown times
+    RTP_BOOST = "rtp_boost"  # Temporary RTP percentage boost
 
 
 class Item(Base):
@@ -1041,3 +1042,68 @@ class ForceRole(Base):
     __table_args__ = (
         UniqueConstraint("guild_id", "role_id", name="unique_guild_role"),
     )
+
+
+class VIPTier(Base):
+    """VIP tier levels with escalating benefits."""
+    __tablename__ = "vip_tiers"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)  # Bronze, Silver, Gold, etc.
+    level = Column(Integer, nullable=False, unique=True)
+    min_wagered = Column(Numeric(38, 2), nullable=False)  # Threshold to qualify
+    rakeback_rate = Column(Numeric(5, 4), nullable=False)  # 0.0100 = 1%
+    rtp_bonus = Column(Numeric(5, 4), default=Decimal("0"))  # RTP % added
+    color = Column(String, default="#FFFFFF")
+    icon = Column(String, nullable=True)
+
+    def __repr__(self):
+        return f"<VIPTier(level={self.level}, name='{self.name}', rakeback={self.rakeback_rate}, rtp_bonus={self.rtp_bonus})>"
+
+
+class UserVIP(Base):
+    """Track user VIP status. Total wagered is computed from GameHistory."""
+    __tablename__ = "user_vip"
+
+    user_id = Column(BigInteger, primary_key=True)
+    tier_id = Column(Integer, ForeignKey("vip_tiers.id"), default=1)
+    total_rakeback_earned = Column(Numeric(38, 2), default=Decimal("0.00"))
+
+    tier = relationship("VIPTier", backref="users")
+
+    def __repr__(self):
+        return f"<UserVIP(user_id={self.user_id}, tier_id={self.tier_id})>"
+
+
+class RakebackBalance(Base):
+    """Track accumulated unclaimed rakeback."""
+    __tablename__ = "rakeback_balances"
+
+    user_id = Column(BigInteger, primary_key=True)
+    accumulated = Column(Numeric(38, 2), default=Decimal("0.00"))
+    last_claim = Column(DateTime(timezone=True), nullable=True)
+    total_claimed = Column(Numeric(38, 2), default=Decimal("0.00"))
+
+    def __repr__(self):
+        return f"<RakebackBalance(user_id={self.user_id}, accumulated={self.accumulated})>"
+
+
+class RakebackTransaction(Base):
+    """Audit trail for rakeback accumulation."""
+    __tablename__ = "rakeback_transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    game_name = Column(String, nullable=False)
+    wagered_amount = Column(Numeric(38, 2), nullable=False)
+    rakeback_rate = Column(Numeric(5, 4), nullable=False)
+    rakeback_amount = Column(Numeric(38, 2), nullable=False)
+    vip_tier_id = Column(Integer, ForeignKey("vip_tiers.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
+
+    __table_args__ = (
+        Index("ix_rakeback_user_created", "user_id", "created_at"),
+    )
+
+    def __repr__(self):
+        return f"<RakebackTransaction(user_id={self.user_id}, game='{self.game_name}', amount={self.rakeback_amount})>"

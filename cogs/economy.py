@@ -4113,6 +4113,7 @@ class Economy(commands.Cog):
                 "luck_boost": "🍀 Luck Boost",
                 "earning_boost": "📈 Earning Boost",
                 "cooldown_reduction": "⏱️ Cooldown Reduction",
+                "rtp_boost": "📊 RTP Boost",
             }
             display_name = effect_names.get(effect.effect_type, effect.effect_type)
 
@@ -4168,6 +4169,338 @@ class Economy(commands.Cog):
             embed.add_field(name="📤 Outgoing", value=outgoing_str, inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # ==================== VIP Commands ====================
+
+    vip_group = app_commands.Group(
+        name="vip",
+        description="VIP tier commands for loyal players",
+    )
+
+    @vip_group.command(name="status", description="View your VIP tier status and progress")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def vip_status(self, interaction: Interaction):
+        """View your current VIP tier status."""
+        try:
+            vip_info = await self.bot.database.get_rakeback_info(interaction.user.id)
+            current_tier = vip_info.get("current_tier")
+            next_tier = vip_info.get("next_tier")
+            total_wagered = vip_info.get("total_wagered", Decimal("0"))
+            rakeback_rate = vip_info.get("rakeback_rate", Decimal("0.01"))
+
+            if current_tier is None:
+                # Ensure default VIP tiers exist
+                await self.bot.database.ensure_default_vip_tiers()
+                vip_info = await self.bot.database.get_rakeback_info(interaction.user.id)
+                current_tier = vip_info.get("current_tier")
+                next_tier = vip_info.get("next_tier")
+                total_wagered = vip_info.get("total_wagered", Decimal("0"))
+                rakeback_rate = vip_info.get("rakeback_rate", Decimal("0.01"))
+
+            tier_colors = {
+                "Bronze": discord.Color.orange(),
+                "Silver": discord.Color.light_grey(),
+                "Gold": discord.Color.gold(),
+                "Platinum": discord.Color.lighter_grey(),
+                "Diamond": discord.Color.blue(),
+            }
+
+            color = tier_colors.get(current_tier.name if current_tier else "Bronze", discord.Color.default())
+
+            embed = discord.Embed(
+                title=f"{'💎' if current_tier and current_tier.name == 'Diamond' else '👑'} VIP Status",
+                color=color,
+            )
+
+            tier_emoji = {
+                "Bronze": "🥉",
+                "Silver": "🥈",
+                "Gold": "🥇",
+                "Platinum": "💎",
+                "Diamond": "💠",
+            }
+
+            if current_tier:
+                emoji = tier_emoji.get(current_tier.name, "⭐")
+                embed.add_field(
+                    name="Current Tier",
+                    value=f"{emoji} **{current_tier.name}** (Level {current_tier.level})",
+                    inline=False,
+                )
+
+                # Progress bar
+                if next_tier:
+                    progress = float(total_wagered) / float(next_tier.min_wagered)
+                    progress = min(progress, 1.0)
+                    filled = int(progress * 10)
+                    bar = "█" * filled + "░" * (10 - filled)
+                    progress_pct = f"{progress * 100:.1f}%"
+                    next_amount = float(next_tier.min_wagered) - float(total_wagered)
+                    embed.add_field(
+                        name="Progress to Next Tier",
+                        value=f"`{bar}` {progress_pct}\nNeed **{await self.formatter(Decimal(str(next_amount)))}** more to reach **{next_tier.name}**",
+                        inline=False,
+                    )
+                else:
+                    embed.add_field(
+                        name="Progress",
+                        value="✨ **Maximum Tier Reached!**",
+                        inline=False,
+                    )
+
+                embed.add_field(
+                    name="Total Wagered",
+                    value=f"💰 **{await self.formatter(total_wagered)}**",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="Rakeback Rate",
+                    value=f"📈 **{float(rakeback_rate) * 100:.1f}%**",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="RTP Bonus",
+                    value=f"📊 **+{float(current_tier.rtp_bonus) * 100:.1f}%**",
+                    inline=True,
+                )
+            else:
+                embed.add_field(
+                    name="Current Tier",
+                    value="🥉 **Bronze** (Level 1)",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Total Wagered",
+                    value=f"💰 **{await self.formatter(total_wagered)}**",
+                    inline=True,
+                )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"Error in vip_status: {e}")
+            await interaction.response.send_message(
+                "An error occurred while fetching your VIP status.",
+                ephemeral=True,
+            )
+
+    @vip_group.command(name="tiers", description="View all VIP tiers and their benefits")
+    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def vip_tiers(self, interaction: Interaction):
+        """Display all VIP tiers with benefits."""
+        try:
+            tiers = await self.bot.database.get_all_vip_tiers()
+
+            if not tiers:
+                await self.bot.database.ensure_default_vip_tiers()
+                tiers = await self.bot.database.get_all_vip_tiers()
+
+            tier_emojis = {
+                "Bronze": "🥉",
+                "Silver": "🥈",
+                "Gold": "🥇",
+                "Platinum": "💎",
+                "Diamond": "💠",
+            }
+
+            embed = discord.Embed(
+                title="👑 VIP Tiers",
+                description="Climb the ranks by wagering more! Higher tiers get better rakeback and RTP bonuses.",
+                color=discord.Color.gold(),
+            )
+
+            for tier in tiers:
+                emoji = tier_emojis.get(tier.name, "⭐")
+                rakeback_pct = float(tier.rakeback_rate) * 100
+                rtp_pct = float(tier.rtp_bonus) * 100
+                min_wagered_str = await self.formatter(tier.min_wagered)
+
+                embed.add_field(
+                    name=f"{emoji} {tier.name}",
+                    value=(
+                        f"**Min Wagered:** {min_wagered_str}\n"
+                        f"**Rakeback:** {rakeback_pct:.0f}%\n"
+                        f"**RTP Bonus:** +{rtp_pct:.1f}%"
+                    ),
+                    inline=True,
+                )
+
+            await interaction.response.send_message(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in vip_tiers: {e}")
+            await interaction.response.send_message(
+                "An error occurred while fetching VIP tiers.",
+                ephemeral=True,
+            )
+
+    @vip_group.command(name="leaderboard", description="View top players by total wagered")
+    @app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def vip_leaderboard(self, interaction: Interaction):
+        """Display top VIP players by total wagered."""
+        try:
+            leaderboard = await self.bot.database.get_vip_leaderboard(limit=10)
+
+            if not leaderboard:
+                await interaction.response.send_message(
+                    "No VIP data available yet.",
+                    ephemeral=True,
+                )
+                return
+
+            tier_emojis = {
+                "Bronze": "🥉",
+                "Silver": "🥈",
+                "Gold": "🥇",
+                "Platinum": "💎",
+                "Diamond": "💠",
+            }
+
+            embed = discord.Embed(
+                title="🏆 VIP Leaderboard",
+                description="Top players by total wagered",
+                color=discord.Color.gold(),
+            )
+
+            description_lines = []
+            for i, entry in enumerate(leaderboard, 1):
+                user_id = entry["user_id"]
+                total_wagered = entry["total_wagered"]
+                tier = entry.get("tier")
+
+                tier_name = tier.name if tier else "Bronze"
+                emoji = tier_emojis.get(tier_name, "⭐")
+
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"#{i}"
+
+                formatted_wagered = await self.formatter(total_wagered)
+                description_lines.append(f"{medal} <@{user_id}> - {emoji} {tier_name} - **{formatted_wagered}** wagered")
+
+            embed.description = "\n".join(description_lines)
+
+            await interaction.response.send_message(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in vip_leaderboard: {e}")
+            await interaction.response.send_message(
+                "An error occurred while fetching the leaderboard.",
+                ephemeral=True,
+            )
+
+    # ==================== Rakeback Commands ====================
+
+    @app_commands.command(name="rakeback", description="Claim your accumulated rakeback")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def claim_rakeback(self, interaction: Interaction):
+        """Claim accumulated rakeback."""
+        try:
+            balance = await self.bot.database.get_rakeback_balance(interaction.user.id)
+
+            if balance <= Decimal("0"):
+                embed = discord.Embed(
+                    title="Rakeback",
+                    description="You have no accumulated rakeback to claim.\n\nPlay more games to earn rakeback on your wagers!",
+                    color=discord.Color.orange(),
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            claimed = await self.bot.database.claim_rakeback(interaction.user.id)
+
+            if claimed > 0:
+                formatted_amount = await self.formatter(claimed)
+                embed = discord.Embed(
+                    title="💸 Rakeback Claimed!",
+                    description=f"You claimed **{formatted_amount}** {self.currency_name}!",
+                    color=discord.Color.green(),
+                )
+                await interaction.response.send_message(embed=embed)
+            else:
+                await interaction.response.send_message(
+                    "No rakeback available to claim.",
+                    ephemeral=True,
+                )
+
+        except Exception as e:
+            logger.error(f"Error in claim_rakeback: {e}")
+            await interaction.response.send_message(
+                "An error occurred while claiming rakeback.",
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="rakebackinfo", description="View your rakeback information")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def rakeback_info(self, interaction: Interaction):
+        """View your rakeback balance and history."""
+        try:
+            vip_info = await self.bot.database.get_rakeback_info(interaction.user.id)
+            current_tier = vip_info.get("current_tier")
+            accumulated = vip_info.get("accumulated", Decimal("0"))
+            total_claimed = vip_info.get("total_claimed", Decimal("0"))
+            total_rakeback_earned = vip_info.get("total_rakeback_earned", Decimal("0"))
+            rakeback_rate = vip_info.get("rakeback_rate", Decimal("0.01"))
+            last_claim = vip_info.get("last_claim")
+
+            embed = discord.Embed(
+                title="📈 Rakeback Information",
+                color=discord.Color.blue(),
+            )
+
+            tier_name = current_tier.name if current_tier else "Bronze"
+            embed.add_field(
+                name="Current Tier",
+                value=f"**{tier_name}**",
+                inline=True,
+            )
+            embed.add_field(
+                name="Rakeback Rate",
+                value=f"**{float(rakeback_rate) * 100:.1f}%**",
+                inline=True,
+            )
+            embed.add_field(
+                name="Accumulated",
+                value=f"💰 **{await self.formatter(accumulated)}**",
+                inline=False,
+            )
+            embed.add_field(
+                name="Total Earned",
+                value=f"📊 **{await self.formatter(total_rakeback_earned)}**",
+                inline=True,
+            )
+            embed.add_field(
+                name="Total Claimed",
+                value=f"✅ **{await self.formatter(total_claimed)}**",
+                inline=True,
+            )
+
+            if last_claim:
+                time_since = datetime.utcnow() - last_claim
+                hours = time_since.total_seconds() / 3600
+                if hours < 24:
+                    last_claim_str = f"{int(hours)} hours ago"
+                else:
+                    last_claim_str = f"{int(hours / 24)} days ago"
+                embed.add_field(
+                    name="Last Claim",
+                    value=f"🕒 {last_claim_str}",
+                    inline=True,
+                )
+
+            embed.set_footer(text="Use /rakeback to claim your accumulated rakeback!")
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"Error in rakeback_info: {e}")
+            await interaction.response.send_message(
+                "An error occurred while fetching rakeback info.",
+                ephemeral=True,
+            )
 
 
 async def setup(bot: commands.Bot):
