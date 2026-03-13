@@ -2612,14 +2612,20 @@ class DatabaseManager:
             row = active_users_result.fetchone()
             active_users = (row.senders or 0) + (row.receivers or 0)
 
-            # Volatility estimate (standard deviation of balances across wallets)
+            # Volatility estimate (coefficient of variation of balances across wallets)
+            # Using CV (std_dev / mean) gives a normalized relative volatility measure
             balances_stmt = select(Wallet.balance)
             balances_result = await session.execute(balances_stmt)
             balances = [r[0] for r in balances_result.fetchall()]
-            if len(balances) > 1:
+            if len(balances) > 1 and sum(balances) > 0:
                 mean_balance = sum(balances) / len(balances)
-                variance = sum((x - mean_balance)**2 for x in balances) / (len(balances) - 1)
-                volatility_index = Decimal(variance.sqrt()) if variance >= 0 else Decimal("0.00")
+                if mean_balance > 0:
+                    variance = sum((x - mean_balance)**2 for x in balances) / (len(balances) - 1)
+                    std_dev = Decimal(variance.sqrt()) if variance >= 0 else Decimal("0.00")
+                    # Coefficient of variation (normalized volatility)
+                    volatility_index = (std_dev / mean_balance).quantize(Decimal("0.0001"))
+                else:
+                    volatility_index = Decimal("0.00")
             else:
                 volatility_index = Decimal("0.00")
 
