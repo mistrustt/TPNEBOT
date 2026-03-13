@@ -1438,114 +1438,240 @@ class Economy(commands.Cog):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(
-        name="economy", aliases=["eco", "econ"], description="View economy statistics."
+    @commands.group(
+        name="economy", aliases=["eco", "econ"], description="View economy statistics and related features."
     )
-    async def economy_status(self, ctx: commands.Context):
+    async def economy(self, ctx: commands.Context):
         """Fetch and display economy statistics."""
-        try:
-            wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
-            treasury_balance = await self.bot.database.get_treasury_balance()
-            supply = await self.bot.database.get_supply_record()
-            balance = await self.bot.database.get_wallet_balance_by_user_id(
-                ctx.author.id
-            )
-            balance = Decimal(balance)
-            bank_balance = await self.bot.database.get_bank_balance(wallet_id)
-            bank_balance = Decimal(bank_balance)
-            balance = balance if balance is not None else 0
-            bank_balance = bank_balance if bank_balance is not None else 0
+        if ctx.invoked_subcommand is None:
+            try:
+                wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
+                treasury_balance = await self.bot.database.get_treasury_balance()
+                supply = await self.bot.database.get_supply_record()
+                balance = await self.bot.database.get_wallet_balance_by_user_id(
+                    ctx.author.id
+                )
+                balance = Decimal(balance)
+                bank_balance = await self.bot.database.get_bank_balance(wallet_id)
+                bank_balance = Decimal(bank_balance)
+                balance = balance if balance is not None else 0
+                bank_balance = bank_balance if bank_balance is not None else 0
 
-            # Get new economic factors
-            economic_factors = await self.bot.database.get_economic_factors()
+                # Get new economic factors
+                economic_factors = await self.bot.database.get_economic_factors()
+
+                embed = discord.Embed(
+                    title="📊 Economy Statistics", color=discord.Color.blurple()
+                )
+                embed.add_field(
+                    name="Total Supply",
+                    value=f"{self.currency_name} **{await self.formatter(supply.total_supply)}**",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Circulating Supply",
+                    value=f"{self.currency_name} **{await self.formatter(supply.circulating)}**",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Treasury Balance",
+                    value=f"{self.currency_name} **{await self.formatter(treasury_balance)}**",
+                    inline=False,
+                )
+
+                total_supply = supply.total_supply
+                percentage = (
+                    ((balance + bank_balance) / total_supply) * 100
+                    if total_supply > 0
+                    else 0
+                )
+                health_percentage = (
+                    (treasury_balance / total_supply * 100) if total_supply > 0 else 0
+                )
+                health_emoji = "⚠️" if health_percentage < 20 else "📈"
+                embed.add_field(
+                    name="Economy Health",
+                    value=f"{health_emoji} **{await self.short_formatter(health_percentage)}%**",
+                    inline=False,
+                )
+
+                # New economic indicators
+                embed.add_field(
+                    name="Treasury Health Ratio",
+                    value=f"**{(economic_factors['treasury_health'] * 100):.2f}%**",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Transaction Fee Rate",
+                    value=f"**{(economic_factors['fee_rate'] * 100):.2f}%**",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Passive Income Rate",
+                    value=f"**{(economic_factors['passive_income_rate'] * 100):.2f}%**",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Market Volatility Index",
+                    value=f"**{(economic_factors['volatility_index'] * 100):.2f}%**",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Velocity of Money",
+                    value=f"**{economic_factors['velocity_of_money']:.4f}**",
+                    inline=False,
+                )
+
+                embed.add_field(
+                    name="Liquidity Ratio",
+                    value=f"**{(economic_factors['liquidity_ratio'] * 100):.2f}%**",
+                    inline=False,
+                )
+
+                embed.add_field(
+                    name="Wins/Losses",
+                    value=f"{await self.bot.database.get_global_wins():,}/{await self.bot.database.get_global_losses():,}",
+                    inline=False,
+                )
+                embed.add_field(
+                    name="Your Holdings",
+                    value=f"**{percentage:.2f}%** of Total Supply",
+                    inline=False,
+                )
+
+                await ctx.reply(embed=embed)
+
+            except Exception as e:
+                await ctx.reply(
+                    f"🚫 Error fetching economy stats, Please try again later.",
+                    delete_after=5,
+                )
+                logger.error(f"Error fetching economy stats: {e}")
+
+    @economy.command(
+        name="trends", aliases=["trend"], description="View economic trends over time."
+    )
+    async def economy_trends(self, ctx: commands.Context, days: int = 30):
+        """Display economic trends over the specified number of days."""
+        if not hasattr(self.bot, 'database'):
+            return await ctx.send("❌ Database not available.")
+
+        if days > 365:
+            return await ctx.send("❌ Maximum trend period is 365 days.")
+
+        try:
+            trends = await self.bot.database.get_economic_trends(days)
+
+            if "error" in trends:
+                return await ctx.send(f"❌ {trends['error']}")
 
             embed = discord.Embed(
-                title="📊 Economy Statistics", color=discord.Color.blurple()
-            )
-            embed.add_field(
-                name="Total Supply",
-                value=f"{self.currency_name} **{await self.formatter(supply.total_supply)}**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Circulating Supply",
-                value=f"{self.currency_name} **{await self.formatter(supply.circulating)}**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Treasury Balance",
-                value=f"{self.currency_name} **{await self.formatter(treasury_balance)}**",
-                inline=False,
+                title=f"📈 Economic Trends ({days} days)",
+                description=f"Data points: {trends['data_points']}",
+                color=discord.Color.green()
             )
 
-            total_supply = supply.total_supply
-            percentage = (
-                ((balance + bank_balance) / total_supply) * 100
-                if total_supply > 0
-                else 0
-            )
-            health_percentage = (
-                (treasury_balance / total_supply * 100) if total_supply > 0 else 0
-            )
-            health_emoji = "⚠️" if health_percentage < 20 else "📈"
-            embed.add_field(
-                name="Economy Health",
-                value=f"{health_emoji} **{await self.short_formatter(health_percentage)}%**",
-                inline=False,
-            )
+            # Add metrics with their trends
+            for metric_name, metric_data in trends['metrics'].items():
+                # Format metric name to be more readable
+                formatted_name = metric_name.replace('_', ' ').title()
 
-            # New economic indicators
-            embed.add_field(
-                name="Treasury Health Ratio",
-                value=f"**{(economic_factors['treasury_health'] * 100):.2f}%**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Transaction Fee Rate",
-                value=f"**{(economic_factors['fee_rate'] * 100):.2f}%**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Passive Income Rate",
-                value=f"**{(economic_factors['passive_income_rate'] * 100):.2f}%**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Market Volatility Index",
-                value=f"**{(economic_factors['volatility_index'] * 100):.2f}%**",
-                inline=False,
-            )
-            embed.add_field(
-                name="Velocity of Money",
-                value=f"**{economic_factors['velocity_of_money']:.4f}**",
-                inline=False,
-            )
+                # Determine trend indicator
+                if metric_data['trend_slope'] > 0:
+                    trend_indicator = "↗️"
+                elif metric_data['trend_slope'] < 0:
+                    trend_indicator = "↘️"
+                else:
+                    trend_indicator = "➡️"
 
-            embed.add_field(
-                name="Liquidity Ratio",
-                value=f"**{(economic_factors['liquidity_ratio'] * 100):.2f}%**",
-                inline=False,
-            )
+                # Format the value appropriately
+                if metric_name in ['treasury_health', 'liquidity_ratio']:
+                    current_val = f"{metric_data['current']*100:.2f}%"
+                    avg_val = f"{metric_data['average']*100:.2f}%"
+                else:
+                    current_val = f"{metric_data['current']:.4f}"
+                    avg_val = f"{metric_data['average']:.4f}"
 
-            embed.add_field(
-                name="Wins/Losses",
-                value=f"{await self.bot.database.get_global_wins():,}/{await self.bot.database.get_global_losses():,}",
-                inline=False,
-            )
-            embed.add_field(
-                name="Your Holdings",
-                value=f"**{percentage:.2f}%** of Total Supply",
-                inline=False,
-            )
+                value_text = (
+                    f"Current: {current_val} {trend_indicator}\n"
+                    f"Average: {avg_val}\n"
+                    f"Range: {metric_data['min']:.4f} - {metric_data['max']:.4f}"
+                )
 
-            await ctx.reply(embed=embed)
+                embed.add_field(
+                    name=formatted_name,
+                    value=value_text,
+                    inline=True
+                )
+
+            await ctx.send(embed=embed)
 
         except Exception as e:
-            await ctx.reply(
-                f"🚫 Error fetching economy stats, Please try again later.",
-                delete_after=5,
+            logger.error(f"Error getting economic trends: {e}")
+            await ctx.send("❌ Error retrieving trends. Please try again.")
+
+    @economy.command(
+        name="health", aliases=["econhealth"], description="Get the overall economic health score."
+    )
+    async def economy_health(self, ctx: commands.Context):
+        """Display the overall economic health score and breakdown with personalized recommendations."""
+        if not hasattr(self.bot, 'database'):
+            return await ctx.send("❌ Database not available.")
+
+        try:
+            health_data = await self.bot.database.get_economic_health_score()
+            recommendations = await self.bot.database.get_personalized_economic_recommendations(ctx.author.id)
+
+            embed = discord.Embed(
+                title="🏥 Economic Health Score",
+                description=f"Overall Score: **{health_data['score']}/100** ({health_data['status']})",
+                color=discord.Color.orange()
             )
-            logger.error(f"Error fetching economy stats: {e}")
+
+            # Add component scores
+            for component_name, component_data in health_data['components'].items():
+                formatted_name = component_name.replace('_', ' ').title()
+                value_text = (
+                    f"Value: {component_data['value']}%\n"
+                    f"Score: {component_data['score']}/{component_data['weight']}"
+                )
+
+                # Color coding for health
+                if component_data['score'] / component_data['weight'] > 0.8:
+                    field_color = "🟢"
+                elif component_data['score'] / component_data['weight'] > 0.6:
+                    field_color = "🟡"
+                elif component_data['score'] / component_data['weight'] > 0.4:
+                    field_color = "🟠"
+                else:
+                    field_color = "🔴"
+
+                embed.add_field(
+                    name=f"{field_color} {formatted_name}",
+                    value=value_text,
+                    inline=True
+                )
+
+            # Add recommendations section
+            if recommendations.get('recommendations'):
+                rec_text = ""
+                for rec in recommendations['recommendations']:
+                    priority_emoji = {"high": "🔴", "medium": "🟡", "info": "🔵"}
+                    emoji = priority_emoji.get(rec.get('priority', 'info'), "🔹")
+                    rec_text += f"{emoji} {rec['message']}\n"
+
+                embed.add_field(
+                    name="💡 Recommendations",
+                    value=rec_text.strip(),
+                    inline=False
+                )
+
+            embed.set_footer(text="Higher scores indicate better economic health")
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error getting economic health: {e}")
+            await ctx.send("❌ Error retrieving health score. Please try again.")
 
     @commands.command(name="daily", description="Claim your daily reward.")
     async def daily(self, ctx: commands.Context):

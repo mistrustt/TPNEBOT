@@ -38,6 +38,7 @@ from .models import (
     CryptoPrice,
     Supply,
     EconomicMetricsHistory,
+    UserEconomicPreferences,
     Reputation,
     Wallet,
     Block,
@@ -2583,6 +2584,44 @@ class DatabaseManager:
             else:
                 velocity_of_money = Decimal("0")
 
+            # Get current economic factors for additional metrics
+            economic_factors = await self.get_economic_factors()
+
+            # Store in historical table
+            historical_record = EconomicMetricsHistory(
+                date=today,
+                total_supply=total_supply,
+                circulating_supply=circulating_supply,
+                treasury_balance=treasury_balance,
+                treasury_health=economic_factors.get("treasury_health", Decimal("0")),
+                liquidity_ratio=liquidity_ratio,
+                velocity_of_money=velocity_of_money,
+                volatility_index=volatility_index,
+                transaction_volume=transaction_volume,
+                active_users=active_users,
+                avg_wallet_balance=avg_wallet_balance,
+                fee_rate=economic_factors.get("fee_rate", Decimal("0")),
+                passive_income_rate=economic_factors.get("passive_income_rate", Decimal("0"))
+            )
+
+            # Check if record already exists for today
+            existing_stmt = select(EconomicMetricsHistory).where(
+                EconomicMetricsHistory.date == today
+            )
+            existing_result = await session.execute(existing_stmt)
+            existing_record = existing_result.scalar_one_or_none()
+
+            if existing_record:
+                # Update existing record
+                for key, value in historical_record.__dict__.items():
+                    if not key.startswith('_') and key != 'id':
+                        setattr(existing_record, key, value)
+            else:
+                # Insert new record
+                session.add(historical_record)
+
+            await session.commit()
+
             # Optionally store in Redis/file/local cache for use in dynamic adjustments
             self._latest_metrics = {
                 "date": today,
@@ -2598,6 +2637,380 @@ class DatabaseManager:
             }
 
         logger.info("[DAILY SNAPSHOT] Economy metrics collected.")
+
+    async def get_or_create_user_economic_preferences(self, user_id: int) -> UserEconomicPreferences:
+        """
+        Get user economic preferences, creating default ones if they don't exist.
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            UserEconomicPreferences object
+        """
+        async with self.async_sessionmaker() as session:
+            # Try to get existing preferences
+            stmt = select(UserEconomicPreferences).where(UserEconomicPreferences.user_id == user_id)
+            result = await session.execute(stmt)
+            preferences = result.scalar_one_or_none()
+
+            # If no preferences exist, create default ones
+            if not preferences:
+                preferences = UserEconomicPreferences(user_id=user_id)
+                session.add(preferences)
+                await session.commit()
+
+            return preferences
+
+    async def update_user_economic_preferences(self, user_id: int, **kwargs) -> None:
+        """
+        Update user economic preferences.
+
+        Args:
+            user_id: Discord user ID
+            **kwargs: Preference fields to update
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                stmt = select(UserEconomicPreferences).where(UserEconomicPreferences.user_id == user_id)
+                result = await session.execute(stmt)
+                preferences = result.scalar_one_or_none()
+
+                if not preferences:
+                    preferences = UserEconomicPreferences(user_id=user_id)
+                    session.add(preferences)
+
+                # Update provided fields
+                for key, value in kwargs.items():
+                    if hasattr(preferences, key):
+                        setattr(preferences, key, value)
+
+                await session.commit()
+
+    async def get_users_for_economic_alerts(self) -> list:
+        """
+        Get all users who have economic alerts enabled.
+
+        Returns:
+            List of user IDs
+        """
+        async with self.async_sessionmaker() as session:
+            stmt = select(UserEconomicPreferences.user_id).where(
+                UserEconomicPreferences.economic_alerts_enabled == True
+            )
+            result = await session.execute(stmt)
+            return [row[0] for row in result.fetchall()]
+
+    async def check_and_send_economic_alerts(self) -> dict:
+        """
+        Check economic conditions and send alerts to users who have them enabled.
+
+        Returns:
+            Dictionary with alert statistics
+        """
+        # Get current economic factors
+        factors = await self.get_economic_factors()
+        velocity = float(factors.get("velocity_of_money", 0))
+        liquidity = float(factors.get("liquidity_ratio", 0))
+        volatility = float(factors.get("volatility_index", 0))
+
+        # Get users with alerts enabled
+        user_ids = await self.get_users_for_economic_alerts()
+
+        alerts_sent = {
+            "velocity": 0,
+            "liquidity": 0,
+            "volatility": 0,
+            "total_users": len(user_ids)
+        }
+
+        # For now, we'll just return the stats without actually sending DMs
+        # In a real implementation, we would send DMs to users through the bot
+
+        return alerts_sent
+
+    async def get_personalized_economic_recommendations(self, user_id: int) -> dict:
+        """
+        Get personalized economic recommendations based on user preferences and current conditions.
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            Dictionary with recommendations
+        """
+        # Get user preferences
+        preferences = await self.get_or_create_user_economic_preferences(user_id)
+
+        # Get current economic factors
+        factors = await self.get_economic_factors()
+        health_score = await self.get_economic_health_score()
+
+        recommendations = {
+            "timestamp": discord.utils.utcnow().isoformat(),
+            "user_risk_profile": preferences.risk_tolerance,
+            "user_investment_style": preferences.investment_style,
+            "economic_health_score": health_score["score"],
+            "economic_health_status": health_score["status"],
+            "current_conditions": {
+                "treasury_health": float(factors.get("treasury_health", 0)),
+                "liquidity_ratio": float(factors.get("liquidity_ratio", 0)),
+                "velocity_of_money": float(factors.get("velocity_of_money", 0)),
+                "volatility_index": float(factors.get("volatility_index", 0)),
+                "fee_rate": float(factors.get("fee_rate", 0))
+            },
+            "recommendations": []
+        }
+
+        # Generate recommendations based on conditions
+        liquidity_ratio = float(factors.get("liquidity_ratio", 0))
+        velocity_of_money = float(factors.get("velocity_of_money", 0))
+        volatility_index = float(factors.get("volatility_index", 0))
+
+        # Liquidity-based recommendations
+        if liquidity_ratio < 0.3:
+            recommendations["recommendations"].append({
+                "type": "liquidity",
+                "priority": "high",
+                "message": "Low liquidity detected. Consider holding cash as opportunities may arise soon.",
+                "action": "hold_cash"
+            })
+        elif liquidity_ratio > 0.7:
+            recommendations["recommendations"].append({
+                "type": "liquidity",
+                "priority": "medium",
+                "message": "High liquidity detected. Good time to make investments or large transactions.",
+                "action": "consider_investing"
+            })
+
+        # Velocity-based recommendations
+        if velocity_of_money < 0.1:
+            recommendations["recommendations"].append({
+                "type": "velocity",
+                "priority": "high",
+                "message": "Low economic activity. Transaction volumes are decreasing.",
+                "action": "reduce_trading_activity"
+            })
+        elif velocity_of_money > 0.5:
+            recommendations["recommendations"].append({
+                "type": "velocity",
+                "priority": "medium",
+                "message": "High economic activity. Markets are active, consider participating.",
+                "action": "increase_activity"
+            })
+
+        # Volatility-based recommendations
+        if volatility_index > 0.05:
+            recommendations["recommendations"].append({
+                "type": "volatility",
+                "priority": "high",
+                "message": "High market volatility. Consider reducing position sizes and using stop-losses.",
+                "action": "reduce_exposure"
+            })
+
+        # Risk tolerance based recommendations
+        if preferences.risk_tolerance == "low":
+            recommendations["recommendations"].append({
+                "type": "risk",
+                "priority": "info",
+                "message": "Conservative risk profile detected. Focus on stable assets and avoid speculative trades.",
+                "action": "focus_stable_assets"
+            })
+        elif preferences.risk_tolerance == "high":
+            recommendations["recommendations"].append({
+                "type": "risk",
+                "priority": "info",
+                "message": "Aggressive risk profile detected. You may consider higher-risk opportunities.",
+                "action": "consider_opportunities"
+            })
+
+        return recommendations
+
+    async def get_economic_trends(self, days: int = 30) -> dict:
+        """
+        Get economic trends over the specified number of days.
+
+        Args:
+            days: Number of days to analyze (default: 30)
+
+        Returns:
+            Dictionary containing trend analysis for key metrics
+        """
+        cutoff_date = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.async_sessionmaker() as session:
+            stmt = select(EconomicMetricsHistory).where(
+                EconomicMetricsHistory.date >= cutoff_date
+            ).order_by(EconomicMetricsHistory.date)
+
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+
+            if not records:
+                return {"error": "No historical data available"}
+
+            # Calculate trends
+            trends = {
+                "period_days": days,
+                "data_points": len(records),
+                "metrics": {}
+            }
+
+            # Define metrics to analyze
+            metrics_to_analyze = [
+                "treasury_health", "liquidity_ratio", "velocity_of_money",
+                "volatility_index", "transaction_volume", "active_users",
+                "fee_rate", "passive_income_rate"
+            ]
+
+            for metric in metrics_to_analyze:
+                values = [getattr(record, metric) for record in records if getattr(record, metric) is not None]
+                if values:
+                    # Calculate basic statistics
+                    current = values[-1] if values else Decimal("0")
+                    previous = values[-2] if len(values) > 1 else Decimal("0")
+
+                    if len(values) > 1:
+                        avg = sum(values) / len(values)
+                        # Calculate trend (slope approximation)
+                        trend_slope = (values[-1] - values[0]) / len(values)
+
+                        trends["metrics"][metric] = {
+                            "current": float(current),
+                            "average": float(avg),
+                            "change_from_previous": float(current - previous) if previous != 0 else 0,
+                            "change_percent": float(((current - previous) / previous) * 100) if previous != 0 else 0,
+                            "trend_slope": float(trend_slope),
+                            "min": float(min(values)),
+                            "max": float(max(values))
+                        }
+                    else:
+                        trends["metrics"][metric] = {
+                            "current": float(current),
+                            "average": float(current),
+                            "change_from_previous": 0,
+                            "change_percent": 0,
+                            "trend_slope": 0,
+                            "min": float(current),
+                            "max": float(current)
+                        }
+
+            return trends
+
+    async def get_economic_health_score(self) -> dict:
+        """
+        Calculate an overall economic health score based on multiple factors.
+
+        Returns:
+            Dictionary containing health score and contributing factors
+        """
+        factors = await self.get_economic_factors()
+
+        # Extract key metrics
+        treasury_health = float(factors.get("treasury_health", 0))
+        liquidity_ratio = float(factors.get("liquidity_ratio", 0))
+        velocity_of_money = float(factors.get("velocity_of_money", 0))
+        volatility_index = float(factors.get("volatility_index", 0))
+
+        # Weighted scoring system
+        # Treasury health (30% weight)
+        treasury_score = treasury_health * 30
+
+        # Liquidity ratio (25% weight) - ideal is around 0.5-0.8
+        if 0.3 <= liquidity_ratio <= 0.8:
+            liquidity_score = 25  # Perfect score for healthy liquidity
+        elif liquidity_ratio > 0.8:
+            liquidity_score = 25 * (0.8 / liquidity_ratio)  # Decrease score for too much liquidity
+        else:
+            liquidity_score = 25 * (liquidity_ratio / 0.3)  # Decrease score for too little liquidity
+
+        # Velocity of money (25% weight) - higher is generally better
+        velocity_score = min(25, velocity_of_money * 50)  # Cap at 25 points
+
+        # Volatility index (20% weight) - lower is better
+        volatility_score = 20 * (1 - min(1, volatility_index * 5))  # Invert and scale
+
+        # Calculate total score (0-100)
+        total_score = treasury_score + liquidity_score + velocity_score + volatility_score
+
+        # Normalize to 0-100 range
+        health_score = max(0, min(100, total_score))
+
+        # Determine health status
+        if health_score >= 80:
+            status = "Excellent"
+        elif health_score >= 60:
+            status = "Good"
+        elif health_score >= 40:
+            status = "Fair"
+        elif health_score >= 20:
+            status = "Poor"
+        else:
+            status = "Critical"
+
+        return {
+            "score": round(health_score, 2),
+            "status": status,
+            "components": {
+                "treasury_health": {
+                    "value": round(treasury_health * 100, 2),
+                    "score": round(treasury_score, 2),
+                    "weight": 30
+                },
+                "liquidity_ratio": {
+                    "value": round(liquidity_ratio * 100, 2),
+                    "score": round(liquidity_score, 2),
+                    "weight": 25
+                },
+                "velocity_of_money": {
+                    "value": round(velocity_of_money, 4),
+                    "score": round(velocity_score, 2),
+                    "weight": 25
+                },
+                "volatility_index": {
+                    "value": round(volatility_index * 100, 2),
+                    "score": round(volatility_score, 2),
+                    "weight": 20
+                }
+            }
+        }
+
+    async def get_historical_economic_metrics(self, days: int = 30) -> list:
+        """
+        Get raw historical economic metrics for the specified number of days.
+
+        Args:
+            days: Number of days to retrieve (default: 30)
+
+        Returns:
+            List of historical metrics dictionaries
+        """
+        cutoff_date = discord.utils.utcnow().date() - timedelta(days=days)
+
+        async with self.async_sessionmaker() as session:
+            stmt = select(EconomicMetricsHistory).where(
+                EconomicMetricsHistory.date >= cutoff_date
+            ).order_by(EconomicMetricsHistory.date.desc())
+
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+
+            # Convert to dictionary format for easy consumption
+            metrics_list = []
+            for record in records:
+                metrics_list.append({
+                    "date": record.date.isoformat(),
+                    "treasury_health": float(record.treasury_health),
+                    "liquidity_ratio": float(record.liquidity_ratio),
+                    "velocity_of_money": float(record.velocity_of_money),
+                    "volatility_index": float(record.volatility_index),
+                    "transaction_volume": float(record.transaction_volume),
+                    "active_users": record.active_users,
+                    "fee_rate": float(record.fee_rate),
+                    "passive_income_rate": float(record.passive_income_rate)
+                })
+
+            return metrics_list
 
     async def add_loan_record(
         self, user_id: int, principal: Decimal, interest_rate: Decimal, total_repay: Decimal, due_date: datetime, status: str = "active"

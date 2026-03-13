@@ -671,6 +671,31 @@ class EconomicMetricsHistory(Base):
     )
 
 
+class UserEconomicPreferences(Base):
+    __tablename__ = "user_economic_preferences"
+
+    user_id = Column(BigInteger, primary_key=True)
+    # Notification preferences
+    economic_alerts_enabled = Column(Boolean, default=True)
+    velocity_alerts_enabled = Column(Boolean, default=True)
+    liquidity_alerts_enabled = Column(Boolean, default=True)
+    volatility_alerts_enabled = Column(Boolean, default=True)
+
+    # Alert thresholds
+    velocity_low_threshold = Column(Numeric(precision=10, scale=4), default=Decimal("0.1"))
+    liquidity_low_threshold = Column(Numeric(precision=10, scale=4), default=Decimal("0.2"))
+    volatility_high_threshold = Column(Numeric(precision=10, scale=4), default=Decimal("0.05"))
+
+    # Personalized recommendations
+    risk_tolerance = Column(String, default="moderate")  # "low", "moderate", "high"
+    investment_style = Column(String, default="balanced")  # "conservative", "balanced", "aggressive"
+
+    # Last notification timestamps
+    last_velocity_alert = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_liquidity_alert = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_volatility_alert = Column(TIMESTAMP(timezone=True), nullable=True)
+
+
 class MinesSettings(Base):
     __tablename__ = "mines_settings"
 
