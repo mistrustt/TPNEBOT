@@ -4166,7 +4166,7 @@ class Economy(commands.Cog):
 
     # ==================== VIP Commands ====================
 
-    @commands.group(name="vip", description="VIP tier information and benefits")
+    @commands.group(name="vip", description="VIP tier information and benefits", invoke_without_command=True)
     async def vip_group(self, ctx: commands.Context):
         """Group command for VIP tier information."""
         prefix = await self.bot.get_prefix(ctx.message)
@@ -4404,7 +4404,7 @@ class Economy(commands.Cog):
 
     # ==================== Rakeback Commands ====================
 
-    @commands.group(name="rakeback", description="Manage your rakeback earnings")
+    @commands.group(name="rakeback", description="Manage your rakeback earnings", invoke_without_command=True)
     async def rakeback_group(self, ctx: commands.Context):
         """Group command for rakeback management."""
         prefix = await self.bot.get_prefix(ctx.message)
