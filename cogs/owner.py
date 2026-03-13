@@ -3192,6 +3192,202 @@ class Owner(commands.Cog, name="Owner"):
         await ctx.message.add_reaction(self.shh_emoji)
         await ctx.message.delete()
 
+    @commands.group(
+        name="anticheat",
+        aliases=["ac"],
+        invoke_without_command=True,
+        hidden=True,
+    )
+    @commands.is_owner()
+    async def anticheat(self, ctx: Context):
+        """Anti-cheat/Anti-laundering management commands."""
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}anticheat {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}anticheat {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="Anti-Cheat Commands",
+            description=description,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Use {prefix}anticheat <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @anticheat.command(name="flags", hidden=True)
+    @commands.is_owner()
+    async def anticheat_flags(
+        self,
+        ctx: Context,
+        activity_type: str = None,
+        reviewed: str = None,
+        limit: int = 20,
+    ):
+        """View flagged suspicious activities.
+
+        Args:
+            activity_type: Filter by type (alt_transfer, circular_transfer) or 'all'
+            reviewed: Filter by reviewed status (true/false/all)
+            limit: Maximum number of results (default 20)
+        """
+        from database.models import SuspiciousActivityType
+
+        # Parse activity type
+        act_type = None
+        if activity_type and activity_type.lower() != "all":
+            try:
+                act_type = SuspiciousActivityType(activity_type.lower())
+            except ValueError:
+                return await ctx.send(
+                    f"Invalid activity type. Use: alt_transfer, circular_transfer, or all"
+                )
+
+        # Parse reviewed filter
+        reviewed_filter = None
+        if reviewed and reviewed.lower() != "all":
+            reviewed_filter = reviewed.lower() == "true"
+
+        try:
+            flags = await self.bot.database.get_suspicious_activities(
+                activity_type=act_type,
+                reviewed=reviewed_filter,
+                limit=min(limit, 50),
+            )
+        except Exception as e:
+            return await ctx.send(f"Error fetching flags: {e}")
+
+        if not flags:
+            embed = discord.Embed(
+                title="Suspicious Activity Flags",
+                description="No flags found matching the criteria.",
+                color=discord.Color.green(),
+            )
+            return await ctx.send(embed=embed)
+
+        lines = []
+        for f in flags:
+            act_emoji = "🔄" if f.activity_type == SuspiciousActivityType.CIRCULAR_TRANSFER else "👤"
+            reviewed_str = "✅" if f.reviewed else "⏳"
+            amount_str = f"{float(f.amount):,.2f}" if f.amount else "N/A"
+            user_str = f"<@{f.user_id}>"
+            related_str = ""
+            if f.related_user_ids:
+                related_mentions = ", ".join(f"<@{uid}>" for uid in f.related_user_ids[:3])
+                if len(f.related_user_ids) > 3:
+                    related_mentions += f" +{len(f.related_user_ids) - 3} more"
+                related_str = f"\n  Related: {related_mentions}"
+            lines.append(
+                f"{act_emoji} **ID {f.id}** | {user_str} | {f.activity_type.value}\n"
+                f"  Amount: {amount_str} | {reviewed_str}\n"
+                f"  Guild: {f.guild_id}{related_str}\n"
+                f"  Created: {discord.utils.format_dt(f.created_at, 'R')}"
+            )
+
+        embed = discord.Embed(
+            title="Suspicious Activity Flags",
+            description="\n\n".join(lines[:10]),
+            color=discord.Color.orange(),
+        )
+        if len(flags) > 10:
+            embed.set_footer(text=f"Showing 10 of {len(flags)} results")
+        await ctx.send(embed=embed)
+
+    @anticheat.command(name="review", hidden=True)
+    @commands.is_owner()
+    async def anticheat_review(
+        self, ctx: Context, flag_id: int, *, notes: str = None
+    ):
+        """Mark a suspicious activity flag as reviewed.
+
+        Args:
+            flag_id: The ID of the flag to review
+            notes: Optional notes about the review
+        """
+        success = await self.bot.database.review_suspicious_activity(
+            flag_id, ctx.author.id, notes
+        )
+
+        if success:
+            embed = discord.Embed(
+                title="Flag Reviewed",
+                description=f"Flag #{flag_id} has been marked as reviewed.\n"
+                + (f"Notes: {notes}" if notes else ""),
+                color=discord.Color.green(),
+            )
+        else:
+            embed = discord.Embed(
+                title="Error",
+                description=f"Flag #{flag_id} not found.",
+                color=discord.Color.red(),
+            )
+        await ctx.send(embed=embed)
+
+    @anticheat.command(name="cycles", hidden=True)
+    @commands.is_owner()
+    async def anticheat_cycles(
+        self,
+        ctx: Context,
+        user: discord.Member,
+        depth: int = 3,
+        hours: int = 24,
+    ):
+        """Check for circular transfer patterns for a user.
+
+        Args:
+            user: The user to check
+            depth: Maximum cycle depth to search (default 3)
+            hours: Hours to look back (default 24)
+        """
+        try:
+            cycles = await self.bot.database.detect_circular_transfers(
+                user_id=user.id,
+                depth=depth,
+                hours=hours,
+                min_amount=Decimal("100"),
+                guild_id=ctx.guild.id if ctx.guild else None,
+            )
+        except Exception as e:
+            return await ctx.send(f"Error detecting cycles: {e}")
+
+        if not cycles:
+            embed = discord.Embed(
+                title="Circular Transfer Check",
+                description=f"No circular transfer patterns found for {user.mention} in the last {hours} hours.",
+                color=discord.Color.green(),
+            )
+            return await ctx.send(embed=embed)
+
+        lines = []
+        for i, cycle in enumerate(cycles[:5], 1):
+            cycle_str = " → ".join(f"<@{uid}>" for uid in cycle)
+            lines.append(f"**Cycle {i}:**\n{cycle_str}")
+
+        embed = discord.Embed(
+            title=f"Circular Transfer Patterns for {user.display_name}",
+            description="\n\n".join(lines),
+            color=discord.Color.orange(),
+        )
+        if len(cycles) > 5:
+            embed.set_footer(text=f"Showing 5 of {len(cycles)} cycles found")
+        await ctx.send(embed=embed)
+
+
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
     logger.debug("Owner cog initialized successfully")

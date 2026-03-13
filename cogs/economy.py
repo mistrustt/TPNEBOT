@@ -2265,6 +2265,7 @@ class Economy(commands.Cog):
                     receiver_wallet_id=user_wallet_id,
                     amount=total_theft,
                     description=f"Critical Robbery by {ctx.author.name}",
+                    guild_id=ctx.guild.id if ctx.guild else None,
                 )
                 result_message = (
                     f"🔥 **YOU STOLE BASICALLY EVERYTHING LMFAOOOOOOOOOOOO**.\n"
@@ -2290,6 +2291,7 @@ class Economy(commands.Cog):
                     receiver_wallet_id=user_wallet_id,
                     amount=amount_stolen,
                     description=f"Robbery by {ctx.author.name}",
+                    guild_id=ctx.guild.id if ctx.guild else None,
                 )
 
                 result_message = (
@@ -2311,6 +2313,7 @@ class Economy(commands.Cog):
                     receiver_wallet_id=user_wallet_id,
                     amount=net_gain,
                     description=f"Partial Robbery by {ctx.author.name}",
+                    guild_id=ctx.guild.id if ctx.guild else None,
                 )
                 result_message = (
                     f"🤏 You **robbed** {target.mention} but they fought back, you managed to steal "
@@ -2455,6 +2458,7 @@ class Economy(commands.Cog):
                     receiver_wallet_id=robber_wallet,
                     amount=target_balance,
                     description=f"Drained by {ctx.author.name}",
+                    guild_id=ctx.guild.id if ctx.guild else None,
                 )
 
                 await self.bot.database.set_cooldown(
@@ -2563,11 +2567,22 @@ class Economy(commands.Cog):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
+            # Check for alt transfer and show warning (non-blocking)
+            guild_id = ctx.guild.id if ctx.guild else None
+            alt_warning = None
+            if guild_id:
+                is_alt = await self.bot.database.check_alt_transfer(
+                    sender.id, receiver.id, guild_id
+                )
+                if is_alt:
+                    alt_warning = "⚠️ **Warning:** This transfer is between linked alternate accounts."
+
             txid = await self.bot.database.process_p2p_transaction(
                 sender_wallet_id=sender_wallet_id,
                 receiver_wallet_id=receiver_wallet_id,
                 amount=amount,
                 description=f"Transfer from {sender.name} to {receiver.name}",
+                guild_id=guild_id,
             )
             color = discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel):
@@ -2586,6 +2601,8 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
+            if alt_warning:
+                embed.add_field(name="⚠️ Notice", value=alt_warning, inline=False)
             embed.set_author(
                 name="Transfer", icon_url=self.utils.get_avatar_url(ctx.author)
             )

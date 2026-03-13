@@ -906,6 +906,50 @@ class UserAlt(Base):
     )
 
 
+class SuspiciousActivityType(enum.Enum):
+    ALT_TRANSFER = "alt_transfer"
+    CIRCULAR_TRANSFER = "circular_transfer"
+
+
+class SuspiciousActivityLog(Base):
+    __tablename__ = "suspicious_activity_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    activity_type = Column(Enum(SuspiciousActivityType), nullable=False)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    related_user_ids = Column(ARRAY(BigInteger), nullable=True)
+    amount = Column(Numeric(precision=38, scale=2), nullable=True)
+    details = Column(JSON, nullable=True)
+    reviewed = Column(Boolean, default=False, nullable=False)
+    reviewed_by = Column(BigInteger, nullable=True)
+    review_notes = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
+
+    __table_args__ = (
+        Index("ix_suspicious_activity_created", "created_at"),
+        Index("ix_suspicious_activity_type_reviewed", "activity_type", "reviewed"),
+    )
+
+
+class TransferHistory(Base):
+    __tablename__ = "transfer_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    transaction_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    sender_id = Column(BigInteger, nullable=False, index=True)
+    receiver_id = Column(BigInteger, nullable=False, index=True)
+    amount = Column(Numeric(precision=38, scale=2), nullable=False)
+    guild_id = Column(BigInteger, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
+
+    __table_args__ = (
+        Index("ix_transfer_history_sender_time", "sender_id", "created_at"),
+        Index("ix_transfer_history_receiver_time", "receiver_id", "created_at"),
+        Index("ix_transfer_history_guild_time", "guild_id", "created_at"),
+    )
+
+
 class CommandRoleRestriction(Base):
     __tablename__ = "command_role_restrictions"
 

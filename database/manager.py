@@ -69,6 +69,9 @@ from .models import (
     LockdownChannel,
     Juul,
     UserAlt,
+    SuspiciousActivityLog,
+    SuspiciousActivityType,
+    TransferHistory,
 )
 from .blockchain import Blockchain, KeyManager
 from datetime import datetime, timedelta, timezone
@@ -1769,6 +1772,7 @@ class DatabaseManager:
         receiver_wallet_id: str,
         amount: Decimal,
         description: str,
+        guild_id: int = None,
     ):
         net_amt = (amount).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
@@ -1832,6 +1836,62 @@ class DatabaseManager:
                 )
 
             await self.update_supply()
+
+        # Anti-cheat logging (outside transaction to avoid blocking)
+        if guild_id is not None:
+            # Log the transfer
+            await self.log_transfer(
+                transaction_id=txid_main,
+                sender_id=sender.user_id,
+                receiver_id=receiver.user_id,
+                amount=net_amt,
+                guild_id=guild_id,
+            )
+
+            # Check for alt transfer
+            is_alt_transfer = await self.check_alt_transfer(
+                sender.user_id, receiver.user_id, guild_id
+            )
+            if is_alt_transfer:
+                await self.log_suspicious_activity(
+                    activity_type=SuspiciousActivityType.ALT_TRANSFER,
+                    user_id=sender.user_id,
+                    guild_id=guild_id,
+                    related_user_ids=[receiver.user_id],
+                    amount=net_amt,
+                    details={
+                        "transaction_id": txid_main,
+                        "sender_id": sender.user_id,
+                        "receiver_id": receiver.user_id,
+                        "description": description,
+                    },
+                )
+
+            # Check for circular transfers
+            try:
+                cycles = await self.detect_circular_transfers(
+                    user_id=sender.user_id,
+                    depth=3,
+                    hours=24,
+                    min_amount=Decimal("100"),
+                    guild_id=guild_id,
+                )
+                if cycles:
+                    for cycle in cycles:
+                        await self.log_suspicious_activity(
+                            activity_type=SuspiciousActivityType.CIRCULAR_TRANSFER,
+                            user_id=sender.user_id,
+                            guild_id=guild_id,
+                            related_user_ids=cycle,
+                            amount=net_amt,
+                            details={
+                                "transaction_id": txid_main,
+                                "cycle_path": cycle,
+                            },
+                        )
+            except Exception as e:
+                logging.warning(f"Failed to detect circular transfers: {e}")
+
         return txid_main
 
     async def process_treasury_transaction(
@@ -6196,3 +6256,204 @@ class DatabaseManager:
                     delete(Transaction).where(Transaction.to_user_id == user_id)
                 )
                 await session.commit()
+
+    # =====================
+    # Anti-Cheat Methods
+    # =====================
+
+    async def log_transfer(
+        self,
+        transaction_id: str,
+        sender_id: int,
+        receiver_id: int,
+        amount: Decimal,
+        guild_id: int,
+    ) -> None:
+        """Log a P2P transfer in the transfer history table."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                session.add(
+                    TransferHistory(
+                        transaction_id=transaction_id,
+                        sender_id=sender_id,
+                        receiver_id=receiver_id,
+                        amount=amount,
+                        guild_id=guild_id,
+                    )
+                )
+
+    async def check_alt_transfer(
+        self, sender_id: int, receiver_id: int, guild_id: int
+    ) -> bool:
+        """
+        Check if a transfer is between linked alternate accounts.
+        Returns True if the users are linked alts, False otherwise.
+        """
+        linked_ids = await self.get_all_linked_user_ids(sender_id, guild_id)
+        return receiver_id in linked_ids
+
+    async def log_suspicious_activity(
+        self,
+        activity_type: SuspiciousActivityType,
+        user_id: int,
+        guild_id: int,
+        related_user_ids: List[int] = None,
+        amount: Decimal = None,
+        details: dict = None,
+    ) -> int:
+        """
+        Log a suspicious activity for owner review.
+        Returns the ID of the created log entry.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                log = SuspiciousActivityLog(
+                    activity_type=activity_type,
+                    user_id=user_id,
+                    guild_id=guild_id,
+                    related_user_ids=related_user_ids or [],
+                    amount=amount,
+                    details=details or {},
+                )
+                session.add(log)
+                await session.flush()
+                return log.id
+
+    async def get_suspicious_activities(
+        self,
+        activity_type: SuspiciousActivityType = None,
+        reviewed: bool = None,
+        guild_id: int = None,
+        user_id: int = None,
+        limit: int = 50,
+    ) -> List[SuspiciousActivityLog]:
+        """Query suspicious activity logs with filters."""
+        async with self.async_sessionmaker() as session:
+            stmt = select(SuspiciousActivityLog).order_by(
+                SuspiciousActivityLog.created_at.desc()
+            )
+            if activity_type is not None:
+                stmt = stmt.where(SuspiciousActivityLog.activity_type == activity_type)
+            if reviewed is not None:
+                stmt = stmt.where(SuspiciousActivityLog.reviewed == reviewed)
+            if guild_id is not None:
+                stmt = stmt.where(SuspiciousActivityLog.guild_id == guild_id)
+            if user_id is not None:
+                stmt = stmt.where(SuspiciousActivityLog.user_id == user_id)
+            if limit:
+                stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def review_suspicious_activity(
+        self, log_id: int, reviewed_by: int, notes: str = None
+    ) -> bool:
+        """Mark a suspicious activity log as reviewed."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                log = await session.get(SuspiciousActivityLog, log_id)
+                if not log:
+                    return False
+                log.reviewed = True
+                log.reviewed_by = reviewed_by
+                log.review_notes = notes
+                return True
+
+    async def get_recent_transfers(
+        self,
+        user_id: int,
+        hours: int = 24,
+        guild_id: int = None,
+        limit: int = 100,
+    ) -> List[TransferHistory]:
+        """Get recent transfers for a user."""
+        async with self.async_sessionmaker() as session:
+            cutoff = discord.utils.utcnow() - timedelta(hours=hours)
+            stmt = (
+                select(TransferHistory)
+                .where(
+                    (TransferHistory.sender_id == user_id)
+                    | (TransferHistory.receiver_id == user_id)
+                )
+                .where(TransferHistory.created_at >= cutoff)
+                .order_by(TransferHistory.created_at.desc())
+            )
+            if guild_id is not None:
+                stmt = stmt.where(TransferHistory.guild_id == guild_id)
+            if limit:
+                stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def detect_circular_transfers(
+        self,
+        user_id: int,
+        depth: int = 3,
+        hours: int = 24,
+        min_amount: Decimal = Decimal("100"),
+        guild_id: int = None,
+    ) -> List[List[int]]:
+        """
+        Detect circular transfer patterns using DFS.
+        Returns list of cycles found, where each cycle is a list of user IDs.
+        """
+        cutoff = discord.utils.utcnow() - timedelta(hours=hours)
+
+        async with self.async_sessionmaker() as session:
+            # Get all transfers in the time window
+            stmt = (
+                select(TransferHistory)
+                .where(TransferHistory.created_at >= cutoff)
+                .where(TransferHistory.amount >= min_amount)
+            )
+            if guild_id is not None:
+                stmt = stmt.where(TransferHistory.guild_id == guild_id)
+            result = await session.execute(stmt)
+            transfers = list(result.scalars().all())
+
+        # Build a directed graph: user -> list of users they sent money to
+        graph: dict[int, set[int]] = {}
+        for t in transfers:
+            if t.sender_id not in graph:
+                graph[t.sender_id] = set()
+            graph[t.sender_id].add(t.receiver_id)
+
+        cycles = []
+        visited_cycles = set()
+
+        def find_cycles_dfs(
+            start: int, current: int, path: List[int], visited: set
+        ) -> None:
+            """DFS helper to find cycles."""
+            if len(path) > depth + 1:
+                return
+
+            if current in visited:
+                if current == start and len(path) > 1:
+                    # Found a cycle back to start
+                    cycle_key = tuple(sorted(path))
+                    if cycle_key not in visited_cycles:
+                        cycles.append(path[:])
+                        visited_cycles.add(cycle_key)
+                return
+
+            visited.add(current)
+            neighbors = graph.get(current, set())
+
+            for neighbor in neighbors:
+                if neighbor == start and len(path) >= 2:
+                    # Complete cycle
+                    cycle_key = tuple(sorted(path + [start]))
+                    if cycle_key not in visited_cycles:
+                        cycles.append(path + [start])
+                        visited_cycles.add(cycle_key)
+                elif neighbor not in visited:
+                    find_cycles_dfs(start, neighbor, path + [neighbor], visited)
+
+            visited.remove(current)
+
+        # Start DFS from the target user
+        if user_id in graph:
+            find_cycles_dfs(user_id, user_id, [user_id], set())
+
+        return cycles
