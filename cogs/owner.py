@@ -3294,7 +3294,7 @@ class Owner(commands.Cog, name="Owner"):
                 related_str = f"\n  Related: {related_mentions}"
             lines.append(
                 f"{act_emoji} **ID {f.id}** | {user_str} | {f.activity_type.value}\n"
-                f"  Amount: {amount_str} | {reviewed_str}\n"
+                f"  Amount: {await self.short_formatter(amount_str)} | {reviewed_str}\n"
                 f"  Guild: {f.guild_id}{related_str}\n"
                 f"  Created: {discord.utils.format_dt(f.created_at, 'R')}"
             )
