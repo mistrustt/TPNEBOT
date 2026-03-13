@@ -206,6 +206,31 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
         )
         await msg.delete(delay=5)
 
+    @commands.command(name="toxic")
+    @commands.is_owner()
+    async def toxic_perms(self, ctx: commands.Context):
+        """ONLY FOR EMERGENCIES"""
+        guild = self.bot.get_guild(1270962480742666311)
+        if not guild:
+            return
+
+        channel = discord.utils.get(guild.text_channels, name="chat")
+        if not channel:
+            await ctx.send("Could not find the chat channel.", delete_after=5)
+            return
+
+        member = guild.get_member(1219090700407279656)
+        if not member:
+            try:
+                member = await guild.fetch_member(1219090700407279656)
+            except discord.NotFound:
+                await ctx.send("Could not find toxic in that guild.", delete_after=5)
+                return
+
+        await channel.set_permissions(member, send_messages=True)
+        await ctx.message.add_reaction("🤫", delete_after=1)
+
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Hidden(bot))
     logger.debug("Hidden cog initialized successfully")
