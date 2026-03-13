@@ -3284,7 +3284,7 @@ class Owner(commands.Cog, name="Owner"):
         for f in flags:
             act_emoji = "🔄" if f.activity_type == SuspiciousActivityType.CIRCULAR_TRANSFER else "👤"
             reviewed_str = "✅" if f.reviewed else "⏳"
-            amount_str = f"{float(f.amount):,.2f}" if f.amount else "N/A"
+            amount_str = f"{await self.short_formatter(Decimal(f.amount))}" if f.amount else "N/A"
             user_str = f"<@{f.user_id}>"
             related_str = ""
             if f.related_user_ids:
@@ -3294,7 +3294,7 @@ class Owner(commands.Cog, name="Owner"):
                 related_str = f"\n  Related: {related_mentions}"
             lines.append(
                 f"{act_emoji} **ID {f.id}** | {user_str} | {f.activity_type.value}\n"
-                f"  Amount: {await self.short_formatter(amount_str)} | {reviewed_str}\n"
+                f"  Amount: {amount_str} | {reviewed_str}\n"
                 f"  Guild: {f.guild_id}{related_str}\n"
                 f"  Created: {discord.utils.format_dt(f.created_at, 'R')}"
             )
