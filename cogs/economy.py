@@ -2110,11 +2110,11 @@ class Economy(commands.Cog):
 
     # Predefined job definitions
     JOBS = {
-        "janitor": {"title": "Janitor", "base_salary": Decimal("500")},
-        "cashier": {"title": "Cashier", "base_salary": Decimal("750")},
-        "developer": {"title": "Developer", "base_salary": Decimal("1500")},
-        "manager": {"title": "Manager", "base_salary": Decimal("2000")},
-        "executive": {"title": "Executive", "base_salary": Decimal("3000")},
+        "janitor": {"title": "Janitor", "base_salary": Decimal("50000000")},
+        "cashier": {"title": "Cashier", "base_salary": Decimal("75000000")},
+        "developer": {"title": "Developer", "base_salary": Decimal("150000000")},
+        "manager": {"title": "Manager", "base_salary": Decimal("200000000")},
+        "executive": {"title": "Executive", "base_salary": Decimal("300000000")},
     }
 
     @commands.group(name="job", description="Job commands to earn some money.")
@@ -4198,7 +4198,7 @@ class Economy(commands.Cog):
         embed.set_footer(text=f"Use {prefix}vip <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @vip_group.command(name="status", description="View your VIP tier status and progress")
+    @vip_group.command(name="status", aliases=["stat"], description="View your VIP tier status and progress")
     async def vip_status(self, ctx: commands.Context):
         """View your current VIP tier status."""
         try:
@@ -4304,7 +4304,7 @@ class Economy(commands.Cog):
                 ephemeral=True,
             )
 
-    @vip_group.command(name="tiers", description="View all VIP tiers and their benefits")
+    @vip_group.command(name="tiers", aliases=['tier'], description="View all VIP tiers and their benefits")
     async def vip_tiers(self, ctx: commands.Context):
         """Display all VIP tiers with benefits."""
         try:
@@ -4352,7 +4352,7 @@ class Economy(commands.Cog):
                 "An error occurred while fetching VIP tiers."
             )
 
-    @vip_group.command(name="leaderboard", description="View top players by total wagered")
+    @vip_group.command(name="leaderboard", aliases=["lb"], description="View top players by total wagered")
     async def vip_leaderboard(self, ctx: commands.Context):
         """Display top VIP players by total wagered."""
         try:
