@@ -3,8 +3,6 @@ from discord.ext import commands
 import logging
 import asyncio
 
-import bot
-
 logger = logging.getLogger(__name__)
 
 
