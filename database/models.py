@@ -474,15 +474,16 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(BigInteger, nullable=False, unique=True)
     title = Column(String, nullable=False)
-    salary = Column(
-        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
-    )
+    base_salary = Column(Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00"))
+    days_employed = Column(Integer, default=1, nullable=False)
+    streak = Column(Integer, default=0, nullable=False)
     last_worked = Column(DateTime(timezone=True), nullable=True)
+    hired_at = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
 
     def __repr__(self):
-        return f"<Job user_id={self.user_id} title='{self.title}' salary={self.salary}>"
+        return f"<Job user_id={self.user_id} title='{self.title}' base_salary={self.base_salary} days_employed={self.days_employed} streak={self.streak}>"
 
 class UserRoleHistory(Base):
     __tablename__ = "user_role_history"

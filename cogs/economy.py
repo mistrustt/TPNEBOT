@@ -1027,6 +1027,7 @@ class Economy(commands.Cog):
         ]
         self.exchange_rate = Decimal("1000000000000")
         self.validate_economy_task.start()
+        self.fire_inactive_employees_task.start()
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -1034,6 +1035,7 @@ class Economy(commands.Cog):
 
     def cog_unload(self):
         self.validate_economy_task.cancel()
+        self.fire_inactive_employees_task.cancel()
 
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
         server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)
@@ -1285,6 +1287,21 @@ class Economy(commands.Cog):
 
     @validate_economy_task.before_loop
     async def before_validate_economy_task(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=24)
+    async def fire_inactive_employees_task(self):
+        """Fire employees who haven't worked in 48+ hours."""
+        try:
+            employees_to_fire = await self.bot.database.get_employees_for_firing()
+            for job in employees_to_fire:
+                await self.bot.database.fire_employee(job.user_id)
+                logger.info(f"Fired employee {job.user_id} from {job.title} for inactivity")
+        except Exception as e:
+            logger.error(f"Error firing inactive employees: {e}")
+
+    @fire_inactive_employees_task.before_loop
+    async def before_fire_inactive_employees_task(self):
         await self.bot.wait_until_ready()
 
     @commands.command(
@@ -1938,21 +1955,258 @@ class Economy(commands.Cog):
 
         await ctx.reply(embed=embed)
 
+    # Predefined job definitions
+    JOBS = {
+        "janitor": {"title": "Janitor", "base_salary": Decimal("500")},
+        "cashier": {"title": "Cashier", "base_salary": Decimal("750")},
+        "developer": {"title": "Developer", "base_salary": Decimal("1500")},
+        "manager": {"title": "Manager", "base_salary": Decimal("2000")},
+        "executive": {"title": "Executive", "base_salary": Decimal("3000")},
+    }
+
     @commands.group(name="job", description="Job commands to earn some money.")
     async def job(self, ctx: commands.Context):
         """Group command for jobs."""
         if ctx.invoked_subcommand is None:
             embed = discord.Embed(
-                description="Available job commands:",  
+                description=(
+                    "Available job commands:\n"
+                    "• `!job list` - View all available jobs\n"
+                    "• `!job apply <job>` - Apply for a job\n"
+                    "• `!job work` - Work to earn your salary\n"
+                    "• `!job quit` - Quit your current job\n"
+                    "• `!job info` - View your job details"
+                ),
                 color=discord.Color.blurple(),
             )
             embed.set_author(name="Jobs", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
 
+    @job.command(name="list", description="View all available jobs.")
+    async def job_list(self, ctx: commands.Context):
+        """List all available jobs with their base salaries."""
+        color = (
+            discord.Color.blurple()
+            if isinstance(ctx.channel, discord.DMChannel)
+            else (
+                ctx.author.top_role.color
+                if ctx.author.top_role
+                else discord.Color.blurple()
+            )
+        )
+        lines = []
+        for job_key, job_data in self.JOBS.items():
+            lines.append(f"**{job_data['title']}** (`{job_key}`) - Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**")
+
+        embed = discord.Embed(
+            title="Available Jobs",
+            description="\n".join(lines),
+            color=color,
+        )
+        embed.set_footer(text="Use !job apply <job_name> to apply for a job")
+        await ctx.reply(embed=embed)
 
     @job.command(name="apply", description="Apply for a job to earn some money.")
     async def job_apply(self, ctx: commands.Context, job_name: str):
-        return
+        """Apply for a job."""
+        user_id = ctx.author.id
+        job_name = job_name.lower()
+
+        if job_name not in self.JOBS:
+            valid_jobs = ", ".join(self.JOBS.keys())
+            embed = discord.Embed(
+                description=f"Invalid job. Available jobs: {valid_jobs}",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        job_data = self.JOBS[job_name]
+
+        try:
+            await self.bot.database.apply_for_job(
+                user_id=user_id,
+                job_title=job_data["title"],
+                base_salary=job_data["base_salary"],
+            )
+
+            color = (
+                discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel)
+                else (
+                    ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple()
+                )
+            )
+            embed = discord.Embed(
+                description=(
+                    f"You got the job! You are now a **{job_data['title']}**.\n"
+                    f"Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**\n"
+                    f"Use `!job work` to collect your salary daily."
+                ),
+                color=color,
+            )
+            embed.set_author(name="Job Applied", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @job.command(name="work", description="Work to earn your salary (24h cooldown).")
+    async def job_work(self, ctx: commands.Context):
+        """Work at your job to earn salary."""
+        user_id = ctx.author.id
+
+        try:
+            job, salary = await self.bot.database.work_job(user_id)
+
+            # Pay the user via treasury
+            wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=salary,
+                description=f"Job Salary: {job.title}",
+            )
+
+            color = (
+                discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel)
+                else (
+                    ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple()
+                )
+            )
+
+            # Calculate tenure bonus display
+            weeks_employed = job.days_employed / 7
+            salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
+
+            multiplier_text = f" (×{salary_multiplier:.2f})" if salary_multiplier > 1.0 else ""
+
+            embed = discord.Embed(
+                description=(
+                    f"You worked as a **{job.title}** and earned {self.currency_name} **{await self.formatter(salary)}**{multiplier_text}\n\n"
+                    f"**Streak:** {job.streak} consecutive days\n"
+                    f"**Tenure:** {job.days_employed} days employed"
+                ),
+                color=color,
+            )
+            embed.set_author(name="Work Complete", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @job.command(name="quit", description="Quit your current job.")
+    async def job_quit(self, ctx: commands.Context):
+        """Quit your current job."""
+        user_id = ctx.author.id
+
+        try:
+            job = await self.bot.database.get_job(user_id)
+            if not job:
+                raise ValueError("You don't have a job to quit.")
+
+            await self.bot.database.quit_job(user_id)
+
+            embed = discord.Embed(
+                description=f"You quit your job as a **{job.title}**. You can apply for a new job anytime.",
+                color=discord.Color.green(),
+            )
+            embed.set_author(name="Job Quit", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
+
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+
+    @job.command(name="info", description="View your current job details.")
+    async def job_info(self, ctx: commands.Context):
+        """View your current job information."""
+        user_id = ctx.author.id
+
+        try:
+            job = await self.bot.database.get_job(user_id)
+            if not job:
+                embed = discord.Embed(
+                    description="You don't have a job. Use `!job list` to see available jobs.",
+                    color=discord.Color.red(),
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+
+            current_salary = await self.bot.database.calculate_salary(job)
+            weeks_employed = job.days_employed / 7
+            salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
+
+            color = (
+                discord.Color.blurple()
+                if isinstance(ctx.channel, discord.DMChannel)
+                else (
+                    ctx.author.top_role.color
+                    if ctx.author.top_role
+                    else discord.Color.blurple()
+                )
+            )
+
+            embed = discord.Embed(
+                title=f"💼 {job.title}",
+                color=color,
+            )
+            embed.add_field(
+                name="Base Salary",
+                value=f"{self.currency_name} {await self.formatter(job.base_salary)}",
+                inline=True,
+            )
+            embed.add_field(
+                name="Current Salary",
+                value=f"{self.currency_name} {await self.formatter(current_salary)} (×{salary_multiplier:.2f})",
+                inline=True,
+            )
+            embed.add_field(
+                name="Tenure",
+                value=f"{job.days_employed} days",
+                inline=True,
+            )
+            embed.add_field(
+                name="Work Streak",
+                value=f"{job.streak} consecutive days",
+                inline=True,
+            )
+
+            if job.last_worked:
+                next_work = job.last_worked + timedelta(hours=24)
+                now = discord.utils.utcnow()
+                if next_work > now:
+                    remaining = next_work - now
+                    hours = remaining.seconds // 3600
+                    minutes = (remaining.seconds % 3600) // 60
+                    embed.add_field(
+                        name="Next Work",
+                        value=f"{hours}h {minutes}m",
+                        inline=True,
+                    )
+                else:
+                    embed.add_field(
+                        name="Next Work",
+                        value="Ready now!",
+                        inline=True,
+                    )
+            else:
+                embed.add_field(
+                    name="Next Work",
+                    value="Ready now!",
+                    inline=True,
+                )
+
+            embed.set_footer(text=f"Hired: {job.hired_at.strftime('%Y-%m-%d') if hasattr(job.hired_at, 'strftime') else job.hired_at}")
+            await ctx.reply(embed=embed)
+
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.group(name="loan", description="Take out a loan. Pay it back with interest!")
     async def loan(self, ctx: commands.Context):

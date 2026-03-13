@@ -72,6 +72,7 @@ from .models import (
     SuspiciousActivityLog,
     SuspiciousActivityType,
     TransferHistory,
+    Job,
 )
 from .blockchain import Blockchain, KeyManager
 from datetime import datetime, timedelta, timezone
@@ -6478,3 +6479,134 @@ class DatabaseManager:
         find_cycles_dfs(user_id, user_id, [user_id], set())
 
         return cycles
+
+    # ==================== Job Methods ====================
+
+    async def get_job(self, user_id: int) -> Optional[Job]:
+        """Get a user's current job, if any."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Job).where(Job.user_id == user_id)
+            )
+            return result.scalar_one_or_none()
+
+    async def apply_for_job(
+        self, user_id: int, job_title: str, base_salary: Decimal
+    ) -> Job:
+        """Apply for a job. Creates a new job record for the user."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                # Check if user already has a job
+                existing = await session.execute(
+                    select(Job).where(Job.user_id == user_id)
+                )
+                if existing.scalar_one_or_none():
+                    raise ValueError("You already have a job. Quit your current job first.")
+
+                job = Job(
+                    user_id=user_id,
+                    title=job_title,
+                    base_salary=base_salary,
+                    days_employed=1,
+                    streak=0,
+                    hired_at=discord.utils.utcnow(),
+                )
+                session.add(job)
+            await session.commit()
+            return job
+
+    async def quit_job(self, user_id: int) -> bool:
+        """Remove a user's job record."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Job).where(Job.user_id == user_id)
+                )
+                job = result.scalar_one_or_none()
+                if not job:
+                    raise ValueError("You don't have a job to quit.")
+                await session.delete(job)
+            await session.commit()
+            return True
+
+    async def work_job(self, user_id: int) -> Tuple[Job, Decimal]:
+        """
+        Process a user's work action.
+        Returns the updated job and the calculated salary.
+        Raises ValueError if cooldown hasn't expired or no job found.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Job).where(Job.user_id == user_id)
+                )
+                job = result.scalar_one_or_none()
+                if not job:
+                    raise ValueError("You don't have a job. Apply for one first!")
+
+                now = discord.utils.utcnow()
+
+                # Check if 24 hours have passed since last work
+                if job.last_worked:
+                    time_since_last = (now - job.last_worked).total_seconds()
+                    cooldown_remaining = 86400 - time_since_last  # 24 hours = 86400 seconds
+                    if cooldown_remaining > 0:
+                        hours = int(cooldown_remaining // 3600)
+                        minutes = int((cooldown_remaining % 3600) // 60)
+                        raise ValueError(
+                            f"You need to wait {hours}h {minutes}m before working again."
+                        )
+
+                # Calculate salary with tenure bonus
+                weeks_employed = job.days_employed / 7
+                salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
+                current_salary = job.base_salary * Decimal(str(salary_multiplier))
+                current_salary = current_salary.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+                # Update job record
+                job.last_worked = now
+                job.days_employed += 1
+                job.streak += 1
+
+            await session.commit()
+            return job, current_salary
+
+    async def calculate_salary(self, job: Job) -> Decimal:
+        """Calculate current salary based on tenure."""
+        weeks_employed = job.days_employed / 7
+        salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
+        current_salary = job.base_salary * Decimal(str(salary_multiplier))
+        return current_salary.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    async def get_employees_for_firing(self) -> List[Job]:
+        """
+        Get employees who haven't worked in 48+ hours.
+        These users should be fired.
+        """
+        threshold = discord.utils.utcnow() - timedelta(hours=48)
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Job).where(
+                    (Job.last_worked != None) & (Job.last_worked < threshold)
+                )
+            )
+            return result.scalars().all()
+
+    async def fire_employee(self, user_id: int) -> bool:
+        """Remove a job record for an inactive employee."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Job).where(Job.user_id == user_id)
+                )
+                job = result.scalar_one_or_none()
+                if job:
+                    await session.delete(job)
+            await session.commit()
+            return True
+
+    async def get_all_jobs(self) -> List[Job]:
+        """Get all job records (for admin purposes)."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(select(Job))
+            return result.scalars().all()
