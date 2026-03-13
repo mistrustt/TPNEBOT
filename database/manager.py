@@ -2005,6 +2005,47 @@ class DatabaseManager:
             await self.update_supply()
         return tid_main
 
+    async def refund_transaction(self, txid: str, reason: str):
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                tx = await session.get(Transaction, txid)
+                if not tx:
+                    raise ValueError("Transaction not found.")
+                if tx.amount == 0:
+                    raise ValueError("Cannot refund zero-amount transaction.")
+
+                # Reverse the transaction
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    await self.get_wallet_id_for_user(tx.from_user_id),
+                    +tx.amount,
+                )
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    await self.get_wallet_id_for_user(tx.to_user_id),
+                    -tx.amount,
+                )
+
+                # Record refund transaction
+                refund_txid = str(uuid.uuid4())
+                session.add(
+                    Transaction(
+                        id=refund_txid,
+                        from_user_id=tx.to_user_id,
+                        to_user_id=tx.from_user_id,
+                        amount=-tx.amount,
+                        description=f"Refund for {txid}: {reason}",
+                        timestamp=discord.utils.utcnow(),
+                    )
+                )
+
+            await self.update_supply()
+        return refund_txid
+
     async def get_transaction_by_id(self, txid: str) -> Transaction:
         """
         Fetch a single transaction record by its Transaction ID (UUID).
