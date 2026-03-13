@@ -724,9 +724,24 @@ class UseItemPaginator(View):
             return
         entry = self.entries[self.current_page]
         item_id = entry.get("id")
+        item_name = entry.get("name", "Unknown")
         try:
-            message = await self.bot.database.use_inventory_item(self.user_id, item_id)
+            # Check for cooldown first
+            remaining = await self.bot.database.get_item_cooldown(self.user_id, item_name)
+            if remaining > 0:
+                mins, secs = divmod(remaining, 60)
+                await interaction.response.send_message(
+                    f"This item is on cooldown. Time remaining: {mins}m {secs}s",
+                    ephemeral=True,
+                )
+                return
 
+            # Use the enhanced method that handles effects
+            result = await self.bot.database.use_inventory_item_with_effects(
+                self.user_id, item_id
+            )
+
+            # Refresh inventory
             self.entries = await self.bot.database.get_user_inventory_grouped(
                 self.user_id
             )
@@ -737,9 +752,133 @@ class UseItemPaginator(View):
             embed = await self.build_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
+            # Send result message
+            message = result.get("message", "Item used successfully!")
+            if result.get("cooldown_seconds"):
+                mins, secs = divmod(result["cooldown_seconds"], 60)
+                message += f"\nCooldown: {mins}m {secs}s"
             await interaction.followup.send(message, ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(str(e), ephemeral=True)
+
+
+class TradeRequestView(discord.ui.View):
+    """View for accepting or declining trade requests."""
+
+    def __init__(self, bot, trade_id: int, from_user_id: int, to_user_id: int, item_name: str, quantity: int):
+        super().__init__(timeout=120.0)
+        self.bot = bot
+        self.trade_id = trade_id
+        self.from_user_id = from_user_id
+        self.to_user_id = to_user_id
+        self.item_name = item_name
+        self.quantity = quantity
+        self.responded = False
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    async def accept_button(
+        self, interaction: discord.Interaction, _button: discord.ui.Button
+    ):
+        if interaction.user.id != self.to_user_id:
+            await interaction.response.send_message(
+                "This trade request is not for you.", ephemeral=True
+            )
+            return
+
+        if self.responded:
+            await interaction.response.send_message(
+                "This trade has already been processed.", ephemeral=True
+            )
+            return
+
+        try:
+            trade = await self.bot.database.accept_trade_request(self.trade_id)
+            self.responded = True
+
+            # Notify both parties
+            from_user = self.bot.get_user(self.from_user_id)
+            to_user = self.bot.get_user(self.to_user_id)
+            from_name = from_user.display_name if from_user else f"User {self.from_user_id}"
+            to_name = to_user.display_name if to_user else f"User {self.to_user_id}"
+
+            embed = discord.Embed(
+                title="Trade Completed",
+                description=f"{to_name} accepted the trade!",
+                color=discord.Color.green(),
+            )
+            embed.add_field(name="Item", value=f"{self.item_name} x{self.quantity}", inline=True)
+
+            await interaction.response.edit_message(embed=embed, view=None)
+
+            # Try to DM the sender
+            if from_user:
+                try:
+                    dm_embed = discord.Embed(
+                        title="Trade Accepted",
+                        description=f"{to_name} accepted your trade request for {self.item_name} x{self.quantity}",
+                        color=discord.Color.green(),
+                    )
+                    await from_user.send(embed=dm_embed)
+                except discord.Forbidden:
+                    pass  # DMs disabled
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Failed to complete trade: {str(e)}", ephemeral=True
+            )
+
+    @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
+    async def decline_button(
+        self, interaction: discord.Interaction, _button: discord.ui.Button
+    ):
+        if interaction.user.id != self.to_user_id:
+            await interaction.response.send_message(
+                "This trade request is not for you.", ephemeral=True
+            )
+            return
+
+        if self.responded:
+            await interaction.response.send_message(
+                "This trade has already been processed.", ephemeral=True
+            )
+            return
+
+        try:
+            await self.bot.database.decline_trade_request(self.trade_id)
+            self.responded = True
+
+            from_user = self.bot.get_user(self.from_user_id)
+            to_user = self.bot.get_user(self.to_user_id)
+            to_name = to_user.display_name if to_user else f"User {self.to_user_id}"
+
+            embed = discord.Embed(
+                title="Trade Declined",
+                description=f"{to_name} declined the trade request.",
+                color=discord.Color.red(),
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+
+            # Try to DM the sender
+            if from_user:
+                try:
+                    dm_embed = discord.Embed(
+                        title="Trade Declined",
+                        description=f"{to_name} declined your trade request for {self.item_name}",
+                        color=discord.Color.red(),
+                    )
+                    await from_user.send(embed=dm_embed)
+                except discord.Forbidden:
+                    pass
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Failed to decline trade: {str(e)}", ephemeral=True
+            )
+
+    async def on_timeout(self):
+        if not self.responded:
+            try:
+                await self.bot.database.decline_trade_request(self.trade_id)
+            except:
+                pass
 
 
 class BalanceView(discord.ui.View):
@@ -1299,6 +1438,20 @@ class Economy(commands.Cog):
                 logger.info(f"Fired employee {job.user_id} from {job.title} for inactivity")
         except Exception as e:
             logger.error(f"Error firing inactive employees: {e}")
+
+    @tasks.loop(minutes=5)
+    async def cleanup_expired_effects_task(self):
+        """Clean up expired effects from the database."""
+        try:
+            removed = await self.bot.database.cleanup_expired_effects()
+            if removed > 0:
+                logger.info(f"Cleaned up {removed} expired effect(s)")
+        except Exception as e:
+            logger.error(f"Error cleaning up expired effects: {e}")
+
+    @cleanup_expired_effects_task.before_loop
+    async def before_cleanup_expired_effects_task(self):
+        await self.bot.wait_until_ready()
 
     @fire_inactive_employees_task.before_loop
     async def before_fire_inactive_employees_task(self):
@@ -3812,28 +3965,29 @@ class Economy(commands.Cog):
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     async def use_item(self, interaction: Interaction):
-        not_implemented = True
-        if not_implemented:
-            await interaction.response.send_message(
-                "This command is not yet implemented.", ephemeral=True
-            )
-            return
-
+        # Get usable items (CONSUMABLE and REDEEMABLE types)
         entries = await self.bot.database.get_user_inventory_grouped(
             interaction.user.id
         )
-        if not entries:
+        # Filter to only show usable items
+        usable_entries = []
+        for entry in entries:
+            item_type = entry.get("item_type")
+            if item_type in ("consumable", "redeemable"):
+                usable_entries.append(entry)
+
+        if not usable_entries:
             embed = discord.Embed(
                 title="Inventory",
-                description="Your inventory is empty.",
-                color=discord.Color.red(),
+                description="You have no usable items (consumables or redeemables).",
+                color=discord.Color.orange(),
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         paginator = UseItemPaginator(
             bot=self.bot,
-            entries=entries,
+            entries=usable_entries,
             user_id=interaction.user.id,
             title="Your Inventory — Use an item",
         )
@@ -3851,31 +4005,169 @@ class Economy(commands.Cog):
         item_id: int,
         quantity: int = 1,
     ):
-        not_implemented = True
-        if not_implemented:
-            await interaction.response.send_message(
-                "This command is not yet implemented.", ephemeral=True
-            )
-            return
-
         if member.bot or member.id == interaction.user.id:
             await interaction.response.send_message(
                 "Invalid target user.", ephemeral=True
             )
             return
+
+        # Get the item to verify ownership and get details
+        item = await self.bot.database.get_user_item(interaction.user.id, item_id)
+        if not item:
+            await interaction.response.send_message(
+                "You don't own this item.", ephemeral=True
+            )
+            return
+
+        if item.quantity < quantity:
+            await interaction.response.send_message(
+                f"You only have {item.quantity} of this item.", ephemeral=True
+            )
+            return
+
         try:
-            await self.bot.database.transfer_item(
+            # Create pending trade request
+            trade = await self.bot.database.create_trade_request(
                 interaction.user.id, member.id, item_id, quantity
             )
-            message = (
-                f"Transferred {quantity} of item {item_id} to {member.display_name}."
+
+            embed = discord.Embed(
+                title="Trade Request Sent",
+                description=f"Request to trade **{item.name}** x{quantity} to {member.display_name}",
+                color=discord.Color.blue(),
             )
-            color = discord.Color.green()
+            embed.add_field(name="Trade ID", value=str(trade.id), inline=True)
+            embed.set_footer(text="Waiting for recipient to respond...")
+
+            # Create trade request view for the recipient
+            view = TradeRequestView(
+                bot=self.bot,
+                trade_id=trade.id,
+                from_user_id=interaction.user.id,
+                to_user_id=member.id,
+                item_name=item.name,
+                quantity=quantity,
+            )
+
+            # Send confirmation to recipient
+            recipient_embed = discord.Embed(
+                title="Trade Request",
+                description=f"{interaction.user.display_name} wants to trade with you!",
+                color=discord.Color.gold(),
+            )
+            recipient_embed.add_field(name="Item", value=f"{item.name} x{quantity}", inline=True)
+            if item.description:
+                recipient_embed.add_field(name="Description", value=item.description, inline=False)
+            recipient_embed.set_footer(text="You have 2 minutes to respond")
+
+            try:
+                await member.send(embed=recipient_embed, view=view)
+                embed.add_field(name="Status", value="Notification sent to recipient", inline=False)
+            except discord.Forbidden:
+                # DMs disabled, send to channel
+                embed.add_field(name="Status", value="Could not DM recipient - they may have DMs disabled", inline=False)
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
         except Exception as e:
-            message = str(e)
-            color = discord.Color.red()
-        embed = discord.Embed(description=message, color=color)
-        await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(
+                f"Failed to create trade: {str(e)}", ephemeral=True
+            )
+
+    @app_commands.command(
+        name="vieweffects", description="View your active effects from items"
+    )
+    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def view_effects(self, interaction: Interaction):
+        effects = await self.bot.database.get_user_active_effects(interaction.user.id)
+
+        if not effects:
+            embed = discord.Embed(
+                title="Active Effects",
+                description="You have no active effects.",
+                color=discord.Color.orange(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="Your Active Effects",
+            color=discord.Color.blurple(),
+        )
+
+        for effect in effects:
+            expires_in = effect.expires_at - datetime.utcnow()
+            mins, secs = divmod(int(expires_in.total_seconds()), 60)
+            hours, mins = divmod(mins, 60)
+
+            if hours > 0:
+                time_str = f"{hours}h {mins}m {secs}s"
+            elif mins > 0:
+                time_str = f"{mins}m {secs}s"
+            else:
+                time_str = f"{secs}s"
+
+            effect_names = {
+                "currency": "💰 Currency",
+                "gambling_multiplier": "🎰 Gambling Multiplier",
+                "luck_boost": "🍀 Luck Boost",
+                "earning_boost": "📈 Earning Boost",
+                "cooldown_reduction": "⏱️ Cooldown Reduction",
+            }
+            display_name = effect_names.get(effect.effect_type, effect.effect_type)
+
+            embed.add_field(
+                name=f"{display_name}",
+                value=f"**Value:** {effect.effect_value}x\n**From:** {effect.source_item_name}\n**Expires in:** {time_str}",
+                inline=False,
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="pendingtrades", description="View your pending trade requests"
+    )
+    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
+    @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    async def pending_trades(self, interaction: Interaction):
+        trades = await self.bot.database.get_pending_trades(interaction.user.id)
+
+        if not trades:
+            embed = discord.Embed(
+                title="Pending Trades",
+                description="You have no pending trade requests.",
+                color=discord.Color.orange(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="Your Pending Trades",
+            color=discord.Color.blurple(),
+        )
+
+        incoming = [t for t in trades if t.to_user_id == interaction.user.id]
+        outgoing = [t for t in trades if t.from_user_id == interaction.user.id]
+
+        if incoming:
+            incoming_str = "\n".join([
+                f"**ID {t.id}:** {t.item_name} x{t.quantity} from <@{t.from_user_id}>"
+                for t in incoming[:5]
+            ])
+            if len(incoming) > 5:
+                incoming_str += f"\n... and {len(incoming) - 5} more"
+            embed.add_field(name="📥 Incoming", value=incoming_str, inline=False)
+
+        if outgoing:
+            outgoing_str = "\n".join([
+                f"**ID {t.id}:** {t.item_name} x{t.quantity} to <@{t.to_user_id}>"
+                for t in outgoing[:5]
+            ])
+            if len(outgoing) > 5:
+                outgoing_str += f"\n... and {len(outgoing) - 5} more"
+            embed.add_field(name="📤 Outgoing", value=outgoing_str, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

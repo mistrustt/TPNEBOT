@@ -364,6 +364,14 @@ class ItemType(enum.Enum):
     CONSUMABLE = "consumable"
 
 
+class EffectType(enum.Enum):
+    CURRENCY = "currency"  # Direct currency grant
+    GAMBLING_MULTIPLIER = "gambling_multiplier"  # Multiplier on gambling wins
+    LUCK_BOOST = "luck_boost"  # Better RNG outcomes
+    EARNING_BOOST = "earning_boost"  # General earning multiplier
+    COOLDOWN_REDUCTION = "cooldown_reduction"  # Reduce cooldown times
+
+
 class Item(Base):
     __tablename__ = "items"
 
@@ -403,6 +411,61 @@ class ShopItem(Base):
             f"<ShopItem(name='{self.name}', price={self.price}, "
             f"quantity={self.quantity}, description='{self.description}')>"
         )
+
+
+class ItemCooldown(Base):
+    """Track per-user, per-item cooldowns."""
+    __tablename__ = "item_cooldowns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    item_name = Column(String, nullable=False)
+    cooldown_expiry = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_name", name="uq_item_cooldown_user_item"),
+    )
+
+    def __repr__(self):
+        return f"<ItemCooldown(user_id={self.user_id}, item_name='{self.item_name}', cooldown_expiry={self.cooldown_expiry})>"
+
+
+class ActiveEffect(Base):
+    """Track timed effects applied to users."""
+    __tablename__ = "active_effects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    effect_type = Column(String, nullable=False)
+    effect_value = Column(Numeric(10, 4), nullable=False)
+    source_item_name = Column(String, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
+
+    __table_args__ = (
+        Index("ix_active_effects_user_expires", "user_id", "expires_at"),
+    )
+
+    def __repr__(self):
+        return f"<ActiveEffect(user_id={self.user_id}, effect_type='{self.effect_type}', effect_value={self.effect_value}, expires_at={self.expires_at})>"
+
+
+class TradeLog(Base):
+    """Audit trail for item trades."""
+    __tablename__ = "trade_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    from_user_id = Column(BigInteger, nullable=False, index=True)
+    to_user_id = Column(BigInteger, nullable=False, index=True)
+    item_id = Column(Integer, nullable=False)
+    item_name = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending, completed, cancelled
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        return f"<TradeLog(id={self.id}, from={self.from_user_id}, to={self.to_user_id}, item={self.item_name}, status={self.status})>"
 
 
 class Bounty(Base):

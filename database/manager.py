@@ -46,7 +46,11 @@ from .models import (
     LoanPayment,
     Item,
     ItemType,
+    EffectType,
     ShopItem,
+    ItemCooldown,
+    ActiveEffect,
+    TradeLog,
     Bounty,
     Skulls,
     Flames,
@@ -4192,6 +4196,10 @@ class DatabaseManager:
         quantity: int,
         item_type: ItemType = ItemType.COLLECTIBLE,
         unlimited: bool = False,
+        effect: str = None,
+        effect_value: int = None,
+        effect_duration: int = None,
+        cooldown_seconds: int = None,
     ) -> ShopItem:
         """Create and store a new shop item."""
         async with self.async_sessionmaker() as session:
@@ -4203,6 +4211,10 @@ class DatabaseManager:
                     quantity=quantity,
                     unlimited=unlimited,
                     item_type=item_type,
+                    effect=effect,
+                    effect_value=effect_value,
+                    effect_duration=effect_duration,
+                    cooldown_seconds=cooldown_seconds,
                 )
                 session.add(new_shop_item)
             await session.commit()
@@ -4379,6 +4391,398 @@ class DatabaseManager:
                 return f"You are now showcasing your collectible {item.name}."
             else:
                 raise ValueError("Unknown item type.")
+
+    # ==================== Item Cooldown Methods ====================
+
+    async def set_item_cooldown(
+        self, user_id: int, item_name: str, cooldown_seconds: int
+    ) -> None:
+        """Set a cooldown for a user on a specific item."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                expiry = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
+                # Check if cooldown already exists
+                stmt = select(ItemCooldown).where(
+                    ItemCooldown.user_id == user_id, ItemCooldown.item_name == item_name
+                )
+                existing = (await session.execute(stmt)).scalar_one_or_none()
+                if existing:
+                    existing.cooldown_expiry = expiry
+                else:
+                    cooldown = ItemCooldown(
+                        user_id=user_id, item_name=item_name, cooldown_expiry=expiry
+                    )
+                    session.add(cooldown)
+            await session.commit()
+
+    async def get_item_cooldown(self, user_id: int, item_name: str) -> int:
+        """
+        Get remaining cooldown seconds for a user's item.
+        Returns 0 if no cooldown or if expired.
+        """
+        async with self.async_sessionmaker() as session:
+            stmt = select(ItemCooldown).where(
+                ItemCooldown.user_id == user_id, ItemCooldown.item_name == item_name
+            )
+            cooldown = (await session.execute(stmt)).scalar_one_or_none()
+            if not cooldown:
+                return 0
+            now = discord.utils.utcnow()
+            if cooldown.cooldown_expiry <= now:
+                # Cooldown expired, clean it up
+                await session.delete(cooldown)
+                await session.commit()
+                return 0
+            remaining = (cooldown.cooldown_expiry - now).total_seconds()
+            return int(remaining)
+
+    async def is_item_on_cooldown(self, user_id: int, item_name: str) -> bool:
+        """Check if an item is on cooldown for a user."""
+        remaining = await self.get_item_cooldown(user_id, item_name)
+        return remaining > 0
+
+    async def clear_item_cooldown(self, user_id: int, item_name: str) -> bool:
+        """Clear a cooldown for a user's item. Returns True if cooldown was cleared."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                stmt = select(ItemCooldown).where(
+                    ItemCooldown.user_id == user_id, ItemCooldown.item_name == item_name
+                )
+                cooldown = (await session.execute(stmt)).scalar_one_or_none()
+                if cooldown:
+                    await session.delete(cooldown)
+                    await session.commit()
+                    return True
+            return False
+
+    # ==================== Active Effect Methods ====================
+
+    async def create_active_effect(
+        self,
+        user_id: int,
+        effect_type: str,
+        effect_value: Decimal,
+        duration_seconds: int,
+        source_item_name: str,
+    ) -> ActiveEffect:
+        """Create a timed effect for a user."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                expires_at = discord.utils.utcnow() + timedelta(seconds=duration_seconds)
+                effect = ActiveEffect(
+                    user_id=user_id,
+                    effect_type=effect_type,
+                    effect_value=effect_value,
+                    source_item_name=source_item_name,
+                    expires_at=expires_at,
+                )
+                session.add(effect)
+            await session.commit()
+            return effect
+
+    async def get_user_active_effects(self, user_id: int) -> List[ActiveEffect]:
+        """Get all non-expired effects for a user."""
+        async with self.async_sessionmaker() as session:
+            now = discord.utils.utcnow()
+            stmt = (
+                select(ActiveEffect)
+                .where(ActiveEffect.user_id == user_id, ActiveEffect.expires_at > now)
+                .order_by(ActiveEffect.expires_at)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def get_active_effects_by_type(
+        self, user_id: int, effect_type: str
+    ) -> List[ActiveEffect]:
+        """Get all non-expired effects of a specific type for a user."""
+        async with self.async_sessionmaker() as session:
+            now = discord.utils.utcnow()
+            stmt = (
+                select(ActiveEffect)
+                .where(
+                    ActiveEffect.user_id == user_id,
+                    ActiveEffect.effect_type == effect_type,
+                    ActiveEffect.expires_at > now,
+                )
+                .order_by(ActiveEffect.expires_at)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def cleanup_expired_effects(self) -> int:
+        """Remove all expired effects. Returns count of removed effects."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                now = discord.utils.utcnow()
+                stmt = delete(ActiveEffect).where(ActiveEffect.expires_at <= now)
+                result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount
+
+    async def get_effect_multiplier(
+        self, user_id: int, effect_type: str
+    ) -> Decimal:
+        """
+        Get the combined multiplier value for a specific effect type.
+        Returns Decimal('1.0') if no active effects.
+        For multipliers, returns the product of all active multipliers.
+        """
+        effects = await self.get_active_effects_by_type(user_id, effect_type)
+        if not effects:
+            return Decimal("1.0")
+        combined = Decimal("1.0")
+        for effect in effects:
+            combined *= effect.effect_value
+        return combined
+
+    async def remove_active_effect(self, effect_id: int) -> bool:
+        """Remove a specific active effect by ID. Returns True if removed."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                stmt = select(ActiveEffect).where(ActiveEffect.id == effect_id)
+                effect = (await session.execute(stmt)).scalar_one_or_none()
+                if effect:
+                    await session.delete(effect)
+                    await session.commit()
+                    return True
+            return False
+
+    # ==================== Trade Methods ====================
+
+    async def create_trade_request(
+        self, from_user_id: int, to_user_id: int, item_id: int, quantity: int = 1
+    ) -> TradeLog:
+        """
+        Create a pending trade request.
+        Validates that the sender owns the item.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                # Verify ownership
+                stmt = select(Item).where(Item.id == item_id)
+                item = (await session.execute(stmt)).scalar_one_or_none()
+                if not item:
+                    raise ValueError("Item not found.")
+                if item.user_id != from_user_id:
+                    raise ValueError("You don't own this item.")
+                if item.quantity < quantity:
+                    raise ValueError(
+                        f"Insufficient quantity. You have {item.quantity}, need {quantity}."
+                    )
+
+                trade = TradeLog(
+                    from_user_id=from_user_id,
+                    to_user_id=to_user_id,
+                    item_id=item_id,
+                    item_name=item.name,
+                    quantity=quantity,
+                    status="pending",
+                )
+                session.add(trade)
+            await session.commit()
+            return trade
+
+    async def accept_trade_request(self, trade_id: int) -> TradeLog:
+        """
+        Accept a pending trade request.
+        Transfers the item to the recipient and marks the trade as completed.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                stmt = select(TradeLog).where(TradeLog.id == trade_id)
+                trade = (await session.execute(stmt)).scalar_one_or_none()
+                if not trade:
+                    raise ValueError("Trade not found.")
+                if trade.status != "pending":
+                    raise ValueError(f"Trade is already {trade.status}.")
+
+                # Get the item
+                item_stmt = select(Item).where(Item.id == trade.item_id)
+                item = (await session.execute(item_stmt)).scalar_one_or_none()
+                if not item:
+                    raise ValueError("Item no longer exists.")
+                if item.user_id != trade.from_user_id:
+                    raise ValueError("Sender no longer owns this item.")
+                if item.quantity < trade.quantity:
+                    raise ValueError("Insufficient item quantity.")
+
+                # Handle quantity transfer
+                if item.quantity == trade.quantity:
+                    # Transfer full ownership
+                    item.user_id = trade.to_user_id
+                else:
+                    # Split the item - create new item for recipient
+                    item.quantity -= trade.quantity
+                    new_item = Item(
+                        user_id=trade.to_user_id,
+                        name=item.name,
+                        serial_number=f"{item.serial_number}-{trade.to_user_id}",
+                        description=item.description,
+                        quantity=trade.quantity,
+                        item_type=item.item_type,
+                        effect=item.effect,
+                        effect_value=item.effect_value,
+                        effect_duration=item.effect_duration,
+                        cooldown_seconds=item.cooldown_seconds,
+                    )
+                    session.add(new_item)
+
+                # Update trade status
+                trade.status = "completed"
+                trade.completed_at = discord.utils.utcnow()
+            await session.commit()
+            return trade
+
+    async def decline_trade_request(self, trade_id: int) -> TradeLog:
+        """Decline a pending trade request."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                stmt = select(TradeLog).where(TradeLog.id == trade_id)
+                trade = (await session.execute(stmt)).scalar_one_or_none()
+                if not trade:
+                    raise ValueError("Trade not found.")
+                if trade.status != "pending":
+                    raise ValueError(f"Trade is already {trade.status}.")
+                trade.status = "cancelled"
+            await session.commit()
+            return trade
+
+    async def get_pending_trades(self, user_id: int) -> List[TradeLog]:
+        """Get all pending trades where the user is either sender or recipient."""
+        async with self.async_sessionmaker() as session:
+            stmt = (
+                select(TradeLog)
+                .where(
+                    TradeLog.status == "pending",
+                    (TradeLog.to_user_id == user_id)
+                    | (TradeLog.from_user_id == user_id),
+                )
+                .order_by(TradeLog.created_at.desc())
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def get_trade_by_id(self, trade_id: int) -> Optional[TradeLog]:
+        """Get a trade by its ID."""
+        async with self.async_sessionmaker() as session:
+            stmt = select(TradeLog).where(TradeLog.id == trade_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def get_pending_trades_for_user(self, user_id: int) -> List[TradeLog]:
+        """Get all pending trades where the user is the recipient."""
+        async with self.async_sessionmaker() as session:
+            stmt = (
+                select(TradeLog)
+                .where(TradeLog.to_user_id == user_id, TradeLog.status == "pending")
+                .order_by(TradeLog.created_at.desc())
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    # ==================== Enhanced use_inventory_item ====================
+
+    async def use_inventory_item_with_effects(
+        self, user_id: int, item_id: int
+    ) -> dict:
+        """
+        Enhanced version of use_inventory_item that handles cooldowns,
+        effect types, and effect durations.
+
+        Returns a dict with:
+        - message: str - result message
+        - effect_type: str (optional)
+        - effect_applied: bool
+        - cooldown_seconds: int (optional)
+        """
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Item).where(Item.user_id == user_id, Item.id == item_id)
+            )
+            item = result.scalar_one_or_none()
+            if not item:
+                raise ValueError("Item not found in inventory.")
+
+            # Check cooldown
+            if item.cooldown_seconds:
+                remaining = await self.get_item_cooldown(user_id, item.name)
+                if remaining > 0:
+                    raise ValueError(
+                        f"This item is on cooldown. {remaining} seconds remaining."
+                    )
+
+            response = {"message": "", "effect_applied": False}
+
+            # Apply effect based on type
+            effect = item.effect
+            effect_value = item.effect_value
+            effect_duration = item.effect_duration
+
+            if effect == "currency" and effect_value:
+                # Direct currency grant
+                wallet_id = await self.get_wallet_id_for_user(user_id)
+                await self.process_treasury_transaction(
+                    wallet_id, Decimal(effect_value), f"Used {item.name}"
+                )
+                response["message"] = f"You received {effect_value} coins from {item.name}!"
+                response["effect_applied"] = True
+
+            elif effect in (
+                "gambling_multiplier",
+                "luck_boost",
+                "earning_boost",
+                "cooldown_reduction",
+            ):
+                # Create timed effect
+                if effect_duration:
+                    await self.create_active_effect(
+                        user_id=user_id,
+                        effect_type=effect,
+                        effect_value=Decimal(str(effect_value)),
+                        duration_seconds=effect_duration,
+                        source_item_name=item.name,
+                    )
+                    duration_mins = effect_duration // 60
+                    duration_secs = effect_duration % 60
+                    duration_str = f"{duration_mins}m {duration_secs}s" if duration_mins else f"{duration_secs}s"
+
+                    effect_names = {
+                        "gambling_multiplier": f"{effect_value}x gambling multiplier",
+                        "luck_boost": f"{effect_value}x luck boost",
+                        "earning_boost": f"{effect_value}x earning boost",
+                        "cooldown_reduction": f"{effect_value}% cooldown reduction",
+                    }
+                    response["message"] = (
+                        f"Activated {effect_names.get(effect, effect)} for {duration_str}!"
+                    )
+                    response["effect_applied"] = True
+                else:
+                    response["message"] = f"Used {item.name} but no duration was specified."
+
+            elif item.item_type == ItemType.COLLECTIBLE:
+                response["message"] = f"You are showcasing your collectible {item.name}."
+            else:
+                response["message"] = f"You used {item.name}."
+
+            # Set cooldown if applicable
+            if item.cooldown_seconds and item.item_type != ItemType.COLLECTIBLE:
+                await self.set_item_cooldown(user_id, item.name, item.cooldown_seconds)
+                response["cooldown_seconds"] = item.cooldown_seconds
+
+            # Handle quantity reduction based on item type
+            if item.item_type == ItemType.CONSUMABLE:
+                async with session.begin():
+                    item.quantity -= 1
+                    if item.quantity <= 0:
+                        await session.delete(item)
+                await session.commit()
+            elif item.item_type == ItemType.REDEEMABLE:
+                async with session.begin():
+                    await session.delete(item)
+                await session.commit()
+
+            return response
 
     async def place_bounty(
         self, issuer_id: int, target_id: int, reward: Decimal
