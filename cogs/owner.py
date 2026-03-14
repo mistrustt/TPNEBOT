@@ -3790,6 +3790,144 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_footer(text=f"Showing 5 of {len(cycles)} cycles found")
         await ctx.send(embed=embed)
 
+    @anticheat.command(name="hoarding", hidden=True)
+    @commands.is_owner()
+    async def anticheat_hoarding(
+        self,
+        ctx: Context,
+        user: discord.User,
+        days: int = 30,
+    ):
+        """Check hoarding score for a user.
+
+        Args:
+            user: The user to check
+            days: Days to analyze for flow patterns (default 30)
+        """
+        try:
+            score_data = await self.bot.database.calculate_hoarding_score(
+                user_id=user.id,
+                guild_id=ctx.guild.id if ctx.guild else None,
+                days=days,
+            )
+        except Exception as e:
+            return await ctx.send(f"Error calculating hoarding score: {e}")
+
+        # Format factors
+        factors_lines = []
+        for factor, score in score_data["factors"].items():
+            factor_name = factor.replace("_", " ").title()
+            bar = "█" * (score // 2) + "░" * (10 - score // 2)
+            factors_lines.append(f"**{factor_name}:** {score}/20 `{bar}`")
+
+        # Balance info
+        balance_data = score_data["details"]["aggregated_balance"]
+        balance_lines = [
+            f"**Main Balance:** {await self.short_formatter(Decimal(str(score_data['details']['main_balance'])))}",
+            f"**Alt Accounts:** {balance_data['account_count'] - 1}",
+        ]
+        if balance_data["linked_user_ids"]:
+            alt_balances = []
+            for alt_id in balance_data["linked_user_ids"][:5]:
+                alt_bal = balance_data["individual_balances"].get(alt_id, Decimal("0"))
+                alt_balances.append(f"<@{alt_id}>: {await self.short_formatter(Decimal(str(alt_bal)))}")
+            if len(balance_data["linked_user_ids"]) > 5:
+                alt_balances.append(f"... +{len(balance_data['linked_user_ids']) - 5} more")
+            balance_lines.append("**Linked Alts:**\n" + "\n".join(alt_balances))
+
+        # Flow info
+        flow_data = score_data["details"]["net_flow"]
+        flow_lines = [
+            f"**Received ({days}d):** {await self.short_formatter(Decimal(str(flow_data['total_received'])))}",
+            f"**Sent ({days}d):** {await self.short_formatter(Decimal(str(flow_data['total_sent'])))}",
+            f"**Net Flow:** {await self.short_formatter(Decimal(str(flow_data['net_flow'])))}",
+            f"**Ratio:** {flow_data['ratio']:.2f}x" if flow_data['ratio'] else "**Ratio:** N/A (no sends)",
+        ]
+
+        # Risk color
+        risk_colors = {
+            "low": discord.Color.green(),
+            "medium": discord.Color.orange(),
+            "high": discord.Color.red(),
+            "critical": discord.Color.dark_red(),
+        }
+
+        embed = discord.Embed(
+            title=f"Hoarding Score: {user.display_name}",
+            description=f"**Total Score:** {score_data['score']}/100\n**Risk Level:** {score_data['risk_level'].upper()}",
+            color=risk_colors.get(score_data["risk_level"], discord.Color.blurple()),
+        )
+        embed.add_field(name="Factors", value="\n".join(factors_lines), inline=False)
+        embed.add_field(
+            name="Aggregated Balance",
+            value="\n".join(balance_lines)
+            + f"\n**Total:** {await self.short_formatter(Decimal(str(balance_data['total_balance'])))}",
+            inline=False,
+        )
+        embed.add_field(name="Net Flow Analysis", value="\n".join(flow_lines), inline=False)
+
+        await ctx.send(embed=embed)
+
+    @anticheat.command(name="scan", hidden=True)
+    @commands.is_owner()
+    async def anticheat_scan(
+        self,
+        ctx: Context,
+        min_balance: int = 100000,
+        min_score: int = 30,
+        limit: int = 20,
+    ):
+        """Scan for hoarding accounts with high scores.
+
+        Args:
+            min_balance: Minimum balance to check (default 100000)
+            min_score: Minimum hoarding score to report (default 30)
+            limit: Maximum results (default 20)
+        """
+        status_msg = await ctx.send(
+            f"Scanning for hoarding accounts (balance >= {min_balance:,}, score >= {min_score})..."
+        )
+
+        try:
+            results = await self.bot.database.scan_for_hoarding(
+                guild_id=ctx.guild.id if ctx.guild else None,
+                min_balance=Decimal(str(min_balance)),
+                min_score=min_score,
+                limit=min(limit, 50),
+            )
+        except Exception as e:
+            return await status_msg.edit(content=f"Error scanning: {e}")
+
+        if not results:
+            embed = discord.Embed(
+                title="Hoarding Scan Results",
+                description=f"No accounts found with balance >= {min_balance:,} and score >= {min_score}.",
+                color=discord.Color.green(),
+            )
+            return await status_msg.edit(content=None, embed=embed)
+
+        lines = []
+        for r in results[:15]:
+            risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "⚠️"}.get(
+                r["risk_level"], "⚪"
+            )
+            total_bal = await self.short_formatter(Decimal(str(r["total_balance"])))
+            alt_str = f" (+{r['alt_count']} alt)" if r["alt_count"] > 0 else ""
+            lines.append(
+                f"{risk_emoji} **{r['score']}pts** | <@{r['user_id']}> | {total_bal}{alt_str}"
+            )
+
+        embed = discord.Embed(
+            title="Hoarding Scan Results",
+            description="\n".join(lines),
+            color=discord.Color.orange(),
+        )
+        embed.set_footer(text=f"Found {len(results)} accounts | min_balance={min_balance:,} | min_score={min_score}")
+        if len(results) > 15:
+            embed.set_footer(text=f"Showing 15 of {len(results)} results")
+
+        await status_msg.edit(content=None, embed=embed)
+
     # ==================== VIP Admin Commands ====================
 
     @commands.command(name="setviptier", hidden=True)

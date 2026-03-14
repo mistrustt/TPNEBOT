@@ -974,6 +974,8 @@ class UserAlt(Base):
 class SuspiciousActivityType(enum.Enum):
     ALT_TRANSFER = "alt_transfer"
     CIRCULAR_TRANSFER = "circular_transfer"
+    ALT_HOARDING = "alt_hoarding"  # Multiple alts holding large combined balance
+    SUSPICIOUS_FLOW = "suspicious_flow"  # Account receives but rarely spends
 
 
 class SuspiciousActivityLog(Base):

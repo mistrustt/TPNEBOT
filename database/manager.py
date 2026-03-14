@@ -6872,6 +6872,297 @@ class DatabaseManager:
                 log.review_notes = notes
                 return True
 
+    # ==================== Hoarding Detection Methods ====================
+
+    async def get_aggregated_balance(
+        self, user_id: int, guild_id: int = None
+    ) -> dict:
+        """
+        Get aggregated balance across all linked alt accounts.
+
+        Returns dict with:
+        - main_user_id: the queried user
+        - linked_user_ids: list of linked alt user IDs
+        - individual_balances: dict mapping user_id to balance
+        - total_balance: sum of all balances
+        - account_count: number of accounts in network
+        """
+        # Get all linked users
+        linked_ids = await self.get_all_linked_user_ids(user_id, guild_id) if guild_id else []
+        all_user_ids = [user_id] + linked_ids
+
+        async with self.async_sessionmaker() as session:
+            # Query balances for all users in the network
+            result = await session.execute(
+                select(Wallet.user_id, Wallet.balance).where(
+                    Wallet.user_id.in_(all_user_ids)
+                )
+            )
+            rows = result.fetchall()
+
+        individual_balances = {user_id: Decimal("0") for user_id in all_user_ids}
+        for row in rows:
+            individual_balances[row[0]] = Decimal(str(row[1]))
+
+        total_balance = sum(individual_balances.values())
+
+        return {
+            "main_user_id": user_id,
+            "linked_user_ids": linked_ids,
+            "individual_balances": individual_balances,
+            "total_balance": total_balance,
+            "account_count": len(all_user_ids),
+        }
+
+    async def get_net_flow(
+        self, user_id: int, days: int = 30, guild_id: int = None
+    ) -> dict:
+        """
+        Analyze net flow for a user (received vs spent over time period).
+
+        Returns dict with:
+        - total_received: sum of all incoming amounts
+        - total_sent: sum of all outgoing amounts
+        - net_flow: received - sent
+        - transaction_count_in: number of incoming transactions
+        - transaction_count_out: number of outgoing transactions
+        - ratio: received/sent ratio (None if no sends)
+        """
+        cutoff = discord.utils.utcnow() - timedelta(days=days)
+
+        async with self.async_sessionmaker() as session:
+            # Sum of incoming transactions (to_user_id = user_id)
+            incoming_stmt = (
+                select(func.coalesce(func.sum(Transaction.amount), Decimal("0")))
+                .where(Transaction.to_user_id == user_id)
+                .where(Transaction.timestamp >= cutoff)
+            )
+            incoming_result = await session.execute(incoming_stmt)
+            total_received = Decimal(str(incoming_result.scalar() or "0"))
+
+            # Sum of outgoing transactions (from_user_id = user_id)
+            outgoing_stmt = (
+                select(func.coalesce(func.sum(Transaction.amount), Decimal("0")))
+                .where(Transaction.from_user_id == user_id)
+                .where(Transaction.timestamp >= cutoff)
+            )
+            outgoing_result = await session.execute(outgoing_stmt)
+            total_sent = Decimal(str(outgoing_result.scalar() or "0"))
+
+            # Count transactions
+            count_in_stmt = (
+                select(func.count(Transaction.id))
+                .where(Transaction.to_user_id == user_id)
+                .where(Transaction.timestamp >= cutoff)
+            )
+            count_in_result = await session.execute(count_in_stmt)
+            transaction_count_in = count_in_result.scalar() or 0
+
+            count_out_stmt = (
+                select(func.count(Transaction.id))
+                .where(Transaction.from_user_id == user_id)
+                .where(Transaction.timestamp >= cutoff)
+            )
+            count_out_result = await session.execute(count_out_stmt)
+            transaction_count_out = count_out_result.scalar() or 0
+
+        net_flow = total_received - total_sent
+        ratio = float(total_received / total_sent) if total_sent > 0 else None
+
+        return {
+            "user_id": user_id,
+            "days": days,
+            "total_received": total_received,
+            "total_sent": total_sent,
+            "net_flow": net_flow,
+            "transaction_count_in": transaction_count_in,
+            "transaction_count_out": transaction_count_out,
+            "ratio": ratio,
+        }
+
+    async def calculate_hoarding_score(
+        self, user_id: int, guild_id: int = None, days: int = 30
+    ) -> dict:
+        """
+        Calculate a hoarding score combining multiple factors.
+
+        Factors (each 0-20 points, total 0-100):
+        1. Balance concentration (high balance relative to activity)
+        2. Net flow ratio (receives much but sends little)
+        3. Alt network size (many linked alts)
+        4. Aggregated balance (large total across alts)
+        5. Transaction pattern (low outgoing activity)
+
+        Returns dict with:
+        - score: 0-100 hoarding score
+        - factors: breakdown of each factor score
+        - risk_level: "low", "medium", "high", "critical"
+        - details: supporting data
+        """
+        # Get aggregated balance
+        balance_data = await self.get_aggregated_balance(user_id, guild_id)
+
+        # Get net flow
+        flow_data = await self.get_net_flow(user_id, days, guild_id)
+
+        # Get wallet balance
+        wallet = await self.get_wallet(user_id)
+        main_balance = Decimal(str(wallet.balance)) if wallet else Decimal("0")
+
+        factors = {}
+        details = {
+            "aggregated_balance": balance_data,
+            "net_flow": flow_data,
+            "main_balance": main_balance,
+        }
+
+        # Factor 1: Balance concentration (high balance with low activity)
+        # Score high if balance is large relative to outgoing transactions
+        if flow_data["total_sent"] > 0:
+            balance_to_spent_ratio = float(main_balance / flow_data["total_sent"])
+            # Cap at 20 for ratio > 20
+            factors["balance_concentration"] = min(20, int(balance_to_spent_ratio))
+        else:
+            # Never sends anything but has balance - suspicious
+            if main_balance > Decimal("1000"):
+                factors["balance_concentration"] = 20
+            elif main_balance > Decimal("100"):
+                factors["balance_concentration"] = 15
+            else:
+                factors["balance_concentration"] = 10
+
+        # Factor 2: Net flow ratio (receives much, sends little)
+        if flow_data["ratio"] is not None:
+            # ratio > 10 = receives 10x more than sends
+            if flow_data["ratio"] > 10:
+                factors["net_flow_ratio"] = 20
+            elif flow_data["ratio"] > 5:
+                factors["net_flow_ratio"] = 15
+            elif flow_data["ratio"] > 2:
+                factors["net_flow_ratio"] = 10
+            elif flow_data["ratio"] > 1:
+                factors["net_flow_ratio"] = 5
+            else:
+                factors["net_flow_ratio"] = 0
+        else:
+            # No outgoing transactions but has incoming
+            if flow_data["total_received"] > Decimal("1000"):
+                factors["net_flow_ratio"] = 20
+            else:
+                factors["net_flow_ratio"] = 10
+
+        # Factor 3: Alt network size
+        alt_count = balance_data["account_count"] - 1
+        if alt_count >= 5:
+            factors["alt_network_size"] = 20
+        elif alt_count >= 3:
+            factors["alt_network_size"] = 15
+        elif alt_count >= 2:
+            factors["alt_network_size"] = 10
+        elif alt_count == 1:
+            factors["alt_network_size"] = 5
+        else:
+            factors["alt_network_size"] = 0
+
+        # Factor 4: Aggregated balance across alts
+        total_balance = balance_data["total_balance"]
+        if total_balance >= Decimal("10000000"):  # 10M+
+            factors["aggregated_balance"] = 20
+        elif total_balance >= Decimal("5000000"):  # 5M+
+            factors["aggregated_balance"] = 15
+        elif total_balance >= Decimal("1000000"):  # 1M+
+            factors["aggregated_balance"] = 10
+        elif total_balance >= Decimal("100000"):  # 100K+
+            factors["aggregated_balance"] = 5
+        else:
+            factors["aggregated_balance"] = 0
+
+        # Factor 5: Transaction pattern (low outgoing activity)
+        outgoing_count = flow_data["transaction_count_out"]
+        incoming_count = flow_data["transaction_count_in"]
+        if outgoing_count == 0 and incoming_count > 5:
+            factors["transaction_pattern"] = 20  # Never sends, only receives
+        elif outgoing_count == 0 and incoming_count > 0:
+            factors["transaction_pattern"] = 15
+        elif outgoing_count > 0 and incoming_count / max(1, outgoing_count) > 5:
+            factors["transaction_pattern"] = 15  # Receives 5x more often than sends
+        elif outgoing_count > 0 and incoming_count / max(1, outgoing_count) > 2:
+            factors["transaction_pattern"] = 10
+        else:
+            factors["transaction_pattern"] = 0
+
+        total_score = sum(factors.values())
+
+        # Determine risk level
+        if total_score >= 70:
+            risk_level = "critical"
+        elif total_score >= 50:
+            risk_level = "high"
+        elif total_score >= 30:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+
+        return {
+            "user_id": user_id,
+            "score": total_score,
+            "factors": factors,
+            "risk_level": risk_level,
+            "details": details,
+        }
+
+    async def scan_for_hoarding(
+        self,
+        guild_id: int = None,
+        min_balance: Decimal = Decimal("100000"),
+        min_score: int = 30,
+        limit: int = 50,
+    ) -> List[dict]:
+        """
+        Scan for users with high hoarding scores.
+
+        Returns list of dicts with:
+        - user_id
+        - score
+        - risk_level
+        - total_balance (across alts)
+        - alt_count
+        """
+        async with self.async_sessionmaker() as session:
+            # Get wallets with minimum balance
+            stmt = (
+                select(Wallet.user_id, Wallet.balance)
+                .where(Wallet.balance >= min_balance)
+                .order_by(Wallet.balance.desc())
+                .limit(limit * 2)  # Get more than needed, filter by score
+            )
+            result = await session.execute(stmt)
+            candidates = result.fetchall()
+
+        hoarding_candidates = []
+
+        for user_id, balance in candidates:
+            score_data = await self.calculate_hoarding_score(
+                user_id, guild_id, days=30
+            )
+
+            if score_data["score"] >= min_score:
+                hoarding_candidates.append({
+                    "user_id": user_id,
+                    "score": score_data["score"],
+                    "risk_level": score_data["risk_level"],
+                    "total_balance": score_data["details"]["aggregated_balance"]["total_balance"],
+                    "alt_count": score_data["details"]["aggregated_balance"]["account_count"] - 1,
+                    "factors": score_data["factors"],
+                })
+
+            if len(hoarding_candidates) >= limit:
+                break
+
+        # Sort by score descending
+        hoarding_candidates.sort(key=lambda x: x["score"], reverse=True)
+        return hoarding_candidates
+
     async def get_recent_transfers(
         self,
         user_id: int,
