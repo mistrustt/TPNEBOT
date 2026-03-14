@@ -9,6 +9,7 @@ import hashlib
 import time
 import secrets
 import os
+import math
 import aiohttp
 from .models import (
     Base,
@@ -2710,7 +2711,6 @@ class DatabaseManager:
             if len(balances) > 1 and sum(balances) > 0:
                 # Use log-based measure for bounded volatility (0 to ~1.5)
                 # This is more robust to outliers than CV
-                import math
 
                 # Filter out zero balances to avoid log issues
                 positive_balances = [float(b) for b in balances if b > 0]
