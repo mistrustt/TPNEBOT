@@ -3566,10 +3566,6 @@ class Owner(commands.Cog, name="Owner"):
         current_hash, is_authorized = whitelist_check(ctx.author.id)
 
         expected_hash = self.GOLDEN_HASHES.get(ctx.guild.id)
-        print("\n--- HASH DEBUG ---")
-        print(f"Current Hash '{current_hash}'")
-        print(f"Expected Hash '{expected_hash}'")
-        print("------------------\n")
         if current_hash != expected_hash:
             print(f"Whitelist for {ctx.guild.id} does not match expected hash!")
             return
