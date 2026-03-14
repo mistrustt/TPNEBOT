@@ -365,10 +365,13 @@ class Owner(commands.Cog, name="Owner"):
             284439598422163476,  # E
         ]
         self.GOLDEN_HASHES = {
-            1336128367166095380: os.getenv("MISTRUST_GOLDEN_HASH"), # Hash for mistrust
-            1199083709735911465: os.getenv("PRIVATE_GOLDEN_HASH"), # Hash for private
-            1452021243669643324: os.getenv("CLUBHOUSE_GOLDEN_HASH"), # Hash for clubhouse
-            1270962480742666311: os.getenv("TPNE_GOLDEN_HASH"), # Hash for tpne
+            guild_id: (os.getenv(env_var) or "").strip()
+            for guild_id, env_var in [
+                (1336128367166095380, "MISTRUST_GOLDEN_HASH"),
+                (1199083709735911465, "PRIVATE_GOLDEN_HASH"),
+                (1452021243669643324, "CLUBHOUSE_GOLDEN_HASH"),
+                (1270962480742666311, "TPNE_GOLDEN_HASH"),
+            ]
         }
         self.shh_emoji = "🤫"
 
