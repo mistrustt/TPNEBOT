@@ -169,6 +169,9 @@ class CrashView(discord.ui.View):
             {"user_id": uid, "multiplier": str(mult), "win": str(win)},
         )
 
+        # Process game result for rakeback
+        await casino.process_game_result(uid, "crash", bet)
+
         self.cashed_out[uid] = self.current_multiplier
         casino: Casino = self.bot.get_cog("Casino")
         await interaction.response.send_message(
@@ -178,18 +181,42 @@ class CrashView(discord.ui.View):
         await self.update_game_message()
 
     async def generate_crash_point(self, user_id: int) -> Decimal:
-        """Per-user provable fairness"""
+        """Per-user provable fairness with house edge adjustment"""
         casino: Casino = self.bot.get_cog("Casino")
+
+        # Get user's house edge (lower for higher VIP tiers)
+        house_edge = await casino.calculate_house_edge(user_id)
+
         r = await casino.fair_random(user_id)
-        if r < 0.55:
+
+        # Adjust probability distribution based on house edge
+        # Lower house edge = higher chance of better multipliers
+        # Base edge is 4%, so scale probabilities accordingly
+        edge_factor = float(house_edge) / 0.04  # Ratio relative to standard 4% edge
+
+        # Apply house edge by shifting probability thresholds
+        # Higher VIP (lower edge) = more favorable distribution
+        thresholds = {
+            "low": 0.55 * edge_factor,      # 1-2x multiplier
+            "med_low": 0.80 * edge_factor,  # 2-5x multiplier
+            "med": 0.95 * edge_factor,      # 5-20x multiplier
+            "high": 0.992 * edge_factor,    # 20-100x multiplier
+            "vhigh": 0.998 * edge_factor,   # 100-1000x multiplier
+        }
+
+        # Cap thresholds at sensible limits
+        for key in thresholds:
+            thresholds[key] = min(thresholds[key], 0.9999)
+
+        if r < thresholds["low"]:
             v = await casino.fair_uniform(user_id, 1.0, 2.0)
-        elif r < 0.80:
+        elif r < thresholds["med_low"]:
             v = await casino.fair_uniform(user_id, 2.0, 5.0)
-        elif r < 0.95:
+        elif r < thresholds["med"]:
             v = await casino.fair_uniform(user_id, 5.0, 20.0)
-        elif r < 0.992:
+        elif r < thresholds["high"]:
             v = await casino.fair_uniform(user_id, 20.0, 100.0)
-        elif r < 0.998:
+        elif r < thresholds["vhigh"]:
             v = await casino.fair_uniform(user_id, 100.0, 1000.0)
         else:
             v = await casino.fair_uniform(user_id, 1000.0, 20000.0)
@@ -272,6 +299,8 @@ class CrashView(discord.ui.View):
                     if self.current_multiplier >= cp:
                         self.crashed_out[uid] = self.crash_points[uid]
                         await casino._remove_refund(self.session_id, user_id=uid)
+                        # Process game result for rakeback
+                        await casino.process_game_result(uid, "crash", self.players[uid])
                         await casino._log_game_event(
                             self.session_id,
                             "crash",
@@ -2759,6 +2788,9 @@ class Casino(commands.Cog):
 
         reel = [await weighted_choice_int() for _ in range(6)]
 
+        # Calculate house edge for RTP tracking
+        house_edge = await self.calculate_house_edge(user_id)
+
         PAY = {
             (":gem:", 6): 800,
             (":bell:", 6): 60,
@@ -2790,6 +2822,15 @@ class Casino(commands.Cog):
         counts = Counter(reel)
         sym, qty = counts.most_common(1)[0]
         multiplier = Decimal(PAY.get((sym, qty), 0))
+
+        # Apply RTP boost for VIP players (lower house edge = higher RTP)
+        # Base house edge is 4%, so calculate boost relative to that
+        base_edge = Decimal("0.04")
+        if multiplier > 0 and house_edge < base_edge:
+            # Boost multiplier for lower house edge
+            rtp_boost = (base_edge - house_edge) / base_edge
+            multiplier = multiplier * (Decimal("1") + rtp_boost * Decimal("0.25"))
+
         winnings = (stake * multiplier).quantize(Decimal("0.01"))
 
         # Process game result for rakeback
@@ -2953,6 +2994,9 @@ class Casino(commands.Cog):
         if len(self.roll_history[user_id]) > 5:
             self.roll_history[user_id].pop(0)
 
+        # Calculate house edge for RTP tracking and bonus
+        house_edge = await self.calculate_house_edge(user_id)
+
         payout_multipliers = {
             2: 10,
             3: 7,
@@ -2982,17 +3026,23 @@ class Casino(commands.Cog):
         )
 
         winnings = 0
+        base_edge = Decimal("0.04")
+        # Apply RTP boost for VIP players
+        rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
+
         if (normalized_guess in ["even", "evens"] and total % 2 == 0) or (
             normalized_guess in ["odd", "odds"] and total % 2 == 1
         ):
-            winnings = Decimal(amount) * Decimal(even_odd_payout)
+            winnings = Decimal(amount) * Decimal(even_odd_payout) * rtp_boost
             result = f"🎲 You rolled {die1} and {die2} (total {total})\nYou guessed correctly and won {currency_name} **{await self.formatter(winnings)}**!"
         elif normalized_guess.isdigit() and int(normalized_guess) == total:
             multiplier = payout_multipliers[total]
-            winnings = Decimal(amount) * Decimal(multiplier)
+            winnings = Decimal(amount) * Decimal(multiplier) * rtp_boost
             result = f"🎲 You rolled {die1} and {die2} (total {total})\nExact match! You won {currency_name} **{await self.formatter(winnings)}** with a {multiplier}x payout!"
         else:
             result = f"🎲 You rolled {die1} and {die2} (total {total})\nYou lost {currency_name} **{await self.formatter(amount)}**."
+
+        winnings = winnings.quantize(Decimal("0.01")) if winnings else 0
 
         # Process game result for rakeback
         await self.process_game_result(user_id, "dice", amount)
@@ -3210,6 +3260,12 @@ class Casino(commands.Cog):
         green_numbers = {0, "00"}
         all_numbers = list(range(0, 37)) + ["00"]
 
+        # Calculate house edge for RTP tracking and bonus
+        house_edge = await self.calculate_house_edge(user_id)
+        base_edge = Decimal("0.04")
+        # Apply RTP boost for VIP players (lower house edge = higher RTP)
+        rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
+
         spin_result = await self.fair_choice(user_id, all_numbers)
 
         is_red = isinstance(spin_result, int) and spin_result in red_numbers
@@ -3299,6 +3355,10 @@ class Casino(commands.Cog):
             outcome_description += " 🎉 You bet on that number!"
         else:
             outcome_description += " Better luck next time!"
+
+        # Apply RTP boost for VIP players
+        if winnings > 0:
+            winnings = (winnings * rtp_boost).quantize(Decimal("0.01"))
 
         # Process game result for rakeback
         await self.process_game_result(user_id, "roulette", amount)
@@ -3553,6 +3613,12 @@ class Casino(commands.Cog):
         ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         deck = [f"{r}{s}" for s in suits for r in ranks]
         await self.fair_shuffle(user_id, deck)
+
+        # Calculate house edge for RTP tracking
+        house_edge = await self.calculate_house_edge(user_id)
+        base_edge = Decimal("0.04")
+        # RTP boost for VIP players
+        rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.05") if house_edge < base_edge else Decimal("1")
 
         current_bet = amount
         has_doubled = False
@@ -4160,6 +4226,8 @@ class Casino(commands.Cog):
 
         PF = await self.prove_fairness(uid)
 
+        house_edge = await self.calculate_house_edge(uid)
+
         wallet_id = await self.bot.database.get_wallet_id_for_user(uid)
         bal_raw = await self.bot.database.get_wallet_balance(wallet_id)
         balance = Decimal(str(bal_raw))
@@ -4262,7 +4330,15 @@ class Casino(commands.Cog):
         if side == "player" and result == "player":
             payout_mult = Decimal("1")
         elif side == "banker" and result == "banker":
-            payout_mult = Decimal("1")
+            # Apply house edge to banker commission
+            # Standard is 5% commission, adjust based on VIP tier
+            # house_edge is already calculated (default 0.04 = 4%)
+            # Reduce commission for VIP players (lower house edge = lower commission)
+            base_commission = Decimal("0.05")  # 5% standard commission
+            commission = base_commission * house_edge / Decimal("0.04")  # Scale with house edge
+            commission = min(commission, base_commission)  # Cap at 5%
+            payout_mult = Decimal("1") - commission
+            # Super six: banker wins with 6 (3 cards) pays only 0.5:1
             if b_total == 6 and len(banker) == 3:
                 payout_mult = Decimal("0.5")
         elif side == "tie" and result == "tie":
@@ -5661,6 +5737,14 @@ class Casino(commands.Cog):
             init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
             multiplier = float(init_multi) if init_multi else 1.0
 
+            # Calculate house edge for RTP tracking
+            house_edge = await self.calculate_house_edge(user_id)
+            base_edge = Decimal("0.04")
+            # Apply RTP boost for VIP players - multiplier boost
+            if house_edge < base_edge:
+                rtp_boost = float(1 + (float(base_edge) - float(house_edge)) / float(base_edge) * 0.1)
+                multiplier = multiplier * rtp_boost
+
             # Format bet amount for display (formatter is async)
             formatted_bet = await self.formatter(bet_amount)
 
@@ -6027,6 +6111,12 @@ class BetButton(discord.ui.Button):
                 table_ui_view, itn
             )
 
+            # Calculate house edge for RTP tracking and bonus
+            house_edge = await self.cog.calculate_house_edge(table_ui_view.player.id)
+            base_edge = Decimal("0.04")
+            # Apply RTP boost for VIP players
+            rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
+
             max_allowed = await self.bot.database.get_max_gamble_amount(
                 table_ui_view.player.id, False
             )
@@ -6041,7 +6131,7 @@ class BetButton(discord.ui.Button):
                     delete_after=5,
                 )
 
-            total_win = player_bet * Decimal(bet_multiplier)
+            total_win = player_bet * Decimal(bet_multiplier) * rtp_boost
             total_win_formatted = await self.cog.formatter(total_win)
 
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -6092,6 +6182,9 @@ class BetButton(discord.ui.Button):
             await table_ui_view.message.edit(view=table_ui_view)
 
             try:
+                # Process game result for rakeback
+                await self.cog.process_game_result(table_ui_view.player.id, "keno", player_bet)
+
                 if total_win >= player_bet:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,

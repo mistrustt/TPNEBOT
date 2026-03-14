@@ -7537,11 +7537,12 @@ class DatabaseManager:
     async def ensure_default_vip_tiers(self) -> None:
         """Ensure default VIP tiers exist in the database."""
         default_tiers = [
-            {"name": "Bronze", "level": 1, "min_wagered": Decimal("0"), "rakeback_rate": Decimal("0.0100"), "rtp_bonus": Decimal("0")},
-            {"name": "Silver", "level": 2, "min_wagered": Decimal("100000"), "rakeback_rate": Decimal("0.0200"), "rtp_bonus": Decimal("0.0050")},
-            {"name": "Gold", "level": 3, "min_wagered": Decimal("500000"), "rakeback_rate": Decimal("0.0300"), "rtp_bonus": Decimal("0.0100")},
-            {"name": "Platinum", "level": 4, "min_wagered": Decimal("2000000"), "rakeback_rate": Decimal("0.0500"), "rtp_bonus": Decimal("0.0150")},
-            {"name": "Diamond", "level": 5, "min_wagered": Decimal("10000000"), "rakeback_rate": Decimal("0.1000"), "rtp_bonus": Decimal("0.0200")},
+            {"name": "Unranked", "level": 0, "min_wagered": Decimal("0"), "rakeback_rate": Decimal("0"), "rtp_bonus": Decimal("0")},
+            {"name": "Bronze", "level": 1, "min_wagered": Decimal("100000000000"), "rakeback_rate": Decimal("0.0100"), "rtp_bonus": Decimal("0")},
+            {"name": "Silver", "level": 2, "min_wagered": Decimal("100000000000000"), "rakeback_rate": Decimal("0.0200"), "rtp_bonus": Decimal("0.0050")},
+            {"name": "Gold", "level": 3, "min_wagered": Decimal("100000000000000000"), "rakeback_rate": Decimal("0.0300"), "rtp_bonus": Decimal("0.0100")},
+            {"name": "Platinum", "level": 4, "min_wagered": Decimal("100000000000000000000"), "rakeback_rate": Decimal("0.0500"), "rtp_bonus": Decimal("0.0150")},
+            {"name": "Diamond", "level": 5, "min_wagered": Decimal("100000000000000000000000"), "rakeback_rate": Decimal("0.1000"), "rtp_bonus": Decimal("0.0200")},
         ]
 
         async with self.async_sessionmaker() as session:
