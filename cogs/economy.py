@@ -4213,6 +4213,7 @@ class Economy(commands.Cog):
                 rakeback_rate = vip_info.get("rakeback_rate", Decimal("0.01"))
 
             tier_colors = {
+                "Unranked": discord.Color.dark_grey(),
                 "Bronze": discord.Color.orange(),
                 "Silver": discord.Color.light_grey(),
                 "Gold": discord.Color.gold(),
@@ -4228,11 +4229,12 @@ class Economy(commands.Cog):
             )
 
             tier_emoji = {
+                "Unranked": "⚪",
                 "Bronze": "🥉",
                 "Silver": "🥈",
                 "Gold": "🥇",
-                "Platinum": "💎",
-                "Diamond": "💠",
+                "Platinum": "💠",
+                "Diamond": "💎",
             }
 
             if current_tier:
