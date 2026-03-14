@@ -3781,46 +3781,19 @@ class Casino(commands.Cog):
 
         async def build_game_container(accent_color: int, content_text: str, buttons_disabled: bool = False) -> discord.ui.Container:
             """Build a Container with game state and action buttons."""
-            container = discord.ui.Container()
-            container.accent_color = accent_color
-
-            # Add title
-            container.add_item(discord.ui.TextDisplay("## 🃏 Blackjack"))
-
-            # Add game content
-            container.add_item(discord.ui.TextDisplay(content_text))
-
-            # Add separator before buttons
-            container.add_item(discord.ui.Separator())
-
-            # Create sections for buttons - each section has one button as accessory
-            hit_section = discord.ui.Section(
-                discord.ui.TextDisplay("**Actions**"),
-                accessory=hit_button
-            )
-            stay_section = discord.ui.Section(
-                discord.ui.TextDisplay(""),
-                accessory=stay_button
-            )
-            double_section = discord.ui.Section(
-                discord.ui.TextDisplay(""),
-                accessory=double_button
-            )
-            split_section = discord.ui.Section(
-                discord.ui.TextDisplay(""),
-                accessory=split_button
-            )
-
             if buttons_disabled:
                 hit_button.disabled = True
                 stay_button.disabled = True
                 double_button.disabled = True
                 split_button.disabled = True
 
-            container.add_item(hit_section)
-            container.add_item(stay_section)
-            container.add_item(double_section)
-            container.add_item(split_section)
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🃏 Blackjack"),
+                discord.ui.TextDisplay(content_text),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(hit_button, stay_button, double_button, split_button),
+                accent_color=accent_color
+            )
 
             return container
 
