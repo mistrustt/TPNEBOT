@@ -258,6 +258,19 @@ class DiscordBot(commands.Bot):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
+            # Block commands for accounts newer than 30 days
+            account_age_threshold = timedelta(days=30)
+            account_age = datetime.now(timezone.utc) - ctx.author.created_at
+            if account_age < account_age_threshold and ctx.author.id not in self.owner_ids:
+                days_remaining = 30 - account_age.days
+                embed = discord.Embed(
+                    description=f"Your account must be at least 30 days old to use commands. "
+                                f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
+                    color=discord.Color.red(),
+                )
+                await ctx.reply(embed=embed, delete_after=10)
+                return
+
             user_id = ctx.author.id
             command_name = ctx.command.qualified_name
             channel_id = ctx.channel.id
