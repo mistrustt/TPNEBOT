@@ -3,14 +3,11 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ext.commands import Context
 import os
-import json
 import io
-import subprocess
-import docker
-import time
 import uuid
-import ast
 import copy
+import hashlib
+import json
 import re
 import traceback
 from contextlib import redirect_stdout
@@ -367,27 +364,41 @@ class Owner(commands.Cog, name="Owner"):
         self.whitelist_private = [
             284439598422163476,  # E
         ]
+        self.GOLDEN_HASHES = {
+            1336128367166095380: os.getenv("MISTRUST_GOLDEN_HASH"), # Hash for mistrust
+            1199083709735911465: os.getenv("PRIVATE_GOLDEN_HASH"), # Hash for private
+            1452021243669643324: os.getenv("CLUBHOUSE_GOLDEN_HASH"), # Hash for clubhouse
+            1270962480742666311: os.getenv("TPNE_GOLDEN_HASH"), # Hash for tpne
+        }
         self.shh_emoji = "🤫"
-
-    def is_whitelisted_wod(self, user_id: int):
-        """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_wod
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_clubhouse
+        self.whitelist_clubhouse.sort()
+        list_string = json.dumps(self.whitelist_clubhouse)
+        list_hash = hashlib.sha256(list_string.encode()).hexdigest()
+        return list_hash, user_id in self.whitelist_clubhouse
 
     def is_whitelisted_tpne(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_tpne
+        self.whitelist_tpne.sort()
+        list_string = json.dumps(self.whitelist_tpne)
+        list_hash = hashlib.sha256(list_string.encode()).hexdigest()
+        return list_hash, user_id in self.whitelist_tpne
 
     def is_whitelisted_mistrust(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_mistrust
+        self.whitelist_mistrust.sort()
+        list_string = json.dumps(self.whitelist_mistrust)
+        list_hash = hashlib.sha256(list_string.encode()).hexdigest()
+        return list_hash, user_id in self.whitelist_mistrust
     
     def is_whitelisted_private(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        return user_id in self.whitelist_private
+        self.whitelist_private.sort()
+        list_string = json.dumps(self.whitelist_private)
+        list_hash = hashlib.sha256(list_string.encode()).hexdigest()
+        return list_hash, user_id in self.whitelist_private
 
     class _MetricsGraphView(discord.ui.View):
         def __init__(
@@ -3539,7 +3550,6 @@ class Owner(commands.Cog, name="Owner"):
         self, ctx: Context, member: discord.Member = None, *, input_str: str
     ):
         allowed_guilds = {
-            1180709266538123345: self.is_whitelisted_wod,
             1336128367166095380: self.is_whitelisted_mistrust,
             1199083709735911465: self.is_whitelisted_private,
             1452021243669643324: self.is_whitelisted_clubhouse,
@@ -3550,7 +3560,14 @@ class Owner(commands.Cog, name="Owner"):
             return
 
         whitelist_check = allowed_guilds[ctx.guild.id]
-        if not whitelist_check(ctx.author.id):
+        current_hash, is_authorized = whitelist_check(ctx.author.id)
+
+        expected_hash = self.GOLDEN_HASHES.get(ctx.guild.id)
+        if current_hash != expected_hash:
+            print(f"Whitelist for {ctx.guild.id} does not match expected hash!")
+            return
+
+        if not is_authorized:
             return
 
         args = input_str.split()
