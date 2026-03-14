@@ -3103,7 +3103,7 @@ class DatabaseManager:
 
         # Volatility index (20% weight) - lower is better, now uses log-variance (0 to ~2)
         # Score decreases linearly from 20 to 0 as volatility increases from 0 to 1
-        volatility_score = 20 * max(Decimal("0"), 1 - min(volatility_index, Decimal("1")))
+        volatility_score = 20 * max(0, 1 - min(volatility_index, 1))
 
         # Calculate total score (0-100)
         total_score = treasury_score + liquidity_score + velocity_score + volatility_score

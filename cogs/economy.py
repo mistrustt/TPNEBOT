@@ -1754,7 +1754,7 @@ class Economy(commands.Cog):
             await ctx.send("❌ Error retrieving trends. Please try again.")
 
     @economy.command(
-        name="health", aliases=["econhealth"], description="Get the overall economic health score."
+        name="health", aliases=["status"], description="Get the overall economic health score."
     )
     async def economy_health(self, ctx: commands.Context):
         """Display the overall economic health score and breakdown with personalized recommendations."""
