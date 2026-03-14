@@ -4205,7 +4205,7 @@ class Economy(commands.Cog):
 
             if current_tier is None:
                 # Ensure default VIP tiers exist
-                await self.bot.database.ensure_default_vip_tiers()
+                await self.bot.database.upgrade_user_vip(ctx.author.id)  # This will create a VIP record if it doesn't exist
                 vip_info = await self.bot.database.get_rakeback_info(ctx.author.id)
                 current_tier = vip_info.get("current_tier")
                 next_tier = vip_info.get("next_tier")
@@ -4308,7 +4308,7 @@ class Economy(commands.Cog):
             tiers = await self.bot.database.get_all_vip_tiers()
 
             if not tiers:
-                await self.bot.database.ensure_default_vip_tiers()
+                await self.bot.database.upgrade_user_vip(ctx.author.id)  # This will create a VIP record if it doesn't exist
                 tiers = await self.bot.database.get_all_vip_tiers()
 
             tier_emojis = {
