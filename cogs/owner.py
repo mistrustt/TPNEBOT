@@ -365,38 +365,38 @@ class Owner(commands.Cog, name="Owner"):
             284439598422163476,  # E
         ]
         self.GOLDEN_HASHES = {
-            1336128367166095380: os.getenv("MISTRUST_GOLDEN_HASH"), # Hash for mistrust
-            1199083709735911465: os.getenv("PRIVATE_GOLDEN_HASH"), # Hash for private
-            1452021243669643324: os.getenv("CLUBHOUSE_GOLDEN_HASH"), # Hash for clubhouse
-            1270962480742666311: os.getenv("TPNE_GOLDEN_HASH"), # Hash for tpne
+            1336128367166095380: os.getenv("MISTRUST_GOLDEN_HASH", "").strip(), # Hash for mistrust
+            1199083709735911465: os.getenv("PRIVATE_GOLDEN_HASH", "").strip(), # Hash for private
+            1452021243669643324: os.getenv("CLUBHOUSE_GOLDEN_HASH", "").strip(), # Hash for clubhouse
+            1270962480742666311: os.getenv("TPNE_GOLDEN_HASH", "").strip(), # Hash for tpne
         }
         self.shh_emoji = "🤫"
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        self.whitelist_clubhouse.sort()
-        list_string = json.dumps(self.whitelist_clubhouse)
+        list_string = json.dumps(sorted(self.whitelist_clubhouse), separators=(',', ':'))
+    
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_clubhouse
 
     def is_whitelisted_tpne(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        self.whitelist_tpne.sort()
-        list_string = json.dumps(self.whitelist_tpne)
+        list_string = json.dumps(sorted(self.whitelist_tpne), separators=(',', ':'))
+    
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_tpne
 
     def is_whitelisted_mistrust(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        self.whitelist_mistrust.sort()
-        list_string = json.dumps(self.whitelist_mistrust)
+        list_string = json.dumps(sorted(self.whitelist_mistrust), separators=(',', ':'))
+    
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_mistrust
     
     def is_whitelisted_private(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        self.whitelist_private.sort()
-        list_string = json.dumps(self.whitelist_private)
+        list_string = json.dumps(sorted(self.whitelist_private), separators=(',', ':'))
+    
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_private
 
