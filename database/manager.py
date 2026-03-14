@@ -2935,35 +2935,53 @@ class DatabaseManager:
         velocity_of_money = float(factors.get("velocity_of_money", 0))
         volatility_index = float(factors.get("volatility_index", 0))
 
-        # Liquidity-based recommendations
-        if liquidity_ratio < 0.3:
+        # Liquidity-based recommendations (tiered to match scoring)
+        # Scoring: 0.3-0.8 = 25pts (perfect), <0.3 scales down: 25 * (ratio/0.3)
+        # So: 0.25 → 21pts (yellow), 0.15 → 12.5pts (orange), <0.15 → red
+        if liquidity_ratio < 0.15:
             recommendations["recommendations"].append({
                 "type": "liquidity",
                 "priority": "high",
-                "message": "Low liquidity detected. Consider holding cash as opportunities may arise soon.",
+                "message": "Critical liquidity shortage. Economy is tight - cash is valuable.",
                 "action": "hold_cash"
             })
-        elif liquidity_ratio > 0.7:
+        elif liquidity_ratio < 0.3:
             recommendations["recommendations"].append({
                 "type": "liquidity",
                 "priority": "medium",
-                "message": "High liquidity detected. Good time to make investments or large transactions.",
+                "message": "Low liquidity detected. Consider holding cash as opportunities may arise.",
+                "action": "hold_cash"
+            })
+        elif liquidity_ratio > 0.85:
+            recommendations["recommendations"].append({
+                "type": "liquidity",
+                "priority": "medium",
+                "message": "Very high liquidity. Consider investments or large transactions.",
                 "action": "consider_investing"
             })
 
-        # Velocity-based recommendations
+        # Velocity-based recommendations (tiered to match scoring)
+        # Scoring: velocity * 50, capped at 25 points
+        # So: 0.5 → 25pts, 0.3 → 15pts, 0.1 → 5pts
         if velocity_of_money < 0.1:
             recommendations["recommendations"].append({
                 "type": "velocity",
                 "priority": "high",
-                "message": "Low economic activity. Transaction volumes are decreasing.",
+                "message": "Very low economic activity. Transaction volumes are critically low.",
                 "action": "reduce_trading_activity"
             })
-        elif velocity_of_money > 0.5:
+        elif velocity_of_money < 0.2:
             recommendations["recommendations"].append({
                 "type": "velocity",
                 "priority": "medium",
-                "message": "High economic activity. Markets are active, consider participating.",
+                "message": "Low economic activity. Transaction volumes are below normal.",
+                "action": "reduce_trading_activity"
+            })
+        elif velocity_of_money > 0.6:
+            recommendations["recommendations"].append({
+                "type": "velocity",
+                "priority": "info",
+                "message": "High economic activity. Markets are very active.",
                 "action": "increase_activity"
             })
 
