@@ -3561,7 +3561,7 @@ class Casino(commands.Cog):
             )
             view = discord.ui.LayoutView()
             view.add_item(container)
-            await ctx.reply(view=view, flags=32768, delete_after=5)
+            await ctx.reply(view=view, delete_after=5)
             return
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
@@ -3576,7 +3576,7 @@ class Casino(commands.Cog):
             )
             view = discord.ui.LayoutView()
             view.add_item(container)
-            await ctx.reply(view=view, flags=32768, delete_after=5)
+            await ctx.reply(view=view, delete_after=5)
 
         if amount <= 0 or amount > balance:
             container = discord.ui.Container(
@@ -3585,7 +3585,7 @@ class Casino(commands.Cog):
             )
             view = discord.ui.LayoutView()
             view.add_item(container)
-            await ctx.reply(view=view, flags=32768, delete_after=5)
+            await ctx.reply(view=view, delete_after=5)
             return
 
         try:
@@ -3599,7 +3599,7 @@ class Casino(commands.Cog):
             )
             view = discord.ui.LayoutView()
             view.add_item(container)
-            await ctx.reply(view=view, flags=32768, delete_after=5)
+            await ctx.reply(view=view, delete_after=5)
             return
 
         session_id = await self._create_game_session(
@@ -3731,7 +3731,7 @@ class Casino(commands.Cog):
                     )
                     view = discord.ui.LayoutView()
                     view.add_item(container)
-                    await ctx.reply(view=view, flags=32768, delete_after=5)
+                    await ctx.reply(view=view, delete_after=5)
                     return
             elif player_score == dealer_score:
                 outcome = "tie"
@@ -3758,7 +3758,7 @@ class Casino(commands.Cog):
                     )
                     view = discord.ui.LayoutView()
                     view.add_item(container)
-                    await ctx.reply(view=view, flags=32768, delete_after=5)
+                    await ctx.reply(view=view, delete_after=5)
                     return
                 result = (
                     f"It's a tie! Your bet of {self.currency_name} "
@@ -4165,7 +4165,7 @@ class Casino(commands.Cog):
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
         )
-        await ctx.reply(view=view, flags=32768)
+        await ctx.reply(view=view)
 
     @commands.command(
         name="poker", aliases=["headsup"], description="Play a game of Heads-Up Poker"
