@@ -1761,60 +1761,55 @@ class Economy(commands.Cog):
         if not hasattr(self.bot, 'database'):
             return await ctx.send("❌ Database not available.")
 
-        try:
-            health_data = await self.bot.database.get_economic_health_score()
-            recommendations = await self.bot.database.get_personalized_economic_recommendations(ctx.author.id)
+        health_data = await self.bot.database.get_economic_health_score()
+        recommendations = await self.bot.database.get_personalized_economic_recommendations(ctx.author.id)
 
-            embed = discord.Embed(
-                title="🏥 Economic Health Score",
-                description=f"Overall Score: **{health_data['score']}/100** ({health_data['status']})",
-                color=discord.Color.orange()
+        embed = discord.Embed(
+            title="🏥 Economic Health Score",
+            description=f"Overall Score: **{health_data['score']}/100** ({health_data['status']})",
+            color=discord.Color.orange()
+        )
+
+        # Add component scores
+        for component_name, component_data in health_data['components'].items():
+            formatted_name = component_name.replace('_', ' ').title()
+            value_text = (
+                f"Value: {component_data['value']}%\n"
+                f"Score: {component_data['score']}/{component_data['weight']}"
             )
 
-            # Add component scores
-            for component_name, component_data in health_data['components'].items():
-                formatted_name = component_name.replace('_', ' ').title()
-                value_text = (
-                    f"Value: {component_data['value']}%\n"
-                    f"Score: {component_data['score']}/{component_data['weight']}"
-                )
+            # Color coding for health
+            if component_data['score'] / component_data['weight'] > 0.8:
+                field_color = "🟢"
+            elif component_data['score'] / component_data['weight'] > 0.6:
+                field_color = "🟡"
+            elif component_data['score'] / component_data['weight'] > 0.4:
+                field_color = "🟠"
+            else:
+                field_color = "🔴"
 
-                # Color coding for health
-                if component_data['score'] / component_data['weight'] > 0.8:
-                    field_color = "🟢"
-                elif component_data['score'] / component_data['weight'] > 0.6:
-                    field_color = "🟡"
-                elif component_data['score'] / component_data['weight'] > 0.4:
-                    field_color = "🟠"
-                else:
-                    field_color = "🔴"
+            embed.add_field(
+                name=f"{field_color} {formatted_name}",
+                value=value_text,
+                inline=True
+            )
 
-                embed.add_field(
-                    name=f"{field_color} {formatted_name}",
-                    value=value_text,
-                    inline=True
-                )
+        # Add recommendations section
+        if recommendations.get('recommendations'):
+            rec_text = ""
+            for rec in recommendations['recommendations']:
+                priority_emoji = {"high": "🔴", "medium": "🟡", "info": "🔵"}
+                emoji = priority_emoji.get(rec.get('priority', 'info'), "🔹")
+                rec_text += f"{emoji} {rec['message']}\n"
 
-            # Add recommendations section
-            if recommendations.get('recommendations'):
-                rec_text = ""
-                for rec in recommendations['recommendations']:
-                    priority_emoji = {"high": "🔴", "medium": "🟡", "info": "🔵"}
-                    emoji = priority_emoji.get(rec.get('priority', 'info'), "🔹")
-                    rec_text += f"{emoji} {rec['message']}\n"
+            embed.add_field(
+                name="💡 Recommendations",
+                value=rec_text.strip(),
+                inline=False
+            )
 
-                embed.add_field(
-                    name="💡 Recommendations",
-                    value=rec_text.strip(),
-                    inline=False
-                )
-
-            embed.set_footer(text="Higher scores indicate better economic health")
-            await ctx.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"Error getting economic health: {e}")
-            await ctx.send("❌ Error retrieving health score. Please try again.")
+        embed.set_footer(text="Higher scores indicate better economic health")
+        await ctx.send(embed=embed)
 
     @commands.command(name="daily", description="Claim your daily reward.")
     async def daily(self, ctx: commands.Context):
