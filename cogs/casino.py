@@ -24,12 +24,15 @@ from textwrap import shorten
 logger = logging.getLogger("discord_bot")
 
 
-class CrashView(discord.ui.View):
+class CrashView(discord.ui.LayoutView):
+    """Crash game view using Components V2 Container system."""
+
     def __init__(
         self, bot: commands.Bot, host_id: int, channel_id: int, session_id=None
     ):
         super().__init__(timeout=None)
         self.bot = bot
+        self.casino: Casino = bot.get_cog("Casino")
         self.host_id = host_id
         self.channel_id = channel_id
         self.session_id = session_id
@@ -50,15 +53,84 @@ class CrashView(discord.ui.View):
             label="Join Crash", style=discord.ButtonStyle.green
         )
         self.join_btn.callback = self.join_callback
-        self.add_item(self.join_btn)
 
         self.cashout_btn = discord.ui.Button(
             label="Cash Out", style=discord.ButtonStyle.red, disabled=True
         )
         self.cashout_btn.callback = self.cashout_callback
-        self.add_item(self.cashout_btn)
 
         self.game_message: discord.Message = None
+
+    async def build_container(self) -> discord.ui.Container:
+        """Build the game container with current state."""
+        if self.game_phase == "starting":
+            title = "🚀 Crash – Lobby"
+            content = f"Click **Join** starting <t:{self.countdown_end}:R>"
+            accent_color = 0x57F287  # Green
+            show_buttons = True
+            buttons_disabled = False
+        elif self.game_phase == "running":
+            title = "🚀 Crash – Running"
+            # Build player list
+            lines = []
+            for uid, bet in self.players.items():
+                cp = self.crash_points.get(uid, Decimal("0.00"))
+                if uid in self.cashed_out:
+                    status = f"💰 cashed @ {self.cashed_out[uid]:.2f}×"
+                elif uid in self.crashed_out:
+                    status = f"💥 crashed @ {self.crashed_out[uid]:.2f}×"
+                else:
+                    val = (bet * self.current_multiplier).quantize(Decimal("0.01"))
+                    status = f"🟢 playing → {await self.casino.formatter(val)} {self.casino.currency_name}"
+                lines.append(f"<@{uid}> {status}")
+
+            content = f"**Multiplier:** {self.current_multiplier:.2f}×\n\n**Players:**\n" + "\n".join(lines) if lines else f"**Multiplier:** {self.current_multiplier:.2f}×"
+            accent_color = 0x5865F2  # Blurple
+            show_buttons = True
+            active_can_cash = any(
+                uid not in self.cashed_out and uid not in self.crashed_out
+                for uid in self.players
+            )
+            buttons_disabled = not active_can_cash
+        else:  # ended
+            title = "🚀 Crash – Ended"
+            lines = []
+            for uid, bet in self.players.items():
+                cp = self.crash_points.get(uid, Decimal("0.00"))
+                if uid in self.cashed_out:
+                    status = f"💰 cashed @ {self.cashed_out[uid]:.2f}×"
+                elif uid in self.crashed_out:
+                    status = f"💥 crashed @ {self.crashed_out[uid]:.2f}×"
+                else:
+                    status = "🟢 playing"
+                status += f" ( could have reached {cp:.2f}× )"
+                lines.append(f"<@{uid}> {status}")
+
+            content = "**Players:**\n" + "\n".join(lines) if lines else "No players"
+            accent_color = 0xED4245  # Red
+            show_buttons = False
+            buttons_disabled = True
+
+        # Update button states
+        self.join_btn.disabled = self.game_phase != "starting"
+        self.cashout_btn.disabled = buttons_disabled if self.game_phase == "running" else True
+
+        if show_buttons:
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(f"## {title}"),
+                discord.ui.TextDisplay(content),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(self.join_btn, self.cashout_btn),
+                accent_color=accent_color
+            )
+        else:
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(f"## {title}"),
+                discord.ui.TextDisplay(content),
+                accent_color=accent_color
+            )
+
+        return container
 
     async def join_callback(self, interaction: Interaction):
         """Show the bet modal when someone clicks Join."""
@@ -75,9 +147,8 @@ class CrashView(discord.ui.View):
                 "You've already joined!", ephemeral=True
             )
 
-        casino: Casino = self.bot.get_cog("Casino")
         max_allowed = await self.bot.database.get_max_gamble_amount(uid, False)
-        formatted_max = await casino.short_formatter(max_allowed)
+        formatted_max = await self.casino.short_formatter(max_allowed)
 
         modal = discord.ui.Modal(title="Join Crash Game")
         amount_input = discord.ui.TextInput(
@@ -92,7 +163,7 @@ class CrashView(discord.ui.View):
             balance = await self.bot.database.get_wallet_balance(wallet)
 
             try:
-                bet = await casino.amount_handler(amount_input.value, balance)
+                bet = await self.casino.amount_handler(amount_input.value, balance)
             except ValueError as e:
                 return await sub_int.response.send_message(
                     f"Invalid bet: {e}", ephemeral=True
@@ -117,7 +188,7 @@ class CrashView(discord.ui.View):
                 wallet, -bet, "Crash Game Bet"
             )
 
-            await casino._add_refund(
+            await self.casino._add_refund(
                 self.session_id,
                 user_id=uid,
                 wallet_id=str(wallet),
@@ -128,7 +199,7 @@ class CrashView(discord.ui.View):
             self.players[uid] = bet
             self.crash_points[uid] = await self.generate_crash_point(uid)
 
-            await casino._log_game_event(
+            await self.casino._log_game_event(
                 self.session_id,
                 "join",
                 {"user_id": uid, "bet": str(bet)},
@@ -136,7 +207,7 @@ class CrashView(discord.ui.View):
 
             self.cashout_btn.disabled = False
             await sub_int.response.send_message(
-                f"You joined with **{await casino.formatter(bet)}** {casino.currency_name}",
+                f"You joined with **{await self.casino.formatter(bet)}** {self.casino.currency_name}",
                 ephemeral=True,
             )
             await self.update_game_message()
@@ -161,33 +232,30 @@ class CrashView(discord.ui.View):
             wallet, win, "Crash Game Payout"
         )
 
-        casino: Casino = self.bot.get_cog("Casino")
-        await casino._remove_refund(self.session_id, user_id=uid)
-        await casino._log_game_event(
+        await self.casino._remove_refund(self.session_id, user_id=uid)
+        await self.casino._log_game_event(
             self.session_id,
             "cashout",
             {"user_id": uid, "multiplier": str(mult), "win": str(win)},
         )
 
         # Process game result for rakeback
-        await casino.process_game_result(uid, "crash", bet)
+        await self.casino.process_game_result(uid, "crash", bet)
 
         self.cashed_out[uid] = self.current_multiplier
-        casino: Casino = self.bot.get_cog("Casino")
         await interaction.response.send_message(
-            f"Cashed out @ {mult:.2f}× for **{await casino.formatter(win)}** {casino.currency_name}",
+            f"Cashed out @ {mult:.2f}× for **{await self.casino.formatter(win)}** {self.casino.currency_name}",
             ephemeral=True,
         )
         await self.update_game_message()
 
     async def generate_crash_point(self, user_id: int) -> Decimal:
         """Per-user provable fairness with house edge adjustment"""
-        casino: Casino = self.bot.get_cog("Casino")
 
         # Get user's house edge (lower for higher VIP tiers)
-        house_edge = await casino.calculate_house_edge(user_id)
+        house_edge = await self.casino.calculate_house_edge(user_id)
 
-        r = await casino.fair_random(user_id)
+        r = await self.casino.fair_random(user_id)
 
         # Adjust probability distribution based on house edge
         # Lower house edge = higher chance of better multipliers
@@ -209,17 +277,17 @@ class CrashView(discord.ui.View):
             thresholds[key] = min(thresholds[key], 0.9999)
 
         if r < thresholds["low"]:
-            v = await casino.fair_uniform(user_id, 1.0, 2.0)
+            v = await self.casino.fair_uniform(user_id, 1.0, 2.0)
         elif r < thresholds["med_low"]:
-            v = await casino.fair_uniform(user_id, 2.0, 5.0)
+            v = await self.casino.fair_uniform(user_id, 2.0, 5.0)
         elif r < thresholds["med"]:
-            v = await casino.fair_uniform(user_id, 5.0, 20.0)
+            v = await self.casino.fair_uniform(user_id, 5.0, 20.0)
         elif r < thresholds["high"]:
-            v = await casino.fair_uniform(user_id, 20.0, 100.0)
+            v = await self.casino.fair_uniform(user_id, 20.0, 100.0)
         elif r < thresholds["vhigh"]:
-            v = await casino.fair_uniform(user_id, 100.0, 1000.0)
+            v = await self.casino.fair_uniform(user_id, 100.0, 1000.0)
         else:
-            v = await casino.fair_uniform(user_id, 1000.0, 20000.0)
+            v = await self.casino.fair_uniform(user_id, 1000.0, 20000.0)
         return Decimal(str(round(v, 2)))
 
     async def start_game(self, ctx: commands.Context):
@@ -232,14 +300,11 @@ class CrashView(discord.ui.View):
 
         self.countdown_end = int((now + datetime.timedelta(seconds=20)).timestamp())
 
-        embed = discord.Embed(
-            title="🚀 Crash – Lobby",
-            description=f"Click **Join** starting <t:{self.countdown_end}:R>",
-            color=discord.Color.green(),
-        )
-        self.game_message = await ctx.send(embed=embed, view=self)
-        casino: Casino = self.bot.get_cog("Casino")
-        await casino._update_game_session(
+        container = await self.build_container()
+        self.clear_items()
+        self.add_item(container)
+        self.game_message = await ctx.send(view=self)
+        await self.casino._update_game_session(
             self.session_id, message_id=self.game_message.id
         )
 
@@ -248,16 +313,16 @@ class CrashView(discord.ui.View):
             await self.update_game_message()
 
         if not self.players:
-            await self.game_message.edit(
-                embed=discord.Embed(
-                    title="🚀 Crash – Cancelled",
-                    description="No players joined.",
-                    color=discord.Color.red(),
-                ),
-                view=None,
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🚀 Crash – Cancelled"),
+                discord.ui.TextDisplay("No players joined."),
+                accent_color=0xED4245
             )
+            self.clear_items()
+            self.add_item(container)
+            await self.game_message.edit(view=self)
             self.is_running = False
-            await casino._end_game_session(
+            await self.casino._end_game_session(
                 self.session_id,
                 outcome="cancelled",
                 reason="no_players",
@@ -266,12 +331,6 @@ class CrashView(discord.ui.View):
             return
 
         self.game_phase = "running"
-        self.join_btn.disabled = True
-
-        self.cashout_btn.disabled = not any(
-            uid not in self.cashed_out and uid not in self.crashed_out
-            for uid in self.players
-        )
         await self.update_game_message()
 
         running_start = discord.utils.utcnow()
@@ -284,8 +343,8 @@ class CrashView(discord.ui.View):
                         self.crashed_out[uid] = self.crash_points.get(
                             uid, self.current_multiplier
                         )
-                        await casino._remove_refund(self.session_id, user_id=uid)
-                        await casino._log_game_event(
+                        await self.casino._remove_refund(self.session_id, user_id=uid)
+                        await self.casino._log_game_event(
                             self.session_id,
                             "crash",
                             {"user_id": uid, "multiplier": str(self.crashed_out[uid])},
@@ -298,10 +357,10 @@ class CrashView(discord.ui.View):
                 if uid not in self.cashed_out and uid not in self.crashed_out:
                     if self.current_multiplier >= cp:
                         self.crashed_out[uid] = self.crash_points[uid]
-                        await casino._remove_refund(self.session_id, user_id=uid)
+                        await self.casino._remove_refund(self.session_id, user_id=uid)
                         # Process game result for rakeback
-                        await casino.process_game_result(uid, "crash", self.players[uid])
-                        await casino._log_game_event(
+                        await self.casino.process_game_result(uid, "crash", self.players[uid])
+                        await self.casino._log_game_event(
                             self.session_id,
                             "crash",
                             {"user_id": uid, "multiplier": str(cp)},
@@ -310,7 +369,7 @@ class CrashView(discord.ui.View):
             await asyncio.sleep(1)
 
         self.game_phase = "ended"
-        await casino._end_game_session(
+        await self.casino._end_game_session(
             self.session_id,
             outcome="completed",
             final_state={
@@ -320,8 +379,10 @@ class CrashView(discord.ui.View):
             },
         )
 
-        self.cashout_btn.disabled = True
-        await self.game_message.edit(embed=await self.make_embed(), view=None)
+        container = await self.build_container()
+        self.clear_items()
+        self.add_item(container)
+        await self.game_message.edit(view=self)
         self.is_running = False
 
     def calculate_increment(self) -> Decimal:
@@ -351,49 +412,11 @@ class CrashView(discord.ui.View):
         return Decimal("100.0")
 
     async def update_game_message(self):
-        active_can_cash = any(
-            uid not in self.cashed_out and uid not in self.crashed_out
-            for uid in self.players
-        )
-        self.cashout_btn.disabled = not (
-            self.game_phase == "running" and active_can_cash
-        )
-        await self.game_message.edit(embed=await self.make_embed(), view=self)
-
-    async def make_embed(self) -> discord.Embed:
-        casino: Casino = self.bot.get_cog("Casino")
-        title = "🚀 Crash – Running" if self.game_phase == "running" else "🚀 Crash"
-        embed = discord.Embed(title=title, color=discord.Color.blue())
-
-        if self.game_phase == "starting":
-            embed.description = f"Starting <t:{self.countdown_end}:R>"
-        else:
-            embed.add_field(
-                name="Multiplier", value=f"{self.current_multiplier:.2f}×", inline=False
-            )
-
-        lines = []
-        for uid, bet in self.players.items():
-            cp = self.crash_points.get(uid, Decimal("0.00"))
-
-            if uid in self.cashed_out:
-                status = f"💰 cashed @ {self.cashed_out[uid]:.2f}×"
-            elif uid in self.crashed_out:
-                status = f"💥 crashed @ {self.crashed_out[uid]:.2f}×"
-            else:
-                if self.game_phase == "running":
-                    val = (bet * self.current_multiplier).quantize(Decimal("0.01"))
-                    status = f"🟢 playing → {await casino.formatter(val)} {casino.currency_name}"
-                else:
-                    status = "🟢 playing"
-
-            if self.game_phase == "ended":
-                status += f" ( could have reached {cp:.2f}× )"
-
-            lines.append(f"<@{uid}> {status}")
-
-        embed.add_field(name="Players", value="\n".join(lines), inline=False)
-        return embed
+        """Update the game message with current state."""
+        container = await self.build_container()
+        self.clear_items()
+        self.add_item(container)
+        await self.game_message.edit(view=self)
 
 
 class MinesGridLayout(discord.ui.LayoutView):
