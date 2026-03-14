@@ -890,7 +890,9 @@ class MinesCashoutButton(discord.ui.Button):
             )
 
 
-class DoubleOrNothingView(View):
+class DoubleOrNothingView(discord.ui.LayoutView):
+    """Double or Nothing game view using Components V2 Container system."""
+
     def __init__(
         self,
         bot,
@@ -914,10 +916,49 @@ class DoubleOrNothingView(View):
         self.session_id = session_id
         self.message: discord.Message | None = None
 
-    @discord.ui.button(label="Double", style=discord.ButtonStyle.green)
-    async def double_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+        # Create buttons
+        self.double_button = discord.ui.Button(
+            label="Double", style=discord.ButtonStyle.green
+        )
+        self.double_button.callback = self._double_callback
+
+        self.cashout_button = discord.ui.Button(
+            label="Cash Out", style=discord.ButtonStyle.red
+        )
+        self.cashout_button.callback = self._cashout_callback
+
+        # Build initial container
+        self._build_container()
+
+    def _build_container(self, accent_color: int = 0x57F287, content: str = None):
+        """Build the game container with current state."""
+        if content is None:
+            content = (
+                f"**Starting bet:** {self.currency_name} {self._format_winnings(self.initial_amount)}\n"
+                f"**Winnings:** {self.currency_name} {self._format_winnings(self.winnings)}"
+            )
+
+        container = discord.ui.Container(
+            discord.ui.TextDisplay(f"## 🎲 Double Or Nothing"),
+            discord.ui.TextDisplay(content),
+            discord.ui.Separator(),
+            discord.ui.ActionRow(self.double_button, self.cashout_button),
+            accent_color=accent_color
+        )
+
+        # Clear existing items and add new container
+        self.clear_items()
+        self.add_item(container)
+
+    def _format_winnings(self, amount) -> str:
+        """Format winnings amount. Returns the amount for caller to format."""
+        casino: Casino = self.bot.get_cog("Casino")
+        # We need to run the formatter synchronously, but it's async
+        # Return the decimal value and let the caller handle it
+        return str(amount)
+
+    async def _double_callback(self, interaction: discord.Interaction):
+        """Handle double button click."""
         casino: Casino = self.bot.get_cog("Casino")
 
         if interaction.user.id != self.initial_user.id:
@@ -931,7 +972,6 @@ class DoubleOrNothingView(View):
 
         success = await casino.fair_choice(self.user_id, [True, False])
         if success:
-
             self.winnings = Decimal(self.winnings) * 2
             revealed_seed, new_hash = await self.bot.database.increment_win(
                 self.user_id,
@@ -944,18 +984,16 @@ class DoubleOrNothingView(View):
             )
             self.rounds += 1
 
-            embed = discord.Embed(
-                description=(
-                    f"Current Winnings: {self.currency_name} **{await casino.formatter(self.winnings)}**\n"
-                    "Would you like to double again?"
-                ),
-                color=discord.Color.green(),
+            # Format winnings
+            formatted_winnings = await casino.formatter(self.winnings)
+            content = (
+                f"**Current Winnings:** {self.currency_name} **{formatted_winnings}**\n"
+                f"Would you like to double again?"
             )
-            embed.set_author(
-                name="Double Or Nothing", icon_url=self.initial_user.display_avatar.url
-            )
-            embed.set_footer(text=f"Round {self.rounds}")
-            await interaction.response.edit_message(embed=embed, view=self)
+
+            self._build_container(accent_color=0x57F287, content=content)  # Green
+            await interaction.response.edit_message(view=self)
+
             await casino._log_game_event(
                 self.session_id,
                 "double",
@@ -971,14 +1009,18 @@ class DoubleOrNothingView(View):
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
-            embed = discord.Embed(
-                description="You lost everything! Better luck next time.",
-                color=discord.Color.red(),
+
+            # Build loss container (no buttons)
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🎲 Double Or Nothing"),
+                discord.ui.TextDisplay("You lost everything! Better luck next time."),
+                accent_color=0xED4245  # Red
             )
-            embed.set_author(
-                name="Double Or Nothing", icon_url=self.initial_user.display_avatar.url
-            )
-            await interaction.response.edit_message(embed=embed, view=None)
+
+            self.clear_items()
+            self.add_item(container)
+            await interaction.response.edit_message(view=self)
+
             await casino._remove_refund(self.session_id, user_id=self.user_id)
             await casino._end_game_session(
                 self.session_id,
@@ -987,10 +1029,8 @@ class DoubleOrNothingView(View):
             )
             self.stop()
 
-    @discord.ui.button(label="Cash Out", style=discord.ButtonStyle.red)
-    async def cashout_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+    async def _cashout_callback(self, interaction: discord.Interaction):
+        """Handle cash out button click."""
         casino: Casino = self.bot.get_cog("Casino")
 
         if interaction.user.id != self.initial_user.id:
@@ -999,16 +1039,20 @@ class DoubleOrNothingView(View):
             )
             return
 
-        embed = discord.Embed(
-            description=(
-                f"You cashed out with **{await casino.formatter(self.winnings)}** **{self.currency_name}**!"
+        formatted_winnings = await casino.formatter(self.winnings)
+
+        # Build cashout container (no buttons)
+        container = discord.ui.Container(
+            discord.ui.TextDisplay("## 🎲 Double Or Nothing"),
+            discord.ui.TextDisplay(
+                f"You cashed out with **{formatted_winnings}** **{self.currency_name}**!"
             ),
-            color=discord.Color.blue(),
+            accent_color=0x5865F2  # Blurple
         )
-        embed.set_author(
-            name="Double Or Nothing", icon_url=self.initial_user.display_avatar.url
-        )
-        await interaction.response.edit_message(embed=embed, view=None)
+
+        self.clear_items()
+        self.add_item(container)
+        await interaction.response.edit_message(view=self)
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(self.initial_user.id)
         await self.bot.database.process_treasury_transaction(
@@ -1025,9 +1069,17 @@ class DoubleOrNothingView(View):
         self.stop()
 
     async def force_end(self, *, refund: bool = False):
+        """Force end the game, optionally refunding the bet."""
         casino: Casino = self.bot.get_cog("Casino")
-        for child in self.children:
-            child.disabled = True
+
+        # Disable buttons
+        self.double_button.disabled = True
+        self.cashout_button.disabled = True
+        self._build_container(
+            accent_color=0xFEE75C,  # Yellow
+            content="Game ended (timeout or forced)."
+        )
+
         if self.message:
             try:
                 await self.message.edit(view=self)
@@ -1051,10 +1103,19 @@ class DoubleOrNothingView(View):
         self.stop()
 
     async def on_timeout(self):
+        """Handle view timeout."""
         try:
-            for child in self.children:
-                child.disabled = True
-
+            self.double_button.disabled = True
+            self.cashout_button.disabled = True
+            self._build_container(
+                accent_color=0xFEE75C,  # Yellow
+                content="Game timed out. Your bet has been refunded."
+            )
+            if self.message:
+                try:
+                    await self.message.edit(view=self)
+                except Exception:
+                    pass
         finally:
             self.stop()
 
@@ -3443,7 +3504,7 @@ class Casino(commands.Cog):
         description="Start a double or nothing game",
     )
     async def double_or_nothing(self, ctx: Context, bet_amount: str):
-        """Start a double or nothing game"""
+        """Start a double or nothing game. Uses Components V2 Container system."""
         user_id = ctx.author.id
         session_id = None
 
@@ -3456,21 +3517,28 @@ class Casino(commands.Cog):
         try:
             amount = await self.amount_handler(bet_amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(str(e)),
+                accent_color=0xED4245
+            )
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, delete_after=5)
             return
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if amount > max_allowed:
             amount = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                    f"**{await self.formatter(amount)} {self.currency_name}**.",
-                    color=discord.Color.orange(),
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(
+                    f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                    f"**{await self.formatter(amount)} {self.currency_name}**."
                 ),
-                delete_after=5,
+                accent_color=0xFEE75C
             )
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, delete_after=5)
 
         try:
             await self.bot.database.process_treasury_transaction(
@@ -3479,10 +3547,13 @@ class Casino(commands.Cog):
                 description="Double or Nothing Initial Bet",
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
+                accent_color=0xED4245
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, delete_after=5)
             return
 
         session_id = await self._create_game_session(
@@ -3505,19 +3576,6 @@ class Casino(commands.Cog):
             reason="double_bet",
         )
 
-        amount_formatted = await self.formatter(amount)
-        embed = discord.Embed(
-            description=(
-                f"Starting bet: {self.currency_name} **{amount_formatted}**\n"
-                f"Winnings: {self.currency_name} **{amount_formatted}**"
-            ),
-            color=discord.Color.green(),
-        )
-        embed.set_author(
-            name="Double Or Nothing", icon_url=ctx.author.display_avatar.url
-        )
-        embed.set_footer(text="Choose to Double or Cash Out.")
-
         view = DoubleOrNothingView(
             bot=self.bot,
             initial_user=ctx.author,
@@ -3528,10 +3586,11 @@ class Casino(commands.Cog):
             PF=PF,
             session_id=session_id,
         )
+
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
         )
-        msg = await ctx.reply(embed=embed, view=view)
+        msg = await ctx.reply(view=view)
         view.message = msg
         self._register_session_handler(session_id, view.force_end)
 
