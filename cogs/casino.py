@@ -556,7 +556,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.container.stats_text.content = (
             f"💎 **Remaining Gems:** {self.remaining_safe_cells}\n"
             f"📈 **Multiplier:** x{multiplier:.3g}\n"
-            f"💰 **Potential Win:** {potential_win} {self.currency_name}"
+            f"💰 **Potential Win:**{self.currency_name} {potential_win} "
         )
 
         if self.remaining_safe_cells == 0:
@@ -906,6 +906,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
     ):
         super().__init__(timeout=60)
         self.bot = bot
+        self.casino: Casino = bot.get_cog("Casino")
         self.initial_user = initial_user
         self.initial_amount = initial_amount
         self.winnings = winnings
@@ -927,40 +928,39 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         )
         self.cashout_button.callback = self._cashout_callback
 
-        # Build initial container
-        self._build_container()
-
-    def _build_container(self, accent_color: int = 0x57F287, content: str = None):
-        """Build the game container with current state."""
-        if content is None:
-            content = (
-                f"**Starting bet:** {self.currency_name} {self._format_winnings(self.initial_amount)}\n"
-                f"**Winnings:** {self.currency_name} {self._format_winnings(self.winnings)}"
-            )
-
-        container = discord.ui.Container(
-            discord.ui.TextDisplay(f"## 🎲 Double Or Nothing"),
-            discord.ui.TextDisplay(content),
-            discord.ui.Separator(),
-            discord.ui.ActionRow(self.double_button, self.cashout_button),
-            accent_color=accent_color
+    async def build_initial_container(self):
+        """Build the initial game container. Must be called after __init__."""
+        formatted_bet = await self.casino.formatter(self.initial_amount)
+        formatted_winnings = await self.casino.formatter(self.winnings)
+        content = (
+            f"**Starting bet:** {self.currency_name} **{formatted_bet}**\n"
+            f"**Winnings:** {self.currency_name} **{formatted_winnings}**"
         )
+        self._build_container(accent_color=0x57F287, content=content)  # Green
+
+    def _build_container(self, accent_color: int, content: str, show_buttons: bool = True):
+        """Build the game container with current state."""
+        if show_buttons:
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🎲 Double Or Nothing"),
+                discord.ui.TextDisplay(content),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(self.double_button, self.cashout_button),
+                accent_color=accent_color
+            )
+        else:
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🎲 Double Or Nothing"),
+                discord.ui.TextDisplay(content),
+                accent_color=accent_color
+            )
 
         # Clear existing items and add new container
         self.clear_items()
         self.add_item(container)
 
-    def _format_winnings(self, amount) -> str:
-        """Format winnings amount. Returns the amount for caller to format."""
-        casino: Casino = self.bot.get_cog("Casino")
-        # We need to run the formatter synchronously, but it's async
-        # Return the decimal value and let the caller handle it
-        return str(amount)
-
     async def _double_callback(self, interaction: discord.Interaction):
         """Handle double button click."""
-        casino: Casino = self.bot.get_cog("Casino")
-
         if interaction.user.id != self.initial_user.id:
             await interaction.response.send_message(
                 "This game is not for you!", ephemeral=True
@@ -968,9 +968,9 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             return
 
         # Process game result for rakeback
-        await casino.process_game_result(self.user_id, "double", self.initial_amount)
+        await self.casino.process_game_result(self.user_id, "double", self.initial_amount)
 
-        success = await casino.fair_choice(self.user_id, [True, False])
+        success = await self.casino.fair_choice(self.user_id, [True, False])
         if success:
             self.winnings = Decimal(self.winnings) * 2
             revealed_seed, new_hash = await self.bot.database.increment_win(
@@ -985,7 +985,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             self.rounds += 1
 
             # Format winnings
-            formatted_winnings = await casino.formatter(self.winnings)
+            formatted_winnings = await self.casino.formatter(self.winnings)
             content = (
                 f"**Current Winnings:** {self.currency_name} **{formatted_winnings}**\n"
                 f"Would you like to double again?"
@@ -994,7 +994,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             self._build_container(accent_color=0x57F287, content=content)  # Green
             await interaction.response.edit_message(view=self)
 
-            await casino._log_game_event(
+            await self.casino._log_game_event(
                 self.session_id,
                 "double",
                 {"round": self.rounds, "winnings": str(self.winnings)},
@@ -1011,18 +1011,15 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             )
 
             # Build loss container (no buttons)
-            container = discord.ui.Container(
-                discord.ui.TextDisplay("## 🎲 Double Or Nothing"),
-                discord.ui.TextDisplay("You lost everything! Better luck next time."),
-                accent_color=0xED4245  # Red
+            self._build_container(
+                accent_color=0xED4245,  # Red
+                content="You lost everything! Better luck next time.",
+                show_buttons=False
             )
-
-            self.clear_items()
-            self.add_item(container)
             await interaction.response.edit_message(view=self)
 
-            await casino._remove_refund(self.session_id, user_id=self.user_id)
-            await casino._end_game_session(
+            await self.casino._remove_refund(self.session_id, user_id=self.user_id)
+            await self.casino._end_game_session(
                 self.session_id,
                 outcome="loss",
                 final_state={"reason": "double_loss", "rounds": self.rounds},
@@ -1031,27 +1028,20 @@ class DoubleOrNothingView(discord.ui.LayoutView):
 
     async def _cashout_callback(self, interaction: discord.Interaction):
         """Handle cash out button click."""
-        casino: Casino = self.bot.get_cog("Casino")
-
         if interaction.user.id != self.initial_user.id:
             await interaction.response.send_message(
                 "This game is not for you!", ephemeral=True
             )
             return
 
-        formatted_winnings = await casino.formatter(self.winnings)
+        formatted_winnings = await self.casino.formatter(self.winnings)
 
         # Build cashout container (no buttons)
-        container = discord.ui.Container(
-            discord.ui.TextDisplay("## 🎲 Double Or Nothing"),
-            discord.ui.TextDisplay(
-                f"You cashed out with **{formatted_winnings}** **{self.currency_name}**!"
-            ),
-            accent_color=0x5865F2  # Blurple
+        self._build_container(
+            accent_color=0x5865F2,  # Blurple
+            content=f"You cashed out with **{formatted_winnings}** **{self.currency_name}**!",
+            show_buttons=False
         )
-
-        self.clear_items()
-        self.add_item(container)
         await interaction.response.edit_message(view=self)
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(self.initial_user.id)
@@ -1060,8 +1050,8 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             amount=self.winnings,
             description="Double or Nothing Winnings",
         )
-        await casino._remove_refund(self.session_id, user_id=self.user_id)
-        await casino._end_game_session(
+        await self.casino._remove_refund(self.session_id, user_id=self.user_id)
+        await self.casino._end_game_session(
             self.session_id,
             outcome="win",
             final_state={"reason": "cashout", "winnings": str(self.winnings)},
@@ -1070,14 +1060,13 @@ class DoubleOrNothingView(discord.ui.LayoutView):
 
     async def force_end(self, *, refund: bool = False):
         """Force end the game, optionally refunding the bet."""
-        casino: Casino = self.bot.get_cog("Casino")
-
         # Disable buttons
         self.double_button.disabled = True
         self.cashout_button.disabled = True
         self._build_container(
             accent_color=0xFEE75C,  # Yellow
-            content="Game ended (timeout or forced)."
+            content="Game ended (timeout or forced).",
+            show_buttons=False
         )
 
         if self.message:
@@ -1094,8 +1083,8 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 amount=self.initial_amount,
                 description="Double or Nothing Refund",
             )
-        await casino._remove_refund(self.session_id, user_id=self.user_id)
-        await casino._end_game_session(
+        await self.casino._remove_refund(self.session_id, user_id=self.user_id)
+        await self.casino._end_game_session(
             self.session_id,
             outcome="forced_end",
             final_state={"reason": "force_end", "refund": refund},
@@ -1109,7 +1098,8 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             self.cashout_button.disabled = True
             self._build_container(
                 accent_color=0xFEE75C,  # Yellow
-                content="Game timed out. Your bet has been refunded."
+                content="Game timed out. Your bet has been refunded.",
+                show_buttons=False
             )
             if self.message:
                 try:
@@ -3586,6 +3576,7 @@ class Casino(commands.Cog):
             PF=PF,
             session_id=session_id,
         )
+        await view.build_initial_container()
 
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
