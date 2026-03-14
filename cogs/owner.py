@@ -3747,22 +3747,28 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         user: discord.Member,
-        depth: int = 3,
-        hours: int = 24,
+        hours: int = 2,
+        min_amount: int = 5000,
+        similarity: float = 0.8,
     ):
-        """Check for circular transfer patterns for a user.
+        """Check for suspicious circular transfer patterns for a user.
+
+        Only flags transfers where similar amounts (80%+) return within
+        a short time window. This reduces false positives from normal commerce.
 
         Args:
             user: The user to check
-            depth: Maximum cycle depth to search (default 3)
-            hours: Hours to look back (default 24)
+            hours: Hours to look back (default 2)
+            min_amount: Minimum transfer amount to consider (default 5000)
+            similarity: Minimum ratio of returned/sent (default 0.8 = 80%)
         """
         try:
             cycles = await self.bot.database.detect_circular_transfers(
                 user_id=user.id,
-                depth=depth,
+                depth=2,
                 hours=hours,
-                min_amount=Decimal("100"),
+                min_amount=Decimal(str(min_amount)),
+                amount_similarity_threshold=similarity,
                 guild_id=ctx.guild.id if ctx.guild else None,
             )
         except Exception as e:
@@ -3771,23 +3777,27 @@ class Owner(commands.Cog, name="Owner"):
         if not cycles:
             embed = discord.Embed(
                 title="Circular Transfer Check",
-                description=f"No circular transfer patterns found for {user.mention} in the last {hours} hours.",
+                description=f"No suspicious circular patterns found for {user.mention}.\n\n"
+                f"_(Looking for amounts {min_amount:,}+ with {similarity*100:.0f}%+ returned within {hours}h)_",
                 color=discord.Color.green(),
             )
             return await ctx.send(embed=embed)
 
         lines = []
         for i, cycle in enumerate(cycles[:5], 1):
-            cycle_str = " → ".join(f"<@{uid}>" for uid in cycle)
-            lines.append(f"**Cycle {i}:**\n{cycle_str}")
+            path_str = " → ".join(f"<@{uid}>" for uid in cycle["path"])
+            lines.append(
+                f"**Cycle {i}:**\n{path_str}\n"
+                f"Sent: {cycle['total_sent']:,} | Returned: {cycle['amount_returned']:,} ({cycle['similarity']*100:.1f}%)"
+            )
 
         embed = discord.Embed(
-            title=f"Circular Transfer Patterns for {user.display_name}",
+            title=f"Suspicious Circular Patterns for {user.display_name}",
             description="\n\n".join(lines),
             color=discord.Color.orange(),
         )
         if len(cycles) > 5:
-            embed.set_footer(text=f"Showing 5 of {len(cycles)} cycles found")
+            embed.set_footer(text=f"Showing 5 of {len(cycles)} suspicious patterns found")
         await ctx.send(embed=embed)
 
     @anticheat.command(name="hoarding", hidden=True)

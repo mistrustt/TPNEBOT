@@ -1876,30 +1876,36 @@ class DatabaseManager:
                     },
                 )
 
-            # Check for circular transfers
-            try:
-                cycles = await self.detect_circular_transfers(
-                    user_id=sender.user_id,
-                    depth=3,
-                    hours=24,
-                    min_amount=Decimal("100"),
-                    guild_id=guild_id,
-                )
-                if cycles:
-                    for cycle in cycles:
-                        await self.log_suspicious_activity(
-                            activity_type=SuspiciousActivityType.CIRCULAR_TRANSFER,
-                            user_id=sender.user_id,
-                            guild_id=guild_id,
-                            related_user_ids=cycle,
-                            amount=net_amt,
-                            details={
-                                "transaction_id": txid_main,
-                                "cycle_path": cycle,
-                            },
-                        )
-            except Exception as e:
-                logging.warning(f"Failed to detect circular transfers: {e}")
+            # Check for circular transfers (only if transfer amount is large enough)
+            # Only run detection for large transfers to avoid noise
+            if net_amt >= Decimal("5000"):
+                try:
+                    cycles = await self.detect_circular_transfers(
+                        user_id=sender.user_id,
+                        depth=2,
+                        hours=2,
+                        min_amount=Decimal("5000"),
+                        amount_similarity_threshold=0.8,
+                        guild_id=guild_id,
+                    )
+                    if cycles:
+                        for cycle in cycles:
+                            await self.log_suspicious_activity(
+                                activity_type=SuspiciousActivityType.CIRCULAR_TRANSFER,
+                                user_id=sender.user_id,
+                                guild_id=guild_id,
+                                related_user_ids=cycle["path"],
+                                amount=cycle["amount_returned"],
+                                details={
+                                    "transaction_id": txid_main,
+                                    "cycle_path": cycle["path"],
+                                    "similarity": cycle["similarity"],
+                                    "total_sent": str(cycle["total_sent"]),
+                                    "amount_returned": str(cycle["amount_returned"]),
+                                },
+                            )
+                except Exception as e:
+                    logging.warning(f"Failed to detect circular transfers: {e}")
 
         return txid_main
 
@@ -7264,28 +7270,35 @@ class DatabaseManager:
     async def detect_circular_transfers(
         self,
         user_id: int,
-        depth: int = 3,
-        hours: int = 24,
-        min_amount: Decimal = Decimal("100"),
+        depth: int = 2,
+        hours: int = 2,
+        min_amount: Decimal = Decimal("5000"),
+        amount_similarity_threshold: float = 0.8,
         guild_id: int = None,
-    ) -> List[List[int]]:
+    ) -> List[dict]:
         """
-        Detect circular transfer patterns that may indicate hidden alt accounts.
+        Detect suspicious circular transfer patterns indicating hidden alt accounts.
 
-        This scans ALL transfers (not just known links) to find cycles where
-        money flows back to the originator through multiple accounts. Such
-        patterns may reveal previously unknown alt relationships.
+        A suspicious circular transfer requires:
+        1. Money sent out returns within a SHORT time window (default 2 hours)
+        2. The amount returned is SIMILAR to amount sent (default 80%+)
+        3. Large enough amounts to be worth exploiting (default $5000+)
 
-        When a cycle is found, all participants are flagged for owner review
-        so they can investigate and potentially link the accounts.
+        Normal commerce does NOT produce similar amounts in short timeframes.
+        If Alice sends Bob $100 for a game, Bob sending $5 back later is normal.
+        But Alice sending $10000 and Bob sending $9500 back in 30 minutes is suspicious.
 
-        Returns list of cycles found, where each cycle is a list of user IDs.
+        Returns list of suspicious cycles, each with:
+        - path: list of user IDs in the cycle
+        - amounts_sent: amounts going out at each step
+        - amounts_received: amounts coming back
+        - similarity: ratio of returned/sent (higher = more suspicious)
+        - total_sent: total amount sent by originator
         """
         cutoff = discord.utils.utcnow() - timedelta(hours=hours)
 
         async with self.async_sessionmaker() as session:
-            # Query the Transaction table for historical P2P transfers
-            # This includes all historical data, not just recent TransferHistory
+            # Query transactions with actual amounts
             stmt = (
                 select(Transaction)
                 .where(Transaction.timestamp >= cutoff)
@@ -7296,58 +7309,79 @@ class DatabaseManager:
             result = await session.execute(stmt)
             transactions = list(result.scalars().all())
 
-        # Build a directed graph: user -> set of users they sent money to
-        graph: dict[int, set[int]] = {}
+        # Build a directed graph with amount tracking
+        # graph[A][B] = list of (amount, timestamp) transactions from A to B
+        graph: dict[int, dict[int, list]] = {}
         for t in transactions:
             sender_id = t.from_user_id
             receiver_id = t.to_user_id
-            if sender_id and receiver_id:
+            if sender_id and receiver_id and sender_id != receiver_id:
                 if sender_id not in graph:
-                    graph[sender_id] = set()
-                graph[sender_id].add(receiver_id)
+                    graph[sender_id] = {}
+                if receiver_id not in graph[sender_id]:
+                    graph[sender_id][receiver_id] = []
+                graph[sender_id][receiver_id].append((t.amount, t.timestamp))
 
-        # If user has no outgoing transfers, no cycles possible
         if user_id not in graph:
             return []
 
-        cycles = []
+        suspicious_cycles = []
         visited_cycles = set()
 
         def find_cycles_dfs(
-            start: int, current: int, path: List[int], visited: set
+            start: int,
+            current: int,
+            path: List[int],
+            amounts_out: List[Decimal],
+            visited: set,
         ) -> None:
-            """DFS helper to find cycles where money returns to origin."""
-            if len(path) > depth + 1:
+            """DFS to find cycles where similar amounts return to originator."""
+            if len(path) > depth + 2:  # path includes start, so +2 for depth limit
                 return
 
-            if current in visited:
-                if current == start and len(path) > 1:
-                    # Found a cycle back to start
-                    cycle_key = tuple(sorted(path))
-                    if cycle_key not in visited_cycles:
-                        cycles.append(path[:])
-                        visited_cycles.add(cycle_key)
+            if current not in graph:
                 return
 
-            visited.add(current)
-            neighbors = graph.get(current, set())
+            for neighbor, txns in graph[current].items():
+                # Get the amounts this user sent to neighbor
+                for amt_sent, ts_sent in txns:
+                    if neighbor == start and len(path) >= 2:
+                        # Direct return: current sent back to start
+                        # Check if amount is similar to what start sent out
+                        total_sent_out = amounts_out[0]  # What originator sent
 
-            for neighbor in neighbors:
-                if neighbor == start and len(path) >= 2:
-                    # Complete cycle found
-                    cycle_key = tuple(sorted(path + [start]))
-                    if cycle_key not in visited_cycles:
-                        cycles.append(path + [start])
-                        visited_cycles.add(cycle_key)
-                elif neighbor not in visited:
-                    find_cycles_dfs(start, neighbor, path + [neighbor], visited)
+                        # Amount similarity check
+                        ratio = float(amt_sent / total_sent_out) if total_sent_out > 0 else 0
 
-            visited.remove(current)
+                        if ratio >= amount_similarity_threshold:
+                            cycle_key = tuple(path)
+                            if cycle_key not in visited_cycles:
+                                suspicious_cycles.append({
+                                    "path": path + [start],
+                                    "amounts_sent": amounts_out,
+                                    "amount_returned": amt_sent,
+                                    "similarity": round(ratio, 3),
+                                    "total_sent": total_sent_out,
+                                })
+                                visited_cycles.add(cycle_key)
 
-        # Start DFS from the target user
-        find_cycles_dfs(user_id, user_id, [user_id], set())
+                    elif neighbor not in visited and len(path) <= depth:
+                        # Continue searching along the path
+                        find_cycles_dfs(
+                            start,
+                            neighbor,
+                            path + [neighbor],
+                            amounts_out,
+                            visited | {neighbor},
+                        )
 
-        return cycles
+        # For each outgoing transaction from the user, trace if similar amounts return
+        for first_hop, txns in graph[user_id].items():
+            for amt_sent, ts_sent in txns:
+                # Only trace this specific amount pattern
+                find_cycles_dfs(user_id, first_hop, [user_id, first_hop], [amt_sent], {user_id, first_hop})
+
+        return suspicious_cycles
 
     # ==================== Job Methods ====================
 
