@@ -3820,17 +3820,25 @@ class Owner(commands.Cog, name="Owner"):
             bar = "█" * (score // 2) + "░" * (10 - score // 2)
             factors_lines.append(f"**{factor_name}:** {score}/20 `{bar}`")
 
-        # Balance info
+        # Balance info (wallet + bank + crypto)
         balance_data = score_data["details"]["aggregated_balance"]
+        main_balance = score_data["details"]["main_balance"]
+        main_wallet = score_data["details"]["main_wallet"]
+        main_bank = score_data["details"]["main_bank"]
+        main_crypto = score_data["details"]["main_crypto"]
         balance_lines = [
-            f"**Main Balance:** {await self.short_formatter(Decimal(str(score_data['details']['main_balance'])))}",
+            f"**Wallet:** {await self.short_formatter(Decimal(str(main_wallet)))}",
+            f"**Bank:** {await self.short_formatter(Decimal(str(main_bank)))}",
+            f"**Crypto:** {await self.short_formatter(Decimal(str(main_crypto)))}",
+            f"**Total:** {await self.short_formatter(Decimal(str(main_balance)))}",
             f"**Alt Accounts:** {balance_data['account_count'] - 1}",
         ]
         if balance_data["linked_user_ids"]:
             alt_balances = []
             for alt_id in balance_data["linked_user_ids"][:5]:
-                alt_bal = balance_data["individual_balances"].get(alt_id, Decimal("0"))
-                alt_balances.append(f"<@{alt_id}>: {await self.short_formatter(Decimal(str(alt_bal)))}")
+                alt_data = balance_data["individual_balances"].get(alt_id, {})
+                alt_total = alt_data.get("total", Decimal("0"))
+                alt_balances.append(f"<@{alt_id}>: {await self.short_formatter(Decimal(str(alt_total)))}")
             if len(balance_data["linked_user_ids"]) > 5:
                 alt_balances.append(f"... +{len(balance_data['linked_user_ids']) - 5} more")
             balance_lines.append("**Linked Alts:**\n" + "\n".join(alt_balances))
@@ -3859,9 +3867,16 @@ class Owner(commands.Cog, name="Owner"):
         )
         embed.add_field(name="Factors", value="\n".join(factors_lines), inline=False)
         embed.add_field(
-            name="Aggregated Balance",
-            value="\n".join(balance_lines)
-            + f"\n**Total:** {await self.short_formatter(Decimal(str(balance_data['total_balance'])))}",
+            name="User Balance",
+            value="\n".join(balance_lines),
+            inline=False,
+        )
+        embed.add_field(
+            name="Network Total",
+            value=f"**Wallet:** {await self.short_formatter(Decimal(str(balance_data['total_wallet'])))}"
+            + f"\n**Bank:** {await self.short_formatter(Decimal(str(balance_data['total_bank'])))}"
+            + f"\n**Crypto:** {await self.short_formatter(Decimal(str(balance_data['total_crypto'])))}"
+            + f"\n**All Accounts:** {await self.short_formatter(Decimal(str(balance_data['total_balance'])))}",
             inline=False,
         )
         embed.add_field(name="Net Flow Analysis", value="\n".join(flow_lines), inline=False)

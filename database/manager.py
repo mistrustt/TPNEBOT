@@ -6878,13 +6878,16 @@ class DatabaseManager:
         self, user_id: int, guild_id: int = None
     ) -> dict:
         """
-        Get aggregated balance across all linked alt accounts.
+        Get aggregated balance across all linked alt accounts (wallet + bank + crypto).
 
         Returns dict with:
         - main_user_id: the queried user
         - linked_user_ids: list of linked alt user IDs
-        - individual_balances: dict mapping user_id to balance
-        - total_balance: sum of all balances
+        - individual_balances: dict mapping user_id to {wallet, bank, crypto, total}
+        - total_balance: sum of all balances (wallet + bank + crypto)
+        - total_wallet: sum of wallet balances only
+        - total_bank: sum of bank balances only
+        - total_crypto: sum of crypto values only
         - account_count: number of accounts in network
         """
         # Get all linked users
@@ -6892,25 +6895,89 @@ class DatabaseManager:
         all_user_ids = [user_id] + linked_ids
 
         async with self.async_sessionmaker() as session:
-            # Query balances for all users in the network
-            result = await session.execute(
-                select(Wallet.user_id, Wallet.balance).where(
+            # Query wallet balances for all users in the network
+            wallet_result = await session.execute(
+                select(Wallet.wallet_id, Wallet.user_id, Wallet.balance).where(
                     Wallet.user_id.in_(all_user_ids)
                 )
             )
-            rows = result.fetchall()
+            wallet_rows = wallet_result.fetchall()
 
-        individual_balances = {user_id: Decimal("0") for user_id in all_user_ids}
-        for row in rows:
-            individual_balances[row[0]] = Decimal(str(row[1]))
+            # Build wallet_id to user_id mapping and get wallet balances
+            wallet_to_user = {}
+            individual_balances = {
+                uid: {"wallet": Decimal("0"), "bank": Decimal("0"), "crypto": Decimal("0"), "total": Decimal("0")}
+                for uid in all_user_ids
+            }
 
-        total_balance = sum(individual_balances.values())
+            for row in wallet_rows:
+                wallet_id, uid, balance = row
+                wallet_to_user[wallet_id] = uid
+                individual_balances[uid]["wallet"] = Decimal(str(balance))
+
+            # Query bank balances using wallet_id mapping
+            if wallet_to_user:
+                bank_result = await session.execute(
+                    select(BankAccount.wallet_id, BankAccount.balance).where(
+                        BankAccount.wallet_id.in_(wallet_to_user.keys())
+                    )
+                )
+                bank_rows = bank_result.fetchall()
+
+                for row in bank_rows:
+                    wallet_id, bank_balance = row
+                    uid = wallet_to_user.get(wallet_id)
+                    if uid:
+                        individual_balances[uid]["bank"] = Decimal(str(bank_balance))
+
+            # Query crypto assets for all users
+            crypto_result = await session.execute(
+                select(CryptoAsset.user_id, CryptoAsset.symbol, CryptoAsset.amount).where(
+                    CryptoAsset.user_id.in_(all_user_ids)
+                )
+            )
+            crypto_rows = crypto_result.fetchall()
+
+            # Get all unique symbols and their current prices
+            symbols = list(set(row[1] for row in crypto_rows))
+            crypto_prices = {}
+            if symbols:
+                price_result = await session.execute(
+                    select(CryptoPrice.symbol, CryptoPrice.price).where(
+                        CryptoPrice.symbol.in_(symbols)
+                    )
+                )
+                for sym, price in price_result.fetchall():
+                    crypto_prices[sym] = Decimal(str(price))
+
+            # Calculate crypto value per user
+            for row in crypto_rows:
+                uid, symbol, amount = row
+                price = crypto_prices.get(symbol, Decimal("0"))
+                value = Decimal(str(amount)) * price
+                individual_balances[uid]["crypto"] += value
+
+            # Calculate totals per user
+            for uid in all_user_ids:
+                individual_balances[uid]["total"] = (
+                    individual_balances[uid]["wallet"]
+                    + individual_balances[uid]["bank"]
+                    + individual_balances[uid]["crypto"]
+                )
+
+        total_wallet = sum(b["wallet"] for b in individual_balances.values())
+        total_bank = sum(b["bank"] for b in individual_balances.values())
+        total_crypto = sum(b["crypto"] for b in individual_balances.values())
+        total_balance = total_wallet + total_bank + total_crypto
 
         return {
             "main_user_id": user_id,
             "linked_user_ids": linked_ids,
             "individual_balances": individual_balances,
             "total_balance": total_balance,
+            "total_wallet": total_wallet,
+            "total_bank": total_bank,
+            "total_crypto": total_crypto,
             "account_count": len(all_user_ids),
         }
 
@@ -6990,7 +7057,7 @@ class DatabaseManager:
         1. Balance concentration (high balance relative to activity)
         2. Net flow ratio (receives much but sends little)
         3. Alt network size (many linked alts)
-        4. Aggregated balance (large total across alts)
+        4. Aggregated balance (large total across alts including bank)
         5. Transaction pattern (low outgoing activity)
 
         Returns dict with:
@@ -6999,21 +7066,26 @@ class DatabaseManager:
         - risk_level: "low", "medium", "high", "critical"
         - details: supporting data
         """
-        # Get aggregated balance
+        # Get aggregated balance (wallet + bank + crypto)
         balance_data = await self.get_aggregated_balance(user_id, guild_id)
 
         # Get net flow
         flow_data = await self.get_net_flow(user_id, days, guild_id)
 
-        # Get wallet balance
-        wallet = await self.get_wallet(user_id)
-        main_balance = Decimal(str(wallet.balance)) if wallet else Decimal("0")
+        # Get main user's total balance (wallet + bank + crypto)
+        main_balance = balance_data["individual_balances"].get(user_id, {}).get("total", Decimal("0"))
+        main_wallet = balance_data["individual_balances"].get(user_id, {}).get("wallet", Decimal("0"))
+        main_bank = balance_data["individual_balances"].get(user_id, {}).get("bank", Decimal("0"))
+        main_crypto = balance_data["individual_balances"].get(user_id, {}).get("crypto", Decimal("0"))
 
         factors = {}
         details = {
             "aggregated_balance": balance_data,
             "net_flow": flow_data,
             "main_balance": main_balance,
+            "main_wallet": main_wallet,
+            "main_bank": main_bank,
+            "main_crypto": main_crypto,
         }
 
         # Factor 1: Balance concentration (high balance with low activity)
@@ -7064,7 +7136,7 @@ class DatabaseManager:
         else:
             factors["alt_network_size"] = 0
 
-        # Factor 4: Aggregated balance across alts
+        # Factor 4: Aggregated balance across alts (wallet + bank)
         total_balance = balance_data["total_balance"]
         if total_balance >= Decimal("10000000"):  # 10M+
             factors["aggregated_balance"] = 20
