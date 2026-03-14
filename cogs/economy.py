@@ -4312,11 +4312,12 @@ class Economy(commands.Cog):
                 tiers = await self.bot.database.get_all_vip_tiers()
 
             tier_emojis = {
+                "Unranked": "⚪",
                 "Bronze": "🥉",
                 "Silver": "🥈",
                 "Gold": "🥇",
-                "Platinum": "💎",
-                "Diamond": "💠",
+                "Platinum": "💠",
+                "Diamond": "💎",
             }
 
             embed = discord.Embed(
@@ -4362,11 +4363,12 @@ class Economy(commands.Cog):
                 return
 
             tier_emojis = {
+                "Unranked": "⚪",
                 "Bronze": "🥉",
                 "Silver": "🥈",
                 "Gold": "🥇",
-                "Platinum": "💎",
-                "Diamond": "💠",
+                "Platinum": "💠",
+                "Diamond": "💎",
             }
 
             embed = discord.Embed(
