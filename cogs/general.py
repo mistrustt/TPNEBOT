@@ -1155,7 +1155,7 @@ class General(commands.Cog, name="General"):
         await ctx.send(embed=embed, delete_after=10)
 
     @commands.command(
-        name="serverinfo", description="View information about the server."
+        name="serverinfo", aliases=["si"], description="View information about the server."
     )
     async def serverinfo(self, ctx: commands.Context) -> None:
         def EmojiBool(bool: bool):
