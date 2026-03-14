@@ -7548,12 +7548,36 @@ class DatabaseManager:
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 for tier_data in default_tiers:
-                    existing = await session.execute(
+                    # Check both by level AND by name to catch any corruption
+                    existing_by_level = await session.execute(
                         select(VIPTier).where(VIPTier.level == tier_data["level"])
                     )
-                    if not existing.scalar_one_or_none():
+                    existing_by_name = await session.execute(
+                        select(VIPTier).where(VIPTier.name == tier_data["name"])
+                    )
+
+                    tier_by_level = existing_by_level.scalar_one_or_none()
+                    tier_by_name = existing_by_name.scalar_one_or_none()
+
+                    if not tier_by_level and not tier_by_name:
+                        # Neither exists - create new tier
                         tier = VIPTier(**tier_data)
                         session.add(tier)
+                    elif tier_by_level and not tier_by_name:
+                        # Tier exists at this level but wrong name - update it
+                        tier_by_level.name = tier_data["name"]
+                        tier_by_level.min_wagered = tier_data["min_wagered"]
+                        tier_by_level.rakeback_rate = tier_data["rakeback_rate"]
+                        tier_by_level.rtp_bonus = tier_data["rtp_bonus"]
+                    elif not tier_by_level and tier_by_name:
+                        # Tier exists with this name but wrong level - this is a conflict
+                        # The tier with correct name takes precedence, fix the level
+                        tier_by_name.level = tier_data["level"]
+                        tier_by_name.min_wagered = tier_data["min_wagered"]
+                        tier_by_name.rakeback_rate = tier_data["rakeback_rate"]
+                        tier_by_name.rtp_bonus = tier_data["rtp_bonus"]
+                    # If both exist and are different, the level-based one is authoritative
+                    # (tier_by_level exists and tier_by_name exists - they should be the same tier)
             await session.commit()
 
     async def get_user_vip(self, user_id: int) -> UserVIP:
