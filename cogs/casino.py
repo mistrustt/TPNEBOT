@@ -897,8 +897,12 @@ class DoubleOrNothingView(View):
             )
             return
 
+        # Process game result for rakeback
+        await casino.process_game_result(self.user_id, "double", self.initial_amount)
+
         success = await casino.fair_choice(self.user_id, [True, False])
         if success:
+
             self.winnings = Decimal(self.winnings) * 2
             revealed_seed, new_hash = await self.bot.database.increment_win(
                 self.user_id,
@@ -2378,6 +2382,9 @@ class Casino(commands.Cog):
             win_multiplier = Decimal("2.0")
             is_winner = await self.fair_randbelow(user_id, 2) == 1
 
+            # Process game result for rakeback
+            await self.process_game_result(user_id, "gamble", amount)
+
             if is_winner:
                 winnings = Decimal(amount) * win_multiplier
                 revealed_seed, new_hash = await self.bot.database.increment_win(
@@ -2537,6 +2544,9 @@ class Casino(commands.Cog):
             treasury_ratio = (
                 treasury / total_supply if total_supply > 0 else Decimal("0")
             )
+
+            # Process game result for rakeback
+            await self.process_game_result(user_id, "supergamble", amount)
 
             if win:
                 raw_multiplier = (
@@ -2782,6 +2792,9 @@ class Casino(commands.Cog):
         multiplier = Decimal(PAY.get((sym, qty), 0))
         winnings = (stake * multiplier).quantize(Decimal("0.01"))
 
+        # Process game result for rakeback
+        await self.process_game_result(user_id, "slots", stake)
+
         if winnings:
             await self.bot.database.process_treasury_transaction(
                 wallet_id, winnings, "Slots Win"
@@ -2980,6 +2993,9 @@ class Casino(commands.Cog):
             result = f"🎲 You rolled {die1} and {die2} (total {total})\nExact match! You won {currency_name} **{await self.formatter(winnings)}** with a {multiplier}x payout!"
         else:
             result = f"🎲 You rolled {die1} and {die2} (total {total})\nYou lost {currency_name} **{await self.formatter(amount)}**."
+
+        # Process game result for rakeback
+        await self.process_game_result(user_id, "dice", amount)
 
         if winnings > 0:
             try:
@@ -3284,6 +3300,9 @@ class Casino(commands.Cog):
         else:
             outcome_description += " Better luck next time!"
 
+        # Process game result for rakeback
+        await self.process_game_result(user_id, "roulette", amount)
+
         if winnings > 0:
             revealed_seed, new_hash = await self.bot.database.increment_win(
                 user_id,
@@ -3580,6 +3599,9 @@ class Casino(commands.Cog):
         ):
             nonlocal dealer_cards
             winnings = Decimal(0)
+
+            # Process game result for rakeback
+            await self.process_game_result(user_id, "blackjack", amount)
 
             if player_score > 21:
                 outcome = "loss"
@@ -4249,6 +4271,9 @@ class Casino(commands.Cog):
         winnings = (stake * payout_mult).quantize(Decimal("0.01"))
 
         profit = (stake * payout_mult).quantize(Decimal("0.01"))
+
+        # Process game result for rakeback
+        await self.process_game_result(uid, "baccarat", stake)
 
         if payout_mult > 0:
             total_return = (stake + profit).quantize(Decimal("0.01"))
