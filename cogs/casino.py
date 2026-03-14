@@ -3541,6 +3541,7 @@ class Casino(commands.Cog):
     async def blackjack(self, ctx: Context, bet_amount: str):
         """
         Play Blackjack with a fresh deck for each game.
+        Uses Discord Components V2 Container system for modern UI.
         """
         user_id = ctx.author.id
         session_id = None
@@ -3554,28 +3555,37 @@ class Casino(commands.Cog):
         try:
             amount = await self.amount_handler(bet_amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(str(e)),
+                accent_color=0xED4245  # Discord red
+            )
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, flags=32768, delete_after=5)
             return
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if amount > max_allowed:
             amount = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                    f"**{await self.formatter(amount)} {self.currency_name}**.",
-                    color=discord.Color.orange(),
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(
+                    f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                    f"**{await self.formatter(amount)} {self.currency_name}**."
                 ),
-                delete_after=5,
+                accent_color=0xFEE75C  # Discord yellow/orange
             )
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, flags=32768, delete_after=5)
 
         if amount <= 0 or amount > balance:
-            embed = discord.Embed(
-                description="Invalid bet amount. Please bet within your balance.",
-                color=discord.Color.red(),
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("Invalid bet amount. Please bet within your balance."),
+                accent_color=0xED4245
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, flags=32768, delete_after=5)
             return
 
         try:
@@ -3583,10 +3593,13 @@ class Casino(commands.Cog):
                 wallet_id=wallet_id, amount=-amount, description="Blackjack Bet"
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            container = discord.ui.Container(
+                discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
+                accent_color=0xED4245
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, flags=32768, delete_after=5)
             return
 
         session_id = await self._create_game_session(
@@ -3712,11 +3725,13 @@ class Casino(commands.Cog):
                         description="Blackjack Win",
                     )
                 except ValueError as e:
-                    embed = discord.Embed(
-                        description=f"🚫 Transaction failed: {e}",
-                        color=discord.Color.red(),
+                    container = discord.ui.Container(
+                        discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
+                        accent_color=0xED4245
                     )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    view = discord.ui.LayoutView()
+                    view.add_item(container)
+                    await ctx.reply(view=view, flags=32768, delete_after=5)
                     return
             elif player_score == dealer_score:
                 outcome = "tie"
@@ -3737,11 +3752,13 @@ class Casino(commands.Cog):
                         description="Blackjack Tie",
                     )
                 except ValueError as e:
-                    embed = discord.Embed(
-                        description=f"🚫 Transaction failed: {e}",
-                        color=discord.Color.red(),
+                    container = discord.ui.Container(
+                        discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
+                        accent_color=0xED4245
                     )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    view = discord.ui.LayoutView()
+                    view.add_item(container)
+                    await ctx.reply(view=view, flags=32768, delete_after=5)
                     return
                 result = (
                     f"It's a tie! Your bet of {self.currency_name} "
@@ -3761,6 +3778,51 @@ class Casino(commands.Cog):
                 result = f"Dealer wins! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
 
             return outcome, result, winnings
+
+        async def build_game_container(accent_color: int, content_text: str, buttons_disabled: bool = False) -> discord.ui.Container:
+            """Build a Container with game state and action buttons."""
+            container = discord.ui.Container()
+            container.accent_color = accent_color
+
+            # Add title
+            container.add_item(discord.ui.TextDisplay("## 🃏 Blackjack"))
+
+            # Add game content
+            container.add_item(discord.ui.TextDisplay(content_text))
+
+            # Add separator before buttons
+            container.add_item(discord.ui.Separator())
+
+            # Create sections for buttons - each section has one button as accessory
+            hit_section = discord.ui.Section(
+                discord.ui.TextDisplay("**Actions**"),
+                accessory=hit_button
+            )
+            stay_section = discord.ui.Section(
+                discord.ui.TextDisplay(""),
+                accessory=stay_button
+            )
+            double_section = discord.ui.Section(
+                discord.ui.TextDisplay(""),
+                accessory=double_button
+            )
+            split_section = discord.ui.Section(
+                discord.ui.TextDisplay(""),
+                accessory=split_button
+            )
+
+            if buttons_disabled:
+                hit_button.disabled = True
+                stay_button.disabled = True
+                double_button.disabled = True
+                split_button.disabled = True
+
+            container.add_item(hit_section)
+            container.add_item(stay_section)
+            container.add_item(double_section)
+            container.add_item(split_section)
+
+            return container
 
         async def finalize_all_hands(interaction):
             nonlocal dealer_score
@@ -3796,8 +3858,10 @@ class Casino(commands.Cog):
                     f"**Your cards:** {', '.join(player_cards)} (Total: **{player_score}**)\n{result}"
                 )
 
-            for item in view.children:
-                item.disabled = True
+            hit_button.disabled = True
+            stay_button.disabled = True
+            double_button.disabled = True
+            split_button.disabled = True
 
             dealer_initial = dealer_cards[0]
             dealer_hits = dealer_cards[1:]
@@ -3807,20 +3871,21 @@ class Casino(commands.Cog):
                 hits_text = dealer_initial
 
             if total_winnings > 0:
-                embed_color = discord.Color.green()
+                accent_color = 0x57F287  # Discord green
             else:
-                embed_color = discord.Color.red()
+                accent_color = 0xED4245  # Discord red
 
-            embed = discord.Embed(
-                title="Blackjack Result",
-                description=(
-                    f"{chr(10).join(results)}\n\n"
-                    f"Bots cards: {hits_text} (Total: **{dealer_score}**)\n\n"
-                    f"**Total Winnings:** {self.currency_name} **{await self.formatter(total_winnings)}**"
-                ),
-                color=embed_color,
+            result_text = (
+                f"{chr(10).join(results)}\n\n"
+                f"Bots cards: {hits_text} (Total: **{dealer_score}**)\n\n"
+                f"**Total Winnings:** {self.currency_name} **{await self.formatter(total_winnings)}**"
             )
-            await interaction.edit_original_response(embed=embed, view=view)
+
+            container = await build_game_container(accent_color, result_text, buttons_disabled=True)
+
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await interaction.edit_original_response(view=view)
 
             if outcomes and all(o == "tie" for o in outcomes):
                 final_outcome = "tie"
@@ -3836,12 +3901,9 @@ class Casino(commands.Cog):
                 final_state={"total_winnings": str(total_winnings)},
             )
 
-        async def update_embed(interaction):
+        async def update_game_view(interaction):
+            """Update the game view with current state."""
             if has_split:
-                hand_cards, hand_bet, is_active = split_hands[active_hand_index]
-                hand_score = calculate_score(hand_cards)
-                status = "▶️ Playing" if is_active else "✅ Complete"
-
                 hands_display = []
                 for idx, (h_cards, h_bet, h_active) in enumerate(split_hands):
                     h_score = calculate_score(h_cards)
@@ -3851,19 +3913,23 @@ class Casino(commands.Cog):
                         f"Bet: {self.currency_name} **{await self.formatter(h_bet)}**"
                     )
 
-                embed.description = (
+                content_text = (
                     f"{chr(10).join(hands_display)}\n\n"
                     f"Bots visible card: {dealer_cards[0]}"
                 )
             else:
                 player_score = calculate_score(player_cards)
-                embed.description = (
+                content_text = (
                     f"Your cards: {', '.join(player_cards)} (Total: **{player_score}**)\n"
                     f"Bots visible card: {dealer_cards[0]}\n"
                     f"Current bet: {self.currency_name} **{await self.formatter(current_bet)}**"
                 )
 
-            await interaction.edit_original_response(embed=embed, view=view)
+            container = await build_game_container(0x5865F2, content_text)  # Discord blurple
+
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await interaction.edit_original_response(view=view)
 
         async def move_to_next_hand(interaction):
             nonlocal active_hand_index
@@ -3891,17 +3957,15 @@ class Casino(commands.Cog):
         player_score = calculate_score(player_cards)
         dealer_score = calculate_score(dealer_cards)
 
-        embed = discord.Embed(
-            title="Blackjack",
-            description=(
-                f"Your cards: {', '.join(player_cards)} (Total: **{player_score}**)\n"
-                f"Bots visible card: {dealer_cards[0]}\n"
-                f"Current bet: {self.currency_name} **{await self.formatter(current_bet)}**"
-            ),
-            color=discord.Color.blurple(),
+        # Define buttons first so they can be referenced in build_game_container
+        hit_button = Button(label="Hit", style=discord.ButtonStyle.primary)
+        stay_button = Button(label="Stay", style=discord.ButtonStyle.secondary)
+        double_button = Button(label="Double Down", style=discord.ButtonStyle.success)
+        split_button = Button(
+            label="Split",
+            style=discord.ButtonStyle.success,
+            disabled=not can_split(player_cards),
         )
-
-        view = ui.View(timeout=120)
 
         async def hit_callback(interaction: Interaction):
             nonlocal player_score, dealer_score, active_hand_index
@@ -3927,9 +3991,9 @@ class Casino(commands.Cog):
                 if hand_score >= 21:
                     finished = await move_to_next_hand(interaction)
                     if not finished:
-                        await update_embed(interaction)
+                        await update_game_view(interaction)
                 else:
-                    await update_embed(interaction)
+                    await update_game_view(interaction)
             else:
                 player_cards.append(draw_card())
                 player_score = calculate_score(player_cards)
@@ -3948,7 +4012,7 @@ class Casino(commands.Cog):
                     await finalize_all_hands(interaction)
                     return
                 else:
-                    await update_embed(interaction)
+                    await update_game_view(interaction)
 
         async def stay_callback(interaction: Interaction):
             nonlocal dealer_score
@@ -3964,7 +4028,7 @@ class Casino(commands.Cog):
             if has_split:
                 finished = await move_to_next_hand(interaction)
                 if not finished:
-                    await update_embed(interaction)
+                    await update_game_view(interaction)
             else:
                 await finalize_all_hands(interaction)
 
@@ -4019,7 +4083,7 @@ class Casino(commands.Cog):
 
                 finished = await move_to_next_hand(interaction)
                 if not finished:
-                    await update_embed(interaction)
+                    await update_game_view(interaction)
             else:
                 current_bet *= Decimal(2)
                 player_cards.append(draw_card())
@@ -4079,30 +4143,29 @@ class Casino(commands.Cog):
             # Disable split button after splitting
             split_button.disabled = True
 
-            await update_embed(interaction)
+            await update_game_view(interaction)
 
-        hit_button = Button(label="Hit", style=discord.ButtonStyle.primary)
         hit_button.callback = hit_callback
-        stay_button = Button(label="Stay", style=discord.ButtonStyle.secondary)
         stay_button.callback = stay_callback
-        double_button = Button(label="Double Down", style=discord.ButtonStyle.success)
         double_button.callback = double_callback
-        split_button = Button(
-            label="Split",
-            style=discord.ButtonStyle.success,
-            disabled=not can_split(player_cards),
-        )
         split_button.callback = split_callback
 
-        view.add_item(hit_button)
-        view.add_item(stay_button)
-        view.add_item(double_button)
-        view.add_item(split_button)
+        # Build initial game view
+        initial_content = (
+            f"Your cards: {', '.join(player_cards)} (Total: **{player_score}**)\n"
+            f"Bots visible card: {dealer_cards[0]}\n"
+            f"Current bet: {self.currency_name} **{await self.formatter(current_bet)}**"
+        )
+
+        container = await build_game_container(0x5865F2, initial_content)  # Discord blurple
+
+        view = discord.ui.LayoutView()
+        view.add_item(container)
 
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
         )
-        await ctx.reply(embed=embed, view=view)
+        await ctx.reply(view=view, flags=32768)
 
     @commands.command(
         name="poker", aliases=["headsup"], description="Play a game of Heads-Up Poker"
