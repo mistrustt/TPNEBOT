@@ -2241,6 +2241,9 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
+            await self.bot.database.set_cooldown(
+                ctx.author.id, ctx.command.qualified_name, 86400 
+            ) # Set cooldown for the work command
             embed.set_author(name="Work Complete", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
 
@@ -2265,6 +2268,9 @@ class Economy(commands.Cog):
                 color=discord.Color.green(),
             )
             embed.set_author(name="Job Quit", icon_url=self.utils.get_avatar_url(ctx.author))
+            await self.bot.database.set_cooldown(
+                ctx.author.id, ctx.command.qualified_name, 86400 
+            ) # Set cooldown for the work command
             await ctx.reply(embed=embed)
 
         except ValueError as e:
