@@ -123,7 +123,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
 
                     asyncio.create_task(unban_lil_dude(user))
             elif any(
-                keyword in message.content.lower() for keyword in allowed_keywords_3
+                keyword in message.content.lower() for keyword in allowed_keywords_2
             ):
                 user = await self.bot.fetch_user(1219090700407279656)  # toxic
                 if user:
@@ -135,7 +135,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
                         except Exception as e:
                             pass
             elif any(
-                keyword in message.content.lower() for keyword in allowed_keywords_2
+                keyword in message.content.lower() for keyword in allowed_keywords_3
             ):
                 user = await self.bot.fetch_user(1479952126967812187)  # righteous
                 if user:
