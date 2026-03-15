@@ -7459,7 +7459,7 @@ class DatabaseManager:
         """
         Process a user's work action.
         Returns the updated job and the calculated salary.
-        Raises ValueError if cooldown hasn't expired or no job found.
+        Raises ValueError if cooldown hasn't expired, no job found, or user was fired for absence.
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -7472,9 +7472,20 @@ class DatabaseManager:
 
                 now = discord.utils.utcnow()
 
-                # Check if 24 hours have passed since last work
+                # Check if user missed a day (more than 48 hours since last work)
+                # They get fired for not showing up
                 if job.last_worked:
                     time_since_last = (now - job.last_worked).total_seconds()
+                    if time_since_last > 172800:  # 48 hours = 172800 seconds
+                        # Fire the employee for missing work
+                        await session.delete(job)
+                        await session.commit()
+                        raise ValueError(
+                            "You were fired for missing work! You didn't show up for more than 48 hours. "
+                            "You'll need to apply for a new job."
+                        )
+
+                    # Check if 24 hours have passed since last work (normal cooldown)
                     cooldown_remaining = 86400 - time_since_last  # 24 hours = 86400 seconds
                     if cooldown_remaining > 0:
                         hours = int(cooldown_remaining // 3600)

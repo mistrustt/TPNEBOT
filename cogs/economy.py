@@ -2122,8 +2122,8 @@ class Economy(commands.Cog):
                     "• `!job list` - View all available jobs\n"
                     "• `!job apply <job>` - Apply for a job\n"
                     "• `!job work` - Work to earn your salary\n"
-                    "• `!job quit` - Quit your current job\n"
-                    "• `!job info` - View your job details"
+                    "• `!job info` - View your job details\n\n"
+                    "⚠️ **Warning:** If you don't work for more than 48 hours, you'll be fired!"
                 ),
                 color=discord.Color.blurple(),
             )
@@ -2164,7 +2164,8 @@ class Economy(commands.Cog):
         existing_job = await self.bot.database.get_job(user_id)
         if existing_job:
             embed = discord.Embed(
-                description="You already have a job. Quit your current job first.",
+                description="You already have a job. Use `!job work` to earn your salary.\n"
+                "If you miss work for 48 hours, you'll be fired automatically.",
                 color=discord.Color.red(),
             )
             return await ctx.reply(embed=embed, delete_after=5)
@@ -2207,7 +2208,8 @@ class Economy(commands.Cog):
             embed = discord.Embed(
                 description=f"You were hired as a **{job_data['title']}**!\n"
                 f"Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**\n"
-                f"Use `!job work` to collect your salary daily.",
+                f"Use `!job work` to collect your salary daily.\n\n"
+                f"⚠️ **Warning:** If you don't work for 48 hours, you'll be fired!",
                 color=color,
             )
             embed.set_author(name="Job Applied", icon_url=self.utils.get_avatar_url(ctx.author))
@@ -2279,33 +2281,6 @@ class Economy(commands.Cog):
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
 
-    @job.command(name="quit", description="Quit your current job.")
-    async def job_quit(self, ctx: commands.Context):
-        """Quit your current job."""
-        user_id = ctx.author.id
-
-        try:
-            job = await self.bot.database.get_job(user_id)
-            if not job:
-                raise ValueError("You don't have a job to quit.")
-
-            await self.bot.database.quit_job(user_id)
-
-            # Set cooldown on "job apply" to prevent immediate re-application exploit
-            await self.bot.database.set_cooldown(user_id, "job apply", 86400)
-
-            embed = discord.Embed(
-                description=f"You quit your job as a **{job.title}**. You can apply for a new job in 24 hours.",
-                color=discord.Color.green(),
-            )
-
-            embed.set_author(name="Job Quit", icon_url=self.utils.get_avatar_url(ctx.author))
-            await ctx.reply(embed=embed)
-
-        except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
-
     @job.command(name="info", description="View your current job details.")
     async def job_info(self, ctx: commands.Context):
         """View your current job information."""
@@ -2361,6 +2336,7 @@ class Economy(commands.Cog):
 
             if job.last_worked:
                 next_work = job.last_worked + timedelta(hours=24)
+                fire_deadline = job.last_worked + timedelta(hours=48)
                 now = discord.utils.utcnow()
                 if next_work > now:
                     remaining = next_work - now
@@ -2377,6 +2353,19 @@ class Economy(commands.Cog):
                         value="Ready now!",
                         inline=True,
                     )
+
+                # Warning if close to being fired (24-48 hours since last work)
+                time_since_last = (now - job.last_worked).total_seconds()
+                if time_since_last > 86400:  # More than 24 hours since last work
+                    time_until_fire = 172800 - time_since_last  # 48 hours - time elapsed
+                    if time_until_fire > 0:
+                        fire_hours = int(time_until_fire // 3600)
+                        fire_minutes = int((time_until_fire % 3600) // 60)
+                        embed.add_field(
+                            name="⚠️ Warning",
+                            value=f"You'll be **fired** in {fire_hours}h {fire_minutes}m if you don't work!",
+                            inline=False,
+                        )
             else:
                 embed.add_field(
                     name="Next Work",
