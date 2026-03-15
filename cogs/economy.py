@@ -2217,6 +2217,10 @@ class Economy(commands.Cog):
                 description=f"Job Salary: {job.title}",
             )
 
+            await self.bot.database.set_cooldown(
+                user_id, ctx.command.qualified_name, 86400
+            )
+
             color = (
                 discord.Color.blurple()
                 if isinstance(ctx.channel, discord.DMChannel)
@@ -2241,10 +2245,6 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 86400 
-            ) # Set cooldown for the work command
-            embed.set_author(name="Work Complete", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
 
         except ValueError as e:
@@ -2263,14 +2263,15 @@ class Economy(commands.Cog):
 
             await self.bot.database.quit_job(user_id)
 
+            await self.bot.database.set_cooldown(
+                user_id, ctx.command.qualified_name, 86400
+            )
+
             embed = discord.Embed(
                 description=f"You quit your job as a **{job.title}**. You can apply for a new job anytime.",
                 color=discord.Color.green(),
             )
             embed.set_author(name="Job Quit", icon_url=self.utils.get_avatar_url(ctx.author))
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 86400 
-            ) # Set cooldown for the work command
             await ctx.reply(embed=embed)
 
         except ValueError as e:
