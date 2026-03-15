@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dict(hidden=True)):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.shh = True
+        self.shh = False
 
     @commands.Cog.listener()
     async def on_ready(self):
