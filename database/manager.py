@@ -3688,59 +3688,63 @@ class DatabaseManager:
             await session.commit()
     
     async def clear_all_cooldowns(self):
-        """Wipes all cooldowns from the database and re-initializes the table."""
+        """Wipes all cooldowns from the database."""
         async with self.async_sessionmaker() as session:
-            async with session.begin():
-                await session.execute(delete(CommandCooldown))
-                await session.commit()
-                
-                async with self.engine.begin() as conn:
-                    await conn.run_sync(CommandCooldown.__table__.create, checkfirst=True)
+            await session.execute(delete(CommandCooldown))
+            await session.commit()
         
     async def set_cooldown(
         self, user_id: int, command_name: str, cooldown_seconds: int
-    ):
+    ) -> None:
         """Sets a cooldown for both prefix and slash commands for a user."""
         expiry_time = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
 
         async with self.async_sessionmaker() as session:
-            async with session.begin():
-                stmt = (
-                    update(CommandCooldown)
-                    .where(
-                        CommandCooldown.user_id == user_id,
-                        CommandCooldown.command_name == command_name,
-                    )
-                    .values(cooldown_expiry=expiry_time)
+            # Try to update existing cooldown first
+            stmt = (
+                update(CommandCooldown)
+                .where(
+                    CommandCooldown.user_id == user_id,
+                    CommandCooldown.command_name == command_name,
                 )
-                result = await session.execute(stmt)
+                .values(cooldown_expiry=expiry_time)
+            )
+            result = await session.execute(stmt)
 
-                if result.rowcount == 0:
-                    cooldown = CommandCooldown(
-                        user_id=user_id,
-                        command_name=command_name,
-                        cooldown_expiry=expiry_time,
-                    )
-                    session.add(cooldown)
+            if result.rowcount == 0:
+                # No existing cooldown, create new one
+                cooldown = CommandCooldown(
+                    user_id=user_id,
+                    command_name=command_name,
+                    cooldown_expiry=expiry_time,
+                )
+                session.add(cooldown)
+
+            await session.commit()
 
     async def get_cooldown(self, user_id: int, command_name: str) -> float:
-        """Returns the maximum remaining cooldown time across both command types."""
+        """Returns the remaining cooldown time in seconds. Returns 0 if expired or not found."""
         async with self.async_sessionmaker() as session:
-            max_remaining = 0
             result = await session.execute(
-                select(CommandCooldown.cooldown_expiry).filter_by(
+                select(CommandCooldown).filter_by(
                     user_id=user_id,
                     command_name=command_name,
                 )
             )
-            cooldown_expiry = result.scalar_one_or_none()
-            if cooldown_expiry:
-                remaining_time = (
-                    cooldown_expiry - discord.utils.utcnow()
-                ).total_seconds()
-                max_remaining = max(max_remaining, remaining_time)
+            cooldown = result.scalar_one_or_none()
 
-            return max(0, max_remaining)
+            if not cooldown:
+                return 0
+
+            now = discord.utils.utcnow()
+            if cooldown.cooldown_expiry <= now:
+                # Cooldown expired, clean it up
+                await session.delete(cooldown)
+                await session.commit()
+                return 0
+
+            remaining_time = (cooldown.cooldown_expiry - now).total_seconds()
+            return max(0, remaining_time)
 
     async def add_to_blacklist(self, user_id: str, reason: str) -> None:
         try:
@@ -4522,21 +4526,22 @@ class DatabaseManager:
         self, user_id: int, item_name: str, cooldown_seconds: int
     ) -> None:
         """Set a cooldown for a user on a specific item."""
+        expiry = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
+
         async with self.async_sessionmaker() as session:
-            async with session.begin():
-                expiry = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
-                # Check if cooldown already exists
-                stmt = select(ItemCooldown).where(
-                    ItemCooldown.user_id == user_id, ItemCooldown.item_name == item_name
+            # Check if cooldown already exists
+            stmt = select(ItemCooldown).where(
+                ItemCooldown.user_id == user_id, ItemCooldown.item_name == item_name
+            )
+            existing = (await session.execute(stmt)).scalar_one_or_none()
+            if existing:
+                existing.cooldown_expiry = expiry
+            else:
+                cooldown = ItemCooldown(
+                    user_id=user_id, item_name=item_name, cooldown_expiry=expiry
                 )
-                existing = (await session.execute(stmt)).scalar_one_or_none()
-                if existing:
-                    existing.cooldown_expiry = expiry
-                else:
-                    cooldown = ItemCooldown(
-                        user_id=user_id, item_name=item_name, cooldown_expiry=expiry
-                    )
-                    session.add(cooldown)
+                session.add(cooldown)
+
             await session.commit()
 
     async def get_item_cooldown(self, user_id: int, item_name: str) -> int:

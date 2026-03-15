@@ -2194,6 +2194,11 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
+
+            await self.bot.database.set_cooldown(
+                user_id, ctx.command.qualified_name, 86400
+            )
+
             embed.set_author(name="Job Applied", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
 
@@ -2215,10 +2220,6 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id,
                 amount=salary,
                 description=f"Job Salary: {job.title}",
-            )
-
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, 86400
             )
 
             color = (
@@ -2245,6 +2246,11 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
+
+            await self.bot.database.set_cooldown(
+                user_id, ctx.command.qualified_name, 86400
+            )
+
             await ctx.reply(embed=embed)
 
         except ValueError as e:
@@ -2263,14 +2269,15 @@ class Economy(commands.Cog):
 
             await self.bot.database.quit_job(user_id)
 
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, 86400
-            )
-
             embed = discord.Embed(
                 description=f"You quit your job as a **{job.title}**. You can apply for a new job anytime.",
                 color=discord.Color.green(),
             )
+
+            await self.bot.database.set_cooldown(
+                user_id, ctx.command.qualified_name, 86400
+            )
+
             embed.set_author(name="Job Quit", icon_url=self.utils.get_avatar_url(ctx.author))
             await ctx.reply(embed=embed)
 
