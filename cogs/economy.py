@@ -2160,6 +2160,15 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         job_name = job_name.lower()
 
+        # Check for existing job first
+        existing_job = await self.bot.database.get_job(user_id)
+        if existing_job:
+            embed = discord.Embed(
+                description="You already have a job. Quit your current job first.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
         if job_name not in self.JOBS:
             valid_jobs = ", ".join(self.JOBS.keys())
             embed = discord.Embed(
@@ -2170,13 +2179,22 @@ class Economy(commands.Cog):
 
         job_data = self.JOBS[job_name]
 
-        try:
-            await self.bot.database.apply_for_job(
-                user_id=user_id,
-                job_title=job_data["title"],
-                base_salary=job_data["base_salary"],
-            )
+        # Hiring chance based on job tier (higher salary = lower chance)
+        hire_chances = {
+            "janitor": 0.80,
+            "cashier": 0.65,
+            "developer": 0.45,
+            "manager": 0.30,
+            "executive": 0.15,
+        }
+        hire_chance = hire_chances.get(job_name, 0.50)
 
+        # Set cooldown regardless of outcome
+        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 86400)
+
+        # Roll for hiring (roll < hire_chance means success)
+        roll = secrets.randbelow(100) / 100
+        if roll < hire_chance:
             color = (
                 discord.Color.blurple()
                 if isinstance(ctx.channel, discord.DMChannel)
@@ -2187,24 +2205,28 @@ class Economy(commands.Cog):
                 )
             )
             embed = discord.Embed(
-                description=(
-                    f"You got the job! You are now a **{job_data['title']}**.\n"
-                    f"Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**\n"
-                    f"Use `!job work` to collect your salary daily."
-                ),
+                description=f"You were hired as a **{job_data['title']}**!\n"
+                f"Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**\n"
+                f"Use `!job work` to collect your salary daily.",
                 color=color,
             )
-
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, 86400
-            )
-
             embed.set_author(name="Job Applied", icon_url=self.utils.get_avatar_url(ctx.author))
-            await ctx.reply(embed=embed)
 
-        except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await self.bot.database.apply_for_job(
+                user_id=user_id,
+                job_title=job_data["title"],
+                base_salary=job_data["base_salary"],
+            )
+            await ctx.reply(embed=embed)
+        else:
+            embed = discord.Embed(
+                description=f"Unfortunately, you were not hired as a **{job_data['title']}**. "
+                f"The position was filled by another candidate.\n\n"
+                f"You can apply again in 24 hours.",
+                color=discord.Color.orange(),
+            )
+            embed.set_author(name="Application Rejected", icon_url=self.utils.get_avatar_url(ctx.author))
+            await ctx.reply(embed=embed)
 
     @job.command(name="work", description="Work to earn your salary (24h cooldown).")
     async def job_work(self, ctx: commands.Context):
@@ -2269,13 +2291,12 @@ class Economy(commands.Cog):
 
             await self.bot.database.quit_job(user_id)
 
-            embed = discord.Embed(
-                description=f"You quit your job as a **{job.title}**. You can apply for a new job anytime.",
-                color=discord.Color.green(),
-            )
+            # Set cooldown on "job apply" to prevent immediate re-application exploit
+            await self.bot.database.set_cooldown(user_id, "job apply", 86400)
 
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, 86400
+            embed = discord.Embed(
+                description=f"You quit your job as a **{job.title}**. You can apply for a new job in 24 hours.",
+                color=discord.Color.green(),
             )
 
             embed.set_author(name="Job Quit", icon_url=self.utils.get_avatar_url(ctx.author))
