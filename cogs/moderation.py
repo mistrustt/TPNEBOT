@@ -121,7 +121,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        if member.id == 1396419405239549962 or member.id == 580460060233170944 and member.guild.id == 1270962480742666311:
+        if member.id == 1396419405239549962 or member.id == 580460060233170944 or member.id == 228909446607273984 and member.guild.id == 1270962480742666311:
             await member.ban(reason="PERM BANNED.")
             return
 
