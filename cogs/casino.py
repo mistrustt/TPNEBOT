@@ -15,6 +15,7 @@ from discord.ui import View, Button
 from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
+from utils.amount import AmountUtils
 from collections import defaultdict
 from decimal import Decimal
 from typing import Sequence, List, Any, Optional
@@ -80,7 +81,7 @@ class CrashView(discord.ui.LayoutView):
                 elif uid in self.crashed_out:
                     status = f"💥 crashed @ {self.crashed_out[uid]:.2f}×"
                 else:
-                    val = (bet * self.current_multiplier).quantize(Decimal("0.01"))
+                    val = AmountUtils.round_currency(bet * self.current_multiplier)
                     status = f"🟢 playing → {await self.casino.formatter(val)} {self.casino.currency_name}"
                 lines.append(f"<@{uid}> {status}")
 
@@ -225,7 +226,7 @@ class CrashView(discord.ui.LayoutView):
 
         bet = self.players[uid]
         mult = self.current_multiplier
-        win = (bet * mult).quantize(Decimal("0.01"))
+        win = AmountUtils.round_currency(bet * mult)
 
         wallet = await self.bot.database.get_wallet_id_for_user(uid)
         await self.bot.database.process_treasury_transaction(
@@ -1911,11 +1912,11 @@ class Casino(commands.Cog):
         amount_input = amount_input.strip().lower()
 
         if amount_input == "all" or amount_input == "max":
-            amount = (user_balance).quantize(Decimal("0.01"))
+            amount = AmountUtils.truncate_currency(user_balance)
         elif amount_input == "half":
-            amount = (user_balance / Decimal("2")).quantize(Decimal("0.01"))
+            amount = AmountUtils.round_currency(user_balance / Decimal("2"))
         elif amount_input == "quarter":
-            amount = (user_balance / Decimal("4")).quantize(Decimal("0.01"))
+            amount = AmountUtils.round_currency(user_balance / Decimal("4"))
 
         elif amount_input.endswith("%"):
             percentage_match = re.match(r"^([0-9]+(\.[0-9]+)?)%$", amount_input)
@@ -2429,7 +2430,7 @@ class Casino(commands.Cog):
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
-            balance = Decimal(str(balance)).quantize(Decimal("0.01"))
+            balance = AmountUtils.round_currency(Decimal(str(balance)))
 
             try:
                 amount = await self.amount_handler(bet_amount, balance)
@@ -2580,7 +2581,7 @@ class Casino(commands.Cog):
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
-            balance = Decimal(str(balance)).quantize(Decimal("0.01"))
+            balance = AmountUtils.round_currency(Decimal(str(balance)))
 
             try:
                 amount = await self.amount_handler(bet_amount, balance)
@@ -2710,7 +2711,7 @@ class Casino(commands.Cog):
                     "0.1"
                 )
                 if recovery_allowed:
-                    recovery = (amount * Decimal("0.20")).quantize(Decimal("0.01"))
+                    recovery = AmountUtils.round_currency(amount * Decimal("0.20"))
                     if recovery > treasury:
                         recovery = treasury
 
@@ -2905,7 +2906,7 @@ class Casino(commands.Cog):
             rtp_boost = (base_edge - house_edge) / base_edge
             multiplier = multiplier * (Decimal("1") + rtp_boost * Decimal("0.25"))
 
-        winnings = (stake * multiplier).quantize(Decimal("0.01"))
+        winnings = AmountUtils.round_currency(stake * multiplier)
 
         # Process game result for rakeback
         await self.process_game_result(user_id, "slots", stake)
@@ -3116,7 +3117,7 @@ class Casino(commands.Cog):
         else:
             result = f"🎲 You rolled {die1} and {die2} (total {total})\nYou lost {currency_name} **{await self.formatter(amount)}**."
 
-        winnings = winnings.quantize(Decimal("0.01")) if winnings else 0
+        winnings = AmountUtils.round_currency(winnings) if winnings else 0
 
         # Process game result for rakeback
         await self.process_game_result(user_id, "dice", amount)
@@ -3432,7 +3433,7 @@ class Casino(commands.Cog):
 
         # Apply RTP boost for VIP players
         if winnings > 0:
-            winnings = (winnings * rtp_boost).quantize(Decimal("0.01"))
+            winnings = AmountUtils.round_currency(winnings * rtp_boost)
 
         # Process game result for rakeback
         await self.process_game_result(user_id, "roulette", amount)
@@ -4453,15 +4454,14 @@ class Casino(commands.Cog):
         elif side == "tie" and result == "tie":
             payout_mult = Decimal("8")
 
-        winnings = (stake * payout_mult).quantize(Decimal("0.01"))
-
-        profit = (stake * payout_mult).quantize(Decimal("0.01"))
+        winnings = AmountUtils.round_currency(stake * payout_mult)
+        profit = AmountUtils.round_currency(stake * payout_mult)
 
         # Process game result for rakeback
         await self.process_game_result(uid, "baccarat", stake)
 
         if payout_mult > 0:
-            total_return = (stake + profit).quantize(Decimal("0.01"))
+            total_return = AmountUtils.round_currency(stake + profit)
             await self.bot.database.process_treasury_transaction(
                 wallet_id, total_return, "Baccarat Payout"
             )
@@ -5609,7 +5609,7 @@ class Casino(commands.Cog):
 
             bet = current_game.players[uid]
             mult = current_game.current_multiplier
-            win = (bet * mult).quantize(Decimal("0.01"))
+            win = AmountUtils.round_currency(bet * mult)
             wallet = await self.bot.database.get_wallet_id_for_user(uid)
             await self.bot.database.process_treasury_transaction(
                 wallet, win, "Crash Win"
@@ -5697,7 +5697,7 @@ class Casino(commands.Cog):
                 if pid not in view.cashed_out and pid not in view.crashed_out:
                     mult = view.current_multiplier
                     view.cashed_out[pid] = mult
-                    win_amt = (bet * mult).quantize(Decimal("0.01"))
+                    win_amt = AmountUtils.round_currency(bet * mult)
                     wallet = await self.bot.database.get_wallet_id_for_user(pid)
                     await self.bot.database.process_treasury_transaction(
                         wallet, win_amt, "Crash Force Payout"
@@ -5898,7 +5898,7 @@ class Casino(commands.Cog):
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
-            balance = Decimal(str(balance)).quantize(Decimal("0.01"))
+            balance = AmountUtils.round_currency(Decimal(str(balance)))
 
             try:
                 amount = await self.amount_handler(player_bet, balance)

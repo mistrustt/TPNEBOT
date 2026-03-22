@@ -88,6 +88,7 @@ import discord
 import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP
+from utils.amount import AmountUtils
 
 logger = logging.getLogger("discord_bot")
 
@@ -1688,7 +1689,7 @@ class DatabaseManager:
         """Transfer funds from wallet to bank without affecting treasury."""
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                amount = amount.quantize(Decimal("0.01"))
+                amount = AmountUtils.round_currency(amount)
 
                 # 1) load + gate
                 wallet = await session.get(Wallet, wallet_id)
@@ -1737,7 +1738,7 @@ class DatabaseManager:
         """Transfer funds from bank to wallet without affecting treasury."""
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                amount = amount.quantize(Decimal("0.01"))
+                amount = AmountUtils.round_currency(amount)
 
                 wallet = await session.get(Wallet, wallet_id)
                 if not wallet:
@@ -1915,12 +1916,12 @@ class DatabaseManager:
         factors = await self.get_economic_factors()
         fee_rate = factors["fee_rate"]
 
-        amount = amount.quantize(Decimal("0.01"), ROUND_HALF_UP)
+        amount = AmountUtils.round_currency(amount)
         if amount == 0:
             raise ValueError("Cannot process zero-amount transaction.")
 
         gross = abs(amount)
-        fee = (gross * fee_rate).quantize(Decimal("0.01"), ROUND_HALF_UP)
+        fee = AmountUtils.round_currency(gross * fee_rate)
         net = gross - fee
 
         async with self.async_sessionmaker() as session:
@@ -2152,13 +2153,9 @@ class DatabaseManager:
                 )
                 bank_total = bank_total_result.scalar() or Decimal("0.00")
 
-                circulating_supply = (wallet_total + bank_total).quantize(
-                    Decimal("0.01")
-                )
+                circulating_supply = AmountUtils.round_currency(wallet_total + bank_total)
 
-                total_supply = (circulating_supply + supply.treasury).quantize(
-                    Decimal("0.01")
-                )
+                total_supply = AmountUtils.round_currency(circulating_supply + supply.treasury)
 
                 treasury_health = (
                     supply.treasury / total_supply
@@ -2299,7 +2296,7 @@ class DatabaseManager:
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                amount = amount.quantize(Decimal("0.01"))
+                amount = AmountUtils.round_currency(amount)
                 supply = await session.get(Supply, 1)
                 if not supply:
                     raise ValueError("Supply record missing!")
@@ -2337,7 +2334,7 @@ class DatabaseManager:
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                amount = amount.quantize(Decimal("0.01"))
+                amount = AmountUtils.round_currency(amount)
                 supply = await session.get(Supply, 1)
                 if not supply:
                     raise ValueError("Supply record missing!")
@@ -2477,7 +2474,7 @@ class DatabaseManager:
 
         if need_rebalance:
             gap = (TARGET * total_supply) - treasury
-            adj = min(abs(gap) * STEP, CAP).quantize(Decimal("0.01"))
+            adj = AmountUtils.round_currency(min(abs(gap) * STEP, CAP))
 
             if adj > 0:
                 try:
@@ -2607,14 +2604,14 @@ class DatabaseManager:
             base_coeff *= Decimal("0.9")  # Discourage gambling during low participation
 
         # ---- calculate tentative limit --------------------------------------
-        by_treasury = (treasury * base_coeff).quantize(Decimal("0.01"))
-        hard_cap = (treasury * MAX_TREASURY_EXPOSURE).quantize(Decimal("0.01"))
+        by_treasury = AmountUtils.round_currency(treasury * base_coeff)
+        hard_cap = AmountUtils.round_currency(treasury * MAX_TREASURY_EXPOSURE)
         provisional = min(by_treasury, hard_cap, user_total)
 
         # ---- enforce adaptive minimum floor ---------------------------------
         adaptive_floor = min(
             MIN_ABSOLUTE_FLOOR,
-            (user_total * Decimal("0.02")).quantize(Decimal("0.01")),
+            AmountUtils.round_currency(user_total * Decimal("0.02")),
         )
         final_limit = max(provisional, adaptive_floor)
 
@@ -2648,14 +2645,14 @@ class DatabaseManager:
         health = factors["treasury_health"]
 
         if health < Decimal("0.25"):
-            base_coeff = Decimal("0.001")  # 0.1% of treasury
+            base_coeff = Decimal("0.0005")  # 0.05% of treasury
         elif health < Decimal("0.50"):
-            base_coeff = Decimal("0.002")  # 0.2% of treasury 
+            base_coeff = Decimal("0.001")  # 0.1% of treasury 
         else:
-            base_coeff = Decimal("0.005")  # 0.5% of treasury
+            base_coeff = Decimal("0.002")  # 0.2% of treasury
 
-        max_loan = (treasury * base_coeff).quantize(Decimal("0.01"))
-        return min(max_loan, user_total * Decimal("2.0"))  # Cap at 2x user's total balance
+        max_loan = AmountUtils.round_currency(treasury * base_coeff)
+        return min(max_loan, user_total * Decimal("1.5"))  # Cap at 1.5x user's total balance
 
     async def collect_daily_economy_snapshot(self):
         """
@@ -2684,7 +2681,7 @@ class DatabaseManager:
             wallet_count_result = await session.execute(select(func.count(Wallet.wallet_id)))
             wallet_count = wallet_count_result.scalar()
             if wallet_count and wallet_count > 0:
-                avg_wallet_balance = (wallet_total / wallet_count).quantize(Decimal("0.01"))
+                avg_wallet_balance = AmountUtils.round_currency(wallet_total / wallet_count)
 
             # Transaction volume (yesterday)
             volume_stmt = select(func.sum(Transaction.amount)).where(
@@ -7706,7 +7703,7 @@ class DatabaseManager:
                 )
                 tier = tier_result.scalar_one_or_none()
                 rakeback_rate = tier.rakeback_rate if tier else Decimal("0.01")
-                rakeback_amount = (wagered * rakeback_rate).quantize(Decimal("0.01"))
+                rakeback_amount = AmountUtils.round_currency(wagered * rakeback_rate)
 
                 # Add rakeback to user's accumulated balance
                 rakeback_result = await session.execute(

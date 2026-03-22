@@ -13,6 +13,7 @@ from discord import ui, Button, Interaction
 from discord.ui import View, Button
 from discord.ext import commands, tasks
 from utils.misc import MiscUtils
+from utils.amount import AmountUtils
 from collections import defaultdict
 import re
 from decimal import Decimal
@@ -244,7 +245,7 @@ class AirDropView(discord.ui.View):
             "You joined the airdrop!", ephemeral=True
         )
 
-        share = (self.amount / Decimal(len(self.joiners))).quantize(Decimal("0.01"))
+        share = AmountUtils.round_currency(self.amount / Decimal(len(self.joiners)))
         economy = self.bot.get_cog("Economy")
 
         embed = discord.Embed(
@@ -462,7 +463,7 @@ class ConfirmPurchaseView(View):
             )
             return
 
-        item_price = Decimal(self.item.price).quantize(Decimal("0.01"))
+        item_price = AmountUtils.round_currency(Decimal(self.item.price))
         try:
             async with self.bot.database.get_session() as session:
                 await self.bot.database.purchase_shop_item(
@@ -1339,7 +1340,8 @@ class Economy(commands.Cog):
         """
         Process the bet input and return the corresponding bet amount.
         Supports keywords ('all', 'half', 'quarter'), percentages, and suffixed values.
-        The returned amount is truncated (not rounded) to two decimal places.
+        Uses ROUND_DOWN for 'all'/'max' keywords, ROUND_HALF_UP for other amounts.
+        Rejects amounts below the minimum currency threshold (0.01).
         """
 
         if not isinstance(amount_input, str):
@@ -1348,11 +1350,11 @@ class Economy(commands.Cog):
         amount_input = amount_input.strip().lower()
 
         if amount_input == "all" or amount_input == "max":
-            amount = (user_balance).quantize(Decimal("0.01"))
+            amount = AmountUtils.truncate_currency(user_balance)
         elif amount_input == "half":
-            amount = (user_balance / Decimal("2")).quantize(Decimal("0.01"))
+            amount = AmountUtils.round_currency(user_balance / Decimal("2"))
         elif amount_input == "quarter":
-            amount = (user_balance / Decimal("4")).quantize(Decimal("0.01"))
+            amount = AmountUtils.round_currency(user_balance / Decimal("4"))
 
         elif amount_input.endswith("%"):
             percentage_match = re.match(r"^([0-9]+(\.[0-9]+)?)%$", amount_input)
@@ -1360,7 +1362,7 @@ class Economy(commands.Cog):
                 try:
                     percentage = Decimal(percentage_match.group(1))
                     if Decimal("1") <= percentage <= Decimal("100"):
-                        amount = user_balance * (percentage / Decimal("100"))
+                        amount = AmountUtils.round_currency(user_balance * (percentage / Decimal("100")))
                     else:
                         raise ValueError("Percentage must be between 1% and 100%.")
                 except InvalidOperation:
@@ -1392,24 +1394,21 @@ class Economy(commands.Cog):
                 number = Decimal(multiplier_match.group(1))
                 if multiplier_match.group(3):
                     multiplier = multipliers[multiplier_match.group(3)]
-                    amount = number * multiplier
+                    amount = AmountUtils.round_currency(number * multiplier)
                 else:
-                    amount = number
+                    amount = AmountUtils.round_currency(number)
             except (InvalidOperation, KeyError):
                 raise ValueError("Invalid amount.")
 
         if amount.is_nan():
             raise ValueError("Invalid amount.")
 
-        try:
-            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        except InvalidOperation:
-            raise ValueError("Invalid amount.")
-
         if amount > user_balance:
             raise ValueError("Insufficient Funds.")
-        if amount <= Decimal("0"):
-            raise ValueError("Amount must be greater than 0.")
+
+        valid, error_msg = AmountUtils.validate_currency_minimum(amount)
+        if not valid:
+            raise ValueError(error_msg)
 
         return amount
 
@@ -2496,8 +2495,11 @@ class Economy(commands.Cog):
         """Repay part or all of an active loan."""
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        balance = str(await self.bot.database.get_wallet_balance(wallet_id))
+        balance = await self.bot.database.get_wallet_balance(wallet_id)
         active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+
+        await self.bot.database.date_check_loans()
+
         if not active_loan:
             embed = discord.Embed(
                 description="You have no active loans to repay.",
@@ -2506,7 +2508,7 @@ class Economy(commands.Cog):
             return await ctx.reply(embed=embed, delete_after=5)
         loan = active_loan[0]
         try:
-            amount = await self.amount_handler(amount, loan.total_repay)
+            amount = await self.amount_handler(amount, balance)
         except ValueError as e:
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
@@ -3277,7 +3279,7 @@ class Economy(commands.Cog):
             return await ctx.reply("Invalid numeric value detected", delete_after=5)
 
         try:
-            coins = (spend / price).quantize(Decimal("0.00000001"))
+            coins = AmountUtils.round_crypto(spend / price)
         except InvalidOperation:
             return await ctx.reply(
                 f"Invalid price calculation result for {symbol}.", delete_after=5
@@ -3331,7 +3333,7 @@ class Economy(commands.Cog):
                 f"Price data for '{symbol}' is unavailable.", delete_after=5
             )
 
-        proceeds = (sell_amt * price).quantize(Decimal("0.01"))
+        proceeds = AmountUtils.round_currency(sell_amt * price)
         await self.bot.database.process_treasury_transaction(
             wallet_id, proceeds, f"Sell {symbol}"
         )
@@ -3434,11 +3436,11 @@ class Economy(commands.Cog):
         amount_input = input_str.strip().lower()
 
         if amount_input == "all" or amount_input == "max":
-            amount = balance  # Use exact balance without quantizing to avoid precision issues
+            amount = AmountUtils.truncate_crypto(balance)
         elif amount_input == "half":
-            amount = (balance / Decimal("2")).quantize(Decimal("0.01"))
+            amount = AmountUtils.round_crypto(balance / Decimal("2"))
         elif amount_input == "quarter":
-            amount = (balance / Decimal("4")).quantize(Decimal("0.01"))
+            amount = AmountUtils.round_crypto(balance / Decimal("4"))
 
         elif amount_input.endswith("%"):
             percentage_match = re.match(r"^([0-9]+(\.[0-9]+)?)%$", amount_input)
@@ -3446,7 +3448,7 @@ class Economy(commands.Cog):
                 try:
                     percentage = Decimal(percentage_match.group(1))
                     if Decimal("1") <= percentage <= Decimal("100"):
-                        amount = balance * (percentage / Decimal("100"))
+                        amount = AmountUtils.round_crypto(balance * (percentage / Decimal("100")))
                     else:
                         raise ValueError("Percentage must be between 1% and 100%.")
                 except InvalidOperation:
@@ -3477,26 +3479,21 @@ class Economy(commands.Cog):
                 number = Decimal(multiplier_match.group(1))
                 if multiplier_match.group(3):
                     multiplier = multipliers[multiplier_match.group(3)]
-                    amount = number * multiplier
+                    amount = AmountUtils.round_crypto(number * multiplier)
                 else:
-                    amount = number
+                    amount = AmountUtils.round_crypto(number)
             except (InvalidOperation, KeyError):
                 raise ValueError("Invalid amount.")
 
         if amount.is_nan():
             raise ValueError("Invalid amount.")
 
-        # Only quantize if not using exact balance (all/max)
-        if amount_input not in ("all", "max"):
-            try:
-                amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            except InvalidOperation:
-                raise ValueError("Invalid amount.")
-
         if amount > balance:
             raise ValueError("Insufficient Funds.")
-        if amount <= Decimal("0"):
-            raise ValueError("Amount must be greater than 0.")
+
+        valid, error_msg = AmountUtils.validate_crypto_minimum(amount)
+        if not valid:
+            raise ValueError(error_msg)
 
         return amount
     
