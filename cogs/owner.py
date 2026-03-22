@@ -354,7 +354,6 @@ class Owner(commands.Cog, name="Owner"):
             284439598422163476,  # E
             1208003447388119040, # tpne alt
             1288160215241326674, # tpne alt 2
-            454063348666073090,
         ]
         self.whitelist_mistrust = [
             284439598422163476,  # E

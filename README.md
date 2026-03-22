@@ -95,9 +95,6 @@ Production deployment guidance (containers, systemd, Docker) is documented in [D
 ## Security
 Follow least privilege for Postgres credentials and secure storage of seeds and private keys. See [SECURITY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/SECURITY.md).
 
-## License
-Add your chosen license file (e.g. MIT, Apache 2.0) in the project root. This documentation does not include a license text by default.
-
 ## Disclaimer
-This documentation was generated automatically based on the current repository structure. Always audit cryptographic and fairness code before relying on it in production.
+This documentation was generated automatically based on the current repository structure.
 

