@@ -2374,15 +2374,10 @@ class DatabaseManager:
         Cross-check that:
         - sum of all wallets & banks == supply.circulating
         - supply.circulating + supply.treasury == supply.total_supply
-        - blockchain is consistent
         Returns True if all checks out, False otherwise.
         """
 
         await self.update_supply()
-
-        is_valid, _ = await self.blockchain.validate_blockchain()
-        if not is_valid:
-            return False
 
         async with self.async_sessionmaker() as session:
             result_wallet = await session.execute(select(func.sum(Wallet.balance)))

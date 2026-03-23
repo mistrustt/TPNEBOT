@@ -1,5 +1,4 @@
 import aiohttp
-import time
 
 JUICEWRLD_API = "https://juicewrldapi.com"
 

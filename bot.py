@@ -7,8 +7,7 @@ import platform
 import inspect
 import traceback
 import urllib.parse
-import uuid
-from discord import app_commands, Webhook
+from discord import app_commands
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from datetime import datetime, timedelta, timezone
@@ -189,9 +188,8 @@ class DiscordBot(commands.Bot):
             )
             self.logger.info("Database connection established successfully.")
 
-            self.logger.info("Initializing database tables & blockchain...")
+            self.logger.info("Initializing database tables...")
             await self.database.initialize()
-            self.logger.info("Blockchain initialized successfully.")
             self.logger.info("Database Tables initialized successfully.")
 
             # Collect initial economic metrics
@@ -220,7 +218,7 @@ class DiscordBot(commands.Bot):
             # Start Admin API server if configured via environment variables
             try:
                 host = os.getenv("ADMIN_API_HOST", "127.0.0.1")
-                port = int(os.getenv("ADMIN_API_PORT", "8080"))
+                port = int(os.getenv("ADMIN_API_PORT", "9203"))
                 secret = os.getenv("ADMIN_API_SECRET")
                 if not secret:
                     self.logger.warning("ADMIN_API_SECRET not set; Admin API will not be started.")
