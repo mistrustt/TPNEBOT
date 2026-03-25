@@ -30,7 +30,6 @@ Required environment variables in `.env`:
 - `database/` - Data layer
   - `models.py` - SQLAlchemy ORM models
   - `manager.py` - Database session factory and async operations (~6000+ lines)
-  - `blockchain.py` - Internal ledger operations
 - `utils/` - Shared utilities
   - `fairness.py` - Provable fairness HMAC-based RNG and verifiers
   - `cooldown.py` - Cooldown embed helpers

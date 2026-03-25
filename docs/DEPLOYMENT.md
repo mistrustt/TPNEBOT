@@ -70,7 +70,6 @@ Note: Ensure Postgres hostname inside URL references service name or external ho
 
 ## Backups
 - Database dumps (pg_dump) on regular schedule.
-- Preserve blockchain blocks and transaction history for audit.
 
 ## Scaling
 - For large guild counts: consider sharding (discord.py has sharding support).

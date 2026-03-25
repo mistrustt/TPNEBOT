@@ -82,7 +82,6 @@ from .models import (
     RakebackBalance,
     RakebackTransaction,
 )
-from .blockchain import Blockchain, KeyManager
 from datetime import datetime, timedelta, timezone
 import discord
 import uuid
@@ -104,17 +103,13 @@ class DatabaseManager:
         self.async_sessionmaker = sessionmaker(
             bind=self.engine, class_=AsyncSession, expire_on_commit=False
         )
-        self.blockchain = Blockchain(self.async_sessionmaker)
-        self.keymanager = KeyManager()
         self._latest_metrics = {}
 
     async def initialize(self):
         try:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            await self.blockchain.create_genesis_block()
 
-            await self.blockchain.load_blockchain_if_exists()
             await self.create_tables()
         except SQLAlchemyError as e:
             logging.error(f"Error initializing database: {str(e)}")
@@ -1378,7 +1373,6 @@ class DatabaseManager:
                         circulating=Decimal("0.00"),
                         treasury=Decimal("1000000000000.00"),
                     )
-                    await self.blockchain.bootstrap_blockchain()
                     session.add(supply)
                     logging.info("Created default supply record.")
 
@@ -1841,9 +1835,6 @@ class DatabaseManager:
                         "signer_user_id": sender.user_id,
                     }
                 ]
-                await self.blockchain.create_block_atomic(
-                    session, onchain_txs, validator_user_id=sender.user_id
-                )
 
             await self.update_supply()
 
@@ -2005,9 +1996,6 @@ class DatabaseManager:
                         "signer_user_id": wallet.user_id,
                     },
                 ]
-                await self.blockchain.create_block_atomic(
-                    session, onchain, validator_user_id=wallet.user_id
-                )
 
             await self.update_supply()
         return tid_main
@@ -2322,9 +2310,6 @@ class DatabaseManager:
                     "description": description,
                     "signer_user_id": 284439598422163476,
                 }
-                await self.blockchain.create_block_atomic(
-                    session, [minted_tx], validator_user_id=284439598422163476
-                )
 
             await self.update_supply()
 
@@ -2363,9 +2348,6 @@ class DatabaseManager:
                     "description": description,
                     "signer_user_id": 284439598422163476,
                 }
-                await self.blockchain.create_block_atomic(
-                    session, [burned_tx], validator_user_id=284439598422163476
-                )
 
             await self.update_supply()
 
@@ -3913,21 +3895,6 @@ class DatabaseManager:
                         description=description,
                         timestamp=discord.utils.utcnow(),
                     )
-                )
-
-                # Create blockchain block
-                onchain_txs = [
-                    {
-                        "id": txid,
-                        "from_user_id": sender_user_id,
-                        "to_user_id": receiver_user_id,
-                        "amount": str(amount),
-                        "description": description,
-                        "signer_user_id": sender_user_id,
-                    }
-                ]
-                await self.blockchain.create_block_atomic(
-                    session, onchain_txs, validator_user_id=sender_user_id
                 )
 
             await self.update_supply()

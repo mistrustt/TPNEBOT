@@ -8,7 +8,7 @@ This document explains the internal architecture of TPNEBOT.
 - Core Bot (`bot.py`): Startup, logging, database initialization, dynamic cog loader, command prefix resolution, status updates.
 - Cogs (`cogs/`): Modular feature units (economy, games, moderation, music, voice, ownership tools, watchdog auditing, etc.). Each cog registers commands and event listeners.
 - Utilities (`utils/`): Shared logic for cooldown messaging and provable fairness.
-- Data Access Layer (`database/manager.py`): Session management, async operations, configuration retrieval, initialization routines (tables, seeds, blockchain setup).
+- Data Access Layer (`database/manager.py`): Session management, async operations, configuration retrieval, initialization routines (tables, seeds setup).
 - Models (`database/models.py`): ORM definitions for all persistent entities.
 
 ## Startup Sequence
@@ -17,8 +17,6 @@ This document explains the internal architecture of TPNEBOT.
    - Sets up logging handlers.
    - Builds Postgres connection URL using `DB_PW`.
    - Loads config row asynchronously (BotConfig) to determine which cogs are enabled.
-3. Initialize database tables and blockchain structures.
-4. Load extensions (cogs) dynamically, skipping any not listed in loaded_cogs if selective loading is configured.
 5. Sync application commands globally (`self.tree.sync()`).
 6. Start background status update loop.
 
@@ -56,10 +54,6 @@ Implemented in `utils/fairness.py` using HMAC SHA256 keyed by server seed and mi
 - Wallet possesses server seed, previous server seed (for rotation), client seed, nonce.
 - Verifiers reconstruct exact outcomes off chain for auditing.
 - Rotation updates server seed and archives previous for post game proofs.
-
-## Blockchain Style Ledger
-- `Block` model stores ordered transaction lists with hash and previous hash producing a simple hash chained sequence.
-- Used for transparency of economy movements and supply tracking.
 
 ## Configuration Persistence
 - `BotConfig` holds loaded/unloaded cog lists and setup flags.
