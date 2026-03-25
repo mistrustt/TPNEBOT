@@ -3083,7 +3083,7 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
-    @adminbank.command(name="freeze", hidden=True)
+    @adminbank.command(name="freeze", aliases=["lock"], hidden=True)
     @commands.is_owner()
     async def admin_bank_freeze(self, ctx: Context, member: discord.Member):
         """Freeze a user's bank account."""
@@ -3104,7 +3104,7 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
-    @adminbank.command(name="thaw", hidden=True)
+    @adminbank.command(name="thaw", aliases=["unfreeze"], hidden=True)
     @commands.is_owner()
     async def admin_bank_unfreeze(self, ctx: Context, member: discord.Member):
         """Thaw a user's bank account."""
@@ -3125,7 +3125,7 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
-    @adminbank.command(name="reset", hidden=True)
+    @adminbank.command(name="reset", aliases=["wipe"], hidden=True)
     @commands.is_owner()
     async def admin_bank_reset(self, ctx: Context, member: discord.Member):
         """Reset a user's bank and wallet balance to zero."""
@@ -3162,7 +3162,7 @@ class Owner(commands.Cog, name="Owner"):
         except Exception as e:
             await ctx.send(embed=discord.Embed(description=f"❌ Error: {e}", color=discord.Color.red()))
 
-    @adminbank.command(name="refund", hidden=True)
+    @adminbank.command(name="refund", aliases=["reimburse"], hidden=True)
     @commands.is_owner()
     async def admin_bank_refund(self, ctx: Context, member: discord.Member, txid: str):
         """Refund a transaction."""
@@ -3182,7 +3182,7 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
-    @adminbank.command(name="mint", hidden=True)
+    @adminbank.command(name="mint", aliases=["create"], hidden=True)
     @commands.is_owner()
     async def mint(self, ctx: Context, amount: str):
         """Mint to currency supply."""
@@ -3205,7 +3205,7 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
-    @adminbank.command(name="burn", hidden=True)
+    @adminbank.command(name="burn", aliases=["destroy"], hidden=True)
     @commands.is_owner()
     async def burn(self, ctx: Context, amount: str):
         """Burn from currency supply."""
