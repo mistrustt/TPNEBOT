@@ -7525,7 +7525,25 @@ class DatabaseManager:
             await session.commit()
             await session.refresh(user_vip)
             return user_vip
-        
+    
+    async def upgrade_all_users_vip(self) -> None:
+        """Upgrade VIP tiers for all users based on their total wagered."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                # Get all user VIP records
+                result = await session.execute(select(UserVIP))
+                user_vips = result.scalars().all()
+
+                for user_vip in user_vips:
+                    # Calculate total wagered for each user
+                    total_wagered = await self.get_total_wagered_all_games(user_vip.user_id)
+                    # Determine appropriate tier based on total wagered
+                    new_tier = await self.get_vip_tier_by_wagered(total_wagered)
+                    if new_tier and new_tier.id != user_vip.tier_id:
+                        user_vip.tier_id = new_tier.id
+
+            await session.commit()
+
     async def get_user_vip(self, user_id: int) -> UserVIP:
         """Get or create user VIP record with tier info."""
         async with self.async_sessionmaker() as session:
