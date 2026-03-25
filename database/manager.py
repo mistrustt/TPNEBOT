@@ -1824,18 +1824,6 @@ class DatabaseManager:
                     ]
                 )
 
-                # 3) on-chain block atomically (validator = sender)
-                onchain_txs = [
-                    {
-                        "id": txid_main,
-                        "from_user_id": sender.user_id,
-                        "to_user_id": receiver.user_id,
-                        "amount": str(net_amt),
-                        "description": description,
-                        "signer_user_id": sender.user_id,
-                    }
-                ]
-
             await self.update_supply()
 
         # Anti-cheat logging (outside transaction to avoid blocking)
@@ -1976,26 +1964,6 @@ class DatabaseManager:
                         ),
                     ]
                 )
-
-                # on-chain block atomically (validator = wallet owner)
-                onchain = [
-                    {
-                        "id": tid_main,
-                        "from_user_id": from_uid,
-                        "to_user_id": to_uid,
-                        "amount": str(net),
-                        "description": description,
-                        "signer_user_id": wallet.user_id,
-                    },
-                    {
-                        "id": tid_fee,
-                        "from_user_id": from_uid,
-                        "to_user_id": 0,
-                        "amount": str(fee),
-                        "description": f"{description} (fee @ {fee_rate:.2%})",
-                        "signer_user_id": wallet.user_id,
-                    },
-                ]
 
             await self.update_supply()
         return tid_main
@@ -2280,7 +2248,6 @@ class DatabaseManager:
     async def mint_currency(self, amount: Decimal, description: str):
         """
         Mint new currency and add it to the treasury balance.
-        Also logs an on-chain "mint" transaction.
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -2301,15 +2268,6 @@ class DatabaseManager:
                     timestamp=discord.utils.utcnow(),
                 )
                 session.add(transaction_db)
-                # Atomic on-chain block (validator = owner/admin)
-                minted_tx = {
-                    "id": txid,
-                    "from_user_id": None,
-                    "to_user_id": 0,
-                    "amount": str(amount),
-                    "description": description,
-                    "signer_user_id": 284439598422163476,
-                }
 
             await self.update_supply()
 
@@ -2339,15 +2297,6 @@ class DatabaseManager:
                     timestamp=discord.utils.utcnow(),
                 )
                 session.add(transaction_db)
-                # Atomic on-chain block (validator = owner/admin)
-                burned_tx = {
-                    "id": txid,
-                    "from_user_id": 0,
-                    "to_user_id": None,
-                    "amount": str(amount),
-                    "description": description,
-                    "signer_user_id": 284439598422163476,
-                }
 
             await self.update_supply()
 

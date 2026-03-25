@@ -347,14 +347,12 @@ class Transaction(Base):
     )
     description = Column(String, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow)
-    block_hash = Column(String(64), nullable=True)
 
     def __repr__(self):
         return (
             f"<Transaction(id={self.id}, from_user_id={self.from_user_id}, "
             f"to_user_id={self.to_user_id}, amount={self.amount}, "
             f"description='{self.description}', timestamp={self.timestamp}, "
-            f"block_hash='{self.block_hash}')>"
         )
 
 

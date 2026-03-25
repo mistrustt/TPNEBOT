@@ -37,7 +37,7 @@ Required environment variables in `.env`:
   - `admin_api.py` - HTTP admin API server
 
 ### Database Models (key tables)
-- **Economy**: Wallet, Transaction, BankAccount, Item, ShopItem, Bounty, Supply, Block
+- **Economy**: Wallet, Transaction, BankAccount, Item, ShopItem, Bounty, Supply
 - **Games**: GameHistory, GameStats, MinesSettings
 - **Moderation**: Punishment, CaseNote, WatchdogLog, JailSetting, JailedUser, UserAlt
 - **Access Control**: CommandStatus, CommandRoleRestriction, Blacklist
