@@ -1456,17 +1456,13 @@ class DatabaseManager:
                 if existing:
                     return
 
-                private_key, public_key = KeyManager.generate_key_pair()
-                private_pem = KeyManager.serialize_key(private_key, private=True)
-                public_pem = KeyManager.serialize_key(public_key, private=False)
-                hashed_key = KeyManager.hash_key(private_pem)
                 salt = os.urandom(16)
 
                 new_wallet = Wallet(
                     user_id=user_id,
-                    public_key=public_pem,
-                    private_key=private_pem,
-                    hashed_key=hashed_key,
+                    public_key=None,
+                    private_key=None,
+                    hashed_key=None,
                     salt=salt,
                     balance=Decimal("0.00"),
                     client_seed=secrets.token_hex(16),
