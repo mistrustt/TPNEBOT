@@ -550,13 +550,11 @@ class UserRoleHistory(Base):
     def __repr__(self):
         return f"<UserRoleHistory user_id={self.user_id} roles={self.roles}>"
 
-
 class Reputation(Base):
     __tablename__ = "reputation"
 
     discord_id = Column(BigInteger, primary_key=True)
     reputation = Column(Integer, default=0, nullable=False)
-
 
 class Sobs(Base):
     __tablename__ = "sobs"
@@ -565,14 +563,12 @@ class Sobs(Base):
     sobs_tx = Column(Integer, default=0, nullable=False)
     sobs_rx = Column(Integer, default=0, nullable=False)
 
-
 class Skulls(Base):
     __tablename__ = "skulls"
 
     discord_id = Column(BigInteger, primary_key=True)
     skulls_tx = Column(Integer, default=0, nullable=False)
     skulls_rx = Column(Integer, default=0, nullable=False)
-
 
 class Flames(Base):
     __tablename__ = "flames"
@@ -581,14 +577,12 @@ class Flames(Base):
     flames_tx = Column(Integer, default=0, nullable=False)
     flames_rx = Column(Integer, default=0, nullable=False)
 
-
 class Hearts(Base):
     __tablename__ = "hearts"
 
     discord_id = Column(BigInteger, primary_key=True)
     hearts_tx = Column(Integer, default=0, nullable=False)
     hearts_rx = Column(Integer, default=0, nullable=False)
-
 
 class Clowns(Base):
     __tablename__ = "clowns"
@@ -597,21 +591,19 @@ class Clowns(Base):
     clowns_tx = Column(Integer, default=0, nullable=False)
     clowns_rx = Column(Integer, default=0, nullable=False)
 
-
 class ReactionSettings(Base):
     __tablename__ = "reaction_settings"
 
     guild_id = Column(BigInteger, primary_key=True)
     self_reactions_enabled = Column(Boolean, default=False)
 
-
 class Blacklist(Base):
     __tablename__ = "blacklist"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, nullable=False, unique=True)
+    admin_id = Column(BigInteger, nullable=False)
     reason = Column(String, nullable=False, default="No reason provided")
-
 
 class FavoriteSongs(Base):
     __tablename__ = "favorite_songs"
@@ -619,7 +611,6 @@ class FavoriteSongs(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, nullable=False)
     song_title = Column(String, nullable=False)
-
 
 class UserTimezone(Base):
     __tablename__ = "user_timezones"
