@@ -2219,7 +2219,7 @@ class Music(commands.Cog, name="Music"):
         songs = Cache.get_songs()
         if songs is not None:
             await self.store_latest_surfaces()
-            await self.sync_names()
+            await self.sync_blacktea()
 
     async def store_latest_surfaces(self, days: int = 30):
         cutoff = discord.utils.utcnow() - timedelta(days=days)

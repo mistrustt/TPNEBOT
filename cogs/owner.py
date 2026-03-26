@@ -39,6 +39,36 @@ logger = logging.getLogger("discord_bot")
 MAX_FIELD_VALUE_LENGTH = 1024
 MAX_EMBED_DESC_LENGTH = 2048
 MAX_EMBED_CHAR_LENGTH = 6000
+MAX_EMBED_DESCRIPTION = 4096  # Discord's max embed description length
+
+
+def _truncate_lines(lines: list[str], max_length: int = MAX_EMBED_DESCRIPTION) -> str:
+    """Join lines and truncate to max_length, adding ellipsis if truncated.
+    
+    Args:
+        lines: List of strings to join with newlines
+        max_length: Maximum character length (default: Discord's embed description limit)
+    
+    Returns:
+        Joined string truncated to max_length
+    """
+    if not lines:
+        return ""
+    
+    result = "\n".join(lines)
+    if len(result) <= max_length:
+        return result
+    
+    # Truncate and add ellipsis indicator
+    truncated = result[:max_length - 100]  # Leave room for truncation message
+    last_newline = truncated.rfind("\n")
+    if last_newline > 0:
+        truncated = truncated[:last_newline]
+    
+    remaining = len(lines) - truncated.count("\n") - 1
+    if remaining > 0:
+        truncated += f"\n... and {remaining} more entries"
+    return truncated
 MAX_FIELDS = 25
 
 
@@ -469,7 +499,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(
             title="Command Usage",
-            description="\n".join(lines),
+            description=_truncate_lines(lines),
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Days: {days}")
@@ -537,7 +567,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(
             title="Command Latency",
-            description="\n".join(lines),
+            description=_truncate_lines(lines),
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Days: {days}")
@@ -608,7 +638,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(
             title="Command Errors",
-            description="\n".join(lines),
+            description=_truncate_lines(lines),
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Days: {days}")
@@ -734,7 +764,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(
             title=f"Top Guilds for {command_name}",
-            description="\n".join(lines),
+            description=_truncate_lines(lines),
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Days: {days}")
@@ -876,7 +906,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(
             title=title,
-            description="\n".join(f"{d}: {v}" for d, v in zip(labels, values)),
+            description=_truncate_lines([f"{d}: {v}" for d, v in zip(labels, values)]),
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Days: {days} | Metric: {metric}")

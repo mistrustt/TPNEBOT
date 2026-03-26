@@ -604,6 +604,7 @@ class Blacklist(Base):
     user_id = Column(BigInteger, nullable=False, unique=True)
     admin_id = Column(BigInteger, nullable=False)
     reason = Column(String, nullable=False, default="No reason provided")
+    added_at = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
 
 class FavoriteSongs(Base):
     __tablename__ = "favorite_songs"
