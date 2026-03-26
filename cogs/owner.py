@@ -524,6 +524,7 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         days: int = 7,
+        *,
         guild_id: Optional[int] = None,
     ) -> None:
         """Display command usage metrics for the specified time range.
@@ -586,6 +587,7 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         days: int = 7,
+        *,
         guild_id: Optional[int] = None,
     ) -> None:
         """Display command latency metrics for the specified time range.
@@ -649,6 +651,7 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         days: int = 7,
+        *,
         guild_id: Optional[int] = None,
     ) -> None:
         """Display command error metrics for the specified time range.
@@ -716,6 +719,7 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         days: int = 7,
+        *,
         guild_id: Optional[int] = None,
     ) -> None:
         """Display user exposure metrics for the specified time range.
@@ -772,9 +776,10 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def metrics_topguilds(
         self,
-        ctx: Context, *,
-        command_name: str, 
+        ctx: Context, 
         days: int = 7,
+        *,
+        command_name: str, 
     ) -> None:
         """Display top guilds by usage for a specific command.
 
@@ -839,8 +844,9 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         metric: str = "usage",
-        command_name: Optional[str] = None,
         days: int = 7,
+        *,
+        command_name: Optional[str] = None,
         guild_id: Optional[int] = None,
     ) -> None:
         """Display per-day metrics for a specific metric type.
