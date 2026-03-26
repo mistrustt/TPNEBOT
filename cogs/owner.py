@@ -108,7 +108,7 @@ class MetricsPaginator(discord.ui.View):
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️")
     async def previous(
-        self, button: discord.ui.Button, interaction: discord.Interaction
+        self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         if self.current_page > 0:
             self.current_page -= 1
@@ -119,7 +119,7 @@ class MetricsPaginator(discord.ui.View):
             await interaction.response.defer()
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, emoji="▶️")
-    async def next(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = self.get_total_pages()
         if self.current_page < total_pages - 1:
             self.current_page += 1
@@ -131,7 +131,7 @@ class MetricsPaginator(discord.ui.View):
 
     @discord.ui.button(label="📊 Graph", style=discord.ButtonStyle.primary)
     async def show_graph(
-        self, button: discord.ui.Button, interaction: discord.Interaction
+        self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         if self.chart_view:
             await interaction.response.edit_message(view=self.chart_view)
