@@ -1911,6 +1911,15 @@ class Owner(commands.Cog, name="Owner"):
 
             display_name = str(user) if user else "Unknown User"
             reason = getattr(r, "reason", None) or "No reason provided"
+            admin_id = getattr(r, "admin_id", None)
+            if admin_id:
+                admin_user = None
+                try:
+                    admin_user = await self.bot.fetch_user(int(admin_id))
+                except Exception:
+                    pass
+                if admin_user:
+                    reason += f" (added by {admin_user})"
             added_at = getattr(r, "added_at", None)
             added_unix = None
             if added_at:
@@ -1926,6 +1935,7 @@ class Owner(commands.Cog, name="Owner"):
                 {
                     "user_id": uid,
                     "display_name": display_name,
+                    "admin_id": admin_id,
                     "reason": reason,
                     "added_unix": added_unix,
                 }
@@ -1950,6 +1960,8 @@ class Owner(commands.Cog, name="Owner"):
                     value=f"<t:{item['added_unix']}:F> • <t:{item['added_unix']}:R>",
                     inline=True,
                 )
+            if item["admin_id"]:
+                embed.add_field(name="Added by", value=f"<@{item['admin_id']}>", inline=True)
             embed.add_field(name="Reason", value=item["reason"], inline=False)
             embed.set_footer(
                 text="Use ◀ / ▶ to navigate, ❌ to remove • Controls expire in 3 minutes"
