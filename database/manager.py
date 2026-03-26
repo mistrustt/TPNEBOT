@@ -1456,14 +1456,8 @@ class DatabaseManager:
                 if existing:
                     return
 
-                salt = os.urandom(16)
-
                 new_wallet = Wallet(
                     user_id=user_id,
-                    public_key=None,
-                    private_key=None,
-                    hashed_key=None,
-                    salt=salt,
                     balance=Decimal("0.00"),
                     client_seed=secrets.token_hex(16),
                     nonce=0,

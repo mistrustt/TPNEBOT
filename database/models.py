@@ -318,10 +318,6 @@ class Wallet(Base):
 
     wallet_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(BigInteger, nullable=False, unique=True)
-    public_key = Column(LargeBinary, nullable=False, unique=True)
-    private_key = Column(LargeBinary, nullable=False, unique=True)
-    hashed_key = Column(String, nullable=False, unique=True)
-    salt = Column(LargeBinary, nullable=False)
     balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
     wallet_frozen = Column(Boolean, default=False)
     client_seed = Column(String(64), nullable=True)  # widened (future-proof)
@@ -334,7 +330,6 @@ class Wallet(Base):
         CheckConstraint("balance >= 0", name="ck_wallet_balance_non_negative"),
         UniqueConstraint("user_id"),
     )
-
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -355,12 +350,10 @@ class Transaction(Base):
             f"description='{self.description}', timestamp={self.timestamp}, "
         )
 
-
 class ItemType(enum.Enum):
     COLLECTIBLE = "collectible"
     REDEEMABLE = "redeemable"
     CONSUMABLE = "consumable"
-
 
 class EffectType(enum.Enum):
     CURRENCY = "currency"  # Direct currency grant
@@ -369,7 +362,6 @@ class EffectType(enum.Enum):
     EARNING_BOOST = "earning_boost"  # General earning multiplier
     COOLDOWN_REDUCTION = "cooldown_reduction"  # Reduce cooldown times
     RTP_BOOST = "rtp_boost"  # Temporary RTP percentage boost
-
 
 class Item(Base):
     __tablename__ = "items"
