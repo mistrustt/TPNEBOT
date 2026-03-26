@@ -772,8 +772,8 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def metrics_topguilds(
         self,
-        ctx: Context,
-        command_name: str,
+        ctx: Context, *,
+        command_name: str, 
         days: int = 7,
     ) -> None:
         """Display top guilds by usage for a specific command.
