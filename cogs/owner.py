@@ -42,33 +42,103 @@ MAX_EMBED_CHAR_LENGTH = 6000
 MAX_EMBED_DESCRIPTION = 4096  # Discord's max embed description length
 
 
-def _truncate_lines(lines: list[str], max_length: int = MAX_EMBED_DESCRIPTION) -> str:
-    """Join lines and truncate to max_length, adding ellipsis if truncated.
-    
-    Args:
-        lines: List of strings to join with newlines
-        max_length: Maximum character length (default: Discord's embed description limit)
-    
-    Returns:
-        Joined string truncated to max_length
-    """
-    if not lines:
-        return ""
-    
-    result = "\n".join(lines)
-    if len(result) <= max_length:
-        return result
-    
-    # Truncate and add ellipsis indicator
-    truncated = result[:max_length - 100]  # Leave room for truncation message
-    last_newline = truncated.rfind("\n")
-    if last_newline > 0:
-        truncated = truncated[:last_newline]
-    
-    remaining = len(lines) - truncated.count("\n") - 1
-    if remaining > 0:
-        truncated += f"\n... and {remaining} more entries"
-    return truncated
+ITEMS_PER_PAGE = 15
+
+
+class MetricsPaginator(discord.ui.View):
+    """Paginator for displaying metrics data with navigation buttons."""
+
+    def __init__(
+        self,
+        data: list[tuple],
+        title: str,
+        author_id: int,
+        format_func: callable = None,
+        footer_text: str = None,
+        color: discord.Color = discord.Color.blurple(),
+        chart_view: discord.ui.View = None,
+    ):
+        super().__init__(timeout=180)
+        self.data = data
+        self.title = title
+        self.author_id = author_id
+        self.format_func = format_func or (lambda x: str(x))
+        self.footer_text = footer_text
+        self.color = color
+        self.chart_view = chart_view
+        self.current_page = 0
+        self.per_page = ITEMS_PER_PAGE
+
+    def get_total_pages(self) -> int:
+        """Calculate total number of pages."""
+        if not self.data:
+            return 1
+        return max(1, (len(self.data) - 1) // self.per_page + 1)
+
+    def get_page_embed(self) -> discord.Embed:
+        """Generate embed for current page."""
+        embed = discord.Embed(title=self.title, color=self.color)
+        
+        if not self.data:
+            embed.description = "No data available."
+            return embed
+
+        start = self.current_page * self.per_page
+        end = start + self.per_page
+        page_data = self.data[start:end]
+
+        lines = []
+        for item in page_data:
+            formatted = self.format_func(item)
+            lines.append(formatted)
+
+        embed.description = "\n".join(lines)
+        
+        total_pages = self.get_total_pages()
+        footer = f"Page {self.current_page + 1}/{total_pages}"
+        if self.footer_text:
+            footer = f"{footer} | {self.footer_text}"
+        embed.set_footer(text=footer)
+
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Only allow the original author to interact."""
+        return interaction.user.id == self.author_id
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️")
+    async def previous(
+        self, button: discord.ui.Button, interaction: discord.Interaction
+    ):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(
+                embed=self.get_page_embed(), view=self
+            )
+        else:
+            await interaction.response.defer()
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, emoji="▶️")
+    async def next(self, button: discord.ui.Button, interaction: discord.Interaction):
+        total_pages = self.get_total_pages()
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(
+                embed=self.get_page_embed(), view=self
+            )
+        else:
+            await interaction.response.defer()
+
+    @discord.ui.button(label="📊 Graph", style=discord.ButtonStyle.primary)
+    async def show_graph(
+        self, button: discord.ui.Button, interaction: discord.Interaction
+    ):
+        if self.chart_view:
+            await interaction.response.edit_message(view=self.chart_view)
+        else:
+            await interaction.response.defer()
+
+
 MAX_FIELDS = 25
 
 
@@ -492,27 +562,23 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No command usage data found for the last {days} day(s).")
 
-        lines = []
-        for name, is_slash, total in rows:
-            kind = "slash" if is_slash else "prefix"
-            lines.append(f"{name} ({kind}) - {total}")
-
-        embed = discord.Embed(
+        paginator = MetricsPaginator(
+            data=rows,
             title="Command Usage",
-            description=_truncate_lines(lines),
-            color=discord.Color.blurple(),
+            author_id=ctx.author.id,
+            format_func=lambda x: f"{x[0]} ({'slash' if x[1] else 'prefix'}) - {x[2]}",
+            footer_text=f"Days: {days}",
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="bar",
+                title="Command Usage",
+                labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _ in rows],
+                values=[int(total) for _, _, total in rows],
+                ylabel="Calls",
+            ),
         )
-        embed.set_footer(text=f"Days: {days}")
-        view = MetricsChartView(
-            self.bot,
-            ctx.author.id,
-            chart_type="bar",
-            title="Command Usage",
-            labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _ in rows],
-            values=[int(total) for _, _, total in rows],
-            ylabel="Calls",
-        )
-        await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
 
     @metrics.command(name="latency", hidden=True)
     @commands.is_owner()
@@ -559,28 +625,23 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No command latency data found for the last {days} day(s).")
 
-        lines = []
-        for name, is_slash, sum_ms, count in rows:
-            avg_ms = int(sum_ms / count) if count else 0
-            kind = "slash" if is_slash else "prefix"
-            lines.append(f"{name} ({kind}) - avg {avg_ms} ms ({count} calls)")
-
-        embed = discord.Embed(
+        paginator = MetricsPaginator(
+            data=rows,
             title="Command Latency",
-            description=_truncate_lines(lines),
-            color=discord.Color.blurple(),
+            author_id=ctx.author.id,
+            format_func=lambda x: f"{x[0]} ({'slash' if x[1] else 'prefix'}) - avg {int(x[2] / x[3]) if x[3] else 0} ms ({x[3]} calls)",
+            footer_text=f"Days: {days}",
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="bar",
+                title="Command Latency (Avg)",
+                labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _, _ in rows],
+                values=[int(sum_ms / count) if count else 0 for _, _, sum_ms, count in rows],
+                ylabel="Avg ms",
+            ),
         )
-        embed.set_footer(text=f"Days: {days}")
-        view = MetricsChartView(
-            self.bot,
-            ctx.author.id,
-            chart_type="bar",
-            title="Command Latency (Avg)",
-            labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _, _ in rows],
-            values=[int(sum_ms / count) if count else 0 for _, _, sum_ms, count in rows],
-            ylabel="Avg ms",
-        )
-        await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
 
     @metrics.command(name="errors", hidden=True)
     @commands.is_owner()
@@ -631,27 +692,23 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No command error data found for the last {days} day(s).")
 
-        lines = []
-        for name, error_type, is_slash, total in rows:
-            kind = "slash" if is_slash else "prefix"
-            lines.append(f"{name} ({kind}) - {error_type}: {total}")
-
-        embed = discord.Embed(
+        paginator = MetricsPaginator(
+            data=rows,
             title="Command Errors",
-            description=_truncate_lines(lines),
-            color=discord.Color.blurple(),
+            author_id=ctx.author.id,
+            format_func=lambda x: f"{x[0]} ({'slash' if x[2] else 'prefix'}) - {x[1]}: {x[3]}",
+            footer_text=f"Days: {days}",
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="bar",
+                title="Command Errors",
+                labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, _, is_slash, _ in rows],
+                values=[int(total) for _, _, _, total in rows],
+                ylabel="Errors",
+            ),
         )
-        embed.set_footer(text=f"Days: {days}")
-        view = MetricsChartView(
-            self.bot,
-            ctx.author.id,
-            chart_type="bar",
-            title="Command Errors",
-            labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, _, is_slash, _ in rows],
-            values=[int(total) for _, _, _, total in rows],
-            ylabel="Errors",
-        )
-        await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
 
     @metrics.command(name="exposure", hidden=True)
     @commands.is_owner()
@@ -758,26 +815,23 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No guild usage data found for command `{command_name}` in the last {days} day(s).")
 
-        lines = []
-        for gid, total in rows:
-            lines.append(f"{gid or 'DM'} - {total}")
-
-        embed = discord.Embed(
+        paginator = MetricsPaginator(
+            data=rows,
             title=f"Top Guilds for {command_name}",
-            description=_truncate_lines(lines),
-            color=discord.Color.blurple(),
+            author_id=ctx.author.id,
+            format_func=lambda x: f"{x[0] or 'DM'} - {x[1]}",
+            footer_text=f"Days: {days}",
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="bar",
+                title=f"Top Guilds for {command_name}",
+                labels=[str(gid or "DM") for gid, _ in rows],
+                values=[int(total) for _, total in rows],
+                ylabel="Calls",
+            ),
         )
-        embed.set_footer(text=f"Days: {days}")
-        view = MetricsChartView(
-            self.bot,
-            ctx.author.id,
-            chart_type="bar",
-            title=f"Top Guilds for {command_name}",
-            labels=[str(gid or "DM") for gid, _ in rows],
-            values=[int(total) for _, total in rows],
-            ylabel="Calls",
-        )
-        await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
 
     @metrics.command(name="perday", hidden=True)
     @commands.is_owner()
@@ -892,6 +946,7 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No per-day data found for metric `{metric}` in the last {days} day(s).")
 
+        # Build labels and values for chart
         labels = []
         values = []
         for row in rows:
@@ -904,22 +959,35 @@ class Owner(commands.Cog, name="Owner"):
             else:
                 values.append(int(row[1]))
 
-        embed = discord.Embed(
+        # Format function for paginator
+        def format_perday(row):
+            bucket = row[0]
+            date_str = bucket.strftime("%Y-%m-%d")
+            if metric == "latency":
+                sum_ms = row[1]
+                count = row[2]
+                value = int(sum_ms / count) if count else 0
+                return f"{date_str}: {value} ms"
+            else:
+                return f"{date_str}: {int(row[1])}"
+
+        paginator = MetricsPaginator(
+            data=rows,
             title=title,
-            description=_truncate_lines([f"{d}: {v}" for d, v in zip(labels, values)]),
-            color=discord.Color.blurple(),
+            author_id=ctx.author.id,
+            format_func=format_perday,
+            footer_text=f"Days: {days} | Metric: {metric}",
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="line",
+                title=title,
+                labels=labels,
+                values=values,
+                ylabel=ylabel,
+            ),
         )
-        embed.set_footer(text=f"Days: {days} | Metric: {metric}")
-        view = MetricsChartView(
-            self.bot,
-            ctx.author.id,
-            chart_type="line",
-            title=title,
-            labels=labels,
-            values=values,
-            ylabel=ylabel,
-        )
-        await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
 
     async def find_role(self, ctx: Context, role_name: str):
         """Helper method to find a role by partial name, ID, or mention."""
