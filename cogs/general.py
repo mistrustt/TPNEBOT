@@ -1045,44 +1045,58 @@ class General(commands.Cog, name="General"):
             await ctx.send(embed=embed)
             return
 
+        # Check if this is a server member or just a User (non-server member)
+        is_member = isinstance(member, discord.Member)
 
-
-        roles = [role for role in member.roles if role.name != "@everyone"]
-
-        if member not in ctx.guild.members:
-            roles_string = "None"
-            staff_perms = False
-            
-        roles_string = " ".join([role.mention for role in roles]) if roles else "None"
-        staff_perms = any(
-            role.permissions.administrator
-            or role.permissions.manage_guild
-            or role.permissions.manage_roles
-            or role.permissions.manage_channels
-            or role.permissions.moderate_members
-            for role in member.roles
-        )
-
-        STATUS_EMOJIS = {
-            discord.Status.online: "<:status_online:1360657806079823972>",
-            discord.Status.idle: "<:status_idle:1360657775822246051>",
-            discord.Status.dnd: "<:status_dnd:1360657764744953998>",
-            discord.Status.offline: "<:status_offline:1360657787981529148>",
-        }
-
-        def get_status_emoji(member: discord.Member):
-            """Returns the appropriate emoji for a given member's status."""
-            if isinstance(member.activity, discord.Streaming):
-                return STATUS_EMOJIS[discord.Status.streaming]
-            return STATUS_EMOJIS.get(
-                member.status, STATUS_EMOJIS[discord.Status.offline]
+        # Member-specific fields
+        if is_member:
+            roles = [role for role in member.roles if role.name != "@everyone"]
+            roles_string = " ".join([role.mention for role in roles]) if roles else "None"
+            staff_perms = any(
+                role.permissions.administrator
+                or role.permissions.manage_guild
+                or role.permissions.manage_roles
+                or role.permissions.manage_channels
+                or role.permissions.moderate_members
+                for role in member.roles
             )
+
+            STATUS_EMOJIS = {
+                discord.Status.online: "<:status_online:1360657806079823972>",
+                discord.Status.idle: "<:status_idle:1360657775822246051>",
+                discord.Status.dnd: "<:status_dnd:1360657764744953998>",
+                discord.Status.offline: "<:status_offline:1360657787981529148>",
+            }
+
+            def get_status_emoji(m):
+                """Returns the appropriate emoji for a given member's status."""
+                if m.activity and isinstance(m.activity, discord.Streaming):
+                    return STATUS_EMOJIS[discord.Status.streaming]
+                return STATUS_EMOJIS.get(
+                    m.status, STATUS_EMOJIS[discord.Status.offline]
+                )
+
+            status_display = get_status_emoji(member)
+
+            if member.premium_since:
+                boosting_status = f"<:checkmark:1360657064019365980> since {member.premium_since.strftime('%m/%d/%Y, %I:%M%p')}"
+            else:
+                boosting_status = "<:crossmark:1360656870305693742>"
+
+            joined_at = member.joined_at.strftime('%m/%d/%Y, %I:%M%p')
+        else:
+            # Non-server member - set defaults for member-specific fields
+            roles_string = "N/A (not in server)"
+            staff_perms = False
+            status_display = "N/A (not in server)"
+            boosting_status = "N/A (not in server)"
+            joined_at = "N/A (not in server)"
 
         flags = member.public_flags
         if flags.hypesquad_bravery:
             hypesquad_house = "<a:bravery:1360659513547424049>"
         elif flags.hypesquad_brilliance:
-            hypesquad_house = "<a:brilliance:1360659501199528037>"
+            hypesquad_house = "<a:brilliance:1360659501199526037>"
         elif flags.hypesquad_balance:
             hypesquad_house = "<a:balance:1360659526117888102>"
         else:
@@ -1094,33 +1108,35 @@ class General(commands.Cog, name="General"):
         flames_rx, _ = await self.bot.database.get_reaction_stats(member.id, "flames")
         hearts_rx, _ = await self.bot.database.get_reaction_stats(member.id, "hearts")
 
-        if member.premium_since:
-            boosting_status = f"<:checkmark:1360657064019365980> since {member.premium_since.strftime('%m/%d/%Y, %I:%M%p')}"
-        else:
-            boosting_status = "<:crossmark:1360656870305693742>"
-
         embed = discord.Embed(
             color=discord.Color.blurple(), timestamp=discord.utils.utcnow()
         )
         embed.set_thumbnail(url=self.utils.get_avatar_url(member))
+
+        # Add indicator for non-server members
+        user_display = f"{member.name} (`{member.id}`)"
+        if not is_member:
+            user_display += " *(not in server)*"
         embed.add_field(
-            name="__Username/ID__", value=f"{member.name} (`{member.id}`)", inline=False
+            name="__Username/ID__", value=user_display, inline=False
         )
+
         if staff_perms:
             embed.add_field(name="__Staff Permissions__", value="**Yes**", inline=False)
+
         embed.add_field(
             name="__Account__",
-            value=f"**Status:** {get_status_emoji(member)}\n**HypeSquad:** {hypesquad_house}\n**Booster:** {boosting_status}",
+            value=f"**Status:** {status_display}\n**HypeSquad:** {hypesquad_house}\n**Booster:** {boosting_status}",
             inline=False,
         )
         embed.add_field(
             name="__Dates__",
-            value=f"**Created:** {member.created_at.strftime('%m/%d/%Y, %I:%M%p')}\n**Joined:** {member.joined_at.strftime('%m/%d/%Y, %I:%M%p')}",
+            value=f"**Created:** {member.created_at.strftime('%m/%d/%Y, %I:%M%p')}\n**Joined:** {joined_at}",
             inline=False,
         )
         embed.add_field(
             name="__Roles__",
-            value=f"Total Roles: **{len(roles)}**\n{roles_string}",
+            value=f"Total Roles: **{len(roles) if is_member else 'N/A'}**\n{roles_string}",
             inline=False,
         )
         embed.add_field(
