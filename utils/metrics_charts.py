@@ -394,6 +394,7 @@ class MetricsChartView(discord.ui.View):
         ylabel: str = "Value",
         datasets: Optional[dict[str, list[int | float]]] = None,
         timeout: float = 180.0,
+        min_value: int | float = 10,
     ):
         """Initialize the metrics chart view.
         
@@ -407,6 +408,7 @@ class MetricsChartView(discord.ui.View):
             ylabel: Y-axis label.
             datasets: Multi-series data (for multi-line or stacked charts).
             timeout: View timeout in seconds.
+            min_value: Minimum value threshold. Values below this are hidden. Default 10.
         """
         super().__init__(timeout=timeout)
         self.bot = bot
@@ -417,6 +419,38 @@ class MetricsChartView(discord.ui.View):
         self.values = values
         self.ylabel = ylabel
         self.datasets = datasets
+        self.min_value = min_value
+        
+        # Filter out values below threshold for single-series charts
+        if self.chart_type in ("line", "bar", "pie"):
+            filtered_data = [
+                (label, value) for label, value in zip(self.labels, self.values)
+                if value >= self.min_value
+            ]
+            if filtered_data:
+                self.labels, self.values = zip(*filtered_data)
+                self.labels = list(self.labels)
+                self.values = list(self.values)
+            else:
+                # Keep original if all values filtered out
+                self.labels = labels
+                self.values = values
+        
+        # Filter datasets for multi-series charts
+        if self.chart_type in ("stacked", "multi") and self.datasets:
+            # For multi-series, filter rows where all values are below threshold
+            if self.labels and self.datasets:
+                first_series = list(self.datasets.values())[0]
+                keep_indices = [
+                    i for i in range(len(first_series))
+                    if any(series[i] >= self.min_value for series in self.datasets.values())
+                ]
+                if keep_indices:
+                    self.labels = [self.labels[i] for i in keep_indices]
+                    self.datasets = {
+                        name: [values[i] for i in keep_indices]
+                        for name, values in self.datasets.items()
+                    }
     
     @discord.ui.button(label="📊 Graph", style=discord.ButtonStyle.primary)
     async def graph_button(self, interaction: discord.Interaction, button: discord.ui.Button):
