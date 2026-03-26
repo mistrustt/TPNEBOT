@@ -1014,8 +1014,36 @@ class General(commands.Cog, name="General"):
         aliases=["ui"],
         description="Displays information about a user.",
     )
-    async def userinfo(self, ctx: commands.Context, member: discord.Member = None):
-        member = member or ctx.author
+    async def userinfo(self, ctx: commands.Context, identifier: str):
+        member = None
+
+        if re.match(r"^\d+$", identifier):
+            try:
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
+            except discord.NotFound:
+                pass
+
+        elif re.match(r"^<@!?(\d+)>$", identifier):
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
+            member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
+        else:
+            identifier = identifier.lower()
+            member = discord.utils.find(
+                lambda m: identifier in m.name.lower(), ctx.guild.members
+            )
+
+        if not member:
+            embed = discord.Embed(
+                description=f"No user found with the identifier: {identifier}. Please try again.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
 
         roles = [role for role in member.roles if role.name != "@everyone"]
         roles_string = " ".join([role.mention for role in roles]) if roles else "None"
