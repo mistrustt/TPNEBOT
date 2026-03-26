@@ -1045,7 +1045,14 @@ class General(commands.Cog, name="General"):
             await ctx.send(embed=embed)
             return
 
+
+
         roles = [role for role in member.roles if role.name != "@everyone"]
+
+        if not roles:
+            roles_string = "None"
+            staff_perms = False
+            
         roles_string = " ".join([role.mention for role in roles]) if roles else "None"
         staff_perms = any(
             role.permissions.administrator
