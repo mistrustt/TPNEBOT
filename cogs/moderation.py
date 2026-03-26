@@ -935,16 +935,18 @@ class Moderation(commands.Cog, name="Moderation"):
         member = None
         if re.match(r"^\d+$", identifier):
             try:
-                member = ctx.guild.get_member(
-                    int(identifier)
-                ) or await self.bot.fetch_user(int(identifier))
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
             except discord.NotFound:
                 pass
+
         elif re.match(r"^<@!?(\d+)>$", identifier):
-            user_id = int(re.match(r"^<@!?(\d+)>$", identifier).group(1))
-            member = ctx.guild.get_member(user_id) or await self.bot.fetch_user(user_id)
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
+            member = ctx.guild.get_member(int(mention_id))
             if not member:
-                pass
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             name = identifier.lower()
             member = discord.utils.find(
@@ -1528,6 +1530,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -1596,6 +1600,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -1744,14 +1750,18 @@ class Moderation(commands.Cog, name="Moderation"):
         member = None
         if re.match(r"^\d+$", identifier):
             try:
-                member = ctx.guild.get_member(
-                    int(identifier)
-                ) or await self.bot.fetch_user(int(identifier))
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
             except discord.NotFound:
                 pass
+
         elif re.match(r"^<@!?(\d+)>$", identifier):
-            mention_id = re.match(r"^<@!?(\d+)>$", identifier).group(1)
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             identifier_l = identifier.lower()
             member = discord.utils.find(
@@ -1956,18 +1966,19 @@ class Moderation(commands.Cog, name="Moderation"):
 
         member = None
         if re.match(r"^\d+$", identifier):
-            uid = int(identifier)
-            member = ctx.guild.get_member(uid)
-            if not member:
-                try:
-                    fetched = await self.bot.fetch_user(uid)
-                    member = ctx.guild.get_member(fetched.id)
-                except discord.NotFound:
-                    member = None
+            try:
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
+            except discord.NotFound:
+                pass
 
         elif re.match(r"^<@!?(\d+)>$", identifier):
-            mention_id = int(re.match(r"^<@!?(\d+)>$", identifier).group(1))
-            member = ctx.guild.get_member(mention_id)
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
+            member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             lowered = identifier.lower()
@@ -2300,6 +2311,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -2442,6 +2455,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -2628,6 +2643,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -2816,6 +2833,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -3547,11 +3566,19 @@ class Moderation(commands.Cog, name="Moderation"):
 
         member = None
         if re.match(r"^\d+$", identifier):
-            member = ctx.guild.get_member(int(identifier)) or await self.bot.fetch_user(
-                int(identifier)
-            )
-        elif m := re.match(r"^<@!?(\d+)>$", identifier):
-            member = ctx.guild.get_member(int(m.group(1)))
+            try:
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
+            except discord.NotFound:
+                pass
+
+        elif re.match(r"^<@!?(\d+)>$", identifier):
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
+            member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             identifier_l = identifier.lower()
             member = discord.utils.find(
@@ -3696,13 +3723,18 @@ class Moderation(commands.Cog, name="Moderation"):
         member = None
         if re.match(r"^\d+$", identifier):
             try:
-                member = ctx.guild.get_member(
-                    int(identifier)
-                ) or await self.bot.fetch_user(int(identifier))
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
             except discord.NotFound:
                 pass
-        elif mention_match := re.match(r"^<@!?(\d+)>$", identifier):
-            member = ctx.guild.get_member(int(mention_match.group(1)))
+
+        elif re.match(r"^<@!?(\d+)>$", identifier):
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
+            member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             name = identifier.lower()
             member = discord.utils.find(
