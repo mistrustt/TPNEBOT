@@ -1049,7 +1049,7 @@ class General(commands.Cog, name="General"):
 
         roles = [role for role in member.roles if role.name != "@everyone"]
 
-        if not roles:
+        if member not in ctx.guild.members:
             roles_string = "None"
             staff_perms = False
             
