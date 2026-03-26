@@ -3659,13 +3659,13 @@ class DatabaseManager:
             remaining_time = (cooldown.cooldown_expiry - now).total_seconds()
             return max(0, remaining_time)
 
-    async def add_to_blacklist(self, user_id: str, reason: str) -> None:
+    async def add_to_blacklist(self, user_id: str, admin_id: str, reason: str) -> None:
         try:
             async with self.async_sessionmaker() as session:
                 await session.execute(
                     delete(Blacklist).where(Blacklist.user_id == user_id)
                 )
-                blacklist_entry = Blacklist(user_id=user_id, reason=reason)
+                blacklist_entry = Blacklist(user_id=user_id, admin_id=admin_id, reason=reason)
                 session.add(blacklist_entry)
                 await session.commit()
         except SQLAlchemyError as e:

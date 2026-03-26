@@ -2001,7 +2001,7 @@ class Owner(commands.Cog, name="Owner"):
                 await ctx.send(embed=embed)
                 return
 
-            await self.bot.database.add_to_blacklist(member.id, reason)
+            await self.bot.database.add_to_blacklist(member.id, ctx.author.id, reason)
             embed = discord.Embed(
                 description=f"User {getattr(member, 'name', str(member.id))} has been blacklisted.\nReason: {reason}",
                 color=0x000000,
@@ -2036,7 +2036,8 @@ class Owner(commands.Cog, name="Owner"):
                 mention_match = re.match(r"^<@!?(\d+)>$", identifier)
                 mention_id = mention_match.group(1)
                 member = ctx.guild.get_member(int(mention_id))
-
+                if not member:
+                    member = await self.bot.fetch_user(int(mention_id))
             else:
                 identifier = identifier.lower()
                 member = discord.utils.find(
@@ -2359,10 +2360,9 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         who: Union[discord.Member, discord.User],
-        channel: Optional[discord.TextChannel],
         *,
-        command: str,
-    ):
+        command: str, channel: Optional[discord.TextChannel] = None,
+        ):
         """Run a command as another user optionally in another channel.
 
         Use this command with caution. It allows the bot owner to impersonate another user
@@ -2477,6 +2477,15 @@ class Owner(commands.Cog, name="Owner"):
             embed = discord.Embed(
                 title="Operation Denied",
                 description="DELETE queries must include a WHERE clause to prevent wiping entire tables.",
+                color=discord.Color.red(),
+            )
+            return await ctx.send(embed=embed)
+
+        # Prevent potentially dangerous operations like DROP or ALTER
+        if any(kw in lower_query for kw in ["drop ", "alter ", "truncate ", "update "]):
+            embed = discord.Embed(
+                title="Operation Denied",
+                description="DROP, ALTER, TRUNCATE, and UPDATE queries are not allowed through this command.",
                 color=discord.Color.red(),
             )
             return await ctx.send(embed=embed)

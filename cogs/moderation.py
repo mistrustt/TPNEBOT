@@ -360,7 +360,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = interaction.guild.get_member(int(mention_id))
-
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             identifier = identifier.lower()
             member = discord.utils.find(
@@ -678,7 +679,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
-
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             identifier = identifier.lower()
             member = discord.utils.find(
@@ -803,7 +805,8 @@ class Moderation(commands.Cog, name="Moderation"):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
-
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
         else:
             identifier = identifier.lower()
             member = discord.utils.find(
@@ -940,6 +943,8 @@ class Moderation(commands.Cog, name="Moderation"):
         elif re.match(r"^<@!?(\d+)>$", identifier):
             user_id = int(re.match(r"^<@!?(\d+)>$", identifier).group(1))
             member = ctx.guild.get_member(user_id) or await self.bot.fetch_user(user_id)
+            if not member:
+                pass
         else:
             name = identifier.lower()
             member = discord.utils.find(
