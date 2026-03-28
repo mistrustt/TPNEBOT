@@ -49,6 +49,7 @@ class CrashView(discord.ui.LayoutView):
         self.crash_points: dict[int, Decimal] = {}
         self.cashed_out: dict[int, Decimal] = {}
         self.crashed_out: dict[int, Decimal] = {}
+        self.pf_data: dict[int, dict] = {}  # Provable fairness data per player
 
         self.join_btn = discord.ui.Button(
             label="Join Crash", style=discord.ButtonStyle.green
@@ -198,6 +199,8 @@ class CrashView(discord.ui.LayoutView):
             )
 
             self.players[uid] = bet
+            # Capture PF data before generate_crash_point consumes the nonce
+            self.pf_data[uid] = await self.casino.prove_fairness(uid)
             self.crash_points[uid] = await self.generate_crash_point(uid)
 
             await self.casino._log_game_event(
@@ -242,6 +245,13 @@ class CrashView(discord.ui.LayoutView):
 
         # Process game result for rakeback
         await self.casino.process_game_result(uid, "crash", bet)
+        pf = self.pf_data.get(uid, {})
+        await self.bot.database.increment_win(
+            uid, "crash", bet=bet,
+            client_seed=pf.get("client_seed"),
+            nonce=pf.get("nonce"),
+            hash_hex=pf.get("server_seed_hash"),
+        )
 
         self.cashed_out[uid] = self.current_multiplier
         await interaction.response.send_message(
@@ -345,6 +355,15 @@ class CrashView(discord.ui.LayoutView):
                             uid, self.current_multiplier
                         )
                         await self.casino._remove_refund(self.session_id, user_id=uid)
+                        # Process game result for rakeback
+                        await self.casino.process_game_result(uid, "crash", self.players[uid])
+                        pf = self.pf_data.get(uid, {})
+                        await self.bot.database.increment_loss(
+                            uid, "crash", bet=self.players[uid],
+                            client_seed=pf.get("client_seed"),
+                            nonce=pf.get("nonce"),
+                            hash_hex=pf.get("server_seed_hash"),
+                        )
                         await self.casino._log_game_event(
                             self.session_id,
                             "crash",
@@ -361,6 +380,13 @@ class CrashView(discord.ui.LayoutView):
                         await self.casino._remove_refund(self.session_id, user_id=uid)
                         # Process game result for rakeback
                         await self.casino.process_game_result(uid, "crash", self.players[uid])
+                        pf = self.pf_data.get(uid, {})
+                        await self.bot.database.increment_loss(
+                            uid, "crash", bet=self.players[uid],
+                            client_seed=pf.get("client_seed"),
+                            nonce=pf.get("nonce"),
+                            hash_hex=pf.get("server_seed_hash"),
+                        )
                         await self.casino._log_game_event(
                             self.session_id,
                             "crash",
