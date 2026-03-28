@@ -3291,7 +3291,7 @@ class DatabaseManager:
             async with session.begin():
                 now = discord.utils.utcnow()
                 
-                # Process overdue loans (existing logic)
+                # Process overdue loans
                 result = await session.execute(
                     select(Loan).where(Loan.status == "active", Loan.due_date < now)
                 )
@@ -3303,16 +3303,17 @@ class DatabaseManager:
                         loan.total_repay += (loan.principal * Decimal("0.1") * days_overdue).quantize(Decimal("0.1"))
                     if days_overdue >= 7:
                         loan.status = "defaulted"
-                        loan.defaulted_date = now  # Track when defaulted
-                        wallet = await self.get_wallet_by_user_id(loan.user_id)  # Ensure wallet exists
-                        await self.freeze_wallet(wallet.wallet_id)
+                        loan.defaulted_date = now
+                        wallet = await self.get_wallet_by_user_id(loan.user_id)
+                        if wallet and not wallet.wallet_frozen:
+                            await self.freeze_wallet(wallet.wallet_id)
                 
-                # NEW: Process defaulted loans for unfreeze after 7 days
+                # Unfreeze wallets 7 days after defaulting
                 result = await session.execute(
-                    select(Loan).where(
+                    select(Loan).join(Wallet, Loan.user_id == Wallet.user_id).where(
                         Loan.status == "defaulted",
                         Loan.defaulted_date != None,
-                        Loan.wallet_unfrozen == False
+                        Wallet.wallet_frozen == True,
                     )
                 )
                 defaulted_loans = result.scalars().all()
@@ -3320,10 +3321,8 @@ class DatabaseManager:
                     days_defaulted = (now - loan.defaulted_date).days
                     if days_defaulted >= 7:
                         wallet = await self.get_wallet_by_user_id(loan.user_id)
-                        await self.unfreeze_wallet(wallet.wallet_id)
-                        loan.wallet_unfrozen = True  # Prevent repeated unfreeze
-                
-            await session.commit()
+                        if wallet and wallet.wallet_frozen:
+                            await self.unfreeze_wallet(wallet.wallet_id)
 
 
     async def set_mines_multi(self, data: list):

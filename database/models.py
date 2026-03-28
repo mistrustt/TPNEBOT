@@ -494,7 +494,6 @@ class Loan(Base):
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
     defaulted_date = Column(DateTime(timezone=True), nullable=True)
-    wallet_unfrozen = Column(Boolean, default=False)
     due_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(String, nullable=False, default="active")
 
