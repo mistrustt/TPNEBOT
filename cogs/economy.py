@@ -2379,7 +2379,7 @@ class Economy(commands.Cog):
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.group(name="loan", description="Take out a loan. Pay it back with interest!")
+    @commands.group(name="loan", aliases=["loans"], description="Take out a loan. Pay it back with interest!")
     async def loan(self, ctx: commands.Context):
         """Group command for managing loans."""
         if ctx.invoked_subcommand is None:
