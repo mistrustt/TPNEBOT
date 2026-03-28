@@ -2431,7 +2431,7 @@ class Economy(commands.Cog):
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         treasury = await self.bot.database.get_treasury_balance()
         safe_loan_amount = await self.bot.database.get_max_loan_amount(user_id)
-        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+        current_loan = await self.bot.database.get_active_loans_for_user(user_id)
 
         await self.bot.database.date_check_loans()
 
@@ -2444,8 +2444,8 @@ class Economy(commands.Cog):
                 return
             
             amount_decimal = Decimal(amount)
-            if active_loan:
-                raise ValueError("You already have an active loan. Please repay it before taking out another.")
+            if current_loan:
+                raise ValueError("You already have a loan. Please repay it before taking out another.")
             if amount_decimal <= 0:
                 raise ValueError("Loan amount must be greater than zero.")
             if amount_decimal > treasury:
@@ -2496,17 +2496,17 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
-        active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+        current_loan = await self.bot.database.get_active_loans_for_user(user_id)
 
         await self.bot.database.date_check_loans()
 
-        if not active_loan:
+        if not current_loan:
             embed = discord.Embed(
                 description="You have no active loans to repay.",
                 color=discord.Color.red(),
             )
             return await ctx.reply(embed=embed, delete_after=5)
-        loan = active_loan[0]
+        loan = current_loan[0]
         try:
             amount = await self.amount_handler(amount, balance)
         except ValueError as e:

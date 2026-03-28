@@ -3148,7 +3148,7 @@ class DatabaseManager:
     async def get_active_loans_for_user(self, user_id: int) -> list[Loan]:
         async with self.async_sessionmaker() as session:
             result = await session.execute(
-                select(Loan).where(Loan.user_id == user_id, Loan.status == "active")
+                select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue", "defaulted"]))
             )
             return result.scalars().all()
         
