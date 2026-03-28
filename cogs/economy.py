@@ -21,12 +21,6 @@ from typing import Sequence, List, Any
 
 logger = logging.getLogger("discord_bot")
 
-COINMARKETCAP_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
-COINMARKETCAP_API_URL = (
-    "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-)
-
-
 class DropView(discord.ui.View):
     def __init__(self, bot, inter, amount, drop_author, currency_name, emoji, cog):
         super().__init__(timeout=120.0)

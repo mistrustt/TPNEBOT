@@ -3878,7 +3878,7 @@ class DatabaseManager:
                 await session.commit()
 
     async def get_crypto_price(self, symbol: str) -> Decimal:
-        """Get the price of a crypto asset."""
+        """Get the price of a crypto asset using FreeCryptoAPI."""
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(CryptoPrice).where(CryptoPrice.symbol == symbol.upper())
@@ -3889,20 +3889,17 @@ class DatabaseManager:
             if (
                 price_record
                 and price_record.timestamp
-                and price_record.timestamp >= now - timedelta(hours=1)
+                and price_record.timestamp >= now - timedelta(minutes=15)
             ):
                 return price_record.price
 
             try:
                 async with aiohttp.ClientSession() as api_session:
-                    params = {
-                        "symbol": symbol,
-                        "convert": "USD",
-                    }
-                    headers = {"X-CMC_PRO_API_KEY": os.getenv("COINMARKETCAP_API_KEY")}
+                    params = {"symbol": symbol.upper()}
+                    headers = {"Authorization": f"Bearer {os.getenv('FREECRYPTOAPI_API_KEY')}"}
 
                     async with api_session.get(
-                        "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest",
+                        "https://api.freecryptoapi.com/v1/getData",
                         params=params,
                         headers=headers,
                     ) as response:
@@ -3912,9 +3909,11 @@ class DatabaseManager:
                             raise Exception("Rate limit exceeded")
 
                         data = await response.json()
-                        crypto_data = data["data"][symbol]
-                        quote = crypto_data["quote"]["USD"]
-                        price = Decimal(str(quote["price"]))
+                        if data.get("status") != "success" or not data.get("symbols"):
+                            raise Exception("Invalid API response")
+
+                        crypto_data = data["symbols"][0]
+                        price = Decimal(str(crypto_data["last"]))
 
                         if price_record:
                             price_record.price = price
@@ -3927,7 +3926,6 @@ class DatabaseManager:
                             )
                             session.add(new_record)
 
-                        await session.commit()
                         await session.commit()
                         return price
 

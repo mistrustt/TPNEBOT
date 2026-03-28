@@ -36,7 +36,7 @@ llmmodel = "arcee-ai/trinity-large-preview:free"
 
 NASA_API_KEY = os.getenv("NASA_API_KEY")
 
-HIDDEN_COGS = {"Owner", "Jishaku"}
+HIDDEN_COGS = {"Owner", "Jishaku", "Hidden"}
 COMMANDS_PER_PAGE = 10
 
 MESSAGE_LINK = re.compile(
