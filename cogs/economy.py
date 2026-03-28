@@ -2521,10 +2521,10 @@ class Economy(commands.Cog):
             if amount_decimal > Decimal(balance):
                 raise ValueError("You do not have enough funds to make this repayment.")
             
-            # Calculate remaining balance to validate against
+            # Calculate remaining balance and cap payment at remaining balance
             remaining_balance = loan.total_repay - loan.amount_paid
             if amount_decimal > remaining_balance:
-                raise ValueError(f"Repayment amount cannot exceed remaining balance of {self.currency_name} **{await self.formatter(remaining_balance)}**.")
+                amount_decimal = remaining_balance
             
             # Process the payment using the new payment system
             payment_result = await self.bot.database.make_loan_payment(
