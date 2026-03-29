@@ -304,113 +304,115 @@ class CrashView(discord.ui.LayoutView):
     async def start_game(self, ctx: commands.Context):
         """Start lobby > run > finish."""
         self.is_running = True
-        now = discord.utils.utcnow()
-        self.start_time = now
-        self.game_phase = "starting"
-        self.current_multiplier = Decimal("1.0")
+        try:
+            now = discord.utils.utcnow()
+            self.start_time = now
+            self.game_phase = "starting"
+            self.current_multiplier = Decimal("1.0")
 
-        self.countdown_end = int((now + datetime.timedelta(seconds=20)).timestamp())
+            self.countdown_end = int((now + datetime.timedelta(seconds=20)).timestamp())
 
-        container = await self.build_container()
-        self.clear_items()
-        self.add_item(container)
-        self.game_message = await ctx.send(view=self)
-        await self.casino._update_game_session(
-            self.session_id, message_id=self.game_message.id
-        )
+            container = await self.build_container()
+            self.clear_items()
+            self.add_item(container)
+            self.game_message = await ctx.send(view=self)
+            await self.casino._update_game_session(
+                self.session_id, message_id=self.game_message.id
+            )
 
-        while discord.utils.utcnow().timestamp() < self.countdown_end:
-            await asyncio.sleep(2)
+            while discord.utils.utcnow().timestamp() < self.countdown_end:
+                await asyncio.sleep(2)
+                await self.update_game_message()
+
+            if not self.players:
+                container = discord.ui.Container(
+                    discord.ui.TextDisplay("## 🚀 Crash – Cancelled"),
+                    discord.ui.TextDisplay("No players joined."),
+                    accent_color=0xED4245
+                )
+                self.clear_items()
+                self.add_item(container)
+                await self.game_message.edit(view=self)
+                await self.casino._end_game_session(
+                    self.session_id,
+                    outcome="cancelled",
+                    reason="no_players",
+                    final_state={"phase": "starting"},
+                )
+                return
+
+            self.game_phase = "running"
             await self.update_game_message()
 
-        if not self.players:
-            container = discord.ui.Container(
-                discord.ui.TextDisplay("## 🚀 Crash – Cancelled"),
-                discord.ui.TextDisplay("No players joined."),
-                accent_color=0xED4245
+            running_start = discord.utils.utcnow()
+            max_run_seconds = 180
+
+            while len(self.cashed_out | self.crashed_out) < len(self.players):
+                if (discord.utils.utcnow() - running_start).total_seconds() >= max_run_seconds:
+                    for uid in self.players:
+                        if uid not in self.cashed_out and uid not in self.crashed_out:
+                            self.crashed_out[uid] = self.crash_points.get(
+                                uid, self.current_multiplier
+                            )
+                            await self.casino._remove_refund(self.session_id, user_id=uid)
+                            # Process game result for rakeback
+                            await self.casino.process_game_result(uid, "crash", self.players[uid])
+                            pf = self.pf_data.get(uid, {})
+                            await self.bot.database.increment_loss(
+                                uid, "crash", bet=self.players[uid],
+                                client_seed=pf.get("client_seed"),
+                                nonce=pf.get("nonce"),
+                                hash_hex=pf.get("server_seed_hash"),
+                            )
+                            await self.casino._log_game_event(
+                                self.session_id,
+                                "crash",
+                                {"user_id": uid, "multiplier": str(self.crashed_out[uid])},
+                            )
+                    break
+
+                self.current_multiplier += self.calculate_increment()
+
+                for uid, cp in self.crash_points.items():
+                    if uid not in self.cashed_out and uid not in self.crashed_out:
+                        if self.current_multiplier >= cp:
+                            self.crashed_out[uid] = self.crash_points[uid]
+                            await self.casino._remove_refund(self.session_id, user_id=uid)
+                            # Process game result for rakeback
+                            await self.casino.process_game_result(uid, "crash", self.players[uid])
+                            pf = self.pf_data.get(uid, {})
+                            await self.bot.database.increment_loss(
+                                uid, "crash", bet=self.players[uid],
+                                client_seed=pf.get("client_seed"),
+                                nonce=pf.get("nonce"),
+                                hash_hex=pf.get("server_seed_hash"),
+                            )
+                            await self.casino._log_game_event(
+                                self.session_id,
+                                "crash",
+                                {"user_id": uid, "multiplier": str(cp)},
+                            )
+                await self.update_game_message()
+                await asyncio.sleep(1)
+
+            self.game_phase = "ended"
+            await self.casino._end_game_session(
+                self.session_id,
+                outcome="completed",
+                final_state={
+                    "players": {str(k): str(v) for k, v in self.players.items()},
+                    "cashed_out": {str(k): str(v) for k, v in self.cashed_out.items()},
+                    "crashed_out": {str(k): str(v) for k, v in self.crashed_out.items()},
+                },
             )
+
+            container = await self.build_container()
             self.clear_items()
             self.add_item(container)
             await self.game_message.edit(view=self)
+        finally:
             self.is_running = False
-            await self.casino._end_game_session(
-                self.session_id,
-                outcome="cancelled",
-                reason="no_players",
-                final_state={"phase": "starting"},
-            )
-            return
-
-        self.game_phase = "running"
-        await self.update_game_message()
-
-        running_start = discord.utils.utcnow()
-        max_run_seconds = 180
-
-        while len(self.cashed_out | self.crashed_out) < len(self.players):
-            if (discord.utils.utcnow() - running_start).total_seconds() >= max_run_seconds:
-                for uid in self.players:
-                    if uid not in self.cashed_out and uid not in self.crashed_out:
-                        self.crashed_out[uid] = self.crash_points.get(
-                            uid, self.current_multiplier
-                        )
-                        await self.casino._remove_refund(self.session_id, user_id=uid)
-                        # Process game result for rakeback
-                        await self.casino.process_game_result(uid, "crash", self.players[uid])
-                        pf = self.pf_data.get(uid, {})
-                        await self.bot.database.increment_loss(
-                            uid, "crash", bet=self.players[uid],
-                            client_seed=pf.get("client_seed"),
-                            nonce=pf.get("nonce"),
-                            hash_hex=pf.get("server_seed_hash"),
-                        )
-                        await self.casino._log_game_event(
-                            self.session_id,
-                            "crash",
-                            {"user_id": uid, "multiplier": str(self.crashed_out[uid])},
-                        )
-                break
-
-            self.current_multiplier += self.calculate_increment()
-
-            for uid, cp in self.crash_points.items():
-                if uid not in self.cashed_out and uid not in self.crashed_out:
-                    if self.current_multiplier >= cp:
-                        self.crashed_out[uid] = self.crash_points[uid]
-                        await self.casino._remove_refund(self.session_id, user_id=uid)
-                        # Process game result for rakeback
-                        await self.casino.process_game_result(uid, "crash", self.players[uid])
-                        pf = self.pf_data.get(uid, {})
-                        await self.bot.database.increment_loss(
-                            uid, "crash", bet=self.players[uid],
-                            client_seed=pf.get("client_seed"),
-                            nonce=pf.get("nonce"),
-                            hash_hex=pf.get("server_seed_hash"),
-                        )
-                        await self.casino._log_game_event(
-                            self.session_id,
-                            "crash",
-                            {"user_id": uid, "multiplier": str(cp)},
-                        )
-            await self.update_game_message()
-            await asyncio.sleep(1)
-
-        self.game_phase = "ended"
-        await self.casino._end_game_session(
-            self.session_id,
-            outcome="completed",
-            final_state={
-                "players": {str(k): str(v) for k, v in self.players.items()},
-                "cashed_out": {str(k): str(v) for k, v in self.cashed_out.items()},
-                "crashed_out": {str(k): str(v) for k, v in self.crashed_out.items()},
-            },
-        )
-
-        container = await self.build_container()
-        self.clear_items()
-        self.add_item(container)
-        await self.game_message.edit(view=self)
-        self.is_running = False
+            self.casino.cleanup_after_game(ctx.channel.id)
 
     def calculate_increment(self) -> Decimal:
         m = self.current_multiplier
@@ -5536,6 +5538,7 @@ class Casino(commands.Cog):
                 outcome="forced_end",
                 final_state={"refund": refund},
             )
+            self.cleanup_after_game(cid)
 
         self._register_session_handler(session_id, force_end)
 
@@ -5705,6 +5708,7 @@ class Casino(commands.Cog):
             if view.game_task:
                 view.game_task.cancel()
             await view.game_message.edit(embed=await view.make_embed(), view=None)
+            self.cleanup_after_game(channel.id)
             await inter.response.send_message(
                 "All players have been forced to crash.", ephemeral=True
             )
@@ -5732,6 +5736,7 @@ class Casino(commands.Cog):
             if view.game_task:
                 view.game_task.cancel()
             await view.game_message.edit(embed=await view.make_embed(), view=None)
+            self.cleanup_after_game(channel.id)
             await inter.response.send_message(
                 "All players have been forced to cash out.", ephemeral=True
             )
