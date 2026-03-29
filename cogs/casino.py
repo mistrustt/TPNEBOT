@@ -362,6 +362,7 @@ class CrashView(discord.ui.LayoutView):
                             await self.bot.database.increment_loss(
                                 uid, "crash", bet=self.players[uid],
                                 client_seed=pf.get("client_seed"),
+                                seed_used=None,
                                 nonce=pf.get("nonce"),
                                 hash_hex=pf.get("server_seed_hash"),
                             )
@@ -385,6 +386,7 @@ class CrashView(discord.ui.LayoutView):
                             await self.bot.database.increment_loss(
                                 uid, "crash", bet=self.players[uid],
                                 client_seed=pf.get("client_seed"),
+                                seed_used=None,
                                 nonce=pf.get("nonce"),
                                 hash_hex=pf.get("server_seed_hash"),
                             )
