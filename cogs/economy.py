@@ -3855,7 +3855,7 @@ class Economy(commands.Cog):
             )
         if member == ctx.guild.me:
             return await ctx.reply(
-                "I appreciate the trust, but no self-bounties on me!", delete_after=5
+                "Nice try, but no bounties on me!", delete_after=5
             )
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user.id)
@@ -3872,7 +3872,7 @@ class Economy(commands.Cog):
                 "🚫 Failed to place bounty. Try again later.", delete_after=5
             )
 
-        desc = f"{user.mention} has placed a bounty of {self.currency_name} **{amt:.2f}** on {member.mention}!"
+        desc = f"{user.mention} has placed a bounty of {self.currency_name} **{await self.short_formatter(amt)}** on {member.mention}!"
         embed = discord.Embed(description=desc, color=discord.Color.green())
         await ctx.reply(embed=embed)
 
