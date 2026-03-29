@@ -5,8 +5,12 @@ Provides standardized rounding and validation for currency and crypto amounts.
 All economic values should use these utilities to ensure consistency.
 """
 
-from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, getcontext
 from typing import Tuple
+
+# Set decimal context precision high enough for large economic values
+# Default is 28, but we need at least 38 for large supply calculations
+getcontext().prec = 38
 
 # Precision constants
 CURRENCY_PRECISION = Decimal("0.01")  # 2 decimal places
