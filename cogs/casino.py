@@ -5540,7 +5540,7 @@ class Casino(commands.Cog):
             )
             self.cleanup_after_game(cid)
 
-        await self.bot.database.update_command_cooldown(
+        await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 10
         )
 
