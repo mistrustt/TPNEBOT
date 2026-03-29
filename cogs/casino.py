@@ -249,6 +249,7 @@ class CrashView(discord.ui.LayoutView):
         await self.bot.database.increment_win(
             uid, "crash", bet=bet,
             client_seed=pf.get("client_seed"),
+            seed_used=None,
             nonce=pf.get("nonce"),
             hash_hex=pf.get("server_seed_hash"),
         )
@@ -5532,7 +5533,7 @@ class Casino(commands.Cog):
             if view.game_task:
                 view.game_task.cancel()
             if view.game_message:
-                await view.game_message.edit(embed=await view.make_embed(), view=None)
+                await view.game_message.edit(components=[await view.build_container()], view=None)
             await self._end_game_session(
                 session_id,
                 outcome="forced_end",
@@ -5705,7 +5706,7 @@ class Casino(commands.Cog):
             view.is_running = False
             if view.game_task:
                 view.game_task.cancel()
-            await view.game_message.edit(embed=await view.make_embed(), view=None)
+            await view.game_message.edit(components=[await view.build_container()], view=None)
             self.cleanup_after_game(channel.id)
             await inter.response.send_message(
                 "All players have been forced to crash.", ephemeral=True
@@ -5733,7 +5734,7 @@ class Casino(commands.Cog):
             view.is_running = False
             if view.game_task:
                 view.game_task.cancel()
-            await view.game_message.edit(embed=await view.make_embed(), view=None)
+            await view.game_message.edit(components=[await view.build_container()], view=None)
             self.cleanup_after_game(channel.id)
             await inter.response.send_message(
                 "All players have been forced to cash out.", ephemeral=True
