@@ -2088,6 +2088,14 @@ class DatabaseManager:
                 if not supply:
                     raise ValueError("Supply record missing.")
 
+                # Ensure supply fields are initialized (handle NULL values)
+                if supply.treasury is None:
+                    supply.treasury = Decimal("0.00")
+                if supply.circulating is None:
+                    supply.circulating = Decimal("0.00")
+                if supply.total_supply is None:
+                    supply.total_supply = Decimal("0.00")
+
                 wallet_total_result = await session.execute(
                     select(func.sum(Wallet.balance))
                 )
