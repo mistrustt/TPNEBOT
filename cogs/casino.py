@@ -5544,6 +5544,8 @@ class Casino(commands.Cog):
             ctx.author.id, ctx.command.qualified_name, 10
         )
 
+        await view.start_game(ctx)
+
     def cleanup_after_game(self, channel_id: int):
         self.active_players.discard(channel_id)
         self.active_games.pop(channel_id, None)
