@@ -58,7 +58,6 @@ from .models import (
     Clowns,
     Sobs,
     ReactionSettings,
-    GameStats,
     HeardleGameStats,
     GameHistory,
     GameSession,
@@ -6641,9 +6640,6 @@ class DatabaseManager:
                 )
                 await session.execute(
                     delete(UserLocation).where(UserLocation.user_id == user_id)
-                )
-                await session.execute(
-                    delete(GameStats).where(GameStats.user_id == user_id)
                 )
                 await session.execute(
                     delete(HeardleGameStats).where(HeardleGameStats.user_id == user_id)
