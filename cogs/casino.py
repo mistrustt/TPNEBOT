@@ -5540,11 +5540,7 @@ class Casino(commands.Cog):
             )
             self.cleanup_after_game(cid)
 
-        self._register_session_handler(session_id, force_end)
-
-        view.game_task = asyncio.create_task(view.start_game(ctx))
-
-        await self.bot.database.set_cooldown(
+        await self.bot.database.update_command_cooldown(
             ctx.author.id, ctx.command.qualified_name, 10
         )
 
