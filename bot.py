@@ -139,10 +139,9 @@ class DiscordBot(commands.Bot):
         await self.wait_until_ready()
         statuses = [
             f".gg/TPNE",
-            f".gg/WRLD",
-            f"{len(set(self.get_all_members())):,} members",
+            f"over {len(set(self.get_all_members())):,} members",
             f"{len(self.guilds):,} servers",
-            "for commands",
+            f"for {len(self.commands):,} commands",
         ]
         await self.change_presence(
             activity=discord.Activity(
