@@ -1469,6 +1469,7 @@ class SlotsView(discord.ui.LayoutView):
         self.is_spinning = False
         self.lock = asyncio.Lock()
         self.message = None
+        self.has_played = False  # Track if game has been spun at least once
         
         # Animation frames (emojis for spinning effect)
         self.spin_frames = ["🎰", "🎲", "🎯", "🎪", "🌟"]
@@ -1584,6 +1585,10 @@ class SlotsView(discord.ui.LayoutView):
                 if self.multiplier > 1:
                     win_text += f" (×{self.multiplier})"
                 container.add_item(discord.ui.TextDisplay(win_text))
+            elif self.has_played:
+                # Show loss message only after game has been played
+                loss_text = f"💔 **No Win**\nYou lost **{await self.cog.formatter(self.bet)}**"
+                container.add_item(discord.ui.TextDisplay(loss_text))
             
             # Winning lines
             if self.payline_wins:
@@ -1694,6 +1699,7 @@ class SlotsView(discord.ui.LayoutView):
             self.payline_wins = winning_lines
             self.scatter_count = scatter_count
             self.scatter_payout = scatter_payout
+            self.has_played = True  # Mark game as played
             
             # Build final container and add to view
             container = await self._build_container()
