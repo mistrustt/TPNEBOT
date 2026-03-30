@@ -2088,14 +2088,9 @@ class Casino(commands.Cog):
             # Diagonal lines
             {"id": 9, "name": "Diagonal Down", "coords": [(0, 0), (1, 1), (2, 2), (3, 3), (3, 4)], "color": "🟤"},
             {"id": 10, "name": "Diagonal Up", "coords": [(3, 0), (2, 1), (1, 2), (0, 3), (0, 4)], "color": "🔷"},
-            # Zigzag patterns
-            {"id": 11, "name": "Zigzag 1", "coords": [(0, 0), (1, 1), (0, 2), (1, 3), (0, 4)], "color": "🔶"},
-            {"id": 12, "name": "Zigzag 2", "coords": [(3, 0), (2, 1), (3, 2), (2, 3), (3, 4)], "color": "🔷"},
-            {"id": 13, "name": "Zigzag 3", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "🟡"},
-            {"id": 14, "name": "Zigzag 4", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🟢"},
             # M-shapes
-            {"id": 15, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "💙"},
-            {"id": 16, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🧡"},
+            {"id": 11, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "💙"},
+            {"id": 12, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🧡"},
         ]
 
         # ========== SLOTS REDESIGN: Weighted Reel Strips ==========
