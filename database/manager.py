@@ -1419,7 +1419,7 @@ class DatabaseManager:
             async with session.begin():
                 await session.execute(
                     text("""TRUNCATE TABLE
-                    supply, wallets, bank_accounts, transactions, crypto_assets,
+                    supply, wallets, transactions, crypto_assets,
                     bounties, blocks, game_stats, game_history
                     RESTART IDENTITY CASCADE
                 """)
@@ -1698,7 +1698,7 @@ class DatabaseManager:
                     frozen_field="wallet_frozen",
                 )
                 await self._atomic_balance_change(
-                    session, "wallets", "wallet_id", wallet_id, +amount
+                    session, "wallets", "wallet_id", wallet_id, +amount, balance_col="bank_balance"
                 )
 
                 # 4) record TX
@@ -1741,7 +1741,7 @@ class DatabaseManager:
                     raise ValueError("Bank account missing.")
 
                 await self._atomic_balance_change(
-                    session, "wallets", "wallet_id", wallet_id, -amount
+                    session, "wallets", "wallet_id", wallet_id, -amount, balance_col="bank_balance"
                 )
                 await self._atomic_balance_change(
                     session,
