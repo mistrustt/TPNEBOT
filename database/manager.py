@@ -2052,6 +2052,8 @@ class DatabaseManager:
         fee = adjusted_fee
         net = gross - fee
 
+        fee_rate = fee / gross if gross > 0 else Decimal("0.00")
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 wallet = await session.get(Wallet, wallet_id)
