@@ -2099,9 +2099,6 @@ class Casino(commands.Cog):
             # M-shapes
             {"id": 17, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "💙"},
             {"id": 18, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🧡"},
-            # Additional patterns
-            {"id": 19, "name": "Step Down", "coords": [(0, 0), (0, 1), (1, 2), (1, 3), (2, 4)], "color": "💛"},
-            {"id": 20, "name": "Step Up", "coords": [(2, 0), (2, 1), (1, 2), (1, 3), (0, 4)], "color": "❤️"},
         ]
 
         # ========== SLOTS REDESIGN: Weighted Reel Strips ==========
