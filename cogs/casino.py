@@ -1620,7 +1620,7 @@ class SlotsView(discord.ui.LayoutView):
                 return
             
             self.is_spinning = True
-            self._update_buttons()
+            self._update_button_states()
         
         try:
             # Deduct bet (or use free spin)
@@ -1637,7 +1637,7 @@ class SlotsView(discord.ui.LayoutView):
                         ephemeral=True
                     )
                     self.is_spinning = False
-                    self._update_buttons()
+                    self._update_button_states()
                     return
                 
                 await self.bot.database.process_treasury_transaction(
@@ -1697,18 +1697,18 @@ class SlotsView(discord.ui.LayoutView):
             
             # Build final container and add to view
             container = await self._build_container()
-            self._update_buttons()
+            self._update_button_states()
             
             # Clear old items and add new container
             self.clear_items()
             self.add_item(container)
-            self._update_buttons()
+            self._update_button_states()
             
             await interaction.edit_original_response(view=self)
             
         finally:
             self.is_spinning = False
-            self._update_buttons()
+            self._update_button_states()
     
     async def _bet_up_callback(self, interaction: discord.Interaction):
         """Increase bet amount."""
@@ -1736,12 +1736,12 @@ class SlotsView(discord.ui.LayoutView):
             return
         
         self.bet = new_bet
-        self._update_buttons()
+        self._update_button_states()
         
         container = await self._build_container()
         self.clear_items()
         self.add_item(container)
-        self._update_buttons()
+        self._update_button_states()
         
         await interaction.edit_original_response(view=self)
     
@@ -1763,12 +1763,12 @@ class SlotsView(discord.ui.LayoutView):
         new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
         
         self.bet = new_bet
-        self._update_buttons()
+        self._update_button_states()
         
         container = await self._build_container()
         self.clear_items()
         self.add_item(container)
-        self._update_buttons()
+        self._update_button_states()
         
         await interaction.edit_original_response(view=self)
     
