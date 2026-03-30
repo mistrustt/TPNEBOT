@@ -2816,7 +2816,7 @@ class Casino(commands.Cog):
                     win_strs = []
                     for win in wins:
                         win_strs.append(
-                            f"Line {win['payline_idx']+1}: {win['symbol']} x{win['count']} = {win['payout']:.2f}x"
+                            f"Line {win['payline_id']}: {win['symbol']} x{win['count']} = {win['payout']:.2f}x"
                         )
                     display_parts.append("Wins:\n" + "\n".join(win_strs))
                 
