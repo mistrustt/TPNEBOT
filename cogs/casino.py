@@ -1436,6 +1436,52 @@ class LadderView(View):
 
         await self.cog.cashout(interaction, self.user_id)
 
+
+class SlotsButtons(ui.ActionRow):
+    """
+    ActionRow subclass containing all slots game buttons.
+    Uses Discord Components V2 pattern with @ui.button decorators.
+    """
+    
+    def __init__(self, parent_view):
+        # Store reference to parent view for accessing game state
+        self.__view = parent_view
+        super().__init__()
+    
+    @ui.button(label="Spin Again", style=ButtonStyle.primary, emoji="🎰")
+    async def spin_again_btn(self, interaction: Interaction, button: ui.Button):
+        """Handle spin again button click."""
+        await self.__view._spin_again_callback(interaction)
+    
+    @ui.button(label="+Bet", style=ButtonStyle.secondary, emoji="⬆️")
+    async def bet_up_btn(self, interaction: Interaction, button: ui.Button):
+        """Handle bet increase button click."""
+        await self.__view._bet_up_callback(interaction)
+    
+    @ui.button(label="-Bet", style=ButtonStyle.secondary, emoji="⬇️")
+    async def bet_down_btn(self, interaction: Interaction, button: ui.Button):
+        """Handle bet decrease button click."""
+        await self.__view._bet_down_callback(interaction)
+    
+    @ui.button(label="Paytable", style=ButtonStyle.secondary, emoji="📋")
+    async def paytable_btn(self, interaction: Interaction, button: ui.Button):
+        """Handle paytable button click."""
+        await self.__view._paytable_callback(interaction)
+    
+    def update_states(self):
+        """Update button states based on current game state."""
+        view = self.__view
+        # Spin Again button - disabled if spinning or no free spins remaining
+        self.spin_again_btn.disabled = view.is_spinning or view.free_spins == 0
+        
+        # Bet adjustment buttons - disabled during free spins
+        self.bet_up_btn.disabled = view.is_spinning or view.free_spins > 0
+        self.bet_down_btn.disabled = view.is_spinning or view.free_spins > 0
+        
+        # Paytable always available unless spinning
+        self.paytable_btn.disabled = view.is_spinning
+
+
 class SlotsView(discord.ui.LayoutView):
     """
     Interactive View for the slots game using Components V2 Container system.
@@ -1474,30 +1520,12 @@ class SlotsView(discord.ui.LayoutView):
         # Animation frames (emojis for spinning effect)
         self.spin_frames = ["🎰", "🎲", "🎯", "🎪", "🌟"]
         
-        # Button instance variables
-        self.spin_again_btn = discord.ui.Button(label="Spin Again", style=discord.ButtonStyle.primary, emoji="🎰")
-        self.spin_again_btn.callback = self._spin_again_callback
-        
-        self.bet_up_btn = discord.ui.Button(label="+Bet", style=discord.ButtonStyle.secondary, emoji="⬆️")
-        self.bet_up_btn.callback = self._bet_up_callback
-        
-        self.bet_down_btn = discord.ui.Button(label="-Bet", style=discord.ButtonStyle.secondary, emoji="⬇️")
-        self.bet_down_btn.callback = self._bet_down_callback
-        
-        self.paytable_btn = discord.ui.Button(label="Paytable", style=discord.ButtonStyle.secondary, emoji="📋")
-        self.paytable_btn.callback = self._paytable_callback
+        # Create ActionRow with buttons (Components V2 pattern)
+        self.buttons = SlotsButtons(self)
     
     def _update_button_states(self):
         """Update button states based on current game state."""
-        # Spin Again button
-        self.spin_again_btn.disabled = self.is_spinning or self.free_spins == 0
-        
-        # Bet adjustment buttons (disabled during free spins)
-        self.bet_up_btn.disabled = self.is_spinning or self.free_spins > 0
-        self.bet_down_btn.disabled = self.is_spinning or self.free_spins > 0
-        
-        # Paytable always available
-        self.paytable_btn.disabled = self.is_spinning
+        self.buttons.update_states()
     
     def _get_winning_set(self) -> set:
         """Get set of (row, col) coordinates for winning positions."""
@@ -1610,12 +1638,6 @@ class SlotsView(discord.ui.LayoutView):
             
             # Bet info
             container.add_item(discord.ui.TextDisplay(f"**Bet:** {await self.cog.formatter(self.bet)}"))
-            
-            # Add buttons to container
-            container.add_item(self.spin_again_btn)
-            container.add_item(self.bet_up_btn)
-            container.add_item(self.bet_down_btn)
-            container.add_item(self.paytable_btn)
         
         return container
     
@@ -1711,8 +1733,9 @@ class SlotsView(discord.ui.LayoutView):
             container = await self._build_container()
             self._update_button_states()
             
-            # Clear old items and add new container
+            # Clear old items and add new container with buttons
             self.clear_items()
+            container.add_item(self.buttons)
             self.add_item(container)
             self._update_button_states()
             
@@ -1752,6 +1775,7 @@ class SlotsView(discord.ui.LayoutView):
         
         container = await self._build_container()
         self.clear_items()
+        container.add_item(self.buttons)
         self.add_item(container)
         self._update_button_states()
         
@@ -1779,6 +1803,7 @@ class SlotsView(discord.ui.LayoutView):
         
         container = await self._build_container()
         self.clear_items()
+        container.add_item(self.buttons)
         self.add_item(container)
         self._update_button_states()
         
@@ -1837,15 +1862,16 @@ class SlotsView(discord.ui.LayoutView):
     
     async def on_timeout(self):
         """Handle view timeout - disable all buttons."""
-        self.spin_again_btn.disabled = True
-        self.bet_up_btn.disabled = True
-        self.bet_down_btn.disabled = True
-        self.paytable_btn.disabled = True
+        self.buttons.spin_again_btn.disabled = True
+        self.buttons.bet_up_btn.disabled = True
+        self.buttons.bet_down_btn.disabled = True
+        self.buttons.paytable_btn.disabled = True
         
         if self.message:
             try:
                 container = await self._build_container()
                 self.clear_items()
+                container.add_item(self.buttons)
                 self.add_item(container)
                 await self.message.edit(view=self)
             except discord.NotFound:
@@ -3605,6 +3631,12 @@ class Casino(commands.Cog):
         # Build initial container and add to view
         container = await view._build_container()
         view.add_item(container)
+        
+        # Add buttons directly to LayoutView (not inside Container)
+        view.add_item(view.spin_again_btn)
+        view.add_item(view.bet_up_btn)
+        view.add_item(view.bet_down_btn)
+        view.add_item(view.paytable_btn)
 
         # Set cooldown
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
