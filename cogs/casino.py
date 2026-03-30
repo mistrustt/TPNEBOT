@@ -1722,19 +1722,23 @@ class SlotsView(discord.ui.LayoutView):
             
             # Build final container and add to view
             container = await self._build_container()
-            self._update_button_states()
             
             # Clear old items and add new container with buttons
             self.clear_items()
             container.add_item(self.buttons)
             self.add_item(container)
+            
+            # Re-enable buttons before sending to Discord
+            self.is_spinning = False
             self._update_button_states()
             
             await interaction.edit_original_response(view=self)
             
-        finally:
+        except Exception:
+            # Ensure buttons are re-enabled on error
             self.is_spinning = False
             self._update_button_states()
+            raise
     
     async def _paytable_callback(self, interaction: discord.Interaction):
         """Show the paytable."""
@@ -3555,6 +3559,7 @@ class Casino(commands.Cog):
             pf_data=PF,
             verification=verification,
         )
+        view.has_played = True  # Mark initial spin as played for loss message display
 
         # Build initial container and add to view
         container = await view._build_container()
