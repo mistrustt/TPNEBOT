@@ -1480,7 +1480,6 @@ class DatabaseManager:
             
             # Jobs system
             "jobs",
-            "streak",
             
             # Games and gambling
             "game_history",
@@ -1495,7 +1494,6 @@ class DatabaseManager:
             "suspicious_activity_log",
             
             # User economy data
-            "user_alts",
             "user_economic_preferences",
             
             # VIP system
