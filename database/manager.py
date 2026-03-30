@@ -2532,7 +2532,27 @@ class DatabaseManager:
         wallet = await self.get_wallet_by_user_id(user_id)
         wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
         bank_bal = await self.get_bank_balance(wallet.wallet_id)
-        user_total = wallet_bal + bank_bal
+        crypto_assets = await self.get_crypto_assets(user_id)
+        
+        # Calculate crypto value from assets
+        crypto_bal = Decimal("0.00")
+        if crypto_assets:
+            # Get current prices for all symbols held
+            symbols = [asset.symbol for asset in crypto_assets]
+            async with self.async_sessionmaker() as session:
+                price_result = await session.execute(
+                    select(CryptoPrice.symbol, CryptoPrice.price).where(
+                        CryptoPrice.symbol.in_(symbols)
+                    )
+                )
+                prices = {sym: Decimal(str(price)) for sym, price in price_result.fetchall()}
+            
+            # Sum up each asset's value (amount * current_price)
+            for asset in crypto_assets:
+                price = prices.get(asset.symbol, Decimal("0.00"))
+                crypto_bal += Decimal(str(asset.amount)) * price
+        
+        user_total = wallet_bal + bank_bal + crypto_bal
 
         # ---- economy snapshot -----------------------------------------------
         supply = await self.get_supply_record()
