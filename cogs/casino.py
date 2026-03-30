@@ -1610,6 +1610,12 @@ class SlotsView(discord.ui.LayoutView):
             
             # Bet info
             container.add_item(discord.ui.TextDisplay(f"**Bet:** {await self.cog.formatter(self.bet)}"))
+            
+            # Add buttons to container
+            container.add_item(self.spin_again_btn)
+            container.add_item(self.bet_up_btn)
+            container.add_item(self.bet_down_btn)
+            container.add_item(self.paytable_btn)
         
         return container
     
