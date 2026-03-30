@@ -1685,11 +1685,16 @@ class SlotsView(discord.ui.View):
             self.scatter_count = scatter_count
             self.scatter_payout = scatter_payout
             
-            # Build final container
+            # Build final container and add to view
             container = await self._build_container()
             self._update_buttons()
             
-            await interaction.edit_original_response(view=self, components=[container])
+            # Clear old items and add new container
+            self.clear_items()
+            self.add_item(container)
+            self._update_buttons()
+            
+            await interaction.edit_original_response(view=self)
             
         finally:
             self.is_spinning = False
@@ -1725,7 +1730,11 @@ class SlotsView(discord.ui.View):
         self._update_buttons()
         
         container = await self._build_container()
-        await interaction.edit_original_response(view=self, components=[container])
+        self.clear_items()
+        self.add_item(container)
+        self._update_buttons()
+        
+        await interaction.edit_original_response(view=self)
     
     @discord.ui.button(label="-Bet", style=discord.ButtonStyle.secondary, emoji="⬇️")
     async def bet_down(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -1749,7 +1758,11 @@ class SlotsView(discord.ui.View):
         self._update_buttons()
         
         container = await self._build_container()
-        await interaction.edit_original_response(view=self, components=[container])
+        self.clear_items()
+        self.add_item(container)
+        self._update_buttons()
+        
+        await interaction.edit_original_response(view=self)
     
     @discord.ui.button(label="Paytable", style=discord.ButtonStyle.secondary, emoji="📋")
     async def paytable(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -1789,12 +1802,16 @@ class SlotsView(discord.ui.View):
         """Run the spin animation (3 frames, 2 edits)."""
         # Frame 1: Show spinning immediately
         container1 = await self._build_container(is_animation=True, frame_num=0)
-        await interaction.response.edit_message(view=self, components=[container1])
+        self.clear_items()
+        self.add_item(container1)
+        await interaction.response.edit_message(view=self)
         
         # Frame 2: Continue spinning at 1.5 seconds
         await asyncio.sleep(1.5)
         container2 = await self._build_container(is_animation=True, frame_num=1)
-        await interaction.edit_original_response(view=self, components=[container2])
+        self.clear_items()
+        self.add_item(container2)
+        await interaction.edit_original_response(view=self)
         
         # Frame 3: Show result at 3 seconds
         await asyncio.sleep(1.5)
@@ -1807,7 +1824,9 @@ class SlotsView(discord.ui.View):
         if self.message:
             try:
                 container = await self._build_container()
-                await self.message.edit(view=self, components=[container])
+                self.clear_items()
+                self.add_item(container)
+                await self.message.edit(view=self)
             except discord.NotFound:
                 pass
 
@@ -3562,14 +3581,15 @@ class Casino(commands.Cog):
             verification=verification,
         )
 
-        # Build initial container
+        # Build initial container and add to view
         container = await view._build_container()
+        view.add_item(container)
 
         # Set cooldown
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
 
         # Send response with view
-        message = await ctx.reply(components=[container], view=view)
+        message = await ctx.reply(view=view)
         view.message = message
 
     @commands.command(
