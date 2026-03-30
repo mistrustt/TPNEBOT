@@ -2698,13 +2698,13 @@ class DatabaseManager:
             user_ratio = user_wealth / total_supply
             
             # Determine tier (check from highest to lowest)
-            if user_ratio >= self.WEALTH_TIERS["tier_4"]["threshold"]:
+            if user_ratio >= WEALTH_TIERS["tier_4"]["threshold"]:
                 return 4
-            elif user_ratio >= self.WEALTH_TIERS["tier_3"]["threshold"]:
+            elif user_ratio >= WEALTH_TIERS["tier_3"]["threshold"]:
                 return 3
-            elif user_ratio >= self.WEALTH_TIERS["tier_2"]["threshold"]:
+            elif user_ratio >= WEALTH_TIERS["tier_2"]["threshold"]:
                 return 2
-            elif user_ratio >= self.WEALTH_TIERS["tier_1"]["threshold"]:
+            elif user_ratio >= WEALTH_TIERS["tier_1"]["threshold"]:
                 return 1
             else:
                 return 0
@@ -2739,8 +2739,8 @@ class DatabaseManager:
                     "tier": 0,
                     "wealth": Decimal("0"),
                     "percentage": Decimal("0"),
-                    "next_tier_threshold": self.WEALTH_TIERS["tier_1"]["threshold"],
-                    "multipliers": self.TIER_PENALTIES[0],
+                    "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
+                    "multipliers": TIER_PENALTIES[0],
                 }
             
             user_wealth = wallet.balance + wallet.bank_balance
@@ -2772,8 +2772,8 @@ class DatabaseManager:
                     "tier": 0,
                     "wealth": user_wealth,
                     "percentage": Decimal("0"),
-                    "next_tier_threshold": self.WEALTH_TIERS["tier_1"]["threshold"],
-                    "multipliers": self.TIER_PENALTIES[0],
+                    "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
+                    "multipliers": TIER_PENALTIES[0],
                 }
             
             # Calculate user's percentage of total supply
@@ -2785,13 +2785,13 @@ class DatabaseManager:
             # Determine next tier threshold
             next_tier_threshold = None
             if tier == 0:
-                next_tier_threshold = self.WEALTH_TIERS["tier_1"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_1"]["threshold"]
             elif tier == 1:
-                next_tier_threshold = self.WEALTH_TIERS["tier_2"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_2"]["threshold"]
             elif tier == 2:
-                next_tier_threshold = self.WEALTH_TIERS["tier_3"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_3"]["threshold"]
             elif tier == 3:
-                next_tier_threshold = self.WEALTH_TIERS["tier_4"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_4"]["threshold"]
             # tier 4 has no next tier
             
             return {
