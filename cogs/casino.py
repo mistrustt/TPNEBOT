@@ -2093,12 +2093,9 @@ class Casino(commands.Cog):
             {"id": 12, "name": "Zigzag 2", "coords": [(3, 0), (2, 1), (3, 2), (2, 3), (3, 4)], "color": "🔷"},
             {"id": 13, "name": "Zigzag 3", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "🟡"},
             {"id": 14, "name": "Zigzag 4", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🟢"},
-            # W-shapes
-            {"id": 15, "name": "W-Shape Top", "coords": [(0, 0), (1, 1), (0, 2), (1, 3), (0, 4)], "color": "💜"},
-            {"id": 16, "name": "W-Shape Bottom", "coords": [(3, 0), (2, 1), (3, 2), (2, 3), (3, 4)], "color": "💚"},
             # M-shapes
-            {"id": 17, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "💙"},
-            {"id": 18, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🧡"},
+            {"id": 15, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "💙"},
+            {"id": 16, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🧡"},
         ]
 
         # ========== SLOTS REDESIGN: Weighted Reel Strips ==========
@@ -2808,10 +2805,40 @@ class Casino(commands.Cog):
                 )
 
             elif game_key == "slots":
-                slots_str = pf.verify_slots(server_seed, client_seed, nonce)
+                slots_data = pf.verify_slots(server_seed, client_seed, nonce)
+                
+                # Build display string
+                display_parts = []
+                
+                # Grid display
+                grid_display = slots_data.get("grid_display", "")
+                if grid_display:
+                    display_parts.append(f"Grid:\n{grid_display}")
+                
+                # Wins
+                wins = slots_data.get("wins", [])
+                if wins:
+                    win_strs = []
+                    for win in wins:
+                        win_strs.append(
+                            f"Line {win['payline_idx']+1}: {win['symbol']} x{win['count']} = {win['payout']:.2f}x"
+                        )
+                    display_parts.append("Wins:\n" + "\n".join(win_strs))
+                
+                # Scatters
+                scatter_count = slots_data.get("scatter_count", 0)
+                scatter_payout = slots_data.get("scatter_payout", 0)
+                if scatter_count > 0:
+                    display_parts.append(f"Scatters: {scatter_count} = {scatter_payout:.2f}x")
+                
+                # Total
+                total_payout = slots_data.get("total_payout", 0)
+                display_parts.append(f"Total Payout: {total_payout:.2f}x")
+                
+                slots_str = "\n\n".join(display_parts)
                 embed.add_field(
-                    name="🎰 Slots Shuffle / Outcome",
-                    value=f"```{shorten(str(slots_str), width=900, placeholder='…')}```",
+                    name="🎰 Slots Outcome",
+                    value=f"```{shorten(slots_str, width=900, placeholder='…')}```",
                     inline=False,
                 )
 
