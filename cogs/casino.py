@@ -1682,9 +1682,12 @@ class SlotsView(discord.ui.LayoutView):
             # Run animation
             await self._run_animation(interaction)
             
-            # Generate new grid
+            # Get user ID and provable fairness data for this spin
             user_id = interaction.user.id
-            grid = await self.cog._async_generate_spin_grid(user_id)
+            PF = await self.cog.prove_fairness(user_id)
+            
+            # Generate new grid
+            grid, verification = await self.cog._async_generate_spin_grid(user_id, PF["nonce"])
             
             # Evaluate results
             winning_lines = self.cog._evaluate_paylines(grid)
@@ -1827,7 +1830,9 @@ class SlotsView(discord.ui.LayoutView):
                 paytable_text += f"{emoji} **{name}** (Scatter) - Pays anywhere!\n"
                 paytable_text += f"   3× = {payouts.get(3, 0)}× bet | 4× = {payouts.get(4, 0)}× bet | 5× = {payouts.get(5, 0)}× bet\n"
             else:
-                payout_str = " | ".join([f"{k}×={v}×" for k, v in sorted(payouts.items())])
+                # Filter to only numeric keys (exclude metadata like "scatter_pays")
+                numeric_payouts = {k: v for k, v in payouts.items() if isinstance(k, int)}
+                payout_str = " | ".join([f"{k}×={v}×" for k, v in sorted(numeric_payouts.items())])
                 paytable_text += f"{emoji} **{name}** - {payout_str}\n"
         
         paytable_text += "\n**Paylines:** 20 lines (see game for patterns)\n"
