@@ -632,19 +632,6 @@ class UserLocation(Base):
         return f"<UserLocation(user_id={self.user_id}, location='{self.location}', lat={self.lat}, lon={self.lon})>"
 
 
-class BankAccount(Base):
-    __tablename__ = "bank_accounts"
-
-    wallet_id = Column(
-        UUID(as_uuid=True), ForeignKey("wallets.wallet_id"), primary_key=True
-    )
-    balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
-
-    __table_args__ = (
-        CheckConstraint("balance >= 0", name="ck_bank_balance_non_negative"),
-    )
-
-
 class Block(Base):
     __tablename__ = "blocks"
 
@@ -823,17 +810,6 @@ class ReportSetting(Base):
 
     guild_id = Column(BigInteger, primary_key=True)
     channel_id = Column(BigInteger, nullable=False)
-
-
-class Streak(Base):
-    __tablename__ = "streak"
-
-    user_id = Column(BigInteger, primary_key=True)
-    streak_count = Column(Integer, default=0, nullable=False)
-    last_worked = Column(DateTime(timezone=True), nullable=False, default=discord.utils.utcnow)
-
-    def __repr__(self):
-        return f"<Streak(user_id={self.user_id}, streak_count={self.streak_count}, last_worked={self.last_worked})>"
 
 
 class Task(Base):

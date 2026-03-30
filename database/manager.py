@@ -62,7 +62,6 @@ from .models import (
     GameSession,
     GameSessionEvent,
     UserRoleHistory,
-    Streak,
     Task,
     JTCSettings,
     TempVoiceChannel,
@@ -1424,24 +1423,113 @@ class DatabaseManager:
                 f"Race or insufficient funds on {table}.{pk_field}={pk_value}"
             )
         return result.scalar_one()
+    
 
-    async def reset_economy(self, caller_id: int, *, confirm: bool = False):
+    async def wipe_economy(self, caller_id: int, *, confirm: bool = False, dry_run: bool = False) -> dict:
+        """
+        Comprehensive economy wipe - resets ALL economy-related tables.
+        
+        This completely wipes the economy and starts fresh:
+        - All wallets, transactions, and supply reset
+        - All items, shops, and trade logs cleared
+        - All loans, bounties, and payments cleared
+        - All game history and sessions cleared
+        - All VIP/rakeback data cleared
+        - All social currency (reputation, sobs, etc.) cleared
+        - All crypto assets and prices cleared
+        - All transfer tracking and suspicious activity cleared
+        
+        Preserved (NOT wiped):
+        - Bot configuration and server settings
+        - Moderation data (punishments, jails, watchdog)
+        - Command statistics and cooldowns
+        - User preferences (timezones, locations)
+        - Music/LastFM data
+        - Role management data
+        
+        Args:
+            caller_id: Discord ID of the caller (must be in ADMIN_IDS)
+            confirm: Safety flag - must be True to execute
+            dry_run: If True, returns what would be wiped without actually wiping
+            
+        Returns:
+            dict with 'wiped_tables' list and 'dry_run' boolean
+        """
         if caller_id not in ADMIN_IDS:
-            raise PermissionError("You do not have permission to reset the economy.")
+            raise PermissionError("You do not have permission to wipe the economy.")
 
         if not confirm:
             raise ValueError("`confirm=True` is required as a safety flag.")
 
+        # All economy-related tables to wipe, organized by category
+        economy_tables = [
+            # Core economy
+            "wallets",
+            "transactions", 
+            "supply",
+            
+            # Items and trading
+            "item_cooldowns",
+            "active_effects",
+            "trade_logs",
+            
+            # Loans and bounties
+            "bounties",
+            "loans",
+            "loan_payments",
+            
+            # Jobs system
+            "jobs",
+            "streak",
+            
+            # Games and gambling
+            "game_history",
+            "game_sessions",
+            "game_session_events",
+            
+            # Crypto
+            "crypto_assets",
+            
+            # Transfer tracking
+            "transfer_history",
+            "suspicious_activity_log",
+            
+            # User economy data
+            "user_alts",
+            "user_economic_preferences",
+            
+            # VIP system
+            "user_vip",
+            "rakeback_balances",
+            "rakeback_transactions",
+            
+            # Economic metrics
+            "economic_metrics_history",
+        ]
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "wiped_tables": economy_tables,
+                "message": f"Would wipe {len(economy_tables)} economy tables"
+            }
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
+                # Build TRUNCATE statement for all economy tables
+                tables_str = ", ".join(economy_tables)
                 await session.execute(
-                    text("""TRUNCATE TABLE
-                    supply, wallets, transactions, crypto_assets,
-                    bounties, blocks, game_stats, game_history
-                    RESTART IDENTITY CASCADE
-                """)
+                    text(f"TRUNCATE TABLE {tables_str} RESTART IDENTITY CASCADE")
                 )
+            
+            # Re-initialize supply record
             await self.initialize_supply_record()
+
+        return {
+            "dry_run": False,
+            "wiped_tables": economy_tables,
+            "message": f"Successfully wiped {len(economy_tables)} economy tables"
+        }
 
     async def get_supply_record(self) -> Supply:
         """
@@ -6252,46 +6340,6 @@ class DatabaseManager:
             wins, losses = result.first()
             return (wins or 0, losses or 0)
 
-    async def get_work_streak(self, user_id: int) -> int:
-        """Retrieve the current work streak for a user."""
-        async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(Streak).filter(Streak.user_id == user_id)
-            )
-            streak = result.scalars().first()
-
-            if streak:
-                if (
-                    discord.utils.utcnow() - streak.last_worked
-                ).total_seconds() < 24 * 3600:
-                    return streak.streak_count
-                else:
-                    return 0
-            else:
-                return 0
-
-    async def update_work_streak(self, user_id: int, streak_count: int):
-        """Update the work streak for a user."""
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                result = await session.execute(
-                    select(Streak).filter(Streak.user_id == user_id)
-                )
-                streak = result.scalars().first()
-
-                if streak:
-                    streak.streak_count = streak_count
-                    streak.last_worked = discord.utils.utcnow()
-                else:
-                    new_streak = Streak(
-                        user_id=user_id,
-                        streak_count=streak_count,
-                        last_worked=discord.utils.utcnow(),
-                    )
-                    session.add(new_streak)
-
-                await session.commit()
-
     async def add_task(self, user_id: int, task: str) -> Task:
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -7081,7 +7129,6 @@ class DatabaseManager:
                 await session.execute(
                     delete(FavoriteSongs).where(FavoriteSongs.user_id == user_id)
                 )
-                await session.execute(delete(Streak).where(Streak.user_id == user_id))
                 await session.execute(
                     delete(UserRoleHistory).where(UserRoleHistory.user_id == user_id)
                 )
