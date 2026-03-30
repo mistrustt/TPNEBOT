@@ -2511,7 +2511,7 @@ class DatabaseManager:
         }
 
     async def get_max_gamble_amount(
-        self, user_id: int, raise_if_limited: bool = False
+        self, user_id: int, raise_if_limited: bool = False, max_payout_multiplier: Decimal = Decimal("1.0")
     ) -> Decimal:
         """
         Calculates the maximum amount a user can gamble based on dynamic risk controls.
@@ -2526,6 +2526,12 @@ class DatabaseManager:
             - Liquidity levels
             - Recent transaction volume
             - Active user engagement
+        - Max payout multiplier adjustment for high-payout games.
+
+        Args:
+            user_id: The user's ID
+            raise_if_limited: If True, raises ValueError when user exceeds limit
+            max_payout_multiplier: Maximum payout multiplier for the game (e.g., 50.0 for crash)
         """
 
         # ---- constants -------------------------------------------------------
@@ -2612,7 +2618,10 @@ class DatabaseManager:
         # ---- calculate tentative limit --------------------------------------
         by_treasury = AmountUtils.round_currency(treasury * base_coeff)
         hard_cap = AmountUtils.round_currency(treasury * MAX_TREASURY_EXPOSURE)
-        provisional = min(by_treasury, hard_cap, user_total)
+        # Adjust hard cap by max payout multiplier to limit treasury exposure
+        # For games with 50x max payout, this ensures max_bet * 50 <= hard_cap
+        adjusted_hard_cap = hard_cap / max_payout_multiplier if max_payout_multiplier > Decimal("1.0") else hard_cap
+        provisional = min(by_treasury, adjusted_hard_cap, user_total)
 
         # ---- enforce adaptive minimum floor ---------------------------------
         adaptive_floor = min(

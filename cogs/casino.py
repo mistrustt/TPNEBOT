@@ -149,7 +149,7 @@ class CrashView(discord.ui.LayoutView):
                 "You've already joined!", ephemeral=True
             )
 
-        max_allowed = await self.bot.database.get_max_gamble_amount(uid, False)
+        max_allowed = await self.bot.database.get_max_gamble_amount(uid, False, Decimal("50.0"))  # 50x max payout for crash
         formatted_max = await self.casino.short_formatter(max_allowed)
 
         modal = discord.ui.Modal(title="Join Crash Game")
@@ -276,12 +276,12 @@ class CrashView(discord.ui.LayoutView):
 
         # Apply house edge by shifting probability thresholds
         # Higher VIP (lower edge) = more favorable distribution
+        # Capped at 50x max for treasury protection
         thresholds = {
             "low": 0.55 * edge_factor,      # 1-2x multiplier
             "med_low": 0.80 * edge_factor,  # 2-5x multiplier
             "med": 0.95 * edge_factor,      # 5-20x multiplier
-            "high": 0.992 * edge_factor,    # 20-100x multiplier
-            "vhigh": 0.998 * edge_factor,   # 100-1000x multiplier
+            "high": 0.999 * edge_factor,    # 20-50x multiplier (capped)
         }
 
         # Cap thresholds at sensible limits
@@ -294,12 +294,8 @@ class CrashView(discord.ui.LayoutView):
             v = await self.casino.fair_uniform(user_id, 2.0, 5.0)
         elif r < thresholds["med"]:
             v = await self.casino.fair_uniform(user_id, 5.0, 20.0)
-        elif r < thresholds["high"]:
-            v = await self.casino.fair_uniform(user_id, 20.0, 100.0)
-        elif r < thresholds["vhigh"]:
-            v = await self.casino.fair_uniform(user_id, 100.0, 1000.0)
         else:
-            v = await self.casino.fair_uniform(user_id, 1000.0, 20000.0)
+            v = await self.casino.fair_uniform(user_id, 20.0, 50.0)
         return Decimal(str(round(v, 2)))
 
     async def start_game(self, ctx: commands.Context):
@@ -2054,9 +2050,9 @@ class Casino(commands.Cog):
         # 5x4 grid (5 reels × 4 rows = 20 positions)
         # Symbol tiers: High (rare), Medium, Low (common), Special (Wild, Scatter)
         self.SLOTS_SYMBOLS = {
-            # High-value symbols (rare, high payouts)
-            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 100, 4: 25, 3: 8}},
-            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 75, 4: 20, 3: 6}},
+            # High-value symbols (rare, high payouts) - capped at 50x max
+            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 50, 4: 25, 3: 8}},
+            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 50, 4: 20, 3: 6}},
             "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 50, 4: 15, 3: 5}},
             # Medium-value symbols
             "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 30, 4: 10, 3: 3}},
@@ -2064,8 +2060,8 @@ class Casino(commands.Cog):
             # Low-value symbols (common, frequent small wins)
             "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 15, 4: 5, 3: 1.5}},
             "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 10, 4: 4, 3: 1}},
-            # Special symbols
-            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 500, 4: 100, 3: 25}, "substitutes": True},
+            # Special symbols - capped at 50x max
+            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 50, 4: 50, 3: 25}, "substitutes": True},
             "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 50, 4: 20, 3: 5, "scatter_pays": True}},
         }
 
@@ -3619,7 +3615,7 @@ class Casino(commands.Cog):
             scatter_payout=scatter_payout,
             winnings=winnings,
             free_spins=free_spins_awarded,
-            multiplier=Decimal("2") if free_spins_awarded > 0 else Decimal("1"),
+            multiplier=Decimal("1"),  # Removed 2x multiplier for treasury safety
             pf_data=PF,
             verification=verification,
         )
