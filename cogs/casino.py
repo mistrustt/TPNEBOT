@@ -3549,7 +3549,7 @@ class Casino(commands.Cog):
             free_spins_awarded = {3: 10, 4: 15, 5: 20}.get(scatter_count, 20)
 
         # Create SlotsView instance
-        view = SlotsView(
+        view = self.SlotsView(
             cog=self,
             user_id=user_id,
             bet=stake,
