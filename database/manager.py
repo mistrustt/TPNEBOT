@@ -2719,7 +2719,7 @@ class DatabaseManager:
         Returns:
             dict: Multipliers for 'bet', 'loan', 'fee', 'transfer'
         """
-        return self.TIER_PENALTIES.get(tier, self.TIER_PENALTIES[0])
+        return TIER_PENALTIES.get(tier, TIER_PENALTIES[0])
 
     async def get_wealth_tier_info(self, user_id: int) -> dict:
         """
