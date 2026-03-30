@@ -1482,6 +1482,7 @@ class SlotsView(discord.ui.LayoutView):
     def __init__(self, cog, user_id: int, bet: Decimal, grid: list, payline_wins: list,
                     scatter_count: int, winnings: Decimal, free_spins: int = 0,
                     multiplier: Decimal = Decimal("1"), pf_data: dict = None,
+                    scatter_payout: Decimal = Decimal("0"),
                     verification: dict = None):
         super().__init__(timeout=300.0)  # 5 minute timeout
         self.cog = cog
@@ -1491,6 +1492,7 @@ class SlotsView(discord.ui.LayoutView):
         self.grid = grid
         self.payline_wins = payline_wins
         self.scatter_count = scatter_count
+        self.scatter_payout = scatter_payout
         self.winnings = winnings
         self.free_spins = free_spins
         self.multiplier = multiplier
@@ -3546,6 +3548,7 @@ class Casino(commands.Cog):
             grid=grid,
             payline_wins=payline_wins,
             scatter_count=scatter_count,
+            scatter_payout=scatter_payout,
             winnings=winnings,
             free_spins=free_spins_awarded,
             multiplier=Decimal("2") if free_spins_awarded > 0 else Decimal("1"),
