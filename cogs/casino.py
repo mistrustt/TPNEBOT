@@ -1578,7 +1578,7 @@ class SlotsView(discord.ui.View):
             if self.payline_wins:
                 lines_text = "**Winning Lines:**\n"
                 for line_data in self.payline_wins[:5]:  # Show max 5 lines
-                    lines_text += f"• Line {line_data['line']}: {line_data['symbol']} ×{line_data['count']} = {line_data['payout']}\n"
+                    lines_text += f"• {line_data['payline_name']}: {line_data['symbol_emoji']} ×{line_data['count']} = {line_data['payout']}×\n"
                 if len(self.payline_wins) > 5:
                     lines_text += f"• ...and {len(self.payline_wins) - 5} more"
                 container.add_item(discord.ui.TextDisplay(lines_text))
