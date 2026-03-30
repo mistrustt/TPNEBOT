@@ -745,6 +745,12 @@ class MinesGridLayout(discord.ui.LayoutView):
 
     async def do_cashout(self, interaction: Interaction):
         """Handle cashout button press."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "this aint yo game bruh", ephemeral=True
+            )
+            return
+
         if self.game_over:
             await interaction.response.send_message(
                 "Game already ended!", ephemeral=True
