@@ -2662,8 +2662,7 @@ class DatabaseManager:
         """
         async with self.async_sessionmaker() as session:
             # Get user's wallet and bank
-            result = await session.execute(select(Wallet).where(Wallet.user_id == user_id))
-            wallet = result.scalar_one_or_none()
+            wallet = await session.get(Wallet, user_id)
             if not wallet:
                 return 0
             
@@ -3200,6 +3199,35 @@ class DatabaseManager:
             }
 
         logger.info("[DAILY SNAPSHOT] Economy metrics collected.")
+
+    async def get_economy_snapshot(self) -> dict:
+        """
+        Get the current economy snapshot.
+        Returns cached metrics if available, otherwise calculates fresh snapshot.
+
+        Returns:
+            Dictionary with economy metrics including total_supply, circulating_supply, etc.
+        """
+        # Return cached metrics if available
+        if hasattr(self, '_latest_metrics') and self._latest_metrics:
+            return self._latest_metrics
+
+        # Otherwise calculate fresh snapshot
+        async with self.async_sessionmaker() as session:
+            # Get supply info
+            supply = await session.get(Supply, 1)
+            if not supply:
+                return {
+                    "total_supply": Decimal("0"),
+                    "circulating_supply": Decimal("0"),
+                    "treasury_balance": Decimal("0"),
+                }
+
+            return {
+                "total_supply": supply.total_supply,
+                "circulating_supply": supply.circulating,
+                "treasury_balance": supply.treasury,
+            }
 
     async def get_or_create_user_economic_preferences(self, user_id: int) -> UserEconomicPreferences:
         """
