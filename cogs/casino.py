@@ -1742,35 +1742,82 @@ class SlotsView(discord.ui.LayoutView):
     
     async def _paytable_callback(self, interaction: discord.Interaction):
         """Show the paytable."""
-        paytable_text = "**🎰 SLOTS PAYTABLE**\n\n"
-        paytable_text += "**Symbols:**\n"
+        embed = discord.Embed(
+            title="🎰 Slots Paytable",
+            color=discord.Color.gold()
+        )
         
-        for sym, data in sorted(self.cog.SLOTS_SYMBOLS.items(), key=lambda x: x[1].get("tier", 0)):
+        # Group symbols by tier
+        symbols_by_tier = {"special": [], "high": [], "medium": [], "low": []}
+        for sym, data in self.cog.SLOTS_SYMBOLS.items():
+            tier = data.get("tier", "low")
+            if tier in symbols_by_tier:
+                symbols_by_tier[tier].append((sym, data))
+        
+        # Sort each tier by highest payout
+        for tier in symbols_by_tier:
+            symbols_by_tier[tier].sort(key=lambda x: max(x[1].get("payouts", {}).get(5, 0), x[1].get("payouts", {}).get(3, 0)), reverse=True)
+        
+        # Special symbols (Wild & Scatter)
+        special_lines = []
+        for sym, data in symbols_by_tier["special"]:
             emoji = data.get("emoji", "❓")
             name = data.get("name", sym)
             payouts = data.get("payouts", {})
-            wild = data.get("wild", False)
-            scatter = data.get("scatter", False)
             
-            if wild:
-                paytable_text += f"{emoji} **{name}** (Wild) - Substitutes for all except Scatter\n"
-            elif scatter:
-                paytable_text += f"{emoji} **{name}** (Scatter) - Pays anywhere!\n"
-                paytable_text += f"   3× = {payouts.get(3, 0)}× bet | 4× = {payouts.get(4, 0)}× bet | 5× = {payouts.get(5, 0)}× bet\n"
-            else:
-                # Filter to only numeric keys (exclude metadata like "scatter_pays")
-                numeric_payouts = {k: v for k, v in payouts.items() if isinstance(k, int)}
-                payout_str = " | ".join([f"{k}×={v}×" for k, v in sorted(numeric_payouts.items())])
-                paytable_text += f"{emoji} **{name}** - {payout_str}\n"
+            if data.get("wild") or data.get("substitutes"):
+                special_lines.append(f"{emoji} **{name}** (Wild)")
+                special_lines.append(f"└ Substitutes for all symbols except Scatter")
+                special_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+            elif data.get("scatter"):
+                special_lines.append(f"{emoji} **{name}** (Scatter)")
+                special_lines.append(f"└ Pays anywhere on the reels!")
+                special_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
         
-        paytable_text += "\n**Paylines:** 20 lines (see game for patterns)\n"
-        paytable_text += "**Free Spins:** 3+ Scatters = 10-20 free spins with 2× multiplier!\n"
-        paytable_text += "**House Edge:** 2%"
+        if special_lines:
+            embed.add_field(name="✨ Special Symbols", value="\n".join(special_lines), inline=False)
         
-        embed = discord.Embed(
-            title="Slots Paytable",
-            description=paytable_text,
-            color=discord.Color.gold()
+        # High value symbols
+        high_lines = []
+        for sym, data in symbols_by_tier["high"]:
+            emoji = data.get("emoji", "❓")
+            name = data.get("name", sym)
+            payouts = data.get("payouts", {})
+            high_lines.append(f"{emoji} **{name}**")
+            high_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+        
+        if high_lines:
+            embed.add_field(name="💎 High Value", value="\n".join(high_lines), inline=True)
+        
+        # Medium value symbols
+        medium_lines = []
+        for sym, data in symbols_by_tier["medium"]:
+            emoji = data.get("emoji", "❓")
+            name = data.get("name", sym)
+            payouts = data.get("payouts", {})
+            medium_lines.append(f"{emoji} **{name}**")
+            medium_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+        
+        if medium_lines:
+            embed.add_field(name="⭐ Medium Value", value="\n".join(medium_lines), inline=True)
+        
+        # Low value symbols
+        low_lines = []
+        for sym, data in symbols_by_tier["low"]:
+            emoji = data.get("emoji", "❓")
+            name = data.get("name", sym)
+            payouts = data.get("payouts", {})
+            low_lines.append(f"{emoji} **{name}**")
+            low_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+        
+        if low_lines:
+            embed.add_field(name="🍋 Low Value", value="\n".join(low_lines), inline=True)
+        
+        # Game info
+        embed.add_field(
+            name="📋 Game Info",
+            value="**Paylines:** 20 fixed lines\n**Free Spins:** 3+ Scatters → 10-20 spins with 2× multiplier\n**House Edge:** 2%",
+            inline=False
         )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
