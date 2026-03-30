@@ -3630,13 +3630,8 @@ class Casino(commands.Cog):
 
         # Build initial container and add to view
         container = await view._build_container()
+        container.add_item(view.buttons)
         view.add_item(container)
-        
-        # Add buttons directly to LayoutView (not inside Container)
-        view.add_item(view.spin_again_btn)
-        view.add_item(view.bet_up_btn)
-        view.add_item(view.bet_down_btn)
-        view.add_item(view.paytable_btn)
 
         # Set cooldown
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
