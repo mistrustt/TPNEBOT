@@ -2662,7 +2662,8 @@ class DatabaseManager:
         """
         async with self.async_sessionmaker() as session:
             # Get user's wallet and bank
-            wallet = await session.get(Wallet, user_id)
+            result = await session.execute(select(Wallet).where(Wallet.user_id == user_id))
+            wallet = result.scalar_one_or_none()
             if not wallet:
                 return 0
             
