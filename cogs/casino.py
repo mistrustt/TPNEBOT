@@ -9,7 +9,7 @@ import functools
 import hmac, hashlib
 from itertools import combinations
 from collections import Counter
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, InvalidOperation
 from discord import ui, ButtonStyle, Interaction
 from discord.ui import View, Button
 from discord.ext import commands
@@ -1436,6 +1436,380 @@ class LadderView(View):
 
         await self.cog.cashout(interaction, self.user_id)
 
+class SlotsView(discord.ui.View):
+    """
+    Interactive View for the slots game with animation and buttons.
+    
+    Features:
+    - 3-frame spin animation (rate-limit safe)
+    - Free spins tracking with 2x multiplier
+    - Interactive buttons: Spin Again, Bet +/-, Paytable
+    """
+    
+    def __init__(self, cog, user_id: int, bet: Decimal, grid: list, payline_wins: list,
+                    scatter_count: int, winnings: Decimal, free_spins: int = 0,
+                    multiplier: Decimal = Decimal("1"), pf_data: dict = None,
+                    verification: dict = None):
+        super().__init__(timeout=300.0)  # 5 minute timeout
+        self.cog = cog
+        self.user_id = user_id
+        self.bot = cog.bot
+        self.bet = bet
+        self.grid = grid
+        self.payline_wins = payline_wins
+        self.scatter_count = scatter_count
+        self.winnings = winnings
+        self.free_spins = free_spins
+        self.multiplier = multiplier
+        self.pf_data = pf_data or {}
+        self.verification = verification or {}
+        
+        # State tracking
+        self.is_spinning = False
+        self.lock = asyncio.Lock()
+        self.message = None
+        
+        # Animation frames (emojis for spinning effect)
+        self.spin_frames = ["🎰", "🎲", "🎯", "🎪", "🌟"]
+        
+        # Update button states
+        self._update_buttons()
+    
+    def _update_buttons(self):
+        """Update button states based on current game state."""
+        # Spin Again button
+        self.spin_again.disabled = self.is_spinning or self.free_spins == 0
+        
+        # Bet adjustment buttons (disabled during free spins)
+        self.bet_up.disabled = self.is_spinning or self.free_spins > 0
+        self.bet_down.disabled = self.is_spinning or self.free_spins > 0
+        
+        # Paytable always available
+        self.paytable.disabled = self.is_spinning
+    
+    def _get_winning_set(self) -> set:
+        """Get set of (row, col) coordinates for winning positions."""
+        winning_set = set()
+        for line_data in self.payline_wins:
+            for coord in line_data.get("coordinates", []):
+                winning_set.add(coord)
+        return winning_set
+    
+    def _format_grid_display(self) -> str:
+        """Format the grid for display with winning highlights."""
+        winning_set = self._get_winning_set()
+        lines = []
+        
+        for row in range(4):
+            row_display = []
+            for col in range(5):
+                sym = self.grid[col][row]
+                sym_data = self.cog.SLOTS_SYMBOLS.get(sym, {})
+                emoji = sym_data.get("emoji", "❓")
+                
+                if (row, col) in winning_set:
+                    row_display.append(f"【{emoji}】")
+                else:
+                    row_display.append(f"｜{emoji}｜")
+            
+            lines.append("".join(row_display))
+        
+        return "\n".join(lines)
+    
+    def _format_animation_frame(self, frame_num: int) -> str:
+        """Format an animation frame with spinning effect."""
+        lines = []
+        spin_emoji = self.spin_frames[frame_num % len(self.spin_frames)]
+        
+        for row in range(4):
+            row_display = []
+            for col in range(5):
+                # Show random symbols during animation
+                if frame_num < 2:
+                    row_display.append(f"｜{spin_emoji}｜")
+                else:
+                    # Final frame shows actual result
+                    sym = self.grid[col][row]
+                    sym_data = self.cog.SLOTS_SYMBOLS.get(sym, {})
+                    emoji = sym_data.get("emoji", "❓")
+                    winning_set = self._get_winning_set()
+                    if (row, col) in winning_set:
+                        row_display.append(f"【{emoji}】")
+                    else:
+                        row_display.append(f"｜{emoji}｜")
+            
+            lines.append("".join(row_display))
+        
+        return "\n".join(lines)
+    
+    async def _build_container(self, is_animation: bool = False, frame_num: int = 0) -> discord.ui.Container:
+        """Build the Components V2 container for the current state."""
+        container = discord.ui.Container(accent_color=discord.Color.gold() if self.winnings > 0 else discord.Color.dark_theme())
+        
+        # Title with free spins indicator
+        if self.free_spins > 0:
+            title = f"🎰 SLOTS - FREE SPINS: {self.free_spins} remaining! (2× Multiplier)"
+        else:
+            title = "🎰 SLOTS"
+        
+        container.add_item(discord.ui.TextDisplay(f"## {title}"))
+        container.add_item(discord.ui.Separator())
+        
+        # Grid display
+        if is_animation:
+            grid_text = self._format_animation_frame(frame_num)
+        else:
+            grid_text = self._format_grid_display()
+        
+        container.add_item(discord.ui.TextDisplay(f"```\n{grid_text}\n```"))
+        
+        # Results section
+        if not is_animation:
+            container.add_item(discord.ui.Separator())
+            
+            # Win summary
+            if self.winnings > 0:
+                win_text = f"💰 **WIN: {await self.cog.formatter(self.winnings)}**"
+                if self.multiplier > 1:
+                    win_text += f" (×{self.multiplier})"
+                container.add_item(discord.ui.TextDisplay(win_text))
+            
+            # Winning lines
+            if self.payline_wins:
+                lines_text = "**Winning Lines:**\n"
+                for line_data in self.payline_wins[:5]:  # Show max 5 lines
+                    lines_text += f"• Line {line_data['line']}: {line_data['symbol']} ×{line_data['count']} = {line_data['payout']}\n"
+                if len(self.payline_wins) > 5:
+                    lines_text += f"• ...and {len(self.payline_wins) - 5} more"
+                container.add_item(discord.ui.TextDisplay(lines_text))
+            
+            # Scatter wins
+            if self.scatter_count >= 3:
+                scatter_text = f"🌟 **Scatter Bonus:** {self.scatter_count} Scatters = {await self.cog.formatter(self.scatter_payout)}"
+                container.add_item(discord.ui.TextDisplay(scatter_text))
+            
+            # Free spins won
+            if self.free_spins > 0 and self.scatter_count >= 3:
+                container.add_item(discord.ui.TextDisplay(f"🎁 **Free Spins Won: {self.free_spins}**"))
+            
+            # Bet info
+            container.add_item(discord.ui.TextDisplay(f"**Bet:** {await self.cog.formatter(self.bet)}"))
+        
+        return container
+    
+    @discord.ui.button(label="Spin Again", style=discord.ButtonStyle.primary, emoji="🎰")
+    async def spin_again(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        """Handle spin again button click."""
+        async with self.lock:
+            if self.is_spinning:
+                await interaction.response.send_message("Already spinning!", ephemeral=True)
+                return
+            
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message("This isn't your game!", ephemeral=True)
+                return
+            
+            self.is_spinning = True
+            self._update_buttons()
+        
+        try:
+            # Deduct bet (or use free spin)
+            if self.free_spins > 0:
+                self.free_spins -= 1
+                # Free spins don't deduct from balance
+            else:
+                wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
+                balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
+                
+                if balance < self.bet:
+                    await interaction.response.send_message(
+                        f"Insufficient balance! You have {await self.cog.formatter(balance)}",
+                        ephemeral=True
+                    )
+                    self.is_spinning = False
+                    self._update_buttons()
+                    return
+                
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=-self.bet,
+                    description="Slots Bet"
+                )
+            
+            # Run animation
+            await self._run_animation(interaction)
+            
+            # Generate new grid
+            user_id = interaction.user.id
+            grid = await self.cog._async_generate_spin_grid(user_id)
+            
+            # Evaluate results
+            winning_lines = self.cog._evaluate_paylines(grid)
+            scatter_count = self.cog._count_scatters(grid)
+            scatter_payout = self.cog._calculate_scatter_payout(scatter_count, self.bet)
+            
+            # Calculate winnings
+            line_winnings = sum(Decimal(str(line["payout"])) for line in winning_lines)
+            total_winnings = (line_winnings + scatter_payout) * self.multiplier
+            
+            # Apply house edge
+            if total_winnings > 0:
+                house_edge = Decimal("0.02")
+                total_winnings = total_winnings * (1 - house_edge)
+                total_winnings = total_winnings.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            
+            # Award winnings
+            if total_winnings > 0:
+                wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=total_winnings,
+                    description="Slots Win"
+                )
+            
+            # Check for free spins trigger
+            new_free_spins = 0
+            if scatter_count >= 3:
+                if scatter_count == 3:
+                    new_free_spins = 10
+                elif scatter_count == 4:
+                    new_free_spins = 15
+                else:  # 5 scatters
+                    new_free_spins = 20
+                self.free_spins += new_free_spins
+            
+            # Update state
+            self.grid = grid
+            self.winnings = total_winnings
+            self.payline_wins = winning_lines
+            self.scatter_count = scatter_count
+            self.scatter_payout = scatter_payout
+            
+            # Build final container
+            container = await self._build_container()
+            self._update_buttons()
+            
+            await interaction.edit_original_response(view=self, components=[container])
+            
+        finally:
+            self.is_spinning = False
+            self._update_buttons()
+    
+    @discord.ui.button(label="+Bet", style=discord.ButtonStyle.secondary, emoji="⬆️")
+    async def bet_up(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        """Increase bet amount."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your game!", ephemeral=True)
+            return
+        
+        if self.free_spins > 0:
+            await interaction.response.send_message("Cannot change bet during free spins!", ephemeral=True)
+            return
+        
+        # Increase bet by 10% or minimum increment
+        new_bet = self.bet * Decimal("1.1")
+        min_bet = Decimal("100")
+        if new_bet < min_bet:
+            new_bet = min_bet
+        new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
+        
+        # Check balance
+        wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
+        
+        if new_bet > balance:
+            await interaction.response.send_message("Insufficient balance for that bet!", ephemeral=True)
+            return
+        
+        self.bet = new_bet
+        self._update_buttons()
+        
+        container = await self._build_container()
+        await interaction.edit_original_response(view=self, components=[container])
+    
+    @discord.ui.button(label="-Bet", style=discord.ButtonStyle.secondary, emoji="⬇️")
+    async def bet_down(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        """Decrease bet amount."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your game!", ephemeral=True)
+            return
+        
+        if self.free_spins > 0:
+            await interaction.response.send_message("Cannot change bet during free spins!", ephemeral=True)
+            return
+        
+        # Decrease bet by 10%
+        new_bet = self.bet * Decimal("0.9")
+        min_bet = Decimal("100")
+        if new_bet < min_bet:
+            new_bet = min_bet
+        new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
+        
+        self.bet = new_bet
+        self._update_buttons()
+        
+        container = await self._build_container()
+        await interaction.edit_original_response(view=self, components=[container])
+    
+    @discord.ui.button(label="Paytable", style=discord.ButtonStyle.secondary, emoji="📋")
+    async def paytable(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        """Show the paytable."""
+        paytable_text = "**🎰 SLOTS PAYTABLE**\n\n"
+        paytable_text += "**Symbols:**\n"
+        
+        for sym, data in sorted(self.cog.SLOTS_SYMBOLS.items(), key=lambda x: x[1].get("tier", 0)):
+            emoji = data.get("emoji", "❓")
+            name = data.get("name", sym)
+            payouts = data.get("payouts", {})
+            wild = data.get("wild", False)
+            scatter = data.get("scatter", False)
+            
+            if wild:
+                paytable_text += f"{emoji} **{name}** (Wild) - Substitutes for all except Scatter\n"
+            elif scatter:
+                paytable_text += f"{emoji} **{name}** (Scatter) - Pays anywhere!\n"
+                paytable_text += f"   3× = {payouts.get(3, 0)}× bet | 4× = {payouts.get(4, 0)}× bet | 5× = {payouts.get(5, 0)}× bet\n"
+            else:
+                payout_str = " | ".join([f"{k}×={v}×" for k, v in sorted(payouts.items())])
+                paytable_text += f"{emoji} **{name}** - {payout_str}\n"
+        
+        paytable_text += "\n**Paylines:** 20 lines (see game for patterns)\n"
+        paytable_text += "**Free Spins:** 3+ Scatters = 10-20 free spins with 2× multiplier!\n"
+        paytable_text += "**House Edge:** 2%"
+        
+        embed = discord.Embed(
+            title="Slots Paytable",
+            description=paytable_text,
+            color=discord.Color.gold()
+        )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    async def _run_animation(self, interaction: discord.Interaction):
+        """Run the spin animation (3 frames, 2 edits)."""
+        # Frame 1: Show spinning immediately
+        container1 = await self._build_container(is_animation=True, frame_num=0)
+        await interaction.response.edit_message(view=self, components=[container1])
+        
+        # Frame 2: Continue spinning at 1.5 seconds
+        await asyncio.sleep(1.5)
+        container2 = await self._build_container(is_animation=True, frame_num=1)
+        await interaction.edit_original_response(view=self, components=[container2])
+        
+        # Frame 3: Show result at 3 seconds
+        await asyncio.sleep(1.5)
+    
+    async def on_timeout(self):
+        """Handle view timeout - disable all buttons."""
+        for child in self.children:
+            child.disabled = True
+        
+        if self.message:
+            try:
+                container = await self._build_container()
+                await self.message.edit(view=self, components=[container])
+            except discord.NotFound:
+                pass
 
 class GameHistoryPaginator(discord.ui.View):
     def __init__(self, cog, history, member, requester):
@@ -3077,381 +3451,6 @@ class Casino(commands.Cog):
         
         return "\n".join(lines)
 
-    class SlotsView(discord.ui.View):
-        """
-        Interactive View for the slots game with animation and buttons.
-        
-        Features:
-        - 3-frame spin animation (rate-limit safe)
-        - Free spins tracking with 2x multiplier
-        - Interactive buttons: Spin Again, Bet +/-, Paytable
-        """
-        
-        def __init__(self, cog, user_id: int, bet: Decimal, grid: list, payline_wins: list,
-                     scatter_count: int, winnings: Decimal, free_spins: int = 0,
-                     multiplier: Decimal = Decimal("1"), pf_data: dict = None,
-                     verification: dict = None):
-            super().__init__(timeout=300.0)  # 5 minute timeout
-            self.cog = cog
-            self.user_id = user_id
-            self.bot = cog.bot
-            self.bet = bet
-            self.grid = grid
-            self.payline_wins = payline_wins
-            self.scatter_count = scatter_count
-            self.winnings = winnings
-            self.free_spins = free_spins
-            self.multiplier = multiplier
-            self.pf_data = pf_data or {}
-            self.verification = verification or {}
-            
-            # State tracking
-            self.is_spinning = False
-            self.lock = asyncio.Lock()
-            self.message = None
-            
-            # Animation frames (emojis for spinning effect)
-            self.spin_frames = ["🎰", "🎲", "🎯", "🎪", "🌟"]
-            
-            # Update button states
-            self._update_buttons()
-        
-        def _update_buttons(self):
-            """Update button states based on current game state."""
-            # Spin Again button
-            self.spin_again.disabled = self.is_spinning or self.free_spins == 0
-            
-            # Bet adjustment buttons (disabled during free spins)
-            self.bet_up.disabled = self.is_spinning or self.free_spins > 0
-            self.bet_down.disabled = self.is_spinning or self.free_spins > 0
-            
-            # Paytable always available
-            self.paytable.disabled = self.is_spinning
-        
-        def _get_winning_set(self) -> set:
-            """Get set of (row, col) coordinates for winning positions."""
-            winning_set = set()
-            for line_data in self.winning_lines:
-                for coord in line_data.get("coordinates", []):
-                    winning_set.add(coord)
-            return winning_set
-        
-        def _format_grid_display(self) -> str:
-            """Format the grid for display with winning highlights."""
-            winning_set = self._get_winning_set()
-            lines = []
-            
-            for row in range(4):
-                row_display = []
-                for col in range(5):
-                    sym = self.grid[col][row]
-                    sym_data = self.cog.SLOTS_SYMBOLS.get(sym, {})
-                    emoji = sym_data.get("emoji", "❓")
-                    
-                    if (row, col) in winning_set:
-                        row_display.append(f"【{emoji}】")
-                    else:
-                        row_display.append(f"｜{emoji}｜")
-                
-                lines.append("".join(row_display))
-            
-            return "\n".join(lines)
-        
-        def _format_animation_frame(self, frame_num: int) -> str:
-            """Format an animation frame with spinning effect."""
-            lines = []
-            spin_emoji = self.spin_frames[frame_num % len(self.spin_frames)]
-            
-            for row in range(4):
-                row_display = []
-                for col in range(5):
-                    # Show random symbols during animation
-                    if frame_num < 2:
-                        row_display.append(f"｜{spin_emoji}｜")
-                    else:
-                        # Final frame shows actual result
-                        sym = self.grid[col][row]
-                        sym_data = self.cog.SLOTS_SYMBOLS.get(sym, {})
-                        emoji = sym_data.get("emoji", "❓")
-                        winning_set = self._get_winning_set()
-                        if (row, col) in winning_set:
-                            row_display.append(f"【{emoji}】")
-                        else:
-                            row_display.append(f"｜{emoji}｜")
-                
-                lines.append("".join(row_display))
-            
-            return "\n".join(lines)
-        
-        async def _build_container(self, is_animation: bool = False, frame_num: int = 0) -> discord.ui.Container:
-            """Build the Components V2 container for the current state."""
-            container = discord.ui.Container(accent_color=discord.Color.gold() if self.winnings > 0 else discord.Color.dark_theme())
-            
-            # Title with free spins indicator
-            if self.free_spins > 0:
-                title = f"🎰 SLOTS - FREE SPINS: {self.free_spins} remaining! (2× Multiplier)"
-            else:
-                title = "🎰 SLOTS"
-            
-            container.add_item(discord.ui.TextDisplay(f"## {title}"))
-            container.add_item(discord.ui.Separator())
-            
-            # Grid display
-            if is_animation:
-                grid_text = self._format_animation_frame(frame_num)
-            else:
-                grid_text = self._format_grid_display()
-            
-            container.add_item(discord.ui.TextDisplay(f"```\n{grid_text}\n```"))
-            
-            # Results section
-            if not is_animation:
-                container.add_item(discord.ui.Separator())
-                
-                # Win summary
-                if self.winnings > 0:
-                    win_text = f"💰 **WIN: {await self.cog.formatter(self.winnings)}**"
-                    if self.multiplier > 1:
-                        win_text += f" (×{self.multiplier})"
-                    container.add_item(discord.ui.TextDisplay(win_text))
-                
-                # Winning lines
-                if self.payline_wins:
-                    lines_text = "**Winning Lines:**\n"
-                    for line_data in self.payline_wins[:5]:  # Show max 5 lines
-                        lines_text += f"• Line {line_data['line']}: {line_data['symbol']} ×{line_data['count']} = {line_data['payout']}\n"
-                    if len(self.payline_wins) > 5:
-                        lines_text += f"• ...and {len(self.payline_wins) - 5} more"
-                    container.add_item(discord.ui.TextDisplay(lines_text))
-                
-                # Scatter wins
-                if self.scatter_count >= 3:
-                    scatter_text = f"🌟 **Scatter Bonus:** {self.scatter_count} Scatters = {await self.cog.formatter(self.scatter_payout)}"
-                    container.add_item(discord.ui.TextDisplay(scatter_text))
-                
-                # Free spins won
-                if self.free_spins > 0 and self.scatter_count >= 3:
-                    container.add_item(discord.ui.TextDisplay(f"🎁 **Free Spins Won: {self.free_spins}**"))
-                
-                # Bet info
-                container.add_item(discord.ui.TextDisplay(f"**Bet:** {await self.cog.formatter(self.bet)}"))
-            
-            return container
-        
-        @discord.ui.button(label="Spin Again", style=discord.ButtonStyle.primary, emoji="🎰")
-        async def spin_again(self, interaction: discord.Interaction, _button: discord.ui.Button):
-            """Handle spin again button click."""
-            async with self.lock:
-                if self.is_spinning:
-                    await interaction.response.send_message("Already spinning!", ephemeral=True)
-                    return
-                
-                if interaction.user.id != self.user_id:
-                    await interaction.response.send_message("This isn't your game!", ephemeral=True)
-                    return
-                
-                self.is_spinning = True
-                self._update_buttons()
-            
-            try:
-                # Deduct bet (or use free spin)
-                if self.free_spins > 0:
-                    self.free_spins -= 1
-                    # Free spins don't deduct from balance
-                else:
-                    wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
-                    balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-                    
-                    if balance < self.bet:
-                        await interaction.response.send_message(
-                            f"Insufficient balance! You have {await self.cog.formatter(balance)}",
-                            ephemeral=True
-                        )
-                        self.is_spinning = False
-                        self._update_buttons()
-                        return
-                    
-                    await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id,
-                        amount=-self.bet,
-                        description="Slots Bet"
-                    )
-                
-                # Run animation
-                await self._run_animation(interaction)
-                
-                # Generate new grid
-                user_id = interaction.user.id
-                grid = await self.cog._async_generate_spin_grid(user_id)
-                
-                # Evaluate results
-                winning_lines = self.cog._evaluate_paylines(grid)
-                scatter_count = self.cog._count_scatters(grid)
-                scatter_payout = self.cog._calculate_scatter_payout(scatter_count, self.bet)
-                
-                # Calculate winnings
-                line_winnings = sum(Decimal(str(line["payout"])) for line in winning_lines)
-                total_winnings = (line_winnings + scatter_payout) * self.multiplier
-                
-                # Apply house edge
-                if total_winnings > 0:
-                    house_edge = Decimal("0.02")
-                    total_winnings = total_winnings * (1 - house_edge)
-                    total_winnings = total_winnings.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-                
-                # Award winnings
-                if total_winnings > 0:
-                    wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-                    await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id,
-                        amount=total_winnings,
-                        description="Slots Win"
-                    )
-                
-                # Check for free spins trigger
-                new_free_spins = 0
-                if scatter_count >= 3:
-                    if scatter_count == 3:
-                        new_free_spins = 10
-                    elif scatter_count == 4:
-                        new_free_spins = 15
-                    else:  # 5 scatters
-                        new_free_spins = 20
-                    self.free_spins += new_free_spins
-                
-                # Update state
-                self.grid = grid
-                self.winnings = total_winnings
-                self.payline_wins = winning_lines
-                self.scatter_count = scatter_count
-                self.scatter_payout = scatter_payout
-                
-                # Build final container
-                container = await self._build_container()
-                self._update_buttons()
-                
-                await interaction.edit_original_response(view=self, components=[container])
-                
-            finally:
-                self.is_spinning = False
-                self._update_buttons()
-        
-        @discord.ui.button(label="+Bet", style=discord.ButtonStyle.secondary, emoji="⬆️")
-        async def bet_up(self, interaction: discord.Interaction, _button: discord.ui.Button):
-            """Increase bet amount."""
-            if interaction.user.id != self.user_id:
-                await interaction.response.send_message("This isn't your game!", ephemeral=True)
-                return
-            
-            if self.free_spins > 0:
-                await interaction.response.send_message("Cannot change bet during free spins!", ephemeral=True)
-                return
-            
-            # Increase bet by 10% or minimum increment
-            new_bet = self.bet * Decimal("1.1")
-            min_bet = Decimal("100")
-            if new_bet < min_bet:
-                new_bet = min_bet
-            new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
-            
-            # Check balance
-            wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
-            balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-            
-            if new_bet > balance:
-                await interaction.response.send_message("Insufficient balance for that bet!", ephemeral=True)
-                return
-            
-            self.bet = new_bet
-            self._update_buttons()
-            
-            container = await self._build_container()
-            await interaction.edit_original_response(view=self, components=[container])
-        
-        @discord.ui.button(label="-Bet", style=discord.ButtonStyle.secondary, emoji="⬇️")
-        async def bet_down(self, interaction: discord.Interaction, _button: discord.ui.Button):
-            """Decrease bet amount."""
-            if interaction.user.id != self.user_id:
-                await interaction.response.send_message("This isn't your game!", ephemeral=True)
-                return
-            
-            if self.free_spins > 0:
-                await interaction.response.send_message("Cannot change bet during free spins!", ephemeral=True)
-                return
-            
-            # Decrease bet by 10%
-            new_bet = self.bet * Decimal("0.9")
-            min_bet = Decimal("100")
-            if new_bet < min_bet:
-                new_bet = min_bet
-            new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
-            
-            self.bet = new_bet
-            self._update_buttons()
-            
-            container = await self._build_container()
-            await interaction.edit_original_response(view=self, components=[container])
-        
-        @discord.ui.button(label="Paytable", style=discord.ButtonStyle.secondary, emoji="📋")
-        async def paytable(self, interaction: discord.Interaction, _button: discord.ui.Button):
-            """Show the paytable."""
-            paytable_text = "**🎰 SLOTS PAYTABLE**\n\n"
-            paytable_text += "**Symbols:**\n"
-            
-            for sym, data in sorted(self.cog.SLOTS_SYMBOLS.items(), key=lambda x: x[1].get("tier", 0)):
-                emoji = data.get("emoji", "❓")
-                name = data.get("name", sym)
-                payouts = data.get("payouts", {})
-                wild = data.get("wild", False)
-                scatter = data.get("scatter", False)
-                
-                if wild:
-                    paytable_text += f"{emoji} **{name}** (Wild) - Substitutes for all except Scatter\n"
-                elif scatter:
-                    paytable_text += f"{emoji} **{name}** (Scatter) - Pays anywhere!\n"
-                    paytable_text += f"   3× = {payouts.get(3, 0)}× bet | 4× = {payouts.get(4, 0)}× bet | 5× = {payouts.get(5, 0)}× bet\n"
-                else:
-                    payout_str = " | ".join([f"{k}×={v}×" for k, v in sorted(payouts.items())])
-                    paytable_text += f"{emoji} **{name}** - {payout_str}\n"
-            
-            paytable_text += "\n**Paylines:** 20 lines (see game for patterns)\n"
-            paytable_text += "**Free Spins:** 3+ Scatters = 10-20 free spins with 2× multiplier!\n"
-            paytable_text += "**House Edge:** 2%"
-            
-            embed = discord.Embed(
-                title="Slots Paytable",
-                description=paytable_text,
-                color=discord.Color.gold()
-            )
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        async def _run_animation(self, interaction: discord.Interaction):
-            """Run the spin animation (3 frames, 2 edits)."""
-            # Frame 1: Show spinning immediately
-            container1 = await self._build_container(is_animation=True, frame_num=0)
-            await interaction.response.edit_message(view=self, components=[container1])
-            
-            # Frame 2: Continue spinning at 1.5 seconds
-            await asyncio.sleep(1.5)
-            container2 = await self._build_container(is_animation=True, frame_num=1)
-            await interaction.edit_original_response(view=self, components=[container2])
-            
-            # Frame 3: Show result at 3 seconds
-            await asyncio.sleep(1.5)
-        
-        async def on_timeout(self):
-            """Handle view timeout - disable all buttons."""
-            for child in self.children:
-                child.disabled = True
-            
-            if self.message:
-                try:
-                    container = await self._build_container()
-                    await self.message.edit(view=self, components=[container])
-                except discord.NotFound:
-                    pass
-
     @commands.command(
         name="slots",
         aliases=["slot"],
@@ -3549,7 +3548,7 @@ class Casino(commands.Cog):
             free_spins_awarded = {3: 10, 4: 15, 5: 20}.get(scatter_count, 20)
 
         # Create SlotsView instance
-        view = self.SlotsView(
+        view = SlotsView(
             cog=self,
             user_id=user_id,
             bet=stake,
