@@ -2070,7 +2070,7 @@ class Casino(commands.Cog):
         }
 
         # ========== SLOTS REDESIGN: Payline Patterns ==========
-        # 20 fixed paylines for 5x4 grid
+        # 10 fixed paylines for 5x4 grid
         # Each payline is a list of (row, col) coordinates for matching left-to-right
         # Grid coordinates: rows 0-3 (top to bottom), cols 0-4 (left to right)
         self.SLOTS_PAYLINES = [
@@ -2088,34 +2088,32 @@ class Casino(commands.Cog):
             # Diagonal lines
             {"id": 9, "name": "Diagonal Down", "coords": [(0, 0), (1, 1), (2, 2), (3, 3), (3, 4)], "color": "🟤"},
             {"id": 10, "name": "Diagonal Up", "coords": [(3, 0), (2, 1), (1, 2), (0, 3), (0, 4)], "color": "🔷"},
-            # M-shapes
-            {"id": 11, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)], "color": "💙"},
-            {"id": 12, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)], "color": "🧡"},
         ]
 
         # ========== SLOTS REDESIGN: Weighted Reel Strips ==========
         # Each reel has weighted symbol distribution for ~96% RTP
         # Format: {symbol_key: weight} - higher weight = more likely
+        # Adjusted for ~90% RTP (more favorable to casino)
         self.SLOTS_REEL_WEIGHTS = {
             0: {  # Reel 1 (leftmost)
-                "lemon": 25, "slot_machine": 22, "cherry": 18, "star": 12,
-                "bell": 8, "seven": 6, "diamond": 5, "wild": 3, "scatter": 1
+                "lemon": 35, "slot_machine": 30, "cherry": 14, "star": 8,
+                "bell": 5, "seven": 4, "diamond": 2, "wild": 1, "scatter": 1
             },
             1: {  # Reel 2
-                "lemon": 23, "slot_machine": 20, "cherry": 17, "star": 14,
-                "bell": 10, "seven": 7, "diamond": 5, "wild": 3, "scatter": 1
+                "lemon": 32, "slot_machine": 28, "cherry": 15, "star": 10,
+                "bell": 6, "seven": 4, "diamond": 3, "wild": 1, "scatter": 1
             },
             2: {  # Reel 3 (center)
-                "lemon": 20, "slot_machine": 18, "cherry": 16, "star": 15,
-                "bell": 12, "seven": 9, "diamond": 6, "wild": 3, "scatter": 1
+                "lemon": 30, "slot_machine": 26, "cherry": 16, "star": 12,
+                "bell": 7, "seven": 5, "diamond": 2, "wild": 1, "scatter": 1
             },
             3: {  # Reel 4
-                "lemon": 18, "slot_machine": 16, "cherry": 15, "star": 16,
-                "bell": 14, "seven": 11, "diamond": 7, "wild": 2, "scatter": 1
+                "lemon": 28, "slot_machine": 25, "cherry": 17, "star": 14,
+                "bell": 7, "seven": 5, "diamond": 2, "wild": 1, "scatter": 1
             },
             4: {  # Reel 5 (rightmost)
-                "lemon": 15, "slot_machine": 14, "cherry": 14, "star": 16,
-                "bell": 15, "seven": 13, "diamond": 10, "wild": 2, "scatter": 1
+                "lemon": 25, "slot_machine": 22, "cherry": 18, "star": 15,
+                "bell": 9, "seven": 6, "diamond": 3, "wild": 1, "scatter": 1
             },
         }
 
