@@ -1453,16 +1453,6 @@ class SlotsButtons(ui.ActionRow):
         """Handle spin again button click."""
         await self.__view._spin_again_callback(interaction)
     
-    @ui.button(label="+Bet", style=ButtonStyle.secondary, emoji="⬆️")
-    async def bet_up_btn(self, interaction: Interaction, button: ui.Button):
-        """Handle bet increase button click."""
-        await self.__view._bet_up_callback(interaction)
-    
-    @ui.button(label="-Bet", style=ButtonStyle.secondary, emoji="⬇️")
-    async def bet_down_btn(self, interaction: Interaction, button: ui.Button):
-        """Handle bet decrease button click."""
-        await self.__view._bet_down_callback(interaction)
-    
     @ui.button(label="Paytable", style=ButtonStyle.secondary, emoji="📋")
     async def paytable_btn(self, interaction: Interaction, button: ui.Button):
         """Handle paytable button click."""
@@ -1473,10 +1463,6 @@ class SlotsButtons(ui.ActionRow):
         view = self.__view
         # Spin Again button - disabled if spinning or no free spins remaining
         self.spin_again_btn.disabled = view.is_spinning or view.free_spins == 0
-        
-        # Bet adjustment buttons - disabled during free spins
-        self.bet_up_btn.disabled = view.is_spinning or view.free_spins > 0
-        self.bet_down_btn.disabled = view.is_spinning or view.free_spins > 0
         
         # Paytable always available unless spinning
         self.paytable_btn.disabled = view.is_spinning
@@ -1748,70 +1734,6 @@ class SlotsView(discord.ui.LayoutView):
             self.is_spinning = False
             self._update_button_states()
     
-    async def _bet_up_callback(self, interaction: discord.Interaction):
-        """Increase bet amount."""
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your game!", ephemeral=True)
-            return
-        
-        if self.free_spins > 0:
-            await interaction.response.send_message("Cannot change bet during free spins!", ephemeral=True)
-            return
-        
-        # Increase bet by 10% or minimum increment
-        new_bet = self.bet * Decimal("1.1")
-        min_bet = Decimal("100")
-        if new_bet < min_bet:
-            new_bet = min_bet
-        new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
-        
-        # Check balance
-        wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
-        balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-        
-        if new_bet > balance:
-            await interaction.response.send_message("Insufficient balance for that bet!", ephemeral=True)
-            return
-        
-        self.bet = new_bet
-        self._update_button_states()
-        
-        container = await self._build_container()
-        self.clear_items()
-        container.add_item(self.buttons)
-        self.add_item(container)
-        self._update_button_states()
-        
-        await interaction.edit_original_response(view=self)
-    
-    async def _bet_down_callback(self, interaction: discord.Interaction):
-        """Decrease bet amount."""
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your game!", ephemeral=True)
-            return
-        
-        if self.free_spins > 0:
-            await interaction.response.send_message("Cannot change bet during free spins!", ephemeral=True)
-            return
-        
-        # Decrease bet by 10%
-        new_bet = self.bet * Decimal("0.9")
-        min_bet = Decimal("100")
-        if new_bet < min_bet:
-            new_bet = min_bet
-        new_bet = new_bet.quantize(Decimal("1"), rounding=ROUND_DOWN)
-        
-        self.bet = new_bet
-        self._update_button_states()
-        
-        container = await self._build_container()
-        self.clear_items()
-        container.add_item(self.buttons)
-        self.add_item(container)
-        self._update_button_states()
-        
-        await interaction.edit_original_response(view=self)
-    
     async def _paytable_callback(self, interaction: discord.Interaction):
         """Show the paytable."""
         paytable_text = "**🎰 SLOTS PAYTABLE**\n\n"
@@ -1868,8 +1790,6 @@ class SlotsView(discord.ui.LayoutView):
     async def on_timeout(self):
         """Handle view timeout - disable all buttons."""
         self.buttons.spin_again_btn.disabled = True
-        self.buttons.bet_up_btn.disabled = True
-        self.buttons.bet_down_btn.disabled = True
         self.buttons.paytable_btn.disabled = True
         
         if self.message:
