@@ -1678,7 +1678,7 @@ class SlotsView(discord.ui.LayoutView):
             # Evaluate results
             winning_lines = self.cog._evaluate_paylines(grid)
             scatter_count = self.cog._count_scatters(grid)
-            scatter_payout = self.cog._calculate_scatter_payout(scatter_count, self.bet)
+            scatter_payout = self.cog._calculate_scatter_payout(scatter_count)
             
             # Calculate winnings
             line_winnings = sum(Decimal(str(line["payout"])) for line in winning_lines)
