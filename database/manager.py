@@ -6650,12 +6650,12 @@ class DatabaseManager:
         factors = await self.get_economic_factors()
         velocity = factors.get("velocity_of_money", Decimal("0"))
         liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
-        volatility = factors.get("volatility_index", Decimal("0.02"))
+        #volatility = factors.get("volatility_index", Decimal("0.02"))
 
         # Define thresholds
         VELOCITY_CRISIS_THRESHOLD = Decimal("0.05")  # Very low money velocity
         LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.1")  # Very low liquidity
-        VOLATILITY_CRISIS_THRESHOLD = Decimal("0.9")  # High inequality (Gini 0-1 scale)
+        #VOLATILITY_CRISIS_THRESHOLD = Decimal("0.9")  # High inequality (Gini 0-1 scale)
 
         circuit_breaker_triggered = False
         reason = []
@@ -6668,16 +6668,16 @@ class DatabaseManager:
             circuit_breaker_triggered = True
             reason.append("Low liquidity")
 
-        if volatility > VOLATILITY_CRISIS_THRESHOLD:
-            circuit_breaker_triggered = True
-            reason.append("High volatility")
+        #if volatility > VOLATILITY_CRISIS_THRESHOLD:
+        #    circuit_breaker_triggered = False
+        #    reason.append("High volatility")
 
         return {
             "triggered": circuit_breaker_triggered,
             "reasons": reason,
             "velocity": velocity,
             "liquidity_ratio": liquidity_ratio,
-            "volatility": volatility
+            #"volatility": volatility
         }
 
     async def get_enhanced_fee_rate(self, transaction_type: str = "standard") -> Decimal:
