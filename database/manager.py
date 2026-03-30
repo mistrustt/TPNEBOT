@@ -15,7 +15,6 @@ from .models import (
     BotConfig,
     ServerSettings,
     LastFMusers,
-    BankAccount,
     UserTimezone,
     UserLocation,
     FavoriteSongs,
@@ -1458,18 +1457,14 @@ class DatabaseManager:
                 new_wallet = Wallet(
                     user_id=user_id,
                     balance=Decimal("0.00"),
+                    bank_balance=Decimal("0.00"),
                     client_seed=secrets.token_hex(16),
                     nonce=0,
                 )
                 session.add(new_wallet)
                 await session.flush()
 
-                new_bank_account = BankAccount(
-                    wallet_id=new_wallet.wallet_id, balance=Decimal("0.00")
-                )
-                session.add(new_bank_account)
-
-                logging.info(f"Created wallet & bank for user {user_id}.")
+                logging.info(f"Created wallet for user {user_id}.")
 
     async def get_wallet_by_user_id(self, user_id: int) -> Wallet:
         """
@@ -1665,8 +1660,8 @@ class DatabaseManager:
 
     async def get_bank_balance(self, wallet_id: str) -> Decimal:
         async with self.async_sessionmaker() as session:
-            bank = await session.get(BankAccount, wallet_id)
-            return bank.balance if bank else Decimal("0.00")
+            wallet = await session.get(Wallet, wallet_id)
+            return wallet.bank_balance if wallet else Decimal("0.00")
 
     async def deposit_to_bank(self, wallet_id: str, amount: Decimal, description: str):
         """Transfer funds from wallet to bank without affecting treasury."""
@@ -1688,9 +1683,9 @@ class DatabaseManager:
                     raise ValueError("Wallet is frozen.")
 
                 # 2) ensure bank row exists
-                bank = await session.get(BankAccount, wallet_id)
+                bank = await session.get(Wallet, wallet_id)
                 if not bank:
-                    bank = BankAccount(wallet_id=wallet_id, balance=Decimal("0.00"))
+                    bank = Wallet(wallet_id=wallet_id, bank_balance=Decimal("0.00"))
                     session.add(bank)
 
                 # 3) atomic balance moves
@@ -1703,7 +1698,7 @@ class DatabaseManager:
                     frozen_field="wallet_frozen",
                 )
                 await self._atomic_balance_change(
-                    session, "bank_accounts", "wallet_id", wallet_id, +amount
+                    session, "wallets", "wallet_id", wallet_id, +amount
                 )
 
                 # 4) record TX
@@ -1741,12 +1736,12 @@ class DatabaseManager:
                 if wallet.wallet_frozen:
                     raise ValueError("Wallet is frozen.")
 
-                bank = await session.get(BankAccount, wallet_id)
+                bank = await session.get(Wallet, wallet_id)
                 if not bank:
                     raise ValueError("Bank account missing.")
 
                 await self._atomic_balance_change(
-                    session, "bank_accounts", "wallet_id", wallet_id, -amount
+                    session, "wallets", "wallet_id", wallet_id, -amount
                 )
                 await self._atomic_balance_change(
                     session,
@@ -2169,7 +2164,7 @@ class DatabaseManager:
                 wallet_total = wallet_total_result.scalar() or Decimal("0.00")
 
                 bank_total_result = await session.execute(
-                    select(func.sum(BankAccount.balance))
+                    select(func.sum(Wallet.bank_balance))
                 )
                 bank_total = bank_total_result.scalar() or Decimal("0.00")
 
@@ -2208,12 +2203,12 @@ class DatabaseManager:
                 stmt = (
                     select(
                         Wallet.user_id,
-                        (Wallet.balance + func.coalesce(BankAccount.balance, 0)).label(
+                        (Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).label(
                             "total_balance"
                         ),
                     )
                     .select_from(Wallet)
-                    .outerjoin(BankAccount, Wallet.wallet_id == BankAccount.wallet_id)
+                    .outerjoin(Wallet, Wallet.wallet_id == Wallet.wallet_id)
                     .order_by(text("total_balance DESC"))
                     .limit(limit)
                 )
@@ -2236,12 +2231,12 @@ class DatabaseManager:
                 subquery = (
                     select(
                         Wallet.user_id,
-                        (Wallet.balance + func.coalesce(BankAccount.balance, 0)).label(
+                        (Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).label(
                             "total_balance"
                         ),
                     )
                     .select_from(Wallet)
-                    .outerjoin(BankAccount, Wallet.wallet_id == BankAccount.wallet_id)
+                    .outerjoin(Wallet, Wallet.wallet_id == Wallet.wallet_id)
                     .subquery()
                 )
 
@@ -2298,9 +2293,8 @@ class DatabaseManager:
         async with self.async_sessionmaker() as session:
             try:
                 stmt = (
-                    select(Wallet.user_id, BankAccount.balance)
-                    .join(BankAccount, Wallet.wallet_id == BankAccount.wallet_id)
-                    .order_by(BankAccount.balance.desc())
+                    select(Wallet.user_id, Wallet.bank_balance)
+                    .order_by(Wallet.bank_balance.desc())
                     .limit(limit)
                 )
                 result = await session.execute(stmt)
@@ -2378,7 +2372,7 @@ class DatabaseManager:
             result_wallet = await session.execute(select(func.sum(Wallet.balance)))
             total_wallet = result_wallet.scalar() or Decimal("0.00")
 
-            result_bank = await session.execute(select(func.sum(BankAccount.balance)))
+            result_bank = await session.execute(select(func.sum(Wallet.bank_balance)))
             total_bank = result_bank.scalar() or Decimal("0.00")
 
             supply = await session.get(Supply, 1)
@@ -2664,7 +2658,7 @@ class DatabaseManager:
             wallet_sum_result = await session.execute(select(func.sum(Wallet.balance)))
             wallet_total = wallet_sum_result.scalar() or Decimal("0.00")
 
-            bank_sum_result = await session.execute(select(func.sum(BankAccount.balance)))
+            bank_sum_result = await session.execute(select(func.sum(Wallet.bank_balance)))
             bank_total = bank_sum_result.scalar() or Decimal("0.00")
 
             avg_wallet_balance = Decimal("0.00")
@@ -6665,7 +6659,7 @@ class DatabaseManager:
         # Define thresholds
         VELOCITY_CRISIS_THRESHOLD = Decimal("0.05")  # Very low money velocity
         LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.1")  # Very low liquidity
-        VOLATILITY_CRISIS_THRESHOLD = Decimal("0.7")  # High inequality (Gini 0-1 scale)
+        VOLATILITY_CRISIS_THRESHOLD = Decimal("0.9")  # High inequality (Gini 0-1 scale)
 
         circuit_breaker_triggered = False
         reason = []
@@ -6960,8 +6954,8 @@ class DatabaseManager:
             # Query bank balances using wallet_id mapping
             if wallet_to_user:
                 bank_result = await session.execute(
-                    select(BankAccount.wallet_id, BankAccount.balance).where(
-                        BankAccount.wallet_id.in_(wallet_to_user.keys())
+                    select(Wallet.wallet_id, Wallet.bank_balance).where(
+                        Wallet.wallet_id.in_(wallet_to_user.keys())
                     )
                 )
                 bank_rows = bank_result.fetchall()

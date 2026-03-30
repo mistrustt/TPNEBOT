@@ -319,6 +319,7 @@ class Wallet(Base):
     wallet_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(BigInteger, nullable=False, unique=True)
     balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
+    bank_balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
     wallet_frozen = Column(Boolean, default=False)
     client_seed = Column(String(64), nullable=True)  # widened (future-proof)
     nonce = Column(Integer, default=0)
