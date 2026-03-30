@@ -278,7 +278,7 @@ class CrashView(discord.ui.LayoutView):
         # Higher VIP (lower edge) = more favorable distribution
         # Capped at 50x max for treasury protection
         thresholds = {
-            "low": 0.55 * edge_factor,      # 1-2x multiplier
+            "low": 0.45 * edge_factor,      # 1-2x multiplier
             "med_low": 0.80 * edge_factor,  # 2-5x multiplier
             "med": 0.95 * edge_factor,      # 5-20x multiplier
             "high": 0.999 * edge_factor,    # 20-50x multiplier (capped)

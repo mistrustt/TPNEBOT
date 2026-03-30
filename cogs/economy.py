@@ -3052,6 +3052,22 @@ class Economy(commands.Cog):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
+            # Check wealth-tier transfer limit
+            max_transfer = await self.bot.database.get_max_transfer_amount(sender.id)
+            if amount > max_transfer:
+                embed = discord.Embed(
+                    description=(
+                        f"🚫 Transfer exceeds your wealth-tier limit.\n\n"
+                        f"**Your max transfer:** {self.currency_name} **{await self.formatter(max_transfer)}**\n"
+                        f"**Attempted:** {self.currency_name} **{await self.formatter(amount)}**\n\n"
+                        f"High-wealth users have reduced transfer limits to promote economic balance."
+                    ),
+                    color=discord.Color.red()
+                )
+                embed.set_author(name="Transfer Limit", icon_url=self.utils.get_avatar_url(ctx.author))
+                await ctx.reply(embed=embed, delete_after=10)
+                return
+
             # Check for alt transfer and show warning (non-blocking)
             guild_id = ctx.guild.id if ctx.guild else None
             alt_warning = None

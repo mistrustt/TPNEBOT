@@ -96,6 +96,23 @@ _LAST_REBALANCE_AT: Optional[datetime] = None  # module-level memo
 CASINO_VERS = ""
 
 class DatabaseManager:
+    # Wealth tier thresholds (percentage of total supply)
+    WEALTH_TIERS = {
+        "tier_1": {"threshold": Decimal("0.005"), "label": "mild"},       # 0.5%
+        "tier_2": {"threshold": Decimal("0.01"), "label": "moderate"},    # 1%
+        "tier_3": {"threshold": Decimal("0.02"), "label": "severe"},     # 2%
+        "tier_4": {"threshold": Decimal("0.05"), "label": "extreme"},    # 5%
+    }
+    
+    # Penalty multipliers per tier (applied to different transaction types)
+    TIER_PENALTIES = {
+        0: {"bet": Decimal("1.0"), "loan": Decimal("1.0"), "fee": Decimal("1.0"), "transfer": Decimal("1.0")},
+        1: {"bet": Decimal("0.8"), "loan": Decimal("0.7"), "fee": Decimal("1.5"), "transfer": Decimal("0.8")},
+        2: {"bet": Decimal("0.5"), "loan": Decimal("0.4"), "fee": Decimal("2.0"), "transfer": Decimal("0.5")},
+        3: {"bet": Decimal("0.25"), "loan": Decimal("0.2"), "fee": Decimal("3.0"), "transfer": Decimal("0.3")},
+        4: {"bet": Decimal("0.1"), "loan": Decimal("0.05"), "fee": Decimal("5.0"), "transfer": Decimal("0.1")},
+    }
+    
     def __init__(self, database_url: str):
         self.engine = create_async_engine(database_url, echo=False)
         self.async_sessionmaker = sessionmaker(
@@ -1780,8 +1797,11 @@ class DatabaseManager:
             reasons = ", ".join(circuit_breaker["reasons"])
             raise ValueError(f"Economic circuit breaker triggered: {reasons}")
 
-        net_amt = (amount).quantize(Decimal("0.01"), ROUND_HALF_UP)
-
+        # Calculate wealth-adjusted fee for P2P transfer
+        # Base fee rate from dynamic economic factors
+        base_fee_rate = await self.get_enhanced_fee_rate("standard")
+        base_fee = AmountUtils.round_currency(amount * base_fee_rate)
+        
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 sender = await session.get(Wallet, sender_wallet_id)
@@ -1793,13 +1813,18 @@ class DatabaseManager:
                 if receiver.wallet_frozen:
                     raise ValueError("Receiver's wallet is frozen.")
 
-                # 1) atomic moves
+                # Apply wealth-adjusted fee based on sender's tier
+                adjusted_fee = await self.calculate_wealth_adjusted_fee(sender.user_id, base_fee)
+                net_amt = AmountUtils.round_currency(amount)
+                total_deduction = net_amt + adjusted_fee
+
+                # 1) atomic moves - sender pays amount + fee, receiver gets amount
                 await self._atomic_balance_change(
                     session,
                     "wallets",
                     "wallet_id",
                     sender_wallet_id,
-                    -amount,
+                    -total_deduction,
                     frozen_field="wallet_frozen",
                 )
                 await self._atomic_balance_change(
@@ -1810,9 +1835,19 @@ class DatabaseManager:
                     +net_amt,
                     frozen_field="wallet_frozen",
                 )
+                # Fee goes to treasury
+                await self._atomic_balance_change(
+                    session,
+                    "supply",
+                    "id",
+                    1,
+                    +adjusted_fee,
+                    balance_col="treasury",
+                )
 
-                # 2) record DB txs
+                # 2) record DB txs - main transfer and fee
                 txid_main = str(uuid.uuid4())
+                txid_fee = str(uuid.uuid4())
                 session.add_all(
                     [
                         Transaction(
@@ -1822,7 +1857,15 @@ class DatabaseManager:
                             amount=net_amt,
                             description=description,
                             timestamp=discord.utils.utcnow(),
-                        )
+                        ),
+                        Transaction(
+                            id=txid_fee,
+                            from_user_id=sender.user_id,
+                            to_user_id=0,  # Treasury
+                            amount=adjusted_fee,
+                            description=f"P2P transfer fee (base: {base_fee_rate:.2%}, wealth-adjusted)",
+                            timestamp=discord.utils.utcnow(),
+                        ),
                     ]
                 )
 
@@ -1901,14 +1944,24 @@ class DatabaseManager:
             reasons = ", ".join(circuit_breaker["reasons"])
             raise ValueError(f"Economic circuit breaker triggered: {reasons}")
 
-        fee_rate = await self.get_enhanced_fee_rate(transaction_type)
+        # Get wallet to determine user for wealth-adjusted fee
+        async with self.async_sessionmaker() as session:
+            wallet = await session.get(Wallet, wallet_id)
+            if not wallet:
+                raise ValueError("Wallet missing.")
+            user_id = wallet.user_id
+
+        # Calculate base fee rate and apply wealth adjustment
+        base_fee_rate = await self.get_enhanced_fee_rate(transaction_type)
+        base_fee = AmountUtils.round_currency(abs(amount) * base_fee_rate)
+        adjusted_fee = await self.calculate_wealth_adjusted_fee(user_id, base_fee)
 
         amount = AmountUtils.round_currency(amount)
         if amount == 0:
             raise ValueError("Cannot process zero-amount transaction.")
 
         gross = abs(amount)
-        fee = AmountUtils.round_currency(gross * fee_rate)
+        fee = adjusted_fee
         net = gross - fee
 
         async with self.async_sessionmaker() as session:
@@ -2510,6 +2563,160 @@ class DatabaseManager:
             "volatility_index": volatility_index,
         }
 
+    async def get_user_wealth_tier(self, user_id: int) -> int:
+        """
+        Calculate the user's wealth tier based on their percentage of total supply.
+        
+        Wealth is calculated on-demand as: wallet + bank + crypto at current prices.
+        
+        Returns:
+            int: Tier 0-4 (0 = no penalty, 1-4 = escalating penalties)
+        """
+        async with self.async_sessionmaker() as session:
+            # Get user's wallet and bank
+            wallet = await session.get(Wallet, user_id)
+            if not wallet:
+                return 0
+            
+            user_wealth = wallet.balance + wallet.bank_balance
+            
+            # Get user's crypto holdings at current prices
+            crypto_result = await session.execute(
+                select(CryptoHolding).where(CryptoHolding.user_id == user_id)
+            )
+            crypto_holdings = crypto_result.scalars().all()
+            
+            for holding in crypto_holdings:
+                crypto = await session.get(Crypto, holding.crypto_id)
+                if crypto and crypto.current_price:
+                    user_wealth += holding.amount * crypto.current_price
+            
+            # Get total supply from economy snapshot
+            snapshot = await self.get_economy_snapshot()
+            total_supply = snapshot["total_supply"]
+            
+            if total_supply <= 0:
+                return 0
+            
+            # Calculate user's percentage of total supply
+            user_ratio = user_wealth / total_supply
+            
+            # Determine tier (check from highest to lowest)
+            if user_ratio >= self.WEALTH_TIERS["tier_4"]["threshold"]:
+                return 4
+            elif user_ratio >= self.WEALTH_TIERS["tier_3"]["threshold"]:
+                return 3
+            elif user_ratio >= self.WEALTH_TIERS["tier_2"]["threshold"]:
+                return 2
+            elif user_ratio >= self.WEALTH_TIERS["tier_1"]["threshold"]:
+                return 1
+            else:
+                return 0
+
+    def get_wealth_penalty_multipliers(self, tier: int) -> dict:
+        """
+        Get penalty multipliers for a given wealth tier.
+        
+        Args:
+            tier: Wealth tier (0-4)
+            
+        Returns:
+            dict: Multipliers for 'bet', 'loan', 'fee', 'transfer'
+        """
+        return self.TIER_PENALTIES.get(tier, self.TIER_PENALTIES[0])
+
+    async def get_wealth_tier_info(self, user_id: int) -> dict:
+        """
+        Get comprehensive wealth tier information for a user.
+        
+        Args:
+            user_id: The user's ID
+            
+        Returns:
+            dict: Contains tier, wealth, percentage, thresholds, and multipliers
+        """
+        async with self.async_sessionmaker() as session:
+            # Get user's wallet and bank
+            wallet = await session.get(Wallet, user_id)
+            if not wallet:
+                return {
+                    "tier": 0,
+                    "wealth": Decimal("0"),
+                    "percentage": Decimal("0"),
+                    "next_tier_threshold": self.WEALTH_TIERS["tier_1"]["threshold"],
+                    "multipliers": self.TIER_PENALTIES[0],
+                }
+            
+            user_wealth = wallet.balance + wallet.bank_balance
+            
+            # Get user's crypto holdings at current prices
+            crypto_result = await session.execute(
+                select(CryptoHolding).where(CryptoHolding.user_id == user_id)
+            )
+            crypto_holdings = crypto_result.scalars().all()
+            
+            for holding in crypto_holdings:
+                crypto = await session.get(Crypto, holding.crypto_id)
+                if crypto and crypto.current_price:
+                    user_wealth += holding.amount * crypto.current_price
+            
+            # Get total supply from economy snapshot
+            snapshot = await self.get_economy_snapshot()
+            total_supply = snapshot["total_supply"]
+            
+            if total_supply <= 0:
+                return {
+                    "tier": 0,
+                    "wealth": user_wealth,
+                    "percentage": Decimal("0"),
+                    "next_tier_threshold": self.WEALTH_TIERS["tier_1"]["threshold"],
+                    "multipliers": self.TIER_PENALTIES[0],
+                }
+            
+            # Calculate user's percentage of total supply
+            user_ratio = user_wealth / total_supply
+            
+            # Determine tier
+            tier = await self.get_user_wealth_tier(user_id)
+            
+            # Determine next tier threshold
+            next_tier_threshold = None
+            if tier == 0:
+                next_tier_threshold = self.WEALTH_TIERS["tier_1"]["threshold"]
+            elif tier == 1:
+                next_tier_threshold = self.WEALTH_TIERS["tier_2"]["threshold"]
+            elif tier == 2:
+                next_tier_threshold = self.WEALTH_TIERS["tier_3"]["threshold"]
+            elif tier == 3:
+                next_tier_threshold = self.WEALTH_TIERS["tier_4"]["threshold"]
+            # tier 4 has no next tier
+            
+            return {
+                "tier": tier,
+                "wealth": user_wealth,
+                "percentage": user_ratio,
+                "next_tier_threshold": next_tier_threshold,
+                "multipliers": self.get_wealth_penalty_multipliers(tier),
+            }
+
+    async def calculate_wealth_adjusted_fee(self, user_id: int, base_fee: Decimal) -> Decimal:
+        """
+        Calculate a wealth-adjusted fee for high-wealth users.
+        
+        Args:
+            user_id: The user's ID
+            base_fee: The base fee amount
+            
+        Returns:
+            Decimal: Adjusted fee based on user's wealth tier
+        """
+        user_tier = await self.get_user_wealth_tier(user_id)
+        if user_tier == 0:
+            return base_fee
+        
+        multipliers = self.get_wealth_penalty_multipliers(user_tier)
+        return AmountUtils.round_currency(base_fee * multipliers["fee"])
+
     async def get_max_gamble_amount(
         self, user_id: int, raise_if_limited: bool = False, max_payout_multiplier: Decimal = Decimal("1.0")
     ) -> Decimal:
@@ -2536,8 +2743,6 @@ class DatabaseManager:
 
         # ---- constants -------------------------------------------------------
         MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2% of treasury
-        WHALE_THRESHOLD = Decimal("0.01")        # 1% of total supply
-        WHALE_PENALTY = Decimal("0.75")          # Lose 75% of budget
         MIN_ABSOLUTE_FLOOR = Decimal("100.00")   # Floor value for small players
 
         # ---- fetch user data -------------------------------------------------
@@ -2595,10 +2800,11 @@ class DatabaseManager:
         else:
             base_coeff = Decimal("0.00125")  # 0.125%
 
-        # ---- apply whale penalty --------------------------------------------
-        user_ratio = (user_total / total_supply).quantize(Decimal("0.0001"))
-        if user_ratio > WHALE_THRESHOLD:
-            base_coeff *= Decimal("1.0") - WHALE_PENALTY  # Reduce by 75%
+        # ---- apply wealth tier penalty --------------------------------------
+        user_tier = await self.get_user_wealth_tier(user_id)
+        if user_tier > 0:
+            multipliers = self.get_wealth_penalty_multipliers(user_tier)
+            base_coeff *= multipliers["bet"]  # Apply tier-based bet multiplier
 
         # ---- adjust for liquidity scarcity ----------------------------------
         LIQUIDITY_ADJUSTMENT_FACTOR = Decimal("0.8")
@@ -2666,8 +2872,82 @@ class DatabaseManager:
         else:
             base_coeff = Decimal("0.002")  # 0.2% of treasury
 
+        # ---- apply wealth tier penalty --------------------------------------
+        user_tier = await self.get_user_wealth_tier(user_id)
+        if user_tier > 0:
+            multipliers = self.get_wealth_penalty_multipliers(user_tier)
+            base_coeff *= multipliers["loan"]  # Apply tier-based loan multiplier
+
         max_loan = AmountUtils.round_currency(treasury * base_coeff)
         return min(max_loan, user_total * Decimal("1.5"))  # Cap at 1.5x user's total balance
+
+    async def get_max_transfer_amount(self, user_id: int) -> Decimal:
+        """
+        Calculate the maximum amount a user can transfer in a single transaction.
+        Uses wealth tier penalties to limit high-wealth users' transfer capabilities.
+        
+        Args:
+            user_id: The user's ID
+            
+        Returns:
+            Decimal: Maximum transfer amount
+        """
+        wallet = await self.get_wallet_by_user_id(user_id)
+        wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
+        bank_bal = await self.get_bank_balance(wallet.wallet_id)
+        
+        # Get user's crypto holdings at current prices
+        crypto_assets = await self.get_crypto_assets(user_id)
+        crypto_bal = Decimal("0.00")
+        if crypto_assets:
+            symbols = [asset.symbol for asset in crypto_assets]
+            async with self.async_sessionmaker() as session:
+                price_result = await session.execute(
+                    select(CryptoPrice.symbol, CryptoPrice.price).where(
+                        CryptoPrice.symbol.in_(symbols)
+                    )
+                )
+                prices = {sym: Decimal(str(price)) for sym, price in price_result.fetchall()}
+            
+            for asset in crypto_assets:
+                price = prices.get(asset.symbol, Decimal("0.00"))
+                crypto_bal += Decimal(str(asset.amount)) * price
+        
+        user_total = wallet_bal + bank_bal + crypto_bal
+
+        supply = await self.get_supply_record()
+        treasury = supply.treasury
+        total_supply = supply.total_supply
+
+        if treasury <= 0 or total_supply <= 0:
+            return Decimal("0.00")
+
+        factors = await self.get_economic_factors()
+        health = factors["treasury_health"]
+
+        # Base transfer coefficient based on treasury health
+        if health < Decimal("0.25"):
+            base_coeff = Decimal("0.05")  # 5% of user's wealth
+        elif health < Decimal("0.50"):
+            base_coeff = Decimal("0.10")  # 10% of user's wealth
+        elif health < Decimal("0.75"):
+            base_coeff = Decimal("0.15")  # 15% of user's wealth
+        else:
+            base_coeff = Decimal("0.20")  # 20% of user's wealth
+
+        # Apply wealth tier penalty
+        user_tier = await self.get_user_wealth_tier(user_id)
+        if user_tier > 0:
+            multipliers = self.get_wealth_penalty_multipliers(user_tier)
+            base_coeff *= multipliers["transfer"]  # Apply tier-based transfer multiplier
+
+        # Calculate max transfer as percentage of user's wealth
+        max_transfer = AmountUtils.round_currency(user_total * base_coeff)
+        
+        # Absolute cap based on treasury (max 5% of treasury in single transfer)
+        treasury_cap = AmountUtils.round_currency(treasury * Decimal("0.05"))
+        
+        return min(max_transfer, treasury_cap)
 
     async def collect_daily_economy_snapshot(self):
         """
