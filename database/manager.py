@@ -2203,13 +2203,9 @@ class DatabaseManager:
                 stmt = (
                     select(
                         Wallet.user_id,
-                        (Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).label(
-                            "total_balance"
-                        ),
+                        (Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).label("total_balance"),
                     )
-                    .select_from(Wallet)
-                    .outerjoin(Wallet, Wallet.wallet_id == Wallet.wallet_id)
-                    .order_by(text("total_balance DESC"))
+                    .order_by((Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).desc())
                     .limit(limit)
                 )
                 result = await session.execute(stmt)
