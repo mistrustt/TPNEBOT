@@ -93,25 +93,25 @@ ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owne
 
 _LAST_REBALANCE_AT: Optional[datetime] = None  # module-level memo
 
-CASINO_VERS = ""
+# Wealth tier thresholds (percentage of total supply)
+WEALTH_TIERS = {
+    "tier_1": {"threshold": Decimal("0.005"), "label": "mild"},       # 0.5%
+    "tier_2": {"threshold": Decimal("0.01"), "label": "moderate"},    # 1%
+    "tier_3": {"threshold": Decimal("0.02"), "label": "severe"},     # 2%
+    "tier_4": {"threshold": Decimal("0.05"), "label": "extreme"},    # 5%
+}
+
+# Penalty multipliers per tier (applied to different transaction types)
+TIER_PENALTIES = {
+    0: {"bet": Decimal("1.0"), "loan": Decimal("1.0"), "fee": Decimal("1.0"), "transfer": Decimal("1.0")},
+    1: {"bet": Decimal("0.8"), "loan": Decimal("0.7"), "fee": Decimal("1.5"), "transfer": Decimal("0.8")},
+    2: {"bet": Decimal("0.5"), "loan": Decimal("0.4"), "fee": Decimal("2.0"), "transfer": Decimal("0.5")},
+    3: {"bet": Decimal("0.25"), "loan": Decimal("0.2"), "fee": Decimal("3.0"), "transfer": Decimal("0.3")},
+    4: {"bet": Decimal("0.1"), "loan": Decimal("0.05"), "fee": Decimal("5.0"), "transfer": Decimal("0.1")},
+}
 
 class DatabaseManager:
-    # Wealth tier thresholds (percentage of total supply)
-    WEALTH_TIERS = {
-        "tier_1": {"threshold": Decimal("0.005"), "label": "mild"},       # 0.5%
-        "tier_2": {"threshold": Decimal("0.01"), "label": "moderate"},    # 1%
-        "tier_3": {"threshold": Decimal("0.02"), "label": "severe"},     # 2%
-        "tier_4": {"threshold": Decimal("0.05"), "label": "extreme"},    # 5%
-    }
-    
-    # Penalty multipliers per tier (applied to different transaction types)
-    TIER_PENALTIES = {
-        0: {"bet": Decimal("1.0"), "loan": Decimal("1.0"), "fee": Decimal("1.0"), "transfer": Decimal("1.0")},
-        1: {"bet": Decimal("0.8"), "loan": Decimal("0.7"), "fee": Decimal("1.5"), "transfer": Decimal("0.8")},
-        2: {"bet": Decimal("0.5"), "loan": Decimal("0.4"), "fee": Decimal("2.0"), "transfer": Decimal("0.5")},
-        3: {"bet": Decimal("0.25"), "loan": Decimal("0.2"), "fee": Decimal("3.0"), "transfer": Decimal("0.3")},
-        4: {"bet": Decimal("0.1"), "loan": Decimal("0.05"), "fee": Decimal("5.0"), "transfer": Decimal("0.1")},
-    }
+
     
     def __init__(self, database_url: str):
         self.engine = create_async_engine(database_url, echo=False)
@@ -1509,7 +1509,7 @@ class DatabaseManager:
         creating a wallet if needed.
         """
         wallet = await self.get_wallet_by_user_id(user_id)
-        return f"{wallet.wallet_id}{CASINO_VERS}"
+        return f"{wallet.wallet_id}"
 
     async def freeze_wallet(self, wallet_id: str):
         """Freeze a wallet to block outgoing transactions."""
@@ -2582,14 +2582,21 @@ class DatabaseManager:
             
             # Get user's crypto holdings at current prices
             crypto_result = await session.execute(
-                select(CryptoHolding).where(CryptoHolding.user_id == user_id)
+                select(CryptoAsset).where(CryptoAsset.user_id == user_id)
             )
             crypto_holdings = crypto_result.scalars().all()
             
             for holding in crypto_holdings:
-                crypto = await session.get(Crypto, holding.crypto_id)
-                if crypto and crypto.current_price:
-                    user_wealth += holding.amount * crypto.current_price
+                # Get latest price for this symbol
+                price_result = await session.execute(
+                    select(CryptoPrice)
+                    .where(CryptoPrice.symbol == holding.symbol)
+                    .order_by(CryptoPrice.timestamp.desc())
+                    .limit(1)
+                )
+                price_entry = price_result.scalar_one_or_none()
+                if price_entry:
+                    user_wealth += holding.amount * price_entry.price
             
             # Get total supply from economy snapshot
             snapshot = await self.get_economy_snapshot()
@@ -2651,14 +2658,21 @@ class DatabaseManager:
             
             # Get user's crypto holdings at current prices
             crypto_result = await session.execute(
-                select(CryptoHolding).where(CryptoHolding.user_id == user_id)
+                select(CryptoAsset).where(CryptoAsset.user_id == user_id)
             )
             crypto_holdings = crypto_result.scalars().all()
             
             for holding in crypto_holdings:
-                crypto = await session.get(Crypto, holding.crypto_id)
-                if crypto and crypto.current_price:
-                    user_wealth += holding.amount * crypto.current_price
+                # Get latest price for this symbol
+                price_result = await session.execute(
+                    select(CryptoPrice)
+                    .where(CryptoPrice.symbol == holding.symbol)
+                    .order_by(CryptoPrice.timestamp.desc())
+                    .limit(1)
+                )
+                price_entry = price_result.scalar_one_or_none()
+                if price_entry:
+                    user_wealth += holding.amount * price_entry.price
             
             # Get total supply from economy snapshot
             snapshot = await self.get_economy_snapshot()
