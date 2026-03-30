@@ -2163,12 +2163,18 @@ class DatabaseManager:
                 )
                 wallet_total = wallet_total_result.scalar() or Decimal("0.00")
 
+                cryptocurrency_total_result = await session.execute(
+                    select(func.sum(CryptoAsset.amount * CryptoPrice.price))
+                    .join(CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol)
+                )
+                cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal("0.00")
+
                 bank_total_result = await session.execute(
                     select(func.sum(Wallet.bank_balance))
                 )
                 bank_total = bank_total_result.scalar() or Decimal("0.00")
 
-                circulating_supply = AmountUtils.round_currency(wallet_total + bank_total)
+                circulating_supply = AmountUtils.round_currency(wallet_total + bank_total + cryptocurrency_total)
 
                 total_supply = AmountUtils.round_currency(circulating_supply + supply.treasury)
 
