@@ -1808,7 +1808,13 @@ class Economy(commands.Cog):
     async def daily(self, ctx: commands.Context):
         """Receive a daily reward."""
         try:
-            daily_amount = secrets.randbelow(55000 - 15000) + 15000
+            # Generate base reward between 15000 and 70000
+            base_amount = secrets.randbelow(55000 - 15000) + 15000
+            
+            # Apply dynamic reward multiplier based on economic conditions
+            multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+            daily_amount = int((Decimal(base_amount) * multiplier).quantize(Decimal("1")))
+            
             wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -1834,10 +1840,19 @@ class Economy(commands.Cog):
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 86400
             )
+            
+            # Build embed with multiplier info
+            multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
             embed = discord.Embed(
-                description=f"You received your daily reward of {self.currency_name} **{await self.formatter(daily_amount)}**!",
+                description=f"You received your daily reward of {self.currency_name} **{await self.formatter(daily_amount)}**{multiplier_text}!",
                 color=color,
             )
+            if multiplier != Decimal("1.0"):
+                embed.add_field(
+                    name="Economic Multiplier",
+                    value=f"Base: {self.currency_name} {await self.formatter(base_amount)} × {multiplier:.2f}",
+                    inline=False,
+                )
             embed.set_author(
                 name="Daily", icon_url=self.utils.get_avatar_url(ctx.author)
             )
@@ -1853,7 +1868,13 @@ class Economy(commands.Cog):
     async def weekly(self, ctx: commands.Context):
         """Receive a weekly reward."""
         try:
-            weekly_amount = secrets.randbelow(310000 - 110000) + 110000
+            # Generate base reward between 110000 and 310000
+            base_amount = secrets.randbelow(310000 - 110000) + 110000
+            
+            # Apply dynamic reward multiplier based on economic conditions
+            multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+            weekly_amount = int((Decimal(base_amount) * multiplier).quantize(Decimal("1")))
+            
             wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -1880,10 +1901,19 @@ class Economy(commands.Cog):
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 604800
             )
+            
+            # Build embed with multiplier info
+            multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
             embed = discord.Embed(
-                description=f"You received your weekly reward of {self.currency_name} **{await self.formatter(weekly_amount)}**!",
+                description=f"You received your weekly reward of {self.currency_name} **{await self.formatter(weekly_amount)}**{multiplier_text}!",
                 color=color,
             )
+            if multiplier != Decimal("1.0"):
+                embed.add_field(
+                    name="Economic Multiplier",
+                    value=f"Base: {self.currency_name} {await self.formatter(base_amount)} × {multiplier:.2f}",
+                    inline=False,
+                )
             embed.set_author(
                 name="Weekly", icon_url=self.utils.get_avatar_url(ctx.author)
             )
@@ -1899,7 +1929,9 @@ class Economy(commands.Cog):
     async def monthly(self, ctx: commands.Context):
         """Receive a monthly reward."""
         try:
-            monthly_amount = secrets.randbelow(9799990 - 3399990) + 3399990
+            base_amount = secrets.randbelow(9799990 - 3399990) + 3399990
+            multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+            monthly_amount = int((Decimal(base_amount) * multiplier).quantize(Decimal("1")))
             wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -1925,13 +1957,22 @@ class Economy(commands.Cog):
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 2592000
             )
+            multiplier_text = ""
+            if multiplier != Decimal("1.0"):
+                multiplier_text = f" (Economic Multiplier: {multiplier}x)"
             embed = discord.Embed(
-                description=f"Your monthly reward is **{self.currency_name} {await self.formatter(monthly_amount)}**.",
+                description=f"Your monthly reward is **{self.currency_name} {await self.formatter(monthly_amount)}**.{multiplier_text}",
                 color=color,
             )
             embed.set_author(
                 name="Monthly", icon_url=self.utils.get_avatar_url(ctx.author)
             )
+            if multiplier != Decimal("1.0"):
+                embed.add_field(
+                    name="Economic Multiplier",
+                    value=f"Base: {await self.formatter(base_amount)} | Multiplier: {multiplier}x",
+                    inline=False
+                )
             await ctx.reply(embed=embed)
         except ValueError as e:
             embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
@@ -2041,9 +2082,13 @@ class Economy(commands.Cog):
                 response = secrets.choice(positive_interactions)
                 base_amount = secrets.randbelow(6000) + 200
                 
-                # Apply multiplier
-                multiplier = await self.fair_uniform(user_id, min_mult, max_mult)
-                amount = Decimal(base_amount) * Decimal(str(multiplier))
+                # Apply character multiplier
+                char_multiplier = await self.fair_uniform(user_id, min_mult, max_mult)
+                amount = Decimal(base_amount) * Decimal(str(char_multiplier))
+                
+                # Apply dynamic economic multiplier
+                economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+                amount = amount * economic_multiplier
                 amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                 try:
@@ -2067,7 +2112,14 @@ class Economy(commands.Cog):
                         else discord.Color.blurple()
                     )
                 
-                multiplier_text = f" (×{multiplier:.2f})" if multiplier > 1.0 else ""
+                # Build multiplier text
+                multiplier_parts = []
+                if char_multiplier > 1.0:
+                    multiplier_parts.append(f"×{char_multiplier:.2f}")
+                if economic_multiplier != Decimal("1.0"):
+                    multiplier_parts.append(f"Econ×{economic_multiplier:.2f}")
+                multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
+                
                 embed = discord.Embed(
                     description=f"{response}\n\n**{name}** gave you {self.currency_name} **{await self.formatter(amount)}**{multiplier_text}.",
                     color=color,
@@ -2231,6 +2283,11 @@ class Economy(commands.Cog):
         try:
             job, salary = await self.bot.database.work_job(user_id)
 
+            # Apply dynamic economic multiplier
+            economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+            salary = salary * economic_multiplier
+            salary = salary.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
             # Pay the user via treasury
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             await self.bot.database.process_treasury_transaction(
@@ -2253,7 +2310,13 @@ class Economy(commands.Cog):
             weeks_employed = job.days_employed / 7
             salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
 
-            multiplier_text = f" (×{salary_multiplier:.2f})" if salary_multiplier > 1.0 else ""
+            # Build multiplier text
+            multiplier_parts = []
+            if salary_multiplier > 1.0:
+                multiplier_parts.append(f"×{salary_multiplier:.2f}")
+            if economic_multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Econ×{economic_multiplier:.2f}")
+            multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
 
             embed = discord.Embed(
                 description=(
@@ -3280,7 +3343,7 @@ class Economy(commands.Cog):
             )
         await self.bot.database.process_treasury_transaction(
             wallet_id, -spend, f"Buy {symbol}"
-        )        
+        ) 
         await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
 
         embed = discord.Embed(

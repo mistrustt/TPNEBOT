@@ -747,7 +747,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         """Handle cashout button press."""
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                "this aint yo game bruh", ephemeral=True
+                "This is not your game!", ephemeral=True
             )
             return
 

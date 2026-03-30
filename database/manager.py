@@ -1670,6 +1670,12 @@ class DatabaseManager:
 
     async def deposit_to_bank(self, wallet_id: str, amount: Decimal, description: str):
         """Transfer funds from wallet to bank without affecting treasury."""
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 amount = AmountUtils.round_currency(amount)
@@ -1719,6 +1725,12 @@ class DatabaseManager:
         self, wallet_id: str, amount: Decimal, description: str
     ):
         """Transfer funds from bank to wallet without affecting treasury."""
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 amount = AmountUtils.round_currency(amount)
@@ -1767,6 +1779,12 @@ class DatabaseManager:
         description: str,
         guild_id: int = None,
     ):
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
         net_amt = (amount).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
         async with self.async_sessionmaker() as session:
@@ -1879,10 +1897,16 @@ class DatabaseManager:
         return txid_main
 
     async def process_treasury_transaction(
-        self, wallet_id: str, amount: Decimal, description: str
+        self, wallet_id: str, amount: Decimal, description: str, transaction_type: str = "standard",
+        guild_id: int = None,
     ):
-        factors = await self.get_economic_factors()
-        fee_rate = factors["fee_rate"]
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
+        fee_rate = await self.get_enhanced_fee_rate(transaction_type)
 
         amount = AmountUtils.round_currency(amount)
         if amount == 0:
@@ -1955,6 +1979,49 @@ class DatabaseManager:
                 )
 
             await self.update_supply()
+
+        # Anti-cheat logging (outside transaction to avoid blocking)
+        if guild_id is not None:
+            # Log the treasury transaction
+            await self.log_transfer(
+                transaction_id=tid_main,
+                sender_id=from_uid,
+                receiver_id=to_uid,
+                amount=net,
+                guild_id=guild_id,
+            )
+
+            # Check for suspicious patterns on large treasury transactions
+            # Only check for outgoing treasury payments (rewards, gambling wins, etc.)
+            if amount > 0 and net >= Decimal("5000"):
+                # Check if receiver has suspicious activity patterns
+                # This helps detect potential exploits or abuse of treasury systems
+                user_id = to_uid
+
+                # Check for rapid successive large treasury receipts
+                recent_large_receipts = await self.get_recent_large_treasury_receipts(
+                    user_id=user_id,
+                    hours=1,
+                    min_amount=Decimal("5000"),
+                    guild_id=guild_id,
+                )
+
+                if len(recent_large_receipts) >= 5:
+                    await self.log_suspicious_activity(
+                        activity_type=SuspiciousActivityType.RAPID_SUCCESSIVE_TRANSACTIONS,
+                        user_id=user_id,
+                        guild_id=guild_id,
+                        related_user_ids=[],
+                        amount=net,
+                        details={
+                            "transaction_id": tid_main,
+                            "description": description,
+                            "recent_receipts_count": len(recent_large_receipts),
+                            "time_window_hours": 1,
+                            "threshold_amount": "5000",
+                        },
+                    )
+
         return tid_main
 
     async def refund_transaction(self, txid: str, reason: str, treasury_fallback: bool = True):
@@ -3700,9 +3767,19 @@ class DatabaseManager:
                         select(CryptoAsset).where(
                             CryptoAsset.user_id == user_id,
                             CryptoAsset.symbol == symbol.upper(),
-                        )
+                        ).order_by(CryptoAsset.purchase_date.desc())
                     )
-                    asset = result.scalar_one_or_none()
+                    assets = result.scalars().all()
+
+                    # Handle duplicate entries - keep newest, delete oldest
+                    if len(assets) > 1:
+                        asset = assets[0]  # Newest (due to desc order)
+                        for old_asset in assets[1:]:
+                            await session.delete(old_asset)
+                    elif len(assets) == 1:
+                        asset = assets[0]
+                    else:
+                        asset = None
 
                     if asset:
                         new_amount = asset.amount + amount
@@ -4349,7 +4426,7 @@ class DatabaseManager:
                     raise ValueError("Wallet is frozen.")
 
                 await self.process_treasury_transaction(
-                    wallet_id, -total_cost, f"Purchased {quantity}x {shop_item.name}"
+                    wallet_id, -total_cost, f"Purchased {quantity}x {shop_item.name}", "standard"
                 )
 
                 if not shop_item.unlimited:
@@ -4398,7 +4475,7 @@ class DatabaseManager:
                 if item.effect == "currency" and item.effect_value:
                     wallet_id = await self.get_wallet_id_for_user(user_id)
                     await self.process_treasury_transaction(
-                        wallet_id, Decimal(item.effect_value), f"Used {item.name}"
+                        wallet_id, Decimal(item.effect_value), f"Used {item.name}", "standard"
                     )
                 async with session.begin():
                     item.quantity -= 1
@@ -4411,7 +4488,7 @@ class DatabaseManager:
                 if item.effect == "currency" and item.effect_value:
                     wallet_id = await self.get_wallet_id_for_user(user_id)
                     await self.process_treasury_transaction(
-                        wallet_id, Decimal(item.effect_value), f"Redeemed {item.name}"
+                        wallet_id, Decimal(item.effect_value), f"Redeemed {item.name}", "standard"
                     )
                 async with session.begin():
                     await session.delete(item)
@@ -4754,7 +4831,7 @@ class DatabaseManager:
                 # Direct currency grant
                 wallet_id = await self.get_wallet_id_for_user(user_id)
                 await self.process_treasury_transaction(
-                    wallet_id, Decimal(effect_value), f"Used {item.name}"
+                    wallet_id, Decimal(effect_value), f"Used {item.name}", "standard"
                 )
                 response["message"] = f"You received {effect_value} coins from {item.name}!"
                 response["effect_applied"] = True
@@ -4821,6 +4898,12 @@ class DatabaseManager:
         self, issuer_id: int, target_id: int, reward: Decimal
     ) -> Bounty:
         """Place (or increase) a bounty on a user."""
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 wallet_id = await self.get_wallet_id_for_user(issuer_id)
@@ -4829,7 +4912,7 @@ class DatabaseManager:
                     raise ValueError("Insufficient balance to place bounty.")
 
                 await self.process_treasury_transaction(
-                    wallet_id, -reward, f"Placed bounty on {target_id}"
+                    wallet_id, -reward, f"Placed bounty on {target_id}", "high_value"
                 )
 
                 stmt = select(Bounty).where(
@@ -4904,6 +4987,12 @@ class DatabaseManager:
         Claim and remove the active bounty on target_id.
         Returns the deleted Bounty instance (detached) so you can inspect its data.
         """
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 stmt = select(Bounty).where(
@@ -4919,7 +5008,7 @@ class DatabaseManager:
 
                 claimer_wallet = await self.get_wallet_id_for_user(claimer_id)
                 await self.process_treasury_transaction(
-                    claimer_wallet, reward_amount, f"Claimed bounty on {target_id}"
+                    claimer_wallet, reward_amount, f"Claimed bounty on {target_id}", "high_value"
                 )
 
             await session.commit()
@@ -6800,6 +6889,31 @@ class DatabaseManager:
                 log.review_notes = notes
                 return True
 
+    async def get_recent_large_treasury_receipts(
+        self, user_id: int, hours: int = 1, min_amount: Decimal = None, guild_id: int = None
+    ) -> List[TransferHistory]:
+        """
+        Get recent large treasury receipts for a user.
+        Used for detecting potential treasury exploitation patterns.
+        """
+        if min_amount is None:
+            min_amount = Decimal("5000")  # Default threshold
+
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        async with self.async_sessionmaker() as session:
+            stmt = (
+                select(TransferHistory)
+                .where(TransferHistory.receiver_id == user_id)
+                .where(TransferHistory.amount >= min_amount)
+                .where(TransferHistory.created_at >= cutoff_time)
+            )
+            if guild_id is not None:
+                stmt = stmt.where(TransferHistory.guild_id == guild_id)
+            stmt = stmt.order_by(TransferHistory.created_at.desc())
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
     # ==================== Hoarding Detection Methods ====================
 
     async def get_aggregated_balance(
@@ -7750,7 +7864,7 @@ class DatabaseManager:
                 # Credit to wallet
                 wallet_id = await self.get_wallet_id_for_user(user_id)
                 await self.process_treasury_transaction(
-                    wallet_id, claim_amount, "Rakeback Claim"
+                    wallet_id, claim_amount, "Rakeback Claim", "standard"
                 )
 
             await session.commit()
