@@ -1461,8 +1461,9 @@ class SlotsButtons(ui.ActionRow):
     def update_states(self):
         """Update button states based on current game state."""
         view = self.__view
-        # Spin Again button - disabled if spinning or no free spins remaining
-        self.spin_again_btn.disabled = view.is_spinning or view.free_spins == 0
+        # Spin Again button - disabled only while spinning
+        # Users can continue playing with balance even without free spins
+        self.spin_again_btn.disabled = view.is_spinning
         
         # Paytable always available unless spinning
         self.paytable_btn.disabled = view.is_spinning
@@ -1682,15 +1683,14 @@ class SlotsView(discord.ui.LayoutView):
             scatter_count = self.cog._count_scatters(grid)
             scatter_payout = self.cog._calculate_scatter_payout(scatter_count)
             
-            # Calculate winnings
+            # Calculate winnings (payout multipliers * bet amount)
             line_winnings = sum(Decimal(str(line["payout"])) for line in winning_lines)
-            total_winnings = (line_winnings + scatter_payout) * self.multiplier
+            total_multiplier = line_winnings + scatter_payout
+            total_winnings = self.bet * total_multiplier * self.multiplier
             
             # Apply house edge
             if total_winnings > 0:
-                house_edge = Decimal("0.02")
-                total_winnings = total_winnings * (1 - house_edge)
-                total_winnings = total_winnings.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                total_winnings = AmountUtils.round_currency(total_winnings * Decimal("0.98"))
             
             # Award winnings
             if total_winnings > 0:
