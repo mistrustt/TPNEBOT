@@ -2698,13 +2698,13 @@ class DatabaseManager:
             user_ratio = user_wealth / total_supply
             
             # Determine tier (check from highest to lowest)
-            if user_ratio >= self.WEALTH_TIERS["tier_4"]["threshold"]:
+            if user_ratio >= WEALTH_TIERS["tier_4"]["threshold"]:
                 return 4
-            elif user_ratio >= self.WEALTH_TIERS["tier_3"]["threshold"]:
+            elif user_ratio >= WEALTH_TIERS["tier_3"]["threshold"]:
                 return 3
-            elif user_ratio >= self.WEALTH_TIERS["tier_2"]["threshold"]:
+            elif user_ratio >= WEALTH_TIERS["tier_2"]["threshold"]:
                 return 2
-            elif user_ratio >= self.WEALTH_TIERS["tier_1"]["threshold"]:
+            elif user_ratio >= WEALTH_TIERS["tier_1"]["threshold"]:
                 return 1
             else:
                 return 0
@@ -2719,7 +2719,7 @@ class DatabaseManager:
         Returns:
             dict: Multipliers for 'bet', 'loan', 'fee', 'transfer'
         """
-        return self.TIER_PENALTIES.get(tier, self.TIER_PENALTIES[0])
+        return TIER_PENALTIES.get(tier, TIER_PENALTIES[0])
 
     async def get_wealth_tier_info(self, user_id: int) -> dict:
         """
@@ -2739,8 +2739,8 @@ class DatabaseManager:
                     "tier": 0,
                     "wealth": Decimal("0"),
                     "percentage": Decimal("0"),
-                    "next_tier_threshold": self.WEALTH_TIERS["tier_1"]["threshold"],
-                    "multipliers": self.TIER_PENALTIES[0],
+                    "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
+                    "multipliers": TIER_PENALTIES[0],
                 }
             
             user_wealth = wallet.balance + wallet.bank_balance
@@ -2772,8 +2772,8 @@ class DatabaseManager:
                     "tier": 0,
                     "wealth": user_wealth,
                     "percentage": Decimal("0"),
-                    "next_tier_threshold": self.WEALTH_TIERS["tier_1"]["threshold"],
-                    "multipliers": self.TIER_PENALTIES[0],
+                    "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
+                    "multipliers": TIER_PENALTIES[0],
                 }
             
             # Calculate user's percentage of total supply
@@ -2785,13 +2785,13 @@ class DatabaseManager:
             # Determine next tier threshold
             next_tier_threshold = None
             if tier == 0:
-                next_tier_threshold = self.WEALTH_TIERS["tier_1"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_1"]["threshold"]
             elif tier == 1:
-                next_tier_threshold = self.WEALTH_TIERS["tier_2"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_2"]["threshold"]
             elif tier == 2:
-                next_tier_threshold = self.WEALTH_TIERS["tier_3"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_3"]["threshold"]
             elif tier == 3:
-                next_tier_threshold = self.WEALTH_TIERS["tier_4"]["threshold"]
+                next_tier_threshold = WEALTH_TIERS["tier_4"]["threshold"]
             # tier 4 has no next tier
             
             return {
@@ -3200,6 +3200,35 @@ class DatabaseManager:
             }
 
         logger.info("[DAILY SNAPSHOT] Economy metrics collected.")
+
+    async def get_economy_snapshot(self) -> dict:
+        """
+        Get the current economy snapshot.
+        Returns cached metrics if available, otherwise calculates fresh snapshot.
+
+        Returns:
+            Dictionary with economy metrics including total_supply, circulating_supply, etc.
+        """
+        # Return cached metrics if available
+        if hasattr(self, '_latest_metrics') and self._latest_metrics:
+            return self._latest_metrics
+
+        # Otherwise calculate fresh snapshot
+        async with self.async_sessionmaker() as session:
+            # Get supply info
+            supply = await session.get(Supply, 1)
+            if not supply:
+                return {
+                    "total_supply": Decimal("0"),
+                    "circulating_supply": Decimal("0"),
+                    "treasury_balance": Decimal("0"),
+                }
+
+            return {
+                "total_supply": supply.total_supply,
+                "circulating_supply": supply.circulating,
+                "treasury_balance": supply.treasury,
+            }
 
     async def get_or_create_user_economic_preferences(self, user_id: int) -> UserEconomicPreferences:
         """
