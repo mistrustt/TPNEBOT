@@ -4352,6 +4352,9 @@ class Casino(commands.Cog):
                 "user_id": user_id,
                 "bet": str(amount),
                 "wallet_id": str(wallet_id),
+                "insurance_bet": "0",
+                "insurance_taken": False,
+                "insurance_offered": False,
             },
             rng=PF,
         )
@@ -4520,19 +4523,26 @@ class Casino(commands.Cog):
 
             return outcome, result, winnings
 
-        async def build_game_container(accent_color: int, content_text: str, buttons_disabled: bool = False) -> discord.ui.Container:
+        async def build_game_container(accent_color: int, content_text: str, buttons_disabled: bool = False, show_insurance: bool = False) -> discord.ui.Container:
             """Build a Container with game state and action buttons."""
             if buttons_disabled:
                 hit_button.disabled = True
                 stay_button.disabled = True
                 double_button.disabled = True
                 split_button.disabled = True
+                insurance_button.disabled = True
+
+            # Build action row with optional insurance button
+            if show_insurance and not insurance_taken:
+                action_row = discord.ui.ActionRow(hit_button, stay_button, double_button, split_button, insurance_button)
+            else:
+                action_row = discord.ui.ActionRow(hit_button, stay_button, double_button, split_button)
 
             container = discord.ui.Container(
                 discord.ui.TextDisplay("## 🃏 Blackjack"),
                 discord.ui.TextDisplay(content_text),
                 discord.ui.Separator(),
-                discord.ui.ActionRow(hit_button, stay_button, double_button, split_button),
+                action_row,
                 accent_color=accent_color
             )
 
@@ -4549,6 +4559,24 @@ class Casino(commands.Cog):
             results = []
             total_winnings = Decimal(0)
             outcomes = []
+
+            # Insurance settlement
+            insurance_result = ""
+            if insurance_taken:
+                dealer_has_blackjack = dealer_score == 21 and len(dealer_cards) == 2
+                if dealer_has_blackjack:
+                    # Insurance wins: 2:1 payout
+                    insurance_payout = insurance_bet * Decimal(2)
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id=wallet_id,
+                        amount=insurance_payout,
+                        description="Blackjack Insurance Win",
+                    )
+                    total_winnings += insurance_payout
+                    insurance_result = f"\n🎰 **Insurance Win!** Dealer had blackjack. You won {self.currency_name} **{await self.formatter(insurance_payout)}**"
+                else:
+                    # Insurance loses
+                    insurance_result = f"\n❌ **Insurance Lost:** Dealer doesn't have blackjack. You lost {self.currency_name} **{await self.formatter(insurance_bet)}**"
 
             if has_split:
                 for idx, (hand_cards, hand_bet, _) in enumerate(split_hands):
@@ -4591,7 +4619,7 @@ class Casino(commands.Cog):
 
             result_text = (
                 f"{chr(10).join(results)}\n\n"
-                f"Bots cards: {hits_text} (Total: **{dealer_score}**)\n\n"
+                f"Bots cards: {hits_text} (Total: **{dealer_score}**){insurance_result}\n\n"
                 f"**Total Winnings:** {self.currency_name} **{await self.formatter(total_winnings)}**"
             )
 
@@ -4671,6 +4699,17 @@ class Casino(commands.Cog):
         player_score = calculate_score(player_cards)
         dealer_score = calculate_score(dealer_cards)
 
+        # Insurance state tracking
+        insurance_bet = Decimal(0)
+        insurance_taken = False
+        insurance_offered = False
+
+        # Check if dealer's up-card is an Ace (offer insurance)
+        # Card format: "RS" where R is rank (A, 2-10, J, Q, K) and S is suit
+        dealer_upcard = dealer_cards[0]
+        dealer_upcard_rank = dealer_upcard[:-1]  # Extract rank
+        dealer_has_ace_up = dealer_upcard_rank == "A"
+
         # Define buttons first so they can be referenced in build_game_container
         hit_button = Button(label="Hit", style=discord.ButtonStyle.primary)
         stay_button = Button(label="Stay", style=discord.ButtonStyle.secondary)
@@ -4679,6 +4718,11 @@ class Casino(commands.Cog):
             label="Split",
             style=discord.ButtonStyle.success,
             disabled=not can_split(player_cards),
+        )
+        insurance_button = Button(
+            label="Insurance (Half Bet)",
+            style=discord.ButtonStyle.secondary,
+            disabled=True,  # Enabled only when insurance is offered
         )
 
         async def hit_callback(interaction: Interaction):
@@ -4859,10 +4903,96 @@ class Casino(commands.Cog):
 
             await update_game_view(interaction)
 
+        async def insurance_callback(interaction: Interaction):
+            nonlocal insurance_bet, insurance_taken
+            if not interaction.response.is_done():
+                await interaction.response.defer(thinking=False)
+
+            if interaction.user.id != user_id:
+                await interaction.response.send_message(
+                    "This is not your game!", ephemeral=True
+                )
+                return
+
+            # Check if insurance is still available
+            if insurance_taken:
+                await interaction.followup.send(
+                    "You've already taken insurance!", ephemeral=True
+                )
+                return
+
+            if not dealer_has_ace_up:
+                await interaction.followup.send(
+                    "Insurance is only available when dealer shows an Ace!", ephemeral=True
+                )
+                return
+
+            # Insurance costs half the original bet
+            insurance_amount = current_bet / Decimal(2)
+
+            # Check if player has enough balance for insurance
+            current_balance = await self.bot.database.get_wallet_balance(wallet_id)
+            if insurance_amount > Decimal(str(current_balance)):
+                await interaction.followup.send(
+                    "Insufficient balance for insurance!", ephemeral=True
+                )
+                return
+
+            # Deduct insurance bet from wallet
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=-insurance_amount,
+                    description="Blackjack Insurance",
+                )
+            except ValueError as e:
+                await interaction.followup.send(
+                    f"🚫 Transaction failed: {e}", ephemeral=True
+                )
+                return
+
+            # Update insurance state
+            insurance_bet = insurance_amount
+            insurance_taken = True
+            insurance_button.disabled = True
+
+            # Update game session state
+            await self._update_game_session(
+                session_id,
+                state={
+                    "user_id": user_id,
+                    "bet": str(current_bet),
+                    "wallet_id": str(wallet_id),
+                    "insurance_bet": str(insurance_bet),
+                    "insurance_taken": True,
+                    "insurance_offered": True,
+                }
+            )
+
+            await update_game_view(interaction)
+
         hit_button.callback = hit_callback
         stay_button.callback = stay_callback
         double_button.callback = double_callback
         split_button.callback = split_callback
+        insurance_button.callback = insurance_callback
+
+        # Enable insurance button if dealer shows Ace
+        if dealer_has_ace_up:
+            insurance_button.disabled = False
+            insurance_offered = True
+            # Update session state to reflect insurance was offered
+            await self._update_game_session(
+                session_id,
+                state={
+                    "user_id": user_id,
+                    "bet": str(current_bet),
+                    "wallet_id": str(wallet_id),
+                    "insurance_bet": "0",
+                    "insurance_taken": False,
+                    "insurance_offered": True,
+                }
+            )
 
         # Build initial game view
         initial_content = (
@@ -4871,7 +5001,7 @@ class Casino(commands.Cog):
             f"Current bet: {self.currency_name} **{await self.formatter(current_bet)}**"
         )
 
-        container = await build_game_container(0x5865F2, initial_content)  # Discord blurple
+        container = await build_game_container(0x5865F2, initial_content, show_insurance=dealer_has_ace_up)  # Discord blurple
 
         view = discord.ui.LayoutView()
         view.add_item(container)
