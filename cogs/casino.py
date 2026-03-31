@@ -1172,6 +1172,803 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             self.stop()
 
 
+# ==================== ROULETTE — Components V2 ====================
+
+ROULETTE_RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+ROULETTE_BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
+ROULETTE_ALL_NUMBERS = list(range(0, 37)) + ["00"]
+
+ROULETTE_PAYTABLE_TEXT = (
+    "```"
+    "Bet Type       │ Payout │ Chance\n"
+    "───────────────┼────────┼───────\n"
+    "Single Number  │  36×   │  2.6%\n"
+    "Green (0/00)   │  14×   │  5.3%\n"
+    "Column         │   3×   │ 31.6%\n"
+    "Dozen          │   3×   │ 31.6%\n"
+    "Red / Black    │   2×   │ 47.4%\n"
+    "Odd / Even     │   2×   │ 47.4%\n"
+    "High / Low     │   2×   │ 47.4%\n"
+    "```"
+)
+
+ROULETTE_BET_LABELS = {
+    "red": "🔴 Red",
+    "black": "⚫ Black",
+    "green": "🟢 Green",
+    "high": "⬆ High",
+    "low": "⬇ Low",
+    "odd": "Odd",
+    "even": "Even",
+    "dozen1": "1st 12",
+    "dozen2": "2nd 12",
+    "dozen3": "3rd 12",
+    "column1": "Col 1",
+    "column2": "Col 2",
+    "column3": "Col 3",
+}
+
+
+class RouletteNumberModal(discord.ui.Modal, title="Pick a Number"):
+    number_input = discord.ui.TextInput(
+        label="Number (0–36 or 00)",
+        placeholder="e.g. 17 or 00",
+        required=True,
+        max_length=2,
+    )
+
+    def __init__(self, roulette_view: "RouletteView"):
+        super().__init__()
+        self.roulette_view = roulette_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        value = self.number_input.value.strip()
+        valid_numbers = {str(i) for i in range(37)} | {"00"}
+        if value not in valid_numbers:
+            await interaction.response.send_message(
+                "Invalid number. Enter 0–36 or 00.", ephemeral=True
+            )
+            return
+        self.roulette_view.selected_choice = value
+        self.roulette_view._rebuild_container()
+        await interaction.response.edit_message(view=self.roulette_view)
+
+
+class RouletteView(discord.ui.LayoutView):
+    """Interactive Roulette game using Components V2 Container system."""
+
+    def __init__(self, bot, cog, user_id: int, bet_amount: Decimal, wallet_id: int,
+                 currency_name: str, formatted_bet: str, ctx: Context):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.cog: Casino = cog
+        self.user_id = user_id
+        self.bet_amount = bet_amount
+        self.wallet_id = wallet_id
+        self.currency_name = currency_name
+        self.formatted_bet = formatted_bet
+        self.ctx = ctx
+        self.message: discord.Message | None = None
+
+        self.selected_choice: str | None = None
+        self.game_phase = "betting"  # "betting" | "result"
+        self.session_id = None
+        self.lock = asyncio.Lock()
+
+        # ── Bet-type buttons (Row 1) ──
+        self.btn_red = discord.ui.Button(label="🔴 Red", style=discord.ButtonStyle.gray, custom_id="roul_red")
+        self.btn_red.callback = self._make_bet_callback("red")
+        self.btn_black = discord.ui.Button(label="⚫ Black", style=discord.ButtonStyle.gray, custom_id="roul_black")
+        self.btn_black.callback = self._make_bet_callback("black")
+        self.btn_green = discord.ui.Button(label="🟢 Green", style=discord.ButtonStyle.gray, custom_id="roul_green")
+        self.btn_green.callback = self._make_bet_callback("green")
+        self.btn_high = discord.ui.Button(label="⬆ High", style=discord.ButtonStyle.gray, custom_id="roul_high")
+        self.btn_high.callback = self._make_bet_callback("high")
+        self.btn_low = discord.ui.Button(label="⬇ Low", style=discord.ButtonStyle.gray, custom_id="roul_low")
+        self.btn_low.callback = self._make_bet_callback("low")
+
+        # ── Bet-type buttons (Row 2) ──
+        self.btn_odd = discord.ui.Button(label="Odd", style=discord.ButtonStyle.gray, custom_id="roul_odd")
+        self.btn_odd.callback = self._make_bet_callback("odd")
+        self.btn_even = discord.ui.Button(label="Even", style=discord.ButtonStyle.gray, custom_id="roul_even")
+        self.btn_even.callback = self._make_bet_callback("even")
+        self.btn_dozen1 = discord.ui.Button(label="1st 12", style=discord.ButtonStyle.gray, custom_id="roul_dozen1")
+        self.btn_dozen1.callback = self._make_bet_callback("dozen1")
+        self.btn_dozen2 = discord.ui.Button(label="2nd 12", style=discord.ButtonStyle.gray, custom_id="roul_dozen2")
+        self.btn_dozen2.callback = self._make_bet_callback("dozen2")
+        self.btn_dozen3 = discord.ui.Button(label="3rd 12", style=discord.ButtonStyle.gray, custom_id="roul_dozen3")
+        self.btn_dozen3.callback = self._make_bet_callback("dozen3")
+
+        # ── Bet-type buttons (Row 3) ──
+        self.btn_col1 = discord.ui.Button(label="Col 1", style=discord.ButtonStyle.gray, custom_id="roul_col1")
+        self.btn_col1.callback = self._make_bet_callback("column1")
+        self.btn_col2 = discord.ui.Button(label="Col 2", style=discord.ButtonStyle.gray, custom_id="roul_col2")
+        self.btn_col2.callback = self._make_bet_callback("column2")
+        self.btn_col3 = discord.ui.Button(label="Col 3", style=discord.ButtonStyle.gray, custom_id="roul_col3")
+        self.btn_col3.callback = self._make_bet_callback("column3")
+        self.btn_number = discord.ui.Button(label="# Number", style=discord.ButtonStyle.gray, custom_id="roul_number")
+        self.btn_number.callback = self._number_callback
+        self.btn_paytable = discord.ui.Button(label="ℹ Paytable", style=discord.ButtonStyle.gray, custom_id="roul_paytable")
+        self.btn_paytable.callback = self._paytable_callback
+
+        # ── Spin / Play Again button (Row 4) ──
+        self.btn_spin = discord.ui.Button(label="🎰 Spin!", style=discord.ButtonStyle.green, custom_id="roul_spin", disabled=True)
+        self.btn_spin.callback = self._spin_callback
+        self.btn_play_again = discord.ui.Button(label="🔄 Play Again", style=discord.ButtonStyle.green, custom_id="roul_again")
+        self.btn_play_again.callback = self._play_again_callback
+
+        # All bet buttons for easy iteration
+        self._bet_buttons = {
+            "red": self.btn_red, "black": self.btn_black, "green": self.btn_green,
+            "high": self.btn_high, "low": self.btn_low, "odd": self.btn_odd,
+            "even": self.btn_even, "dozen1": self.btn_dozen1, "dozen2": self.btn_dozen2,
+            "dozen3": self.btn_dozen3, "column1": self.btn_col1, "column2": self.btn_col2,
+            "column3": self.btn_col3,
+        }
+
+        self._rebuild_container()
+
+    def _get_choice_display(self) -> str:
+        if self.selected_choice is None:
+            return "None"
+        label = ROULETTE_BET_LABELS.get(self.selected_choice)
+        if label:
+            return label
+        return f"Number {self.selected_choice}"
+
+    def _rebuild_container(self):
+        """Rebuild the container based on current game phase."""
+        self.clear_items()
+
+        if self.game_phase == "betting":
+            # Highlight the selected bet button
+            for key, btn in self._bet_buttons.items():
+                btn.style = discord.ButtonStyle.blurple if key == self.selected_choice else discord.ButtonStyle.gray
+                btn.disabled = False
+            # Number button highlighted if a number is selected
+            is_number_selected = (
+                self.selected_choice is not None
+                and self.selected_choice not in self._bet_buttons
+            )
+            self.btn_number.style = discord.ButtonStyle.blurple if is_number_selected else discord.ButtonStyle.gray
+            self.btn_spin.disabled = self.selected_choice is None
+
+            status_text = f"**Bet:** {self.currency_name} **{self.formatted_bet}** │ **Selected:** {self._get_choice_display()}"
+
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🎰 Roulette"),
+                discord.ui.TextDisplay(status_text),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(self.btn_red, self.btn_black, self.btn_green, self.btn_high, self.btn_low),
+                discord.ui.ActionRow(self.btn_odd, self.btn_even, self.btn_dozen1, self.btn_dozen2, self.btn_dozen3),
+                discord.ui.ActionRow(self.btn_col1, self.btn_col2, self.btn_col3, self.btn_number, self.btn_paytable),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(self.btn_spin),
+                accent_color=0xFCD34D,  # Gold
+            )
+            self.add_item(container)
+
+        else:  # result phase
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("## 🎰 Roulette"),
+                discord.ui.TextDisplay(self._result_status),
+                discord.ui.TextDisplay(self._result_detail),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(self.btn_play_again),
+                accent_color=self._result_accent,
+            )
+            self.add_item(container)
+
+    def _make_bet_callback(self, choice: str):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.user_id:
+                return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+            if self.game_phase != "betting":
+                return await interaction.response.defer()
+            self.selected_choice = choice
+            self._rebuild_container()
+            await interaction.response.edit_message(view=self)
+        return callback
+
+    async def _number_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if self.game_phase != "betting":
+            return await interaction.response.defer()
+        await interaction.response.send_modal(RouletteNumberModal(self))
+
+    async def _paytable_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"**🎰 Roulette Paytable**\n{ROULETTE_PAYTABLE_TEXT}", ephemeral=True
+        )
+
+    async def _spin_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if self.game_phase != "betting" or self.selected_choice is None:
+            return await interaction.response.defer()
+
+        async with self.lock:
+            if self.game_phase != "betting":
+                return await interaction.response.defer()
+            self.game_phase = "spinning"
+
+        await interaction.response.defer()
+
+        choice = self.selected_choice
+
+        # ── Fairness & session ──
+        PF = await self.cog.prove_fairness(self.user_id)
+
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=self.wallet_id, amount=Decimal(-self.bet_amount), description="Roulette Bet"
+            )
+        except ValueError as e:
+            self.game_phase = "betting"
+            self._rebuild_container()
+            await interaction.followup.edit_message(interaction.message.id, view=self)
+            await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
+            return
+
+        self.session_id = await self.cog._create_game_session(
+            self.ctx, "roulette", owner_id=self.user_id, wager_total=self.bet_amount,
+            state={"user_id": self.user_id, "bet": str(self.bet_amount),
+                   "wallet_id": str(self.wallet_id), "choice": choice},
+            rng=PF,
+        )
+        await self.cog._add_refund(
+            self.session_id, user_id=self.user_id,
+            wallet_id=str(self.wallet_id), amount=self.bet_amount, reason="roulette_bet",
+        )
+
+        # ── House edge & RTP boost ──
+        house_edge = await self.cog.calculate_house_edge(self.user_id)
+        base_edge = Decimal("0.04")
+        rtp_boost = (
+            Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1")
+            if house_edge < base_edge else Decimal("1")
+        )
+
+        # ── Spin ──
+        spin_result = await self.cog.fair_choice(self.user_id, ROULETTE_ALL_NUMBERS)
+
+        is_int = isinstance(spin_result, int)
+        is_red = is_int and spin_result in ROULETTE_RED_NUMBERS
+        is_black = is_int and spin_result in ROULETTE_BLACK_NUMBERS
+        is_green = (spin_result == 0) or (spin_result == "00")
+        is_even = is_int and spin_result != 0 and (spin_result % 2 == 0)
+        is_odd = is_int and (spin_result % 2 == 1)
+        color_label = "Green" if is_green else ("Red" if is_red else "Black")
+
+        # ── Determine winnings ──
+        winnings = Decimal(0)
+        amount = self.bet_amount
+
+        if choice == "green" and is_green:
+            winnings = amount * Decimal(14)
+        elif choice == "red" and is_red:
+            winnings = amount * Decimal(2)
+        elif choice == "black" and is_black:
+            winnings = amount * Decimal(2)
+        elif choice == "odd" and is_odd:
+            winnings = amount * Decimal(2)
+        elif choice == "even" and is_even:
+            winnings = amount * Decimal(2)
+        elif choice == "high" and is_int and 19 <= spin_result <= 36:
+            winnings = amount * Decimal(2)
+        elif choice == "low" and is_int and 1 <= spin_result <= 18:
+            winnings = amount * Decimal(2)
+        elif choice == "dozen1" and is_int and 1 <= spin_result <= 12:
+            winnings = amount * Decimal(3)
+        elif choice == "dozen2" and is_int and 13 <= spin_result <= 24:
+            winnings = amount * Decimal(3)
+        elif choice == "dozen3" and is_int and 25 <= spin_result <= 36:
+            winnings = amount * Decimal(3)
+        elif choice == "column1" and is_int and (spin_result % 3 == 1):
+            winnings = amount * Decimal(3)
+        elif choice == "column2" and is_int and (spin_result % 3 == 2):
+            winnings = amount * Decimal(3)
+        elif choice == "column3" and is_int and (spin_result % 3 == 0 and spin_result != 0):
+            winnings = amount * Decimal(3)
+        elif (choice.isdigit() and is_int and int(choice) == spin_result) or (choice == "00" and spin_result == "00"):
+            winnings = amount * Decimal(36)
+
+        if winnings > 0:
+            winnings = AmountUtils.round_currency(winnings * rtp_boost)
+
+        await self.cog.process_game_result(self.user_id, "roulette", amount)
+
+        # ── Record outcome ──
+        won = winnings > 0
+        if won:
+            await self.bot.database.increment_win(
+                self.user_id, "roulette", amount,
+                client_seed=PF["client_seed"], seed_used=None,
+                nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
+            )
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=self.wallet_id, amount=winnings, description="Roulette Win"
+                )
+            except ValueError:
+                pass
+        else:
+            await self.bot.database.increment_loss(
+                self.user_id, "roulette", amount,
+                client_seed=PF["client_seed"], seed_used=None,
+                nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
+            )
+
+        await self.bot.database.set_cooldown(self.user_id, "roulette", 5)
+
+        # ── Build result display ──
+        formatted_winnings = await self.cog.formatter(winnings if won else amount)
+        bet_label = self._get_choice_display()
+
+        self._result_status = (
+            f"The ball landed on **{color_label} {spin_result}**\n"
+            f"**Your Bet:** {bet_label} │ **Spin:** {color_label} {spin_result}"
+        )
+        if won:
+            self._result_detail = f"🎉 You won {self.currency_name} **{formatted_winnings}**!"
+            self._result_accent = 0x57F287  # Green
+        else:
+            self._result_detail = f"You lost {self.currency_name} **{formatted_winnings}**. Better luck next time!"
+            self._result_accent = 0xED4245  # Red
+
+        # Check if Play Again is affordable
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(self.wallet_id)))
+        self.btn_play_again.disabled = balance < self.bet_amount
+
+        self.game_phase = "result"
+        self._rebuild_container()
+        await interaction.followup.edit_message(interaction.message.id, view=self)
+
+        await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+        await self.cog._log_game_event(
+            self.session_id, "result",
+            {"outcome": "win" if won else "loss", "amount": str(winnings or amount),
+             "spin": str(spin_result), "color": color_label},
+        )
+        await self.cog._end_game_session(
+            self.session_id, outcome="win" if won else "loss",
+            final_state={"amount": str(winnings or amount)},
+        )
+
+    async def _play_again_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+
+        # Check balance
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(self.wallet_id)))
+        if balance < self.bet_amount:
+            return await interaction.response.send_message(
+                f"🚫 Insufficient balance. You need {self.currency_name} **{self.formatted_bet}**.",
+                ephemeral=True,
+            )
+
+        self.selected_choice = None
+        self.game_phase = "betting"
+        self.session_id = None
+        self._rebuild_container()
+        await interaction.response.edit_message(view=self)
+
+    async def on_timeout(self):
+        # Disable everything in the current container
+        self.game_phase = "timeout"
+        self.clear_items()
+        container = discord.ui.Container(
+            discord.ui.TextDisplay("## 🎰 Roulette"),
+            discord.ui.TextDisplay("Game timed out."),
+            accent_color=0xFEE75C,  # Yellow
+        )
+        self.add_item(container)
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        self.stop()
+
+
+# ==================== HI-LO — Components V2 ====================
+
+HILO_CARD_EMOJIS = {
+    "A": "<:ace:1361825338539376651>",
+    "2": "<:two:1361825398974971904>",
+    "3": "<:three:1361825438732779672>",
+    "4": "<:four:1361825468784836778>",
+    "5": "<:five:1361825513416687697>",
+    "6": "<:six:1361825565690036435>",
+    "7": "<:seven:1361825612070912302>",
+    "8": "<:eight:1361825649383182558>",
+    "9": "<:nine:1361825685311721593>",
+    "10": "<:ten:1361825715665764514>",
+    "J": "<:jack:1361825819478982686>",
+    "Q": "<:queen:1361825774461653084>",
+    "K": "<:king:1361825747051741475>",
+    "back": "<:uncovered:1361825843525194029>",
+}
+
+HILO_CARDS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+HILO_CARD_VALUES = {card: idx for idx, card in enumerate(HILO_CARDS)}
+
+
+class HiLoView(discord.ui.LayoutView):
+    """HiLo card guessing game using Components V2 Container system."""
+
+    def __init__(self, bot, cog, user: discord.Member, bet_amount: Decimal,
+                 wallet_id: int, currency_name: str, current_card: str,
+                 house_edge: Decimal, PF: dict, session_id, ctx: Context):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.cog: Casino = cog
+        self.user = user
+        self.user_id = user.id
+        self.bet_amount = bet_amount
+        self.wallet_id = wallet_id
+        self.currency_name = currency_name
+        self.ctx = ctx
+
+        self.current_card = current_card
+        self.house_edge = house_edge
+        self.PF = PF
+        self.session_id = session_id
+        self.message: discord.Message | None = None
+
+        self.multiplier = Decimal("1.0")
+        self.history: list[str] = []
+        self.game_active = True
+        self.has_played = False
+        self.skips_used = 0
+        self.lock = asyncio.Lock()
+
+        # ── Buttons ──
+        higher_prob, lower_prob = self._calculate_probs(self.current_card)
+        self.btn_higher = discord.ui.Button(
+            label=f"Higher ({higher_prob}%)", style=discord.ButtonStyle.gray, custom_id="hilo_higher"
+        )
+        self.btn_higher.callback = self._higher_callback
+        self.btn_lower = discord.ui.Button(
+            label=f"Lower ({lower_prob}%)", style=discord.ButtonStyle.gray, custom_id="hilo_lower"
+        )
+        self.btn_lower.callback = self._lower_callback
+        self.btn_skip = discord.ui.Button(
+            label="Skip Card", style=discord.ButtonStyle.gray, custom_id="hilo_skip"
+        )
+        self.btn_skip.callback = self._skip_callback
+        self.btn_cashout = discord.ui.Button(
+            label=f"Cash Out {self.multiplier:.2f}x", style=discord.ButtonStyle.blurple, custom_id="hilo_cashout"
+        )
+        self.btn_cashout.callback = self._cashout_callback
+
+        self._rebuild_container()
+
+    # ── Multiplier / probability helpers ──
+
+    def _calculate_multiplier(self, card: str, action: str) -> Decimal:
+        current_value = HILO_CARD_VALUES[card]
+        total = len(HILO_CARDS) - 1  # exclude current card
+
+        if action == "higher":
+            favorable = len([c for c in HILO_CARDS if HILO_CARD_VALUES[c] > current_value])
+        else:
+            favorable = len([c for c in HILO_CARDS if HILO_CARD_VALUES[c] < current_value])
+
+        if favorable == 0:
+            return Decimal("0")
+
+        probability = Decimal(favorable) / Decimal(total)
+        multiplier = (Decimal("1") / probability) * (Decimal("1") - self.house_edge)
+
+        return max(multiplier, Decimal("1.01"))
+
+    def _calculate_probs(self, card: str) -> tuple[int, int]:
+        current_value = HILO_CARD_VALUES[card]
+        higher = len([c for c in HILO_CARDS if HILO_CARD_VALUES[c] > current_value])
+        lower = len([c for c in HILO_CARDS if HILO_CARD_VALUES[c] < current_value])
+        total = len(HILO_CARDS) - 1
+
+        higher_prob = max(8, min(92, round((higher / total) * 100)))
+        lower_prob = max(8, min(92, round((lower / total) * 100)))
+        return higher_prob, lower_prob
+
+    async def _calculate_profits(self, card: str) -> tuple[str, str, str]:
+        higher_mult = self._calculate_multiplier(card, "higher")
+        lower_mult = self._calculate_multiplier(card, "lower")
+
+        profit_higher = (self.bet_amount * self.multiplier * higher_mult) - self.bet_amount
+        profit_lower = (self.bet_amount * self.multiplier * lower_mult) - self.bet_amount
+        total_profit = (self.bet_amount * self.multiplier) - self.bet_amount
+
+        return (
+            await self.cog.formatter(profit_higher),
+            await self.cog.formatter(profit_lower),
+            await self.cog.formatter(total_profit),
+        )
+
+    # ── Container rendering ──
+
+    def _rebuild_container(self, status: str = "Playing", result_text: str | None = None):
+        self.clear_items()
+
+        card_emoji = HILO_CARD_EMOJIS.get(self.current_card, HILO_CARD_EMOJIS["back"])
+
+        # History string
+        history_parts = []
+        for card in self.history:
+            history_parts.append(f"{HILO_CARD_EMOJIS.get(card, '🃏')} {card}")
+        history_parts.append(f"{card_emoji} {self.current_card}")
+        history_parts.append(HILO_CARD_EMOJIS["back"])
+        history_str = " → ".join(history_parts)
+
+        if status == "Playing":
+            accent_color = 0x5865F2  # Blurple
+        elif status == "Cashed Out":
+            accent_color = 0x57F287  # Green
+        else:
+            accent_color = 0xED4245  # Red
+
+        children = [
+            discord.ui.TextDisplay(f"## {HILO_CARD_EMOJIS['back']} HiLo — {status}"),
+            discord.ui.TextDisplay(f"**Current Card:** {card_emoji} **{self.current_card}**"),
+        ]
+
+        if status == "Playing":
+            higher_mult = self._calculate_multiplier(self.current_card, "higher")
+            lower_mult = self._calculate_multiplier(self.current_card, "lower")
+            children.append(discord.ui.TextDisplay(
+                f"**Higher** ({higher_mult:.2f}x) │ "
+                f"**Lower** ({lower_mult:.2f}x) │ "
+                f"**Total** ({self.multiplier:.2f}x)"
+            ))
+
+        children.append(discord.ui.TextDisplay(f"**History:** {history_str}"))
+
+        if result_text:
+            children.append(discord.ui.Separator())
+            children.append(discord.ui.TextDisplay(result_text))
+
+        if status == "Playing":
+            children.append(discord.ui.Separator())
+            children.append(discord.ui.ActionRow(
+                self.btn_higher, self.btn_lower, self.btn_skip, self.btn_cashout
+            ))
+
+        container = discord.ui.Container(*children, accent_color=accent_color)
+        self.add_item(container)
+
+    def _update_button_labels(self):
+        higher_prob, lower_prob = self._calculate_probs(self.current_card)
+        self.btn_higher.label = f"Higher ({higher_prob}%)"
+        self.btn_lower.label = f"Lower ({lower_prob}%)"
+        self.btn_cashout.label = f"Cash Out {self.multiplier:.2f}x"
+
+    # ── Game lifecycle ──
+
+    async def _end_game(self, win: bool):
+        self.game_active = False
+
+        if self.user_id in self.cog.active_players:
+            self.cog.active_players.discard(self.user_id)
+
+        await self.cog.process_game_result(self.user_id, "hilo", self.bet_amount)
+
+        if win:
+            await self.bot.database.increment_win(
+                self.user_id, "hilo", self.bet_amount,
+                client_seed=self.PF["client_seed"], seed_used=None,
+                nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+            )
+            await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+            await self.cog._end_game_session(
+                self.session_id, outcome="win",
+                final_state={"winnings": str(self.bet_amount * self.multiplier)},
+            )
+            return self.bet_amount * self.multiplier
+        else:
+            await self.bot.database.increment_loss(
+                self.user_id, "hilo", self.bet_amount,
+                client_seed=self.PF["client_seed"], seed_used=None,
+                nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+            )
+            await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+            await self.cog._end_game_session(
+                self.session_id, outcome="loss",
+                final_state={"loss": str(self.bet_amount)},
+            )
+            return None
+
+    async def _show_result(self, interaction: discord.Interaction, win: bool):
+        if win:
+            formatted = await self.cog.formatter(self.bet_amount * self.multiplier)
+            result_text = (
+                f"Cashed out with a **{self.multiplier:.2f}x** multiplier\n"
+                f"Won **{formatted}** **{self.currency_name}**"
+            )
+            status = "Cashed Out"
+        else:
+            formatted = await self.cog.formatter(self.bet_amount)
+            result_text = (
+                f"Lost with a possible multiplier of **{self.multiplier:.2f}x**\n"
+                f"Bet: **{formatted}** **{self.currency_name}**"
+            )
+            status = "Lost"
+
+        self._rebuild_container(status=status, result_text=result_text)
+        try:
+            await interaction.followup.edit_message(interaction.message.id, view=self)
+        except Exception as e:
+            self.bot.logger.error(f"Error showing hilo result: {e}")
+
+    # ── Button callbacks ──
+
+    async def _higher_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if not self.game_active:
+            return await interaction.response.defer()
+
+        async with self.lock:
+            if not self.game_active:
+                return await interaction.response.defer()
+
+            await interaction.response.defer()
+            self.has_played = True
+            self.history.append(self.current_card)
+            next_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
+
+            if next_card in ["A", "K"]:
+                self.current_card = next_card
+                await self._end_game(False)
+                await self._show_result(interaction, False)
+                return
+
+            multiplier_increase = self._calculate_multiplier(self.history[-1], "higher")
+
+            current_value = HILO_CARD_VALUES[self.history[-1]]
+            next_value = HILO_CARD_VALUES[next_card]
+
+            if next_value > current_value:
+                self.multiplier *= multiplier_increase
+                self.current_card = next_card
+            elif next_value == current_value:
+                self.current_card = next_card  # Push — no multiplier change
+            else:
+                self.current_card = next_card
+                await self._end_game(False)
+                await self._show_result(interaction, False)
+                return
+
+            self._update_button_labels()
+            self._rebuild_container()
+            await interaction.followup.edit_message(interaction.message.id, view=self)
+
+    async def _lower_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if not self.game_active:
+            return await interaction.response.defer()
+
+        async with self.lock:
+            if not self.game_active:
+                return await interaction.response.defer()
+
+            await interaction.response.defer()
+            self.has_played = True
+            self.history.append(self.current_card)
+            next_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
+
+            if next_card in ["A", "K"]:
+                self.current_card = next_card
+                await self._end_game(False)
+                await self._show_result(interaction, False)
+                return
+
+            multiplier_increase = self._calculate_multiplier(self.history[-1], "lower")
+
+            current_value = HILO_CARD_VALUES[self.history[-1]]
+            next_value = HILO_CARD_VALUES[next_card]
+
+            if next_value < current_value:
+                self.multiplier *= multiplier_increase
+                self.current_card = next_card
+            elif next_value == current_value:
+                self.current_card = next_card  # Push — no multiplier change
+            else:
+                self.current_card = next_card
+                await self._end_game(False)
+                await self._show_result(interaction, False)
+                return
+
+            self._update_button_labels()
+            self._rebuild_container()
+            await interaction.followup.edit_message(interaction.message.id, view=self)
+
+    async def _skip_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if not self.game_active:
+            return await interaction.response.defer()
+
+        if self.skips_used >= 3:
+            return await interaction.response.send_message(
+                "🚫 Limit reached! You can only skip 3 times per game.", ephemeral=True
+            )
+
+        async with self.lock:
+            if not self.game_active:
+                return await interaction.response.defer()
+
+            await interaction.response.defer()
+            self.skips_used += 1
+            self.history.append(self.current_card)
+            self.current_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
+            self._update_button_labels()
+            self._rebuild_container()
+            await interaction.followup.edit_message(interaction.message.id, view=self)
+
+    async def _cashout_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if not self.game_active:
+            return await interaction.response.send_message("Game is not active!", ephemeral=True)
+        if not self.has_played:
+            return await interaction.response.send_message(
+                "🚫 You must make at least one guess (Higher/Lower) before cashing out!", ephemeral=True
+            )
+
+        async with self.lock:
+            if not self.game_active:
+                return await interaction.response.defer()
+
+            await interaction.response.defer()
+
+            winnings = self.bet_amount * self.multiplier
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=self.wallet_id, amount=winnings, description="HiLo Win"
+                )
+            except ValueError as e:
+                await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
+                return
+
+            await self._end_game(True)
+            await self._show_result(interaction, True)
+
+    # ── Force end / timeout ──
+
+    async def force_end(self, refund: bool = False):
+        self.game_active = False
+        if self.user_id in self.cog.active_players:
+            self.cog.active_players.discard(self.user_id)
+
+        if refund:
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=self.wallet_id, amount=self.bet_amount, description="HiLo Refund"
+                )
+            except Exception:
+                pass
+
+        self._rebuild_container(status="Timed Out", result_text="Game ended. Your bet was refunded." if refund else "Game ended.")
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+        await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+        await self.cog._end_game_session(
+            self.session_id, outcome="forced_end", final_state={"refund": refund}
+        )
+        self.stop()
+
+    async def on_timeout(self):
+        await self.force_end(refund=True)
+
+
 class PokerView(View):
     def __init__(
         self,
@@ -3847,22 +4644,16 @@ class Casino(commands.Cog):
     @commands.command(
         name="roulette",
         aliases=["roul", "rou"],
-        description="Play roulette and bet on a number or color. If no arguments are given, shows bet options.",
+        description="Play roulette — interactive betting with Components V2.",
     )
-    async def roulette(self, ctx: Context, bet_amount: str = None, choice: str = None):
-        if bet_amount is None or choice is None:
+    async def roulette(self, ctx: Context, bet_amount: str = None):
+        if bet_amount is None:
             embed = discord.Embed(
-                title="Roulette Betting Options",
+                title="Roulette",
                 description=(
-                    "Usage: `!roulette <amount> <bet>`\n\n"
-                    "**Columns:**\n"
-                    "`column1`: 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34\n"
-                    "`column2`: 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35\n"
-                    "`column3`: 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36\n\n"
-                    "**Other bets:** `red`, `black`, `odd`, `even`, `high`, `low`, `dozen1`, `dozen2`, `dozen3`\n"
-                    "**Green:** `green` (payout ×14 for 0 or 00)\n"
-                    "**Single numbers:** `0`–`36`, or `00` (payout ×36).\n\n"
-                    "Example: `!roulette 100 red`"
+                    "Usage: `!roulette <amount>`\n\n"
+                    "An interactive roulette table will appear where you can pick your bet type and spin.\n\n"
+                    f"**Paytable:**\n{ROULETTE_PAYTABLE_TEXT}"
                 ),
                 color=discord.Color.blue(),
             )
@@ -3870,10 +4661,6 @@ class Casino(commands.Cog):
             return
 
         user_id = ctx.author.id
-        session_id = None
-
-        PF = await self.prove_fairness(user_id)
-
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         raw_balance = await self.bot.database.get_wallet_balance(wallet_id)
         balance = Decimal(str(raw_balance))
@@ -3897,289 +4684,13 @@ class Casino(commands.Cog):
                 delete_after=5,
             )
 
-        valid_choices = (
-            {
-                "green",
-                "red",
-                "black",
-                "odd",
-                "even",
-                "high",
-                "low",
-                "dozen1",
-                "dozen2",
-                "dozen3",
-                "column1",
-                "column2",
-                "column3",
-            }
-            | {str(i) for i in range(37)}
-            | {"00"}
+        formatted_bet = await self.formatter(amount)
+        view = RouletteView(
+            bot=self.bot, cog=self, user_id=user_id, bet_amount=amount,
+            wallet_id=wallet_id, currency_name=self.currency_name,
+            formatted_bet=formatted_bet, ctx=ctx,
         )
-        choice = choice.lower()
-        if choice not in valid_choices:
-            embed = discord.Embed(
-                description=(
-                    "Invalid bet choice. Please choose a valid bet type "
-                    "(`red`, `black`, `odd`, `even`, `high`, `low`, `dozen1`, `dozen2`, `dozen3`, "
-                    "`column1`, `column2`, `column3`), a number `0–36`, or `00`."
-                ),
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
-            return
-
-        try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=Decimal(-amount), description="Roulette Bet"
-            )
-        except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-            )
-            await ctx.reply(embed=embed, delete_after=5)
-            return
-
-        session_id = await self._create_game_session(
-            ctx,
-            "roulette",
-            owner_id=user_id,
-            wager_total=amount,
-            state={
-                "user_id": user_id,
-                "bet": str(amount),
-                "wallet_id": str(wallet_id),
-                "choice": choice,
-            },
-            rng=PF,
-        )
-        await self._add_refund(
-            session_id,
-            user_id=user_id,
-            wallet_id=str(wallet_id),
-            amount=amount,
-            reason="roulette_bet",
-        )
-
-        red_numbers = {
-            1,
-            3,
-            5,
-            7,
-            9,
-            12,
-            14,
-            16,
-            18,
-            19,
-            21,
-            23,
-            25,
-            27,
-            30,
-            32,
-            34,
-            36,
-        }
-        black_numbers = {
-            2,
-            4,
-            6,
-            8,
-            10,
-            11,
-            13,
-            15,
-            17,
-            20,
-            22,
-            24,
-            26,
-            28,
-            29,
-            31,
-            33,
-            35,
-        }
-        green_numbers = {0, "00"}
-        all_numbers = list(range(0, 37)) + ["00"]
-
-        # Calculate house edge for RTP tracking and bonus
-        house_edge = await self.calculate_house_edge(user_id)
-        base_edge = Decimal("0.04")
-        # Apply RTP boost for VIP players (lower house edge = higher RTP)
-        rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
-
-        spin_result = await self.fair_choice(user_id, all_numbers)
-
-        is_red = isinstance(spin_result, int) and spin_result in red_numbers
-        is_black = isinstance(spin_result, int) and spin_result in black_numbers
-        is_green = (spin_result == 0) or (spin_result == "00")
-        is_even = isinstance(spin_result, int) and (spin_result % 2 == 0)
-        is_odd = isinstance(spin_result, int) and (spin_result % 2 == 1)
-        color_label = "Green" if is_green else ("Red" if is_red else "Black")
-
-        winnings = Decimal(0)
-        outcome_description = f"The ball landed on **{color_label} {spin_result}**."
-
-        if choice == "green" and is_green:
-            winnings = amount * Decimal(14)
-            outcome_description += " You bet on Green."
-        elif choice == "red" and is_red:
-            winnings = amount * Decimal(2)
-            outcome_description += " You bet on Red."
-        elif choice == "black" and is_black:
-            winnings = amount * Decimal(2)
-            outcome_description += " You bet on Black."
-        elif choice == "odd" and is_odd:
-            winnings = amount * Decimal(2)
-            outcome_description += " You bet on Odd."
-        elif choice == "even" and is_even:
-            winnings = amount * Decimal(2)
-            outcome_description += " You bet on Even."
-        elif (
-            choice == "high"
-            and isinstance(spin_result, int)
-            and 19 <= spin_result <= 36
-        ):
-            winnings = amount * Decimal(2)
-            outcome_description += " You bet on High (19–36)."
-        elif (
-            choice == "low" and isinstance(spin_result, int) and 1 <= spin_result <= 18
-        ):
-            winnings = amount * Decimal(2)
-            outcome_description += " You bet on Low (1–18)."
-        elif (
-            choice == "dozen1"
-            and isinstance(spin_result, int)
-            and 1 <= spin_result <= 12
-        ):
-            winnings = amount * Decimal(3)
-            outcome_description += " You bet on Dozen 1 (1–12)."
-        elif (
-            choice == "dozen2"
-            and isinstance(spin_result, int)
-            and 13 <= spin_result <= 24
-        ):
-            winnings = amount * Decimal(3)
-            outcome_description += " You bet on Dozen 2 (13–24)."
-        elif (
-            choice == "dozen3"
-            and isinstance(spin_result, int)
-            and 25 <= spin_result <= 36
-        ):
-            winnings = amount * Decimal(3)
-            outcome_description += " You bet on Dozen 3 (25–36)."
-        elif (
-            choice == "column1"
-            and isinstance(spin_result, int)
-            and (spin_result % 3 == 1)
-        ):
-            winnings = amount * Decimal(3)
-            outcome_description += " You bet on Column 1."
-        elif (
-            choice == "column2"
-            and isinstance(spin_result, int)
-            and (spin_result % 3 == 2)
-        ):
-            winnings = amount * Decimal(3)
-            outcome_description += " You bet on Column 2."
-        elif (
-            choice == "column3"
-            and isinstance(spin_result, int)
-            and (spin_result % 3 == 0 and spin_result != 0)
-        ):
-            winnings = amount * Decimal(3)
-            outcome_description += " You bet on Column 3."
-        elif (
-            (choice.isdigit() and isinstance(spin_result, int) and int(choice) == spin_result)
-            or (choice == "00" and spin_result == "00")
-        ):
-            winnings = amount * Decimal(36)
-            outcome_description += " 🎉 You bet on that number!"
-        else:
-            outcome_description += " Better luck next time!"
-
-        # Apply RTP boost for VIP players
-        if winnings > 0:
-            winnings = AmountUtils.round_currency(winnings * rtp_boost)
-
-        # Process game result for rakeback
-        await self.process_game_result(user_id, "roulette", amount)
-
-        if winnings > 0:
-            revealed_seed, new_hash = await self.bot.database.increment_win(
-                user_id,
-                "roulette",
-                amount,
-                client_seed=PF["client_seed"],
-                seed_used=None,
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
-            )
-            try:
-                await self.bot.database.process_treasury_transaction(
-                    wallet_id=wallet_id, amount=winnings, description="Roulette Win"
-                )
-            except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                await ctx.reply(embed=embed, delete_after=5)
-                return
-            result_msg = (
-                f"{outcome_description}\n"
-                f"You won {self.currency_name} **{await self.formatter(winnings)}**!"
-            )
-            embed_color = discord.Color.green()
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
-        else:
-            revealed_seed, new_hash = await self.bot.database.increment_loss(
-                user_id,
-                "roulette",
-                amount,
-                client_seed=PF["client_seed"],
-                seed_used=None,
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
-            )
-            result_msg = (
-                f"{outcome_description}\n"
-                f"You lost your bet of {self.currency_name} **{await self.formatter(amount)}**."
-            )
-            embed_color = discord.Color.red()
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
-
-        embed = discord.Embed(description=result_msg, color=embed_color)
-        embed.set_author(
-            name="Roulette", icon_url=self.utils.get_avatar_url(ctx.author)
-        )
-        embed.add_field(name="Your Bet", value=choice.capitalize(), inline=True)
-        embed.add_field(
-            name="Spin Result", value=f"{color_label} {spin_result}", inline=True
-        )
-        await ctx.reply(embed=embed)
-
-        await self._remove_refund(session_id, user_id=user_id)
-        await self._log_game_event(
-            session_id,
-            "result",
-            {
-                "outcome": "win" if winnings > 0 else "loss",
-                "amount": str(winnings or amount),
-                "spin": str(spin_result),
-                "color": color_label,
-            },
-        )
-        await self._end_game_session(
-            session_id,
-            outcome="win" if winnings > 0 else "loss",
-            final_state={"amount": str(winnings or amount)},
-        )
+        view.message = await ctx.reply(view=view)
 
     @commands.command(
         name="double",
@@ -5327,52 +5838,31 @@ class Casino(commands.Cog):
         )
 
     @commands.command(
-            name="hilo", description="Play Hi-Lo - a simple card guessing game!"
-        )
+        name="hilo", description="Play Hi-Lo — a card guessing game! Uses Components V2."
+    )
     async def hilo(self, ctx: Context, bet_amount: str):
         """Play HiLo - guess if the next card will be higher or lower (Stake-style)"""
         user = ctx.author
-        session_id = None
+        user_id = user.id
 
-        if user.id in self.active_players:
+        if user_id in self.active_players:
             await ctx.reply("🚫 You already have an active game running! Finish it first.", delete_after=5)
             return
-        
-        self.active_players.add(user.id)
+
+        self.active_players.add(user_id)
 
         try:
-            card_emojis = {
-                "A": "<:ace:1361825338539376651>",
-                "2": "<:two:1361825398974971904>",
-                "3": "<:three:1361825438732779672>",
-                "4": "<:four:1361825468784836778>",
-                "5": "<:five:1361825513416687697>",
-                "6": "<:six:1361825565690036435>",
-                "7": "<:seven:1361825612070912302>",
-                "8": "<:eight:1361825649383182558>",
-                "9": "<:nine:1361825685311721593>",
-                "10": "<:ten:1361825715665764514>",
-                "J": "<:jack:1361825819478982686>",
-                "Q": "<:queen:1361825774461653084>",
-                "K": "<:king:1361825747051741475>",
-                "back": "<:uncovered:1361825843525194029>",
-            }
-
-            user_id = ctx.author.id
-
             PF = await self.prove_fairness(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-            balance = await self.bot.database.get_wallet_balance(wallet_id)
-            balance = Decimal(str(balance))
+            balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
 
             try:
                 bet_amount = await self.amount_handler(bet_amount, balance)
             except ValueError as e:
                 embed = discord.Embed(description=str(e), color=discord.Color.red())
                 await ctx.reply(embed=embed, delete_after=5)
-
-                self.active_players.remove(user.id)
+                self.active_players.discard(user_id)
                 return
 
             max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
@@ -5393,545 +5883,38 @@ class Casino(commands.Cog):
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id, amount=-bet_amount, description="HiLo Bet"
                 )
-
             except ValueError as e:
                 embed = discord.Embed(
                     description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
                 )
                 await ctx.reply(embed=embed, delete_after=5)
-
-                self.active_players.remove(user.id)
+                self.active_players.discard(user_id)
                 return
 
             session_id = await self._create_game_session(
-                ctx,
-                "hilo",
-                owner_id=user_id,
-                wager_total=bet_amount,
-                state={
-                    "user_id": user_id,
-                    "bet": str(bet_amount),
-                    "wallet_id": str(wallet_id),
-                },
+                ctx, "hilo", owner_id=user_id, wager_total=bet_amount,
+                state={"user_id": user_id, "bet": str(bet_amount), "wallet_id": str(wallet_id)},
                 rng=PF,
             )
             await self._add_refund(
-                session_id,
-                user_id=user_id,
-                wallet_id=str(wallet_id),
-                amount=bet_amount,
-                reason="hilo_bet",
+                session_id, user_id=user_id, wallet_id=str(wallet_id),
+                amount=bet_amount, reason="hilo_bet",
             )
 
-            # Calculate dynamic house edge based on VIP tier and active RTP boosts
             house_edge = await self.calculate_house_edge(user_id)
-
-            cards = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
-            card_values = {card: idx for idx, card in enumerate(cards)}
-            current_card = await self.fair_choice(ctx.author.id, cards[1:-1])
-
-            game_state = {
-                "multiplier": Decimal("1.0"),
-                "current_card": current_card,
-                "game_active": True,
-                "history": [],
-                "bet_amount": bet_amount,
-                "message": None,
-                "view": None,
-                "has_played": False,
-                "skips_used": 0,
-                "session_id": session_id,
-                "house_edge": house_edge,
-            }
-
-            def calculate_multiplier(current_card, action, edge=house_edge):
-                current_value = card_values[current_card]
-                if action == "higher":
-                    favorable = len(
-                        [c for c in cards if card_values[c] > current_value]
-                    )
-                    total = len([c for c in cards if card_values[c] >= current_value])
-                elif action == "lower":
-                    favorable = len(
-                        [c for c in cards if card_values[c] < current_value]
-                    )
-                    total = len([c for c in cards if card_values[c] <= current_value])
-
-                if favorable == 0 or total == 0:
-                    return Decimal("0")
-
-                probability = Decimal(favorable) / Decimal(total)
-
-                # Fair multiplier (1 / probability) before house edge
-                fair_mult = Decimal("1.0") / probability if probability != 0 else Decimal("0")
-
-                # Apply dynamic house edge based on VIP tier and RTP boosts
-                multiplier = fair_mult * (Decimal("1.0") - edge)
-
-                # Clamp multipliers into typical ranges used by casinos:
-                # - Middle / ~50% chances -> ~1.9x-2.0x
-                # - Strong favorites (high probability) -> ~1.02x-1.5x
-                # - Riskier guesses (low probability) -> ~2.0x-5.0x
-                if Decimal("1.95") <= fair_mult <= Decimal("2.05"):
-                    min_m, max_m = Decimal("1.90"), Decimal("2.00")
-                elif fair_mult <= Decimal("1.5"):
-                    min_m, max_m = Decimal("1.02"), Decimal("1.50")
-                else:
-                    min_m, max_m = Decimal("2.00"), Decimal("5.00")
-
-                if multiplier < min_m:
-                    multiplier = min_m
-                if multiplier > max_m:
-                    multiplier = max_m
-
-                return multiplier
-
-            def calculate_probs(card):
-                current_value = card_values[card]
-                higher = len([c for c in cards if card_values[c] > current_value])
-                lower = len([c for c in cards if card_values[c] < current_value])
-
-                higher_prob = round((higher / (len(cards) - 1)) * 100)
-                lower_prob = round((lower / (len(cards) - 1)) * 100)
-
-                higher_prob = max(8, min(92, higher_prob))
-                lower_prob = max(8, min(92, lower_prob))
-
-                return higher_prob, lower_prob
-
-            def calculate_profits(card, current_multiplier, bet_amount):
-                current_value = card_values[card]
-                higher_mult = calculate_multiplier(card, "higher")
-                lower_mult = calculate_multiplier(card, "lower")
-
-                profit_higher = (
-                    bet_amount * current_multiplier * higher_mult
-                ) - bet_amount
-                profit_lower = (
-                    bet_amount * current_multiplier * lower_mult
-                ) - bet_amount
-                total_profit = (bet_amount * current_multiplier) - bet_amount
-
-                return profit_higher, profit_lower, total_profit
-
-            async def create_embed(status="Playing"):
-                higher_prob, lower_prob = calculate_probs(game_state["current_card"])
-                profit_higher, profit_lower, total_profit = calculate_profits(
-                    game_state["current_card"],
-                    game_state["multiplier"],
-                    game_state["bet_amount"],
-                )
-
-                formatted_bet = await self.formatter(game_state["bet_amount"])
-                formatted_potential = await self.formatter(
-                    game_state["bet_amount"] * game_state["multiplier"]
-                )
-                formatted_profit_higher = await self.formatter(profit_higher)
-                formatted_profit_lower = await self.formatter(profit_lower)
-                formatted_total_profit = await self.formatter(total_profit)
-
-                embed = discord.Embed(
-                    title=f"<:uncovered:1361825843525194029> HiLo - {status}",
-                    color=discord.Color.blurple(),
-                )
-
-                embed.add_field(
-                    name="Current Card",
-                    value=f"{card_emojis.get(game_state['current_card'], card_emojis['back'])} **{game_state['current_card']}**",
-                    inline=False,
-                )
-
-                history_display = []
-                for card in game_state["history"]:
-                    history_display.append(f"{card_emojis.get(card, '🃏')} {card}")
-                history_display.append(
-                    f"{card_emojis.get(game_state['current_card'], '🃏')} {game_state['current_card']}"
-                )
-                history_display.append(f"{card_emojis['back']}")
-
-                if status == "Playing":
-                    embed.add_field(
-                        name="Profit on Next Move",
-                        value=(
-                            f"Profit Higher **({calculate_multiplier(game_state['current_card'], 'higher'):.2f}x):** "
-                            f"\n{self.currency_name} {formatted_profit_higher}\n"
-                            f"Profit Lower **({calculate_multiplier(game_state['current_card'], 'lower'):.2f}x):** "
-                            f"\n{self.currency_name} {formatted_profit_lower}\n"
-                            f"Total Profit **({game_state['multiplier']:.2f}x):** "
-                            f"\n{self.currency_name} {formatted_total_profit}"
-                        ),
-                        inline=False,
-                    )
-
-                embed.add_field(
-                    name="History", value=" → ".join(history_display), inline=False
-                )
-
-                return embed
-
-            async def end_game(win: bool = False):
-                game_state["game_active"] = False
-
-                if user.id in self.active_players:
-                    self.active_players.remove(user.id)
-
-                if game_state["view"]:
-                    for child in game_state["view"].children:
-                        child.disabled = True
-
-                # Process rakeback for the wagered amount
-                await self.process_game_result(user_id, "hilo", game_state["bet_amount"])
-
-                if win:
-                    revealed_seed, new_hash = await self.bot.database.increment_win(
-                        user_id,
-                        "hilo",
-                        game_state["bet_amount"],
-                        client_seed=PF["client_seed"],
-                        seed_used=None,
-                        nonce=PF["nonce"],
-                        hash_hex=PF["server_seed_hash"],
-                    )
-                    await self._remove_refund(session_id, user_id=user_id)
-                    await self._end_game_session(
-                        session_id,
-                        outcome="win",
-                        final_state={
-                            "winnings": str(
-                                game_state["bet_amount"] * game_state["multiplier"]
-                            )
-                        },
-                    )
-                    return game_state["bet_amount"] * game_state["multiplier"]
-                await self._remove_refund(session_id, user_id=user_id)
-                await self._end_game_session(
-                    session_id,
-                    outcome="loss",
-                    final_state={"loss": str(game_state["bet_amount"])},
-                )
-                return None
-
-            async def update_display(interaction: discord.Interaction | None = None):
-                if not game_state["game_active"]:
-                    return
-
-                higher_prob, lower_prob = calculate_probs(game_state["current_card"])
-                new_embed = await create_embed()
-
-                for child in game_state["view"].children:
-                    if child.custom_id == "higher":
-                        child.label = f"Higher ({higher_prob}%)"
-                    elif child.custom_id == "lower":
-                        child.label = f"Lower ({lower_prob}%)"
-                    elif child.custom_id == "cashout":
-                        child.label = f"Cash Out {game_state['multiplier']:.2f}x"
-
-                try:
-                    if interaction and interaction.response.is_done():
-                        await interaction.followup.edit_message(
-                            game_state["message"].id,
-                            embed=new_embed,
-                            view=game_state["view"],
-                        )
-                    elif interaction and not interaction.response.is_done():
-                        await interaction.response.edit_message(
-                            embed=new_embed, view=game_state["view"]
-                        )
-                    else:
-                        await game_state["message"].edit(
-                            embed=new_embed, view=game_state["view"]
-                        )
-                except Exception as e:
-                    self.bot.logger.error(f"Error updating display: {e}")
-
-            async def show_result(win: bool):
-                result_color = discord.Color.green() if win else discord.Color.red()
-
-                if win:
-                    result_text = (
-                        f"Cashed out with a **{game_state['multiplier']:.2f}x multiplier**\n"
-                        f"Won **{await self.formatter(game_state['bet_amount'] * game_state['multiplier'])}** **{self.currency_name}**"
-                    )
-                else:
-                    result_text = (
-                        f"Lost with a possible multiplier of **{game_state['multiplier']:.2f}x**\n"
-                        f"Bet: **{await self.formatter(game_state['bet_amount'])}** **{self.currency_name}**"
-                    )
-
-                status = "Cashed Out" if win else "Lost"
-                embed = await create_embed(status)
-                embed.color = result_color
-                embed.add_field(name="Result", value=result_text, inline=False)
-
-                try:
-                    if game_state["message"]:
-                        await game_state["message"].edit(
-                            embed=embed, view=game_state["view"]
-                        )
-                except Exception as e:
-                    self.bot.logger.error(f"Error showing result: {e}")
-
-            async def handle_interaction_response(
-                interaction: Interaction, message=None, ephemeral=True
-            ):
-                try:
-                    if message:
-                        try:
-                            if not interaction.response.is_done():
-                                await interaction.response.send_message(
-                                    message, ephemeral=ephemeral
-                                )
-                            else:
-                                await ctx.reply(message, ephemeral=ephemeral)
-                        except discord.errors.InteractionResponded:
-                            await ctx.reply(message, ephemeral=ephemeral)
-                    else:
-                        try:
-                            if not interaction.response.is_done():
-                                await interaction.response.defer()
-                        except discord.errors.InteractionResponded:
-                            pass
-                except Exception as e:
-                    self.bot.logger.error(f"Error handling interaction response: {e}")
-                    return False
-                return True
-
-            async def higher_callback(interaction: discord.Interaction):
-                if interaction.user.id != user.id:
-                    return await interaction.response.send_message("This isn't your game!", ephemeral=True)
-                
-                if not game_state["game_active"]:
-                    return
-
-                try:
-                    await interaction.response.defer()
-                    game_state["has_played"] = True
-                    game_state["history"].append(game_state["current_card"])
-                    
-                    next_card = await self.fair_choice(user.id, cards)
-
-                    if next_card in ["A", "K"]:
-                        game_state["current_card"] = next_card
-                        await end_game(False)
-                        await show_result(False) 
-                        await update_display(interaction)
-                        return
-
-                    multiplier_increase = calculate_multiplier(
-                        game_state["current_card"], "higher"
-                    )
-
-                    current_value = card_values[game_state["history"][-1]]
-                    next_value = card_values[next_card]
-
-                    if next_value > current_value:
-                        game_state["multiplier"] *= multiplier_increase
-                        game_state["current_card"] = next_card
-                    elif next_value == current_value:
-                        game_state["current_card"] = next_card
-                    else:
-                        game_state["current_card"] = next_card
-                        await end_game(False)
-                        await show_result(False)
-
-                    await update_display(interaction)
-
-                except Exception as e:
-                    self.bot.logger.error(f"Error in higher callback: {e}")
-
-            async def lower_callback(interaction: Interaction):
-                if interaction.user.id != user.id:
-                    await interaction.response.send_message(
-                        "This isn't your game!", ephemeral=True
-                    )
-                    return
-                if not game_state["game_active"]:
-                    return
-
-                try:
-                    await interaction.response.defer()
-                    game_state["has_played"] = True
-                    game_state["history"].append(game_state["current_card"])
-                    next_card = await self.fair_choice(user.id, cards)
-
-                    if next_card in ["A", "K"]:
-                        game_state["current_card"] = next_card
-                        await end_game(False)
-                        await show_result(False) 
-                        await update_display(interaction)
-                        return
-
-                    multiplier_increase = calculate_multiplier(
-                        game_state["current_card"], "lower"
-                    )
-
-                    current_value = card_values[game_state["history"][-1]]
-                    next_value = card_values[next_card]
-
-                    if next_value < current_value:
-                        game_state["multiplier"] *= multiplier_increase
-                        game_state["current_card"] = next_card
-                    elif next_value == current_value:
-                        game_state["current_card"] = next_card
-                    else:
-                        game_state["current_card"] = next_card
-                        await end_game(False)
-                        await show_result(False)
-
-                    await update_display(interaction)
-
-                except Exception as e:
-                    self.bot.logger.error(f"Error in lower callback: {e}")
-
-            async def skip_callback(interaction: Interaction):
-                if interaction.user.id != user.id:
-                    await handle_interaction_response(
-                        interaction, "This isn't your game!"
-                    )
-                    return
-                if not game_state["game_active"]:
-                    return
-
-                if game_state["skips_used"] >= 3:
-                    await interaction.response.send_message(
-                        "🚫 Limit reached! You can only skip 3 times per game.", 
-                        ephemeral=True
-                    )
-                    return
-
-                try:
-                    await handle_interaction_response(interaction)
-
-                    game_state["skips_used"] += 1
-
-                    game_state["history"].append(game_state["current_card"])
-                    next_card = await self.fair_choice(user.id, cards)
-                    game_state["current_card"] = next_card
-                    await update_display(interaction)
-
-                except Exception as e:
-                    self.bot.logger.error(f"Error in skip callback: {e}")
-
-            async def cashout_callback(interaction: Interaction):
-                if interaction.user.id != user.id:
-                    await handle_interaction_response(
-                        interaction, "This isn't your game!"
-                    )
-                    return
-                if not game_state["game_active"]:
-                    await handle_interaction_response(
-                        interaction, "Game is not active!", ephemeral=True
-                    )
-                    return
-                if not game_state["has_played"]:
-                    await handle_interaction_response(
-                        interaction,
-                        "🚫 You must make at least one guess (Higher/Lower) before cashing out!",
-                        ephemeral=True,
-                    )
-                    return
-
-                try:
-                    await handle_interaction_response(interaction)
-
-                    bet = game_state["bet_amount"]
-                    current_multiplier = game_state["multiplier"]
-                    winnings = bet * current_multiplier
-                    wallet_id = await self.bot.database.get_wallet_id_for_user(
-                        interaction.user.id
-                    )
-
-                    try:
-                        await self.bot.database.process_treasury_transaction(
-                            wallet_id=wallet_id, amount=winnings, description="HiLo Win"
-                        )
-                    except ValueError as e:
-                        embed = discord.Embed(
-                            description=f"🚫 Transaction failed: {e}",
-                            color=discord.Color.red(),
-                        )
-                        await ctx.reply(embed=embed, delete_after=5)
-                        return
-
-                    await end_game(True)
-                    await show_result(True)
-
-                except Exception as e:
-                    self.bot.logger.error(f"Error in cashout callback: {e}")
-                    await handle_interaction_response(
-                        interaction,
-                        "An error occurred while cashing out!",
-                        ephemeral=True,
-                    )
-
-            higher_prob, lower_prob = calculate_probs(current_card)
-
-            view = discord.ui.View(timeout=300.0)
-            game_state["view"] = view
-
-            view.add_item(
-                discord.ui.Button(
-                    label=f"Higher ({higher_prob}%)",
-                    style=discord.ButtonStyle.gray,
-                    custom_id="higher",
-                )
+            current_card = await self.fair_choice(user_id, HILO_CARDS[1:-1])
+
+            view = HiLoView(
+                bot=self.bot, cog=self, user=user, bet_amount=bet_amount,
+                wallet_id=wallet_id, currency_name=self.currency_name,
+                current_card=current_card, house_edge=house_edge,
+                PF=PF, session_id=session_id, ctx=ctx,
             )
-            view.add_item(
-                discord.ui.Button(
-                    label=f"Lower ({lower_prob}%)",
-                    style=discord.ButtonStyle.gray,
-                    custom_id="lower",
-                )
-            )
-            view.add_item(
-                discord.ui.Button(
-                    label="Skip Card", style=discord.ButtonStyle.gray, custom_id="skip"
-                )
-            )
-            view.add_item(
-                discord.ui.Button(
-                    label=f"Cash Out ({game_state['multiplier']:.2f}x)",
-                    style=discord.ButtonStyle.blurple,
-                    custom_id="cashout",
-                )
-            )
-
-            view.children[0].callback = higher_callback
-            view.children[1].callback = lower_callback
-            view.children[2].callback = skip_callback
-            view.children[3].callback = cashout_callback
-
-            embed = await create_embed()
-            game_state["message"] = await ctx.reply(embed=embed, view=view)
-
-            async def force_end(refund: bool = False):
-                game_state["game_active"] = False
-                for child in game_state["view"].children:
-                    child.disabled = True
-                if refund:
-                    wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-                    await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id,
-                        amount=game_state["bet_amount"],
-                        description="HiLo Refund",
-                    )
-                try:
-                    await game_state["message"].edit(view=game_state["view"])
-                except Exception:
-                    pass
-                await self._remove_refund(session_id, user_id=user_id)
-                await self._end_game_session(
-                    session_id,
-                    outcome="forced_end",
-                    final_state={"refund": refund},
-                )
-
-            self._register_session_handler(session_id, force_end)
+            view.message = await ctx.reply(view=view)
+            self._register_session_handler(session_id, view.force_end)
 
         except Exception as e:
-            if user.id in self.active_players:
-                self.active_players.remove(user.id)
-            
+            self.active_players.discard(user_id)
             self.bot.logger.error(f"Error in hilo command: {e}", exc_info=True)
             error_embed = discord.Embed(
                 title="⚠️ Error",
