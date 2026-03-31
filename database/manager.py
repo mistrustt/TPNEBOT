@@ -1768,12 +1768,6 @@ class DatabaseManager:
 
     async def deposit_to_bank(self, wallet_id: str, amount: Decimal, description: str):
         """Transfer funds from wallet to bank without affecting treasury."""
-        # Check economic circuit breaker before processing
-        circuit_breaker = await self.check_economic_circuit_breaker()
-        if circuit_breaker["triggered"]:
-            reasons = ", ".join(circuit_breaker["reasons"])
-            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
-
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 amount = AmountUtils.round_currency(amount)
@@ -1823,12 +1817,6 @@ class DatabaseManager:
         self, wallet_id: str, amount: Decimal, description: str
     ):
         """Transfer funds from bank to wallet without affecting treasury."""
-        # Check economic circuit breaker before processing
-        circuit_breaker = await self.check_economic_circuit_breaker()
-        if circuit_breaker["triggered"]:
-            reasons = ", ".join(circuit_breaker["reasons"])
-            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
-
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 amount = AmountUtils.round_currency(amount)
@@ -7089,31 +7077,28 @@ class DatabaseManager:
         #volatility = factors.get("volatility_index", Decimal("0.02"))
 
         # Define thresholds
-        VELOCITY_CRISIS_THRESHOLD = Decimal("0.05")  # Very low money velocity
-        LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.1")  # Very low liquidity
-        #VOLATILITY_CRISIS_THRESHOLD = Decimal("0.9")  # High inequality (Gini 0-1 scale)
+        VELOCITY_CRISIS_THRESHOLD = Decimal("0.001")  # Near-zero money velocity
+        LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.005")  # Less than 0.5% circulating
 
-        circuit_breaker_triggered = False
         reason = []
 
         if velocity < VELOCITY_CRISIS_THRESHOLD:
-            circuit_breaker_triggered = True
             reason.append("Low velocity of money")
 
         if liquidity_ratio < LIQUIDITY_CRISIS_THRESHOLD:
-            circuit_breaker_triggered = True
             reason.append("Low liquidity")
 
-        #if volatility > VOLATILITY_CRISIS_THRESHOLD:
-        #    circuit_breaker_triggered = False
-        #    reason.append("High volatility")
+        # Both conditions must be met to trigger the circuit breaker
+        circuit_breaker_triggered = (
+            velocity < VELOCITY_CRISIS_THRESHOLD
+            and liquidity_ratio < LIQUIDITY_CRISIS_THRESHOLD
+        )
 
         return {
             "triggered": circuit_breaker_triggered,
             "reasons": reason,
             "velocity": velocity,
             "liquidity_ratio": liquidity_ratio,
-            #"volatility": volatility
         }
 
     async def get_enhanced_fee_rate(self, transaction_type: str = "standard") -> Decimal:
