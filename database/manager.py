@@ -2106,7 +2106,7 @@ class DatabaseManager:
                         Transaction(
                             id=tid_fee,
                             from_user_id=from_uid,
-                            to_user_id=to_uid if from_uid == 0 else 0,
+                            to_user_id=0,  # Fee always goes to treasury
                             amount=fee,
                             description=f"{description} (fee @ {fee_rate:.2%})",
                             timestamp=discord.utils.utcnow(),
