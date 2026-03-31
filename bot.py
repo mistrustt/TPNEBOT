@@ -255,6 +255,15 @@ class DiscordBot(commands.Bot):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
+            # Block DM commands (owners exempt)
+            if ctx.guild is None and ctx.author.id not in self.owner_ids:
+                embed = discord.Embed(
+                    description="Commands can only be used in a server.",
+                    color=discord.Color.red(),
+                )
+                await ctx.reply(embed=embed, delete_after=5)
+                return
+
             # Block commands for accounts newer than 30 days
             account_age_threshold = timedelta(days=30)
             account_age = datetime.now(timezone.utc) - ctx.author.created_at
