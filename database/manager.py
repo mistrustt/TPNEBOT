@@ -2337,7 +2337,7 @@ class DatabaseManager:
 
     async def get_top_balance_users(self, limit: int = 10) -> list[tuple[int, Decimal]]:
         """
-        Retrieve the top users by total balance (wallet + bank combined).
+        Retrieve the top users by total balance (wallet + bank + crypto holdings at current prices).
 
         Args:
             limit: Number of top users to retrieve (default=10)
@@ -2347,12 +2347,40 @@ class DatabaseManager:
         """
         async with self.async_sessionmaker() as session:
             try:
+                # Subquery to get the latest price for each crypto symbol
+                latest_prices = (
+                    select(
+                        CryptoPrice.symbol,
+                        CryptoPrice.price
+                    )
+                    .distinct(CryptoPrice.symbol)
+                    .order_by(CryptoPrice.symbol, CryptoPrice.timestamp.desc())
+                ).subquery()
+
+                # Main query: wallet + bank + crypto holdings at current prices
                 stmt = (
                     select(
                         Wallet.user_id,
-                        (Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).label("total_balance"),
+                        (
+                            Wallet.balance
+                            + func.coalesce(Wallet.bank_balance, Decimal("0"))
+                            + func.coalesce(
+                                func.sum(CryptoAsset.amount * latest_prices.c.price), Decimal("0")
+                            )
+                        ).label("total_balance")
                     )
-                    .order_by((Wallet.balance + func.coalesce(Wallet.bank_balance, 0)).desc())
+                    .outerjoin(CryptoAsset, CryptoAsset.user_id == Wallet.user_id)
+                    .outerjoin(latest_prices, latest_prices.c.symbol == CryptoAsset.symbol)
+                    .group_by(Wallet.user_id, Wallet.balance, Wallet.bank_balance)
+                    .order_by(
+                        (
+                            Wallet.balance
+                            + func.coalesce(Wallet.bank_balance, Decimal("0"))
+                            + func.coalesce(
+                                func.sum(CryptoAsset.amount * latest_prices.c.price), Decimal("0")
+                            )
+                        ).desc()
+                    )
                     .limit(limit)
                 )
                 result = await session.execute(stmt)

@@ -1,5 +1,4 @@
-from datetime import datetime, timedelta
-import os
+import re
 import hmac
 import discord
 import logging
@@ -9,13 +8,13 @@ import random
 import hmac, hashlib
 from discord import app_commands
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from discord import ui, Button, Interaction
+from discord import Button, Interaction
 from discord.ui import View, Button
 from discord.ext import commands, tasks
 from utils.misc import MiscUtils
 from utils.amount import AmountUtils
 from collections import defaultdict
-import re
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Sequence, List, Any
 
@@ -3245,9 +3244,20 @@ class Economy(commands.Cog):
     @commands.command(name='xmas', description="Open your Christmas gift!")
     async def xmas(self, ctx: commands.Context):
         """Open your Christmas gift!"""
+        
+        # 1. Date Check: Only allow on December 25th
+        now = datetime.now(timezone.utc)
+        if now.month != 12 or now.day != 25:
+            embed = discord.Embed(
+                description="🎁 **It's not Christmas yet!** This command only works on December 25th.",
+                color=discord.Color.orange()
+            )
+            return await ctx.reply(embed=embed, delete_after=10)
+
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        gift_amount = Decimal(str(user_id)) * Decimal("2") # Unique amount based on user ID
+        
+        gift_amount = Decimal(str(user_id)) * Decimal("2") 
 
         try:
             await self.bot.database.process_treasury_transaction(
@@ -3262,6 +3272,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
             return
 
+        # Determine embed color based on role or DM
         color = (
             discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel)
@@ -3281,9 +3292,39 @@ class Economy(commands.Cog):
         )
 
         await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 31556926
+            ctx.author.id, ctx.command.qualified_name, 86400
         )
         await ctx.reply(embed=embed)
+
+    @commands.command(name="newyear", description="Open your New Year's gift!")
+    async def newyear(self, ctx: commands.Context):
+        """Open your New Year's gift!"""
+        # Implementation for New Year's gift goes here
+        now = datetime.now(timezone.utc)    
+        if now.month != 1 or now.day != 1:
+            embed = discord.Embed(
+                description="🎉 **It's not New Year's Day yet!** This command only works on January 1st.",
+                color=discord.Color.orange()
+            )
+            await self.bot.database.set_cooldown(
+                ctx.author.id, ctx.command.qualified_name, 86400
+            )
+            return await ctx.reply(embed=embed, delete_after=10)
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        gift_amount = Decimal(str(user_id)) * Decimal("3")
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=gift_amount,
+                description="New Year's Gift",
+            )
+        except ValueError as e:
+            embed = discord.Embed(
+                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
 
     @commands.group(name="crypto", aliases=["coin","coins"], invoke_without_command=True)
     async def crypto(self, ctx: commands.Context):
