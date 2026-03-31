@@ -77,6 +77,7 @@ class Moderation(commands.Cog, name="Moderation"):
             1288160215241326674,  # yo hello (daniel alt)
             1085252140102062210,  # dnd8
             1333280676119838821,  # wrld
+            1219090700407279656,  # toxic
         ]
 
     def cog_unload(self):
