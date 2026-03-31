@@ -3405,7 +3405,7 @@ class Casino(commands.Cog):
         return grid, verification
 
     def _evaluate_paylines(self, grid: list[list[str]]) -> list[dict]:
-        """Evaluate all 20 paylines against the grid.
+        """Evaluate all 10 paylines against the grid.
         
         Args:
             grid: 5x4 grid as list of columns (reels)
@@ -3414,7 +3414,7 @@ class Casino(commands.Cog):
             list of winning paylines, each with:
             - payline_id: int
             - symbol: str
-            - count: int (3, 4, or 5 matching)
+            - count: int (4 or 5 matching)
             - payout: Decimal multiplier
         """
         wins = []
