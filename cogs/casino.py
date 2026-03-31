@@ -1092,6 +1092,10 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             )
             return
 
+        # Process game result for rakeback (only if user has risked funds)
+        if self.rounds > 0:
+            await self.casino.process_game_result(self.user_id, "double", self.initial_amount)
+
         formatted_winnings = await self.casino.formatter(self.winnings)
 
         # Build cashout container (no buttons)
