@@ -3126,7 +3126,69 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="airdrop", aliases=['drop'], description="Start a money airdrop.")
+    @commands.command(name="drop", description="Drop money for others to claim")
+    async def drop(self, ctx: commands.Context, amount: str):
+        user_id = ctx.author.id
+        drop_wallet = await self.bot.database.get_wallet_id_for_user(user_id)
+        balance = await self.bot.database.get_wallet_balance(drop_wallet)
+        balance = Decimal(str(balance))
+        try:
+            amount = await self.amount_handler(amount, balance)
+        except ValueError as e:
+            embed = discord.Embed(description=str(e), color=discord.Color.red())
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        if amount < Decimal("100000"):
+            embed = discord.Embed(
+                description=f"You don't have enough in your wallet to do a drop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=drop_wallet, amount=-amount, description="Money Drop"
+            )
+        except ValueError as e:
+            embed = discord.Embed(
+                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
+
+        symbols = ["💰", "💸", "💳", "💵", "💶", "🪙", "💷", "💴"]
+        choice = secrets.choice(symbols)
+
+        embed = discord.Embed(
+            description=(
+                f"**{ctx.author.display_name}** has dropped {self.currency_name} **{await self.formatter(amount)}**!\n\n"
+                f"Click the **Button** below to claim it!"
+            ),
+            color=discord.Color.gold(),
+        )
+        embed.set_thumbnail(url=self.utils.get_avatar_url(ctx.author))
+        embed.set_author(
+            name="Money Drop", icon_url=self.utils.get_avatar_url(ctx.author)
+        )
+
+        await self.bot.database.set_cooldown(
+            ctx.author.id, ctx.command.qualified_name, 5
+        )
+        view = DropView(
+            self.bot, ctx, amount, ctx.author, self.currency_name, choice, self
+        )
+        drop_message = await ctx.reply(embed=embed, view=view)
+        view.message = drop_message
+
+        self.active_drops[drop_message.id] = {
+            "amount": amount,
+            "claimed": False,
+            "author": ctx.author,
+        }
+
+    @commands.command(name="airdrop", description="Start a money airdrop.")
     async def airdrop(self, ctx: commands.Context, amount: str):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
