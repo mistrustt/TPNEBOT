@@ -2149,11 +2149,11 @@ class Economy(commands.Cog):
 
     # Predefined job definitions
     JOBS = {
-        "janitor": {"title": "Janitor", "base_salary": Decimal("50000000")},
-        "cashier": {"title": "Cashier", "base_salary": Decimal("75000000")},
-        "developer": {"title": "Developer", "base_salary": Decimal("150000000")},
-        "manager": {"title": "Manager", "base_salary": Decimal("200000000")},
-        "executive": {"title": "Executive", "base_salary": Decimal("300000000")},
+        "janitor": {"title": "Janitor", "base_salary": Decimal("500000")},
+        "cashier": {"title": "Cashier", "base_salary": Decimal("750000")},
+        "developer": {"title": "Developer", "base_salary": Decimal("1500000")},
+        "manager": {"title": "Manager", "base_salary": Decimal("2000000")},
+        "executive": {"title": "Executive", "base_salary": Decimal("3000000")},
     }
 
     @commands.group(name="job", description="Job commands to earn some money.")
