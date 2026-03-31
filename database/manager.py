@@ -3131,7 +3131,8 @@ class DatabaseManager:
 
             # Volatility estimate using Gini coefficient (bounded 0-1)
             # Gini = 0 means perfect equality, Gini = 1 means maximum inequality
-            balances_stmt = select(Wallet.balance)
+            # Exclude treasury wallet (user_id=0) from wealth distribution check
+            balances_stmt = select(Wallet.balance).where(Wallet.user_id != 0)
             balances_result = await session.execute(balances_stmt)
             balances = [float(r[0]) for r in balances_result.fetchall()]
 
