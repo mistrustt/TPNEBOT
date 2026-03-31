@@ -4323,6 +4323,721 @@ class Owner(commands.Cog, name="Owner"):
             await ctx.send(f"Error: {e}")
 
 
+    # ── Game Simulation Commands ──────────────────────────────────────
+
+    @commands.group(name="simulate", aliases=["sim"], invoke_without_command=True)
+    @commands.is_owner()
+    async def simulate(self, ctx: Context):
+        """Simulate game outcomes to debug RTP, EV, and payout distributions.
+
+        Usage: !simulate <game> [trials]
+        Games: gamble, supergamble, dice, ladder, crash, double, roulette, mines, slots
+        """
+        embed = discord.Embed(
+            title="Game Simulator",
+            description=(
+                "Run Monte Carlo simulations of casino games.\n\n"
+                "**Usage:** `!simulate <game> [trials]`\n"
+                "**Games:** gamble, supergamble, dice, ladder, crash, "
+                "double, roulette, mines, slots\n\n"
+                "Default: **100,000** trials (max 10,000,000)"
+            ),
+            color=discord.Color.blue(),
+        )
+        await ctx.send(embed=embed)
+
+    @staticmethod
+    def _sim_format_pct(value: float) -> str:
+        return f"{value:.4f}%"
+
+    @staticmethod
+    def _sim_format_mult(value: float) -> str:
+        return f"{value:.4f}x"
+
+    @simulate.command(name="gamble")
+    @commands.is_owner()
+    async def sim_gamble(self, ctx: Context, trials: int = 100_000):
+        """Simulate coinflip gamble (50% chance, 2x payout)."""
+        trials = max(1, min(trials, 10_000_000))
+        import random
+
+        wins = 0
+        total_payout = 0.0
+        for _ in range(trials):
+            if random.randrange(2) == 1:
+                wins += 1
+                total_payout += 2.0
+
+        rtp = (total_payout / trials) * 100
+        win_rate = (wins / trials) * 100
+
+        embed = discord.Embed(
+            title="Gamble Simulation",
+            description=f"**{trials:,}** trials",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Win Rate", value=self._sim_format_pct(win_rate), inline=True)
+        embed.add_field(name="RTP", value=self._sim_format_pct(rtp), inline=True)
+        embed.add_field(name="EV per 1 bet", value=self._sim_format_mult(total_payout / trials), inline=True)
+        embed.add_field(
+            name="Theory",
+            value="Win: 50% × 2.0x = **100.00% RTP**",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="supergamble")
+    @commands.is_owner()
+    async def sim_supergamble(self, ctx: Context, trials: int = 100_000):
+        """Simulate supergamble (15% win: 8x normal, 12x mega)."""
+        trials = max(1, min(trials, 10_000_000))
+        import random
+
+        wins = 0
+        mega_wins = 0
+        total_payout = 0.0
+        for _ in range(trials):
+            win_roll = random.randrange(100)
+            bonus_roll = random.randrange(100)
+            if win_roll < 15:
+                wins += 1
+                if bonus_roll < 15:
+                    mega_wins += 1
+                    total_payout += 12.0
+                else:
+                    total_payout += 8.0
+
+        rtp = (total_payout / trials) * 100
+        win_rate = (wins / trials) * 100
+        mega_rate = (mega_wins / trials) * 100
+
+        embed = discord.Embed(
+            title="SuperGamble Simulation",
+            description=f"**{trials:,}** trials",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Win Rate", value=self._sim_format_pct(win_rate), inline=True)
+        embed.add_field(name="Mega Win Rate", value=self._sim_format_pct(mega_rate), inline=True)
+        embed.add_field(name="RTP", value=self._sim_format_pct(rtp), inline=True)
+        embed.add_field(name="EV per 1 bet", value=self._sim_format_mult(total_payout / trials), inline=True)
+        embed.add_field(
+            name="Theory",
+            value=(
+                "Win: 15% × (85% × 8x + 15% × 12x)\n"
+                "= 15% × (6.8 + 1.8) = 15% × 8.6 = **129.00% RTP**"
+            ),
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="dice")
+    @commands.is_owner()
+    async def sim_dice(self, ctx: Context, trials: int = 100_000):
+        """Simulate dice game for 'total' bet type (all possible totals)."""
+        trials = max(1, min(trials, 10_000_000))
+        import random
+
+        payout_multipliers = {
+            2: 10, 3: 7, 4: 5, 5: 4, 6: 3,
+            7: 2, 8: 3, 9: 4, 10: 5, 11: 7, 12: 10,
+        }
+
+        # Simulate betting on each possible total
+        results = {}
+        for target in range(2, 13):
+            wins = 0
+            total_payout = 0.0
+            for _ in range(trials):
+                d1 = random.randrange(6) + 1
+                d2 = random.randrange(6) + 1
+                total = d1 + d2
+                if total == target:
+                    wins += 1
+                    total_payout += payout_multipliers[target]
+            results[target] = {
+                "win_rate": (wins / trials) * 100,
+                "rtp": (total_payout / trials) * 100,
+            }
+
+        # Also simulate even/odd
+        even_payout = 0.0
+        odd_payout = 0.0
+        for _ in range(trials):
+            d1 = random.randrange(6) + 1
+            d2 = random.randrange(6) + 1
+            total = d1 + d2
+            if total % 2 == 0:
+                even_payout += 1.5
+            else:
+                odd_payout += 1.5
+
+        embed = discord.Embed(
+            title="Dice Simulation",
+            description=f"**{trials:,}** trials per target",
+            color=discord.Color.green(),
+        )
+
+        lines = []
+        for target in range(2, 13):
+            r = results[target]
+            lines.append(
+                f"**{target}** ({payout_multipliers[target]}x): "
+                f"Win {r['win_rate']:.2f}% | RTP {r['rtp']:.2f}%"
+            )
+        lines.append(f"**Even** (1.5x): RTP {(even_payout / trials) * 100:.2f}%")
+        lines.append(f"**Odd** (1.5x): RTP {(odd_payout / trials) * 100:.2f}%")
+
+        embed.add_field(name="Results by Target", value="\n".join(lines), inline=False)
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="ladder")
+    @commands.is_owner()
+    async def sim_ladder(self, ctx: Context, trials: int = 100_000):
+        """Simulate Lucky Ladder with optimal play (always climb)."""
+        trials = max(1, min(trials, 10_000_000))
+        import random
+
+        step_probs = {
+            0: 83, 1: 80, 2: 75, 3: 70, 4: 65,
+            5: 58, 6: 52, 7: 46, 8: 40, 9: 35,
+        }
+        step_mults = {
+            0: 1.00, 1: 1.15, 2: 1.45, 3: 1.90, 4: 2.75,
+            5: 4.20, 6: 7.25, 7: 14.00, 8: 30.00, 9: 75.00, 10: 215.00,
+        }
+
+        total_payout = 0.0
+        step_reached = {i: 0 for i in range(11)}
+        step_deaths = {i: 0 for i in range(10)}
+        max_step = 10
+
+        for _ in range(trials):
+            step = 0
+            while step < max_step:
+                roll = random.randrange(10000)
+                threshold = step_probs[step] * 100
+                if roll < threshold:
+                    step += 1
+                else:
+                    step_deaths[step - 0] += 1  # died trying to climb from this step
+                    break
+            else:
+                # Reached top
+                total_payout += step_mults[max_step]
+                step_reached[max_step] += 1
+                continue
+            # Died — lost bet (payout = 0)
+
+        # Also simulate optimal cashout at each step
+        cashout_rtps = {}
+        for cashout_at in range(1, 11):
+            cp = 0.0
+            for _ in range(trials):
+                step = 0
+                while step < cashout_at:
+                    roll = random.randrange(10000)
+                    threshold = step_probs[step] * 100
+                    if roll < threshold:
+                        step += 1
+                    else:
+                        break
+                else:
+                    cp += step_mults[cashout_at]
+            cashout_rtps[cashout_at] = (cp / trials) * 100
+
+        rtp_always_climb = (total_payout / trials) * 100
+
+        embed = discord.Embed(
+            title="Lucky Ladder Simulation",
+            description=f"**{trials:,}** trials",
+            color=discord.Color.green(),
+        )
+
+        # Step death distribution
+        death_lines = []
+        for s in range(10):
+            pct = (step_deaths[s] / trials) * 100
+            death_lines.append(f"Step {s}→{s+1}: {pct:.2f}% die ({step_probs[s]}% chance)")
+        embed.add_field(name="Death Distribution", value="\n".join(death_lines), inline=False)
+
+        # Cashout RTP by step
+        cashout_lines = [f"Always climb: **{rtp_always_climb:.2f}%**"]
+        for s in range(1, 11):
+            cashout_lines.append(f"Cashout step {s} ({step_mults[s]}x): {cashout_rtps[s]:.2f}%")
+        embed.add_field(name="RTP by Cashout Strategy", value="\n".join(cashout_lines), inline=False)
+
+        embed.add_field(
+            name="Theory",
+            value="Step 0 climb: 83% × 1.15x = **95.45% RTP** (EV-neutral climbing)",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="crash")
+    @commands.is_owner()
+    async def sim_crash(self, ctx: Context, trials: int = 100_000, house_edge: float = 0.04):
+        """Simulate crash game. Optional house_edge (default 0.04 = 4%).
+
+        Usage: !simulate crash [trials] [house_edge]
+        """
+        trials = max(1, min(trials, 10_000_000))
+        house_edge = max(0.01, min(house_edge, 0.10))
+        import random
+
+        edge_factor = house_edge / 0.04
+
+        total_payout = 0.0
+        bracket_counts = {"1-2x": 0, "2-5x": 0, "5-20x": 0, "20-50x": 0}
+
+        for _ in range(trials):
+            r = random.random()
+            t_low = min(0.45 * edge_factor, 0.9999)
+            t_med_low = min(0.80 * edge_factor, 0.9999)
+            t_med = min(0.95 * edge_factor, 0.9999)
+
+            if r < t_low:
+                v = 1.0 + (2.0 - 1.0) * random.random()
+                bracket_counts["1-2x"] += 1
+            elif r < t_med_low:
+                v = 2.0 + (5.0 - 2.0) * random.random()
+                bracket_counts["2-5x"] += 1
+            elif r < t_med:
+                v = 5.0 + (20.0 - 5.0) * random.random()
+                bracket_counts["5-20x"] += 1
+            else:
+                v = 20.0 + (50.0 - 20.0) * random.random()
+                bracket_counts["20-50x"] += 1
+
+            crash_point = round(v, 2)
+            total_payout += crash_point
+
+        rtp = (total_payout / trials) * 100
+        avg_crash = total_payout / trials
+
+        embed = discord.Embed(
+            title="Crash Simulation",
+            description=f"**{trials:,}** trials | House edge: **{house_edge*100:.1f}%**",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Avg Crash Point", value=self._sim_format_mult(avg_crash), inline=True)
+        embed.add_field(name="RTP (bet at 1x, ride to crash)", value=self._sim_format_pct(rtp), inline=True)
+
+        bracket_lines = []
+        for bracket, count in bracket_counts.items():
+            bracket_lines.append(f"**{bracket}**: {(count/trials)*100:.2f}%")
+        embed.add_field(name="Crash Distribution", value="\n".join(bracket_lines), inline=False)
+
+        embed.add_field(
+            name="Note",
+            value="RTP shown is for 'ride to crash'. Actual player RTP depends on cashout strategy.",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="double")
+    @commands.is_owner()
+    async def sim_double(self, ctx: Context, trials: int = 100_000, max_rounds: int = 10):
+        """Simulate Double or Nothing. Shows EV for cashing out at each round.
+
+        Usage: !simulate double [trials] [max_rounds]
+        """
+        trials = max(1, min(trials, 10_000_000))
+        max_rounds = max(1, min(max_rounds, 20))
+        import random
+
+        # For each round N, simulate: what fraction of players survive N rounds?
+        round_stats = {}
+        for target_round in range(1, max_rounds + 1):
+            survivors = 0
+            for _ in range(trials):
+                survived = True
+                for _ in range(target_round):
+                    if random.randrange(2) != 1:
+                        survived = False
+                        break
+                if survived:
+                    survivors += 1
+
+            multiplier = 2 ** target_round
+            survival_rate = survivors / trials
+            rtp = survival_rate * multiplier * 100
+
+            round_stats[target_round] = {
+                "survival": survival_rate * 100,
+                "multiplier": multiplier,
+                "rtp": rtp,
+            }
+
+        embed = discord.Embed(
+            title="Double or Nothing Simulation",
+            description=f"**{trials:,}** trials | Max rounds: **{max_rounds}**",
+            color=discord.Color.green(),
+        )
+
+        lines = []
+        for r in range(1, max_rounds + 1):
+            s = round_stats[r]
+            lines.append(
+                f"Round {r} ({s['multiplier']}x): "
+                f"Survive {s['survival']:.2f}% | RTP {s['rtp']:.2f}%"
+            )
+        embed.add_field(name="Per-Round Stats", value="\n".join(lines), inline=False)
+        embed.add_field(
+            name="Theory",
+            value="Each round: 50% × 2x = **100% RTP** (EV-neutral)",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="roulette")
+    @commands.is_owner()
+    async def sim_roulette(self, ctx: Context, trials: int = 100_000):
+        """Simulate roulette for all bet types."""
+        trials = max(1, min(trials, 10_000_000))
+        import random
+
+        all_numbers = list(range(0, 37)) + ["00"]
+        red_numbers = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+        black_numbers = {2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35}
+
+        bet_types = {
+            "Red (2x)": lambda s: isinstance(s, int) and s in red_numbers,
+            "Black (2x)": lambda s: isinstance(s, int) and s in black_numbers,
+            "Green (14x)": lambda s: s == 0 or s == "00",
+            "Even (2x)": lambda s: isinstance(s, int) and s > 0 and s % 2 == 0,
+            "Odd (2x)": lambda s: isinstance(s, int) and s % 2 == 1,
+            "High (2x)": lambda s: isinstance(s, int) and 19 <= s <= 36,
+            "Low (2x)": lambda s: isinstance(s, int) and 1 <= s <= 18,
+            "Dozen1 (3x)": lambda s: isinstance(s, int) and 1 <= s <= 12,
+            "Dozen2 (3x)": lambda s: isinstance(s, int) and 13 <= s <= 24,
+            "Dozen3 (3x)": lambda s: isinstance(s, int) and 25 <= s <= 36,
+            "Single# (36x)": lambda s: isinstance(s, int) and s == 17,  # representative
+        }
+
+        multipliers = {
+            "Red (2x)": 2, "Black (2x)": 2, "Green (14x)": 14,
+            "Even (2x)": 2, "Odd (2x)": 2, "High (2x)": 2, "Low (2x)": 2,
+            "Dozen1 (3x)": 3, "Dozen2 (3x)": 3, "Dozen3 (3x)": 3,
+            "Single# (36x)": 36,
+        }
+
+        results = {bt: 0.0 for bt in bet_types}
+        for _ in range(trials):
+            spin = random.choice(all_numbers)
+            for bt, check in bet_types.items():
+                if check(spin):
+                    results[bt] += multipliers[bt]
+
+        embed = discord.Embed(
+            title="Roulette Simulation",
+            description=f"**{trials:,}** trials (38-slot American wheel)",
+            color=discord.Color.green(),
+        )
+
+        lines = []
+        for bt in bet_types:
+            rtp = (results[bt] / trials) * 100
+            lines.append(f"**{bt}**: RTP {rtp:.2f}%")
+        embed.add_field(name="RTP by Bet Type", value="\n".join(lines), inline=False)
+        embed.add_field(
+            name="Theory",
+            value="American roulette (0+00): ~**94.74% RTP** for most bets\nGreen 14x: 2/38 × 14 = **73.68% RTP**",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="mines")
+    @commands.is_owner()
+    async def sim_mines(self, ctx: Context, bombs: int = 3, trials: int = 100_000):
+        """Simulate mines game with combinatorial multipliers.
+
+        Usage: !simulate mines [bombs] [trials]
+        """
+        trials = max(1, min(trials, 10_000_000))
+        bombs = max(1, min(bombs, 24))
+        import random
+        from math import comb
+
+        grid_size = 25
+        safe_total = grid_size - bombs
+        house_edge = 0.04
+
+        # Calculate exact combinatorial multipliers
+        multipliers = {}
+        for gems in range(1, safe_total + 1):
+            fair_mult = comb(grid_size, gems) / comb(safe_total, gems)
+            multipliers[gems] = round(fair_mult * (1 - house_edge), 4)
+
+        # Simulate: player clicks gems one at a time, always continues
+        step_survivals = {g: 0 for g in range(1, safe_total + 1)}
+
+        for _ in range(trials):
+            board = [0] * safe_total + [1] * bombs
+            random.shuffle(board)
+            gems_clicked = 0
+            for i in range(grid_size):
+                if board[i] == 1:
+                    break  # hit bomb
+                gems_clicked += 1
+                step_survivals[gems_clicked] += 1
+
+        embed = discord.Embed(
+            title=f"Mines Simulation ({bombs} bombs)",
+            description=f"**{trials:,}** trials | Grid: 5×5 | House edge: 4%",
+            color=discord.Color.green(),
+        )
+
+        lines = []
+        for gems in range(1, min(safe_total + 1, 16)):  # Show first 15 steps
+            surv_pct = (step_survivals[gems] / trials) * 100
+            mult = multipliers[gems]
+            rtp = surv_pct * mult / 100
+            lines.append(
+                f"Gem {gems}: Survive {surv_pct:.2f}% | "
+                f"Mult {mult:.2f}x | RTP {rtp*100:.2f}%"
+            )
+        embed.add_field(name="Per-Gem Stats", value="\n".join(lines), inline=False)
+
+        embed.add_field(
+            name="Theory",
+            value=f"Fair mult × (1 - {house_edge}) at each step → ~**{(1-house_edge)*100:.0f}% RTP**",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
+
+    @simulate.command(name="slots")
+    @commands.is_owner()
+    async def sim_slots(self, ctx: Context, trials: int = 100_000):
+        """Simulate slots spins with full payline evaluation."""
+        trials = max(1, min(trials, 10_000_000))
+        import random
+
+        reel_weights = {
+            0: {"lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
+                "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1},
+            1: {"lemon": 40, "slot_machine": 35, "cherry": 8, "star": 5,
+                "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1},
+            2: {"lemon": 50, "slot_machine": 40, "cherry": 6, "star": 3,
+                "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
+            3: {"lemon": 50, "slot_machine": 40, "cherry": 5, "star": 2,
+                "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1},
+            4: {"lemon": 55, "slot_machine": 40, "cherry": 2, "star": 1,
+                "bell": 0, "seven": 0, "diamond": 1, "wild": 0, "scatter": 1},
+        }
+
+        symbols_payouts = {
+            "diamond": {5: 50, 4: 15},
+            "seven": {5: 50, 4: 12},
+            "bell": {5: 40, 4: 8},
+            "star": {5: 25, 4: 6},
+            "cherry": {5: 15, 4: 4},
+            "lemon": {5: 10, 4: 2},
+            "slot_machine": {5: 8, 4: 1.5},
+            "wild": {5: 50, 4: 20},
+            "scatter": {5: 50, 4: 8},
+        }
+
+        paylines = [
+            [(0,0),(0,1),(0,2),(0,3),(0,4)],
+            [(1,0),(1,1),(1,2),(1,3),(1,4)],
+            [(2,0),(2,1),(2,2),(2,3),(2,4)],
+            [(3,0),(3,1),(3,2),(3,3),(3,4)],
+            [(0,0),(1,1),(2,2),(1,3),(0,4)],
+            [(3,0),(2,1),(1,2),(2,3),(3,4)],
+            [(3,0),(2,1),(1,2),(2,3),(3,4)],
+            [(0,0),(1,1),(2,2),(1,3),(0,4)],
+            [(0,0),(1,1),(2,2),(3,3),(3,4)],
+            [(3,0),(2,1),(1,2),(0,3),(0,4)],
+        ]
+
+        # Precompute cumulative weights per reel
+        reel_data = {}
+        for reel_idx, weights in reel_weights.items():
+            symbols = list(weights.keys())
+            values = list(weights.values())
+            total = sum(values)
+            cum = []
+            running = 0
+            for v in values:
+                running += v
+                cum.append(running)
+            reel_data[reel_idx] = (symbols, cum, total)
+
+        total_payout = 0.0
+        hit_count = 0
+
+        msg = await ctx.send(
+            embed=discord.Embed(
+                description=f"Running {trials:,} slot simulations...",
+                color=discord.Color.blue(),
+            )
+        )
+
+        for trial in range(trials):
+            # Generate 5x4 grid (column-major)
+            grid = []
+            for reel_idx in range(5):
+                syms, cum, total = reel_data[reel_idx]
+                reel = []
+                for _ in range(4):
+                    pos = random.randrange(total)
+                    selected = syms[0]
+                    for i, bound in enumerate(cum):
+                        if pos < bound:
+                            selected = syms[i]
+                            break
+                    reel.append(selected)
+                grid.append(reel)
+
+            # Evaluate paylines
+            spin_payout = 0.0
+            for line in paylines:
+                symbols_on_line = [grid[col][row] for row, col in line]
+
+                first_symbol = None
+                match_count = 0
+                for sym in symbols_on_line:
+                    if sym == "scatter":
+                        break
+                    if first_symbol is None:
+                        if sym != "wild":
+                            first_symbol = sym
+                            match_count = 1
+                    elif sym == first_symbol or sym == "wild":
+                        match_count += 1
+                    else:
+                        break
+
+                if match_count >= 4 and first_symbol:
+                    payouts = symbols_payouts.get(first_symbol, {})
+                    payout = payouts.get(match_count, 0)
+                    spin_payout += payout
+
+            # Count scatters
+            scatter_count = sum(
+                1 for col in grid for sym in col if sym == "scatter"
+            )
+            if scatter_count >= 4:
+                spin_payout += symbols_payouts["scatter"].get(scatter_count, 0)
+
+            if spin_payout > 0:
+                hit_count += 1
+            total_payout += spin_payout
+
+        rtp = (total_payout / trials) * 100
+        hit_rate = (hit_count / trials) * 100
+        avg_win = total_payout / hit_count if hit_count else 0
+
+        embed = discord.Embed(
+            title="Slots Simulation",
+            description=f"**{trials:,}** spins | 5×4 grid | 10 paylines",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="RTP", value=self._sim_format_pct(rtp), inline=True)
+        embed.add_field(name="Hit Rate", value=self._sim_format_pct(hit_rate), inline=True)
+        embed.add_field(name="Avg Win (when hit)", value=f"{avg_win:.2f}x bet", inline=True)
+        embed.add_field(name="Total Wins", value=f"{hit_count:,} / {trials:,}", inline=True)
+        await msg.edit(embed=embed)
+
+    @simulate.command(name="all")
+    @commands.is_owner()
+    async def sim_all(self, ctx: Context, trials: int = 100_000):
+        """Run a quick simulation of all games and show RTP summary."""
+        trials = max(1, min(trials, 1_000_000))
+        import random
+        from math import comb
+
+        msg = await ctx.send(
+            embed=discord.Embed(
+                description=f"Running all simulations ({trials:,} trials each)...",
+                color=discord.Color.blue(),
+            )
+        )
+
+        results = {}
+
+        # Gamble (50%, 2x)
+        p = sum(1 for _ in range(trials) if random.randrange(2) == 1)
+        results["Gamble"] = (p * 2.0 / trials) * 100
+
+        # SuperGamble
+        sg = 0.0
+        for _ in range(trials):
+            if random.randrange(100) < 15:
+                sg += 12.0 if random.randrange(100) < 15 else 8.0
+        results["SuperGamble"] = (sg / trials) * 100
+
+        # Dice (bet on 7, most common)
+        d7 = sum(
+            2.0
+            for _ in range(trials)
+            if (random.randrange(6) + 1 + random.randrange(6) + 1) == 7
+        )
+        results["Dice (bet 7)"] = (d7 / trials) * 100
+
+        # Ladder (cashout step 1)
+        l1 = sum(
+            1.15 for _ in range(trials) if random.randrange(10000) < 8300
+        )
+        results["Ladder (step 1)"] = (l1 / trials) * 100
+
+        # Double or Nothing (1 round)
+        dn = sum(2.0 for _ in range(trials) if random.randrange(2) == 1)
+        results["Double (1 round)"] = (dn / trials) * 100
+
+        # Roulette (red)
+        wheel = list(range(0, 37)) + ["00"]
+        red = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+        rr = sum(
+            2.0
+            for _ in range(trials)
+            if (s := random.choice(wheel)) in red
+        )
+        results["Roulette (red)"] = (rr / trials) * 100
+
+        # Mines (3 bombs, 1 gem click)
+        fair_mult_1gem = comb(25, 1) / comb(22, 1) * 0.96
+        m1 = sum(
+            fair_mult_1gem
+            for _ in range(trials)
+            if random.randrange(25) >= 3  # 22/25 chance safe
+        )
+        results["Mines (3b, 1gem)"] = (m1 / trials) * 100
+
+        # Crash (4% edge, avg crash point)
+        cp = 0.0
+        for _ in range(trials):
+            r = random.random()
+            if r < 0.45:
+                cp += 1.0 + random.random()
+            elif r < 0.80:
+                cp += 2.0 + 3.0 * random.random()
+            elif r < 0.95:
+                cp += 5.0 + 15.0 * random.random()
+            else:
+                cp += 20.0 + 30.0 * random.random()
+        results["Crash (avg point)"] = (cp / trials) * 100
+
+        embed = discord.Embed(
+            title="All Games — RTP Summary",
+            description=f"**{trials:,}** trials each",
+            color=discord.Color.gold(),
+        )
+
+        lines = []
+        for game, rtp in sorted(results.items(), key=lambda x: x[1], reverse=True):
+            indicator = "🟢" if rtp >= 95 else ("🟡" if rtp >= 90 else "🔴")
+            lines.append(f"{indicator} **{game}**: {rtp:.2f}%")
+
+        embed.add_field(name="RTP Results", value="\n".join(lines), inline=False)
+        embed.add_field(
+            name="Legend",
+            value="🟢 ≥95% | 🟡 90-95% | 🔴 <90%",
+            inline=False,
+        )
+        await msg.edit(embed=embed)
+
+
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
     logger.debug("Owner cog initialized successfully")
