@@ -2203,36 +2203,298 @@ class PokerView(View):
         )
 
 
-class LadderView(View):
-    def __init__(self, user_id, cog):
+class LadderView(discord.ui.LayoutView):
+    """Lucky Ladder game view using Components V2 Container system.
+
+    Rebalanced for ~95.5% RTP with EV-neutral climbing at every step.
+    """
+
+    # ── probability of SUCCESS when climbing FROM this step ──
+    STEP_PROBS = {
+        0: 83, 1: 80, 2: 75, 3: 70, 4: 65,
+        5: 58, 6: 52, 7: 46, 8: 40, 9: 35,
+    }
+    # ── multiplier the player HOLDS when standing on this step ──
+    STEP_MULTS = {
+        0: Decimal("1.00"),  1: Decimal("1.15"),  2: Decimal("1.45"),
+        3: Decimal("1.90"),  4: Decimal("2.75"),  5: Decimal("4.20"),
+        6: Decimal("7.25"),  7: Decimal("14.00"), 8: Decimal("30.00"),
+        9: Decimal("75.00"), 10: Decimal("215.00"),
+    }
+    MAX_STEP = 10
+
+    def __init__(
+        self, *, bot, cog, user_id: int, bet: Decimal, wallet_id,
+        PF: dict, session_id, currency_name: str,
+    ):
         super().__init__(timeout=60)
+        self.bot = bot
+        self.cog: Casino = cog
         self.user_id = user_id
-        self.cog = cog
+        self.bet = bet
+        self.wallet_id = wallet_id
+        self.PF = PF
+        self.session_id = session_id
+        self.currency_name = currency_name
+        self.step = 0
+        self.current_multiplier = self.STEP_MULTS[0]
+        self.start_time = discord.utils.utcnow()
         self.message: discord.Message | None = None
 
-    @discord.ui.button(label="Climb", style=discord.ButtonStyle.green)
-    async def climb_button(
-        self, interaction: discord.Interaction, _button: discord.ui.Button
+        # Buttons
+        self.climb_button = discord.ui.Button(
+            label="🪜 Climb", style=discord.ButtonStyle.green,
+        )
+        self.climb_button.callback = self._climb_callback
+
+        self.cashout_button = discord.ui.Button(
+            label="💰 Cash Out", style=discord.ButtonStyle.red,
+        )
+        self.cashout_button.callback = self._cashout_callback
+
+    # ── visual helpers ──────────────────────────────────────────
+
+    def _build_ladder_visual(self) -> str:
+        lines = []
+        for s in range(self.MAX_STEP, -1, -1):
+            mult = self.STEP_MULTS[s]
+            prob = self.STEP_PROBS.get(s, "")
+            prob_str = f"({prob}%)" if prob != "" else "(TOP)"
+            if s == self.step:
+                marker = "▶"
+            elif s < self.step:
+                marker = "✅"
+            else:
+                marker = "⬜"
+            lines.append(f"`{marker} Step {s:>2} │ {mult:>7.2f}x │ {prob_str:>6}`")
+        return "\n".join(lines)
+
+    def _build_container(
+        self, *, accent_color: int, content: str, show_buttons: bool = True,
     ):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "This is not your game!", ephemeral=True
+        ladder_visual = self._build_ladder_visual()
+        children = [
+            discord.ui.TextDisplay("## 🪜 Lucky Ladder"),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(ladder_visual),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(content),
+        ]
+        if show_buttons:
+            children.append(discord.ui.Separator())
+            children.append(
+                discord.ui.ActionRow(self.climb_button, self.cashout_button),
             )
+        container = discord.ui.Container(*children, accent_color=accent_color)
+        self.clear_items()
+        self.add_item(container)
+
+    async def build_initial_container(self):
+        formatted_bet = await self.cog.formatter(self.bet)
+        next_prob = self.STEP_PROBS.get(0, 0)
+        next_mult = self.STEP_MULTS.get(1, Decimal("0"))
+        content = (
+            f"**Bet:** {self.currency_name} **{formatted_bet}**\n"
+            f"**Current Step:** 0 • **Multiplier:** 1.00x\n"
+            f"**Next Climb:** {next_prob}% chance → {next_mult}x\n\n"
+            "Click **Climb** to risk it or **Cash Out** to secure winnings.\n"
+            "*You must climb at least once before cashing out.*"
+        )
+        self._build_container(accent_color=0x5865F2, content=content)
+
+    # ── callbacks ────────────────────────────────────────────────
+
+    async def _climb_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "This is not your game!", ephemeral=True,
+            )
+        if (discord.utils.utcnow() - self.start_time).total_seconds() > 300:
+            self._build_container(
+                accent_color=0xFEE75C,
+                content="Game expired. Your bet has been refunded.",
+                show_buttons=False,
+            )
+            await interaction.response.edit_message(view=self)
+            await self._refund_and_end("expired")
             return
 
-        await self.cog.climb_ladder(interaction, self.user_id)
+        success_chance = self.STEP_PROBS.get(self.step, 0)
+        threshold = success_chance * 100
+        roll = await self.cog.fair_randbelow(self.user_id, 10000)
 
-    @discord.ui.button(label="Cash Out", style=discord.ButtonStyle.red)
-    async def cashout_button(
-        self, interaction: discord.Interaction, _button: discord.ui.Button
-    ):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "This is not your game!", ephemeral=True
+        if roll < threshold:
+            # ── success ──
+            self.step += 1
+            self.current_multiplier = self.STEP_MULTS[self.step]
+            current_winnings = self.bet * self.current_multiplier
+            formatted_winnings = await self.cog.formatter(current_winnings)
+
+            if self.step >= self.MAX_STEP:
+                # Reached the top — auto cash-out
+                await self.cog.process_game_result(self.user_id, "ladder", self.bet)
+                await self.bot.database.increment_win(
+                    self.user_id, "ladder", self.bet,
+                    client_seed=self.PF["client_seed"], seed_used=None,
+                    nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+                )
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=self.wallet_id,
+                    amount=current_winnings,
+                    description="Lucky Ladder Max Win!",
+                )
+                content = (
+                    f"🏆 **You reached the top!**\n\n"
+                    f"**Step:** {self.step} • **Multiplier:** {self.current_multiplier}x\n"
+                    f"**Winnings:** {self.currency_name} **{formatted_winnings}**"
+                )
+                self._build_container(
+                    accent_color=0xFEE75C, content=content, show_buttons=False,
+                )
+                await interaction.response.edit_message(view=self)
+                await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+                await self.cog._end_game_session(
+                    self.session_id, outcome="win",
+                    final_state={"step": self.step, "winnings": str(current_winnings)},
+                )
+                self.stop()
+                return
+
+            # Still climbing
+            next_prob = self.STEP_PROBS.get(self.step, 0)
+            next_mult = self.STEP_MULTS.get(self.step + 1, Decimal("0"))
+            content = (
+                f"🎉 **Climbed to step {self.step}!**\n\n"
+                f"**Multiplier:** {self.current_multiplier}x • "
+                f"**Winnings:** {self.currency_name} **{formatted_winnings}**\n"
+                f"**Next Climb:** {next_prob}% chance → {next_mult}x"
             )
-            return
+            self._build_container(accent_color=0x57F287, content=content)
+            await interaction.response.edit_message(view=self)
+            await self.cog._log_game_event(
+                self.session_id, "climb",
+                {"step": self.step, "multiplier": str(self.current_multiplier)},
+            )
+        else:
+            # ── fell ──
+            await self.cog.process_game_result(self.user_id, "ladder", self.bet)
+            await self.bot.database.increment_loss(
+                self.user_id, "ladder", self.bet,
+                client_seed=self.PF["client_seed"], seed_used=None,
+                nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+            )
+            formatted_bet = await self.cog.formatter(self.bet)
+            content = (
+                f"💥 **You fell from step {self.step}!**\n\n"
+                f"**Lost:** {self.currency_name} **{formatted_bet}**\n"
+                f"Success chance was {success_chance}% — you rolled {roll / 100:.2f}"
+            )
+            self._build_container(
+                accent_color=0xED4245, content=content, show_buttons=False,
+            )
+            await interaction.response.edit_message(view=self)
+            await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+            await self.cog._end_game_session(
+                self.session_id, outcome="loss",
+                final_state={"step": self.step, "loss": str(self.bet)},
+            )
+            self.stop()
 
-        await self.cog.cashout(interaction, self.user_id)
+    async def _cashout_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "This is not your game!", ephemeral=True,
+            )
+        if self.step == 0:
+            return await interaction.response.send_message(
+                "You must climb at least once before cashing out!", ephemeral=True,
+            )
+
+        final_reward = self.bet * self.current_multiplier
+        await self.cog.process_game_result(self.user_id, "ladder", self.bet)
+        await self.bot.database.increment_win(
+            self.user_id, "ladder", self.bet,
+            client_seed=self.PF["client_seed"], seed_used=None,
+            nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+        )
+        await self.bot.database.process_treasury_transaction(
+            wallet_id=self.wallet_id,
+            amount=final_reward,
+            description=f"Lucky Ladder Cashout (Step {self.step})",
+        )
+        formatted_reward = await self.cog.formatter(final_reward)
+        content = (
+            f"💰 **Cashed Out!**\n\n"
+            f"**Step:** {self.step} • **Multiplier:** {self.current_multiplier}x\n"
+            f"**Winnings:** {self.currency_name} **{formatted_reward}**"
+        )
+        self._build_container(
+            accent_color=0x57F287, content=content, show_buttons=False,
+        )
+        await interaction.response.edit_message(view=self)
+        await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+        await self.cog._end_game_session(
+            self.session_id, outcome="win",
+            final_state={"step": self.step, "winnings": str(final_reward)},
+        )
+        self.stop()
+
+    # ── cleanup ──────────────────────────────────────────────────
+
+    async def _refund_and_end(self, reason: str):
+        await self.bot.database.process_treasury_transaction(
+            wallet_id=self.wallet_id,
+            amount=self.bet,
+            description="Lucky Ladder Refund",
+        )
+        await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+        await self.cog._end_game_session(
+            self.session_id, outcome="forced_end",
+            final_state={"reason": reason, "refund": True},
+        )
+        self.stop()
+
+    async def force_end(self, *, refund: bool = False):
+        self.climb_button.disabled = True
+        self.cashout_button.disabled = True
+        self._build_container(
+            accent_color=0xFEE75C,
+            content="Game ended (forced).",
+            show_buttons=False,
+        )
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        if refund:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=self.wallet_id,
+                amount=self.bet,
+                description="Lucky Ladder Refund",
+            )
+        await self.cog._remove_refund(self.session_id, user_id=self.user_id)
+        await self.cog._end_game_session(
+            self.session_id, outcome="forced_end",
+            final_state={"reason": "force_end", "refund": refund},
+        )
+        self.stop()
+
+    async def on_timeout(self):
+        try:
+            self._build_container(
+                accent_color=0xFEE75C,
+                content="Game timed out. Your bet has been refunded.",
+                show_buttons=False,
+            )
+            if self.message:
+                try:
+                    await self.message.edit(view=self)
+                except Exception:
+                    pass
+            await self._refund_and_end("timeout")
+        except Exception:
+            pass
 
 
 class SlotsButtons(ui.ActionRow):
@@ -2825,7 +3087,6 @@ class Casino(commands.Cog):
         self.bot = bot
         self.utils = MiscUtils(self)
         self.currency_name = "<:coin:1359823671581085847>"
-        self.ladder_games = {}
         self.active_players = set()
         self.active_games: dict[int, CrashView] = {}
         self.session_registry = {}
@@ -5929,14 +6190,12 @@ class Casino(commands.Cog):
         description="Play Ladder - a high-risk, high-reward game!",
     )
     async def luckyladder(self, ctx: Context, bet_amount: str):
-        """Start climbing the Lucky Ladder with a bet."""
+        """Start climbing the Lucky Ladder with a bet. Uses Components V2 Container system."""
         user_id = ctx.author.id
         PF = await self.prove_fairness(user_id)
-        session_id = None
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-        currency_name = self.currency_name
 
         try:
             amount = await self.amount_handler(bet_amount, balance)
@@ -5991,268 +6250,17 @@ class Casino(commands.Cog):
             reason="ladder_bet",
         )
 
-        self.ladder_games[user_id] = {
-            "step": 0,
-            "bet": amount,
-            "current_multiplier": Decimal("1.00"),
-            "start_time": discord.utils.utcnow(),
-            "PF": PF,
-            "session_id": session_id,
-        }
-
-        embed = discord.Embed(
-            title="Lucky Ladder",
-            description=(
-                f"You've started climbing with a bet of {currency_name} **{await self.formatter(amount)}**.\n\n"
-                "**How to Play:**\n"
-                "• Click **Climb** to attempt going up a step\n"
-                "• Higher steps = Higher multipliers but lower success chance\n"
-                "• Click **Cash Out** anytime to secure your winnings\n"
-                "• Falling = Lose everything!"
-            ),
-            color=discord.Color.blurple(),
+        view = LadderView(
+            bot=self.bot, cog=self, user_id=user_id, bet=amount,
+            wallet_id=wallet_id, PF=PF, session_id=session_id,
+            currency_name=self.currency_name,
         )
-        embed.add_field(
-            name="Status",
-            value=(
-                "**Current Step:** 0\n"
-                "**Success Chance:** 80%\n"
-                "**Current Multiplier:** 1.00x\n"
-                "**Potential Next Multiplier:** 1.15x"
-            ),
-            inline=False,
-        )
+        await view.build_initial_container()
 
-        view = LadderView(user_id, self)
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
-        msg = await ctx.reply(embed=embed, view=view)
+        msg = await ctx.reply(view=view)
         view.message = msg
-
-        async def force_end(refund: bool = False):
-            game = self.ladder_games.pop(user_id, None)
-            if refund and game:
-                wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-                await self.bot.database.process_treasury_transaction(
-                    wallet_id=wallet_id,
-                    amount=game["bet"],
-                    description="Lucky Ladder Refund",
-                )
-            for child in view.children:
-                child.disabled = True
-            if view.message:
-                try:
-                    await view.message.edit(view=view)
-                except Exception:
-                    pass
-            await self._remove_refund(session_id, user_id=user_id)
-            await self._end_game_session(
-                session_id,
-                outcome="forced_end",
-                final_state={"refund": refund},
-            )
-
-        self._register_session_handler(session_id, force_end)
-
-    async def climb_ladder(self, interaction: discord.Interaction, user_id: int):
-        """Handles the player's climb action with provably-fair RNG."""
-        game = self.ladder_games.get(user_id)
-        if not game:
-            return await interaction.response.send_message(
-                "You are not currently playing Lucky Ladder.", ephemeral=True
-            )
-
-        if (discord.utils.utcnow() - game["start_time"]).total_seconds() > 300:
-            del self.ladder_games[user_id]
-            return await interaction.response.send_message(
-                "Your game has expired. Please start a new one.", ephemeral=True
-            )
-
-        PF = game["PF"]
-        step = game["step"]
-        bet = game["bet"]
-
-        step_probs = {
-            0: 80,
-            1: 75,
-            2: 70,
-            3: 65,
-            4: 60,
-            5: 55,
-            6: 50,
-            7: 45,
-            8: 40,
-            9: 35,
-            10: 30,
-        }
-        step_mults = {
-            0: 1.00,
-            1: 1.15,
-            2: 1.30,
-            3: 1.50,
-            4: 1.75,
-            5: 2.05,
-            6: 2.40,
-            7: 2.80,
-            8: 3.25,
-            9: 3.75,
-            10: 4.20,
-        }
-
-        success_chance = step_probs.get(step, 5)
-        threshold = success_chance * 100
-
-        roll = await self.fair_randbelow(user_id, 10000)
-
-        if roll < threshold:
-            game["step"] += 1
-            game["current_multiplier"] = Decimal(str(step_mults[game["step"]]))
-
-            current_winnings = bet * game["current_multiplier"]
-            next_step = game["step"] + 1
-            next_chance = step_probs.get(next_step, 0)
-            next_mult = step_mults.get(next_step, "MAX")
-
-            embed = discord.Embed(
-                title="Lucky Ladder",
-                description=f"🎉 Success! You've climbed to step {game['step']}!",
-                color=discord.Color.green(),
-            )
-            embed.add_field(
-                name="Status",
-                value=(
-                    f"**Current Step:** {game['step']}\n"
-                    f"**Current Multiplier:** {game['current_multiplier']:.2f}x\n"
-                    f"**Current Winnings:** {await self.formatter(current_winnings)}\n"
-                    f"**Next Step Chance:** {next_chance}%\n"
-                    f"**Next Multiplier:** {next_mult}x"
-                ),
-                inline=False,
-            )
-
-            if game["step"] == 10:
-                wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-                try:
-                    await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id,
-                        amount=current_winnings,
-                        description="Lucky Ladder Max Win!",
-                    )
-                except ValueError as e:
-                    return await interaction.response.send_message(
-                        embed=discord.Embed(
-                            description=f"🚫 {e}", color=discord.Color.red()
-                        ),
-                        delete_after=5,
-                    )
-                embed.description = (
-                    f"🏆 **Congratulations!!** You've reached the top!\n"
-                    f"You won **{await self.formatter(current_winnings)}**!"
-                )
-                await self._remove_refund(game.get("session_id"), user_id=user_id)
-                await self._end_game_session(
-                    game.get("session_id"),
-                    outcome="win",
-                    final_state={"winnings": str(current_winnings)},
-                )
-                del self.ladder_games[user_id]
-                return await interaction.response.edit_message(embed=embed, view=None)
-
-            view = LadderView(user_id, self)
-            await interaction.response.edit_message(embed=embed, view=view)
-
-        else:
-            revealed_seed, new_hash = await self.bot.database.increment_loss(
-                user_id,
-                "ladder",
-                bet,
-                client_seed=PF["client_seed"],
-                seed_used=None,
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
-            )
-            embed = discord.Embed(
-                title="Lucky Ladder",
-                description=(
-                    f"💥 Oh no! You fell from step {step}!\n"
-                    f"You lost {await self.formatter(bet)}\n\n"
-                    f"Success chance: {success_chance}%\n"
-                    f"You rolled: {(roll/100):.2f}"
-                ),
-                color=discord.Color.red(),
-            )
-            await self._remove_refund(game.get("session_id"), user_id=user_id)
-            await self._end_game_session(
-                game.get("session_id"),
-                outcome="loss",
-                final_state={"loss": str(bet)},
-            )
-            del self.ladder_games[user_id]
-            await interaction.response.edit_message(embed=embed, view=None)
-
-    async def cashout(self, interaction: discord.Interaction, user_id: int):
-        """Handles the player's cash out action with PF logging."""
-        game = self.ladder_games.get(user_id)
-        if not game:
-            return await interaction.response.send_message(
-                "You are not currently playing Lucky Ladder.", ephemeral=True
-            )
-
-        if game["step"] == 0:
-            return await interaction.response.send_message(
-                "You cannot cash out your initial bet!", ephemeral=True
-            )
-
-        if (discord.utils.utcnow() - game["start_time"]).total_seconds() > 300:
-            del self.ladder_games[user_id]
-            return await interaction.response.send_message(
-                "Your game has expired. Please start a new one.", ephemeral=True
-            )
-
-        PF = game["PF"]
-        bet = game["bet"]
-        final_reward = bet * game["current_multiplier"]
-
-        revealed_seed, new_hash = await self.bot.database.increment_win(
-            user_id,
-            "ladder",
-            bet,
-            client_seed=PF["client_seed"],
-            seed_used=None,
-            nonce=PF["nonce"],
-            hash_hex=PF["server_seed_hash"],
-        )
-
-        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id,
-                amount=final_reward,
-                description=f"Lucky Ladder Cashout (Step {game['step']})",
-            )
-        except ValueError as e:
-            return await interaction.response.send_message(
-                embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()),
-                delete_after=5,
-            )
-
-        embed = discord.Embed(
-            title="Lucky Ladder",
-            description=(
-                f"💰 **Cashed Out!**\n\n"
-                f"Final Step: {game['step']}\n"
-                f"Multiplier: {game['current_multiplier']:.2f}x\n"
-                f"Winnings: {await self.formatter(final_reward)}"
-            ),
-            color=discord.Color.gold(),
-        )
-        del self.ladder_games[user_id]
-        await interaction.response.edit_message(embed=embed, view=None)
-        await self._remove_refund(game.get("session_id"), user_id=user_id)
-        await self._end_game_session(
-            game.get("session_id"),
-            outcome="win",
-            final_state={"winnings": str(final_reward)},
-        )
+        self._register_session_handler(session_id, view.force_end)
 
     @commands.command(
         name="crash", description="Start a crash game in the current channel."

@@ -124,17 +124,16 @@ class ProvenFairness:
         )
         roll_pct = roll_raw / 100.0
         probabilities = {
-            0: 80,
-            1: 75,
-            2: 70,
-            3: 65,
-            4: 60,
-            5: 55,
-            6: 50,
-            7: 45,
+            0: 83,
+            1: 80,
+            2: 75,
+            3: 70,
+            4: 65,
+            5: 58,
+            6: 52,
+            7: 46,
             8: 40,
             9: 35,
-            10: 30,
         }
         threshold = float(probabilities.get(step, 0))
         return roll_pct, threshold
