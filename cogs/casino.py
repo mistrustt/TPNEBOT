@@ -1506,6 +1506,7 @@ class SlotsView(discord.ui.LayoutView):
         self.lock = asyncio.Lock()
         self.message = None
         self.has_played = False  # Track if game has been spun at least once
+        self.free_spin_retriggers = 0  # Track free spin retriggers (max 1)
         
         # Animation frames (emojis for spinning effect)
         self.spin_frames = ["🎰", "🎲", "🎯", "🎪", "🌟"]
@@ -1689,9 +1690,9 @@ class SlotsView(discord.ui.LayoutView):
             total_multiplier = line_winnings + scatter_payout
             total_winnings = self.bet * total_multiplier * self.multiplier
             
-            # Apply house edge
+            # Apply house edge (8%)
             if total_winnings > 0:
-                total_winnings = AmountUtils.round_currency(total_winnings * Decimal("0.98"))
+                total_winnings = AmountUtils.round_currency(total_winnings * Decimal("0.92"))
             
             # Award winnings
             if total_winnings > 0:
@@ -1702,16 +1703,17 @@ class SlotsView(discord.ui.LayoutView):
                     description="Slots Win"
                 )
             
-            # Check for free spins trigger
+            # Check for free spins trigger (max 1 retrigger)
             new_free_spins = 0
-            if scatter_count >= 3:
+            if scatter_count >= 3 and self.free_spin_retriggers < 1:
                 if scatter_count == 3:
-                    new_free_spins = 10
+                    new_free_spins = 7
                 elif scatter_count == 4:
-                    new_free_spins = 15
+                    new_free_spins = 10
                 else:  # 5 scatters
-                    new_free_spins = 20
+                    new_free_spins = 15
                 self.free_spins += new_free_spins
+                self.free_spin_retriggers += 1
             
             # Update state
             self.grid = grid
@@ -1757,7 +1759,7 @@ class SlotsView(discord.ui.LayoutView):
         
         # Sort each tier by highest payout
         for tier in symbols_by_tier:
-            symbols_by_tier[tier].sort(key=lambda x: max(x[1].get("payouts", {}).get(5, 0), x[1].get("payouts", {}).get(3, 0)), reverse=True)
+            symbols_by_tier[tier].sort(key=lambda x: x[1].get("payouts", {}).get(5, 0), reverse=True)
         
         # Special symbols (Wild & Scatter)
         special_lines = []
@@ -1769,11 +1771,11 @@ class SlotsView(discord.ui.LayoutView):
             if data.get("wild") or data.get("substitutes"):
                 special_lines.append(f"{emoji} **{name}** (Wild)")
                 special_lines.append(f"└ Substitutes for all symbols except Scatter")
-                special_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+                special_lines.append(f"└ 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
             elif data.get("scatter"):
                 special_lines.append(f"{emoji} **{name}** (Scatter)")
                 special_lines.append(f"└ Pays anywhere on the reels!")
-                special_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+                special_lines.append(f"└ 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
         
         if special_lines:
             embed.add_field(name="✨ Special Symbols", value="\n".join(special_lines), inline=False)
@@ -1785,7 +1787,7 @@ class SlotsView(discord.ui.LayoutView):
             name = data.get("name", sym)
             payouts = data.get("payouts", {})
             high_lines.append(f"{emoji} **{name}**")
-            high_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+            high_lines.append(f"└ 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
         
         if high_lines:
             embed.add_field(name="💎 High Value", value="\n".join(high_lines), inline=True)
@@ -1797,7 +1799,7 @@ class SlotsView(discord.ui.LayoutView):
             name = data.get("name", sym)
             payouts = data.get("payouts", {})
             medium_lines.append(f"{emoji} **{name}**")
-            medium_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+            medium_lines.append(f"└ 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
         
         if medium_lines:
             embed.add_field(name="⭐ Medium Value", value="\n".join(medium_lines), inline=True)
@@ -1809,7 +1811,7 @@ class SlotsView(discord.ui.LayoutView):
             name = data.get("name", sym)
             payouts = data.get("payouts", {})
             low_lines.append(f"{emoji} **{name}**")
-            low_lines.append(f"└ 3× = {payouts.get(3, 0)}× | 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
+            low_lines.append(f"└ 4× = {payouts.get(4, 0)}× | 5× = {payouts.get(5, 0)}×")
         
         if low_lines:
             embed.add_field(name="🍋 Low Value", value="\n".join(low_lines), inline=True)
@@ -1817,7 +1819,7 @@ class SlotsView(discord.ui.LayoutView):
         # Game info
         embed.add_field(
             name="📋 Game Info",
-            value="**Paylines:** 20 fixed lines\n**Free Spins:** 3+ Scatters → 10-20 spins with 2× multiplier\n**House Edge:** 2%",
+            value="**Paylines:** 10 fixed lines\n**Min Win:** 4-of-a-kind\n**Free Spins:** 3+ Scatters → 7/10/15 spins (max 1 retrigger)\n**House Edge:** 8%",
             inline=False
         )
         
@@ -2056,21 +2058,21 @@ class Casino(commands.Cog):
         # Symbol tiers: High (rare), Medium, Low (common), Special (Wild, Scatter)
         self.SLOTS_SYMBOLS = {
             # High-value symbols: Huge 5-hit payouts, but heavily nerfed 3-hit payouts
-            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 50, 4: 20, 3: 5}},
-            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 50, 4: 15, 3: 4}},
-            "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 40, 4: 10, 3: 3}},
+            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 50, 4: 15}},
+            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 50, 4: 12}},
+            "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 40, 4: 8}},
             
-            # Medium-value symbols: Trimmed mid-tier bleeds
-            "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 25, 4: 8, 3: 2}},
-            "cherry": {"emoji": "🍒", "name": "Cherry", "tier": "medium", "payouts": {5: 15, 4: 5, 3: 1}},
+            # Medium-value symbols
+            "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 25, 4: 6}},
+            "cherry": {"emoji": "🍒", "name": "Cherry", "tier": "medium", "payouts": {5: 15, 4: 4}},
             
-            # Low-value symbols: "False Wins" (A 3-hit pays 0.5x, meaning on a 10-line bet, they still lose money)
-            "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 10, 4: 3, 3: 0.5}},
-            "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 8, 4: 2, 3: 0.5}},
+            # Low-value symbols
+            "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 10, 4: 2}},
+            "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 8, 4: 1.5}},
             
-            # Special symbols: Wilds removed from 3-hit to prevent cheap connections
-            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 50, 4: 25, 3: 10}, "substitutes": True},
-            "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 50, 4: 10, 3: 2, "scatter_pays": True}},
+            # Special symbols
+            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 50, 4: 20}, "substitutes": True},
+            "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 50, 4: 8, "scatter_pays": True}},
         }
 
         # ========== SLOTS REDESIGN: Payline Patterns ==========
@@ -2086,9 +2088,9 @@ class Casino(commands.Cog):
             # V-shapes
             {"id": 5, "name": "V-Shape Top", "coords": [(0, 0), (1, 1), (2, 2), (1, 3), (0, 4)], "color": "🟣"},
             {"id": 6, "name": "V-Shape Bottom", "coords": [(3, 0), (2, 1), (1, 2), (2, 3), (3, 4)], "color": "🟠"},
-            # Inverted V-shapes
-            {"id": 7, "name": "Inverted V Top", "coords": [(3, 0), (2, 1), (1, 2), (2, 3), (3, 4)], "color": "⚪"},
-            {"id": 8, "name": "Inverted V Bottom", "coords": [(0, 0), (1, 1), (2, 2), (1, 3), (0, 4)], "color": "⚫"},
+            # W-shape and M-shape
+            {"id": 7, "name": "W-Shape", "coords": [(0, 0), (2, 1), (0, 2), (2, 3), (0, 4)], "color": "⚪"},
+            {"id": 8, "name": "M-Shape", "coords": [(3, 0), (1, 1), (3, 2), (1, 3), (3, 4)], "color": "⚫"},
             # Diagonal lines
             {"id": 9, "name": "Diagonal Down", "coords": [(0, 0), (1, 1), (2, 2), (3, 3), (3, 4)], "color": "🟤"},
             {"id": 10, "name": "Diagonal Up", "coords": [(3, 0), (2, 1), (1, 2), (0, 3), (0, 4)], "color": "🔷"},
@@ -2104,12 +2106,12 @@ class Casino(commands.Cog):
                 "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1
             },
             1: {  # Reel 2 (The Tease): Keeps player invested with 2-of-a-kinds
-                "lemon": 35, "slot_machine": 30, "cherry": 12, "star": 8,
-                "bell": 6, "seven": 5, "diamond": 2, "wild": 1, "scatter": 1
+                "lemon": 40, "slot_machine": 35, "cherry": 8, "star": 5,
+                "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1
             },
             2: {  # Reel 3 (The Choke): Drastically drops premium symbols, removes Wilds
-                "lemon": 45, "slot_machine": 35, "cherry": 10, "star": 5,
-                "bell": 2, "seven": 1, "diamond": 1, "wild": 0, "scatter": 1
+                "lemon": 50, "slot_machine": 40, "cherry": 6, "star": 3,
+                "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1
             },
             3: {  # Reel 4 (The Dilution): Almost entirely junk symbols to prevent 4-of-a-kinds
                 "lemon": 50, "slot_machine": 40, "cherry": 5, "star": 2,
@@ -3451,8 +3453,8 @@ class Casino(commands.Cog):
                     # Mismatch - stop counting
                     break
             
-            # Check if we have a winning combination (3+ matches)
-            if match_count >= 3 and first_symbol:
+            # Check if we have a winning combination (4+ matches)
+            if match_count >= 4 and first_symbol:
                 symbol_data = self.SLOTS_SYMBOLS.get(first_symbol, {})
                 payouts = symbol_data.get("payouts", {})
                 payout_mult = Decimal(str(payouts.get(match_count, 0)))
@@ -3580,8 +3582,8 @@ class Casino(commands.Cog):
             total_multiplier += win["payout"]
         total_multiplier += scatter_payout
 
-        # Calculate winnings (apply 2% house edge)
-        winnings = AmountUtils.round_currency(stake * total_multiplier * Decimal("0.98"))
+        # Calculate winnings (apply 8% house edge)
+        winnings = AmountUtils.round_currency(stake * total_multiplier * Decimal("0.92"))
 
         # Process game result for rakeback
         await self.process_game_result(user_id, "slots", stake)
@@ -3610,7 +3612,7 @@ class Casino(commands.Cog):
         # Check for free spins trigger
         free_spins_awarded = 0
         if scatter_count >= 3:
-            free_spins_awarded = {3: 10, 4: 15, 5: 20}.get(scatter_count, 20)
+            free_spins_awarded = {3: 7, 4: 10, 5: 15}.get(scatter_count, 15)
 
         # Create SlotsView instance
         view = SlotsView(
