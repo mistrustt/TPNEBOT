@@ -1001,7 +1001,7 @@ class TransactionPaginator(discord.ui.View):
         self.member = member
         self.requesting_user = requesting_user
         self.current_page = 0
-        self.per_page = 3
+        self.per_page = 5
         self.message = None
 
         for child in self.children:
@@ -1506,7 +1506,7 @@ class Economy(commands.Cog):
 
             # Fetch last 5 transactions
             user_transactions = await self.bot.database.get_transactions_by_user_id(
-                member.id, limit=3
+                member.id, limit=5
             )
 
             if user_transactions:
