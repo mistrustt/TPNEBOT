@@ -1537,9 +1537,14 @@ class Economy(commands.Cog):
                     if len(description) > 25:
                         description = description[:22] + "..."
                     
+                    now = datetime.now(timezone.utc)
+                    if now.month != 4 or now.day != 1:
+                        tx_txt = f"{direction} `**???**` • ???"
+                    else:
+                        tx_txt = f"{direction} **{formatted_amount}** • {description}"
+
                     transactions_text.append(
-                        #f"{direction} **{formatted_amount}** • {description}"
-                        f"{direction} `**???**` • ???"
+                        tx_txt
                     )
                 
                 embed.add_field(
