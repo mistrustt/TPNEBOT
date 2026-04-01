@@ -521,12 +521,38 @@ class Owner(commands.Cog, name="Owner"):
     )
     @commands.is_owner()
     async def metrics(self, ctx: Context):
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}metrics {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}metrics {name}`{aliases}")
+
+        if not lines:
+            description = "No subcommands available."
+        else:
+            description = "\n".join(lines)
+
         embed = discord.Embed(
-            title="Metrics",
-            description="Available subcommands: usage, latency, errors, exposure, topguilds, perday",
+            title="Metrics — Available Commands",
+            description=description,
             color=discord.Color.blurple(),
         )
-        await ctx.send(embed=embed)
+        embed.set_footer(text=f"Use {prefix}metrics <subcommand> for details.")
+
+        await ctx.reply(embed=embed, mention_author=False)
 
     @metrics.command(name="usage", hidden=True)
     @commands.is_owner()
@@ -3111,12 +3137,38 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def adminbank(self, ctx: Context):
         """Admin bank management commands."""
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}bank {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}bank {name}`{aliases}")
+
+        if not lines:
+            description = "No subcommands available."
+        else:
+            description = "\n".join(lines)
+
         embed = discord.Embed(
-            title="Admin Bank Commands",
-            description="Available subcommands: `give`, `reset`, `steal`, `freeze`, `thaw`, `mint`, `burn`",
+            title="Bank — Available Commands",
+            description=description,
             color=discord.Color.blurple(),
         )
-        await ctx.reply(embed=embed)
+        embed.set_footer(text=f"Use {prefix}bank <subcommand> for details.")
+
+        await ctx.reply(embed=embed, mention_author=False)
 
     @adminbank.command(name="give", aliases=["grant", "award", "wire"], hidden=True)
     @commands.is_owner()
@@ -4370,23 +4422,38 @@ class Owner(commands.Cog, name="Owner"):
     @commands.group(name="simulate", aliases=["sim"], invoke_without_command=True)
     @commands.is_owner()
     async def simulate(self, ctx: Context):
-        """Simulate game outcomes to debug RTP, EV, and payout distributions.
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
 
-        Usage: !simulate <game> [trials]
-        Games: gamble, supergamble, dice, ladder, crash, double, roulette, mines, slots
-        """
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}simulate {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}simulate {name}`{aliases}")
+
+        if not lines:
+            description = "No subcommands available."
+        else:
+            description = "\n".join(lines)
+
         embed = discord.Embed(
-            title="Game Simulator",
-            description=(
-                "Run Monte Carlo simulations of casino games.\n\n"
-                "**Usage:** `!simulate <game> [trials]`\n"
-                "**Games:** gamble, supergamble, dice, ladder, crash, "
-                "double, roulette, mines, slots\n\n"
-                "Default: **100,000** trials (max 1,000,000)"
-            ),
-            color=discord.Color.blue(),
+            title="Simulate — Available Commands",
+            description=description,
+            color=discord.Color.blurple(),
         )
-        await ctx.send(embed=embed)
+        embed.set_footer(text=f"Use {prefix}simulate <subcommand> for details.")
+
+        await ctx.reply(embed=embed, mention_author=False)
 
     @staticmethod
     def _sim_format_pct(value: float) -> str:
