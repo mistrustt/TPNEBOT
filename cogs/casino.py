@@ -3115,22 +3115,22 @@ class Casino(commands.Cog):
         # 5x4 grid (5 reels × 4 rows = 20 positions)
         # Symbol tiers: High (rare), Medium, Low (common), Special (Wild, Scatter)
         self.SLOTS_SYMBOLS = {
-            # High-value symbols: Huge 5-hit payouts, but heavily nerfed 3-hit payouts
-            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 50, 4: 15}},
-            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 50, 4: 12}},
-            "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 40, 4: 8}},
+            # High-value symbols: Rare but rewarding
+            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 25, 4: 8}},
+            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 20, 4: 6}},
+            "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 15, 4: 4}},
             
             # Medium-value symbols
-            "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 25, 4: 6}},
-            "cherry": {"emoji": "🍒", "name": "Cherry", "tier": "medium", "payouts": {5: 15, 4: 4}},
+            "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 8, 4: 2}},
+            "cherry": {"emoji": "🍒", "name": "Cherry", "tier": "medium", "payouts": {5: 5, 4: 1.5}},
             
             # Low-value symbols
-            "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 10, 4: 2}},
-            "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 8, 4: 1.5}},
+            "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 3.8, 4: 0.5}},
+            "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 2.5, 4: 0.3}},
             
             # Special symbols
-            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 50, 4: 20}, "substitutes": True},
-            "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 50, 4: 8, "scatter_pays": True}},
+            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 25, 4: 10}, "substitutes": True},
+            "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 20, 4: 5, "scatter_pays": True}},
         }
 
         # ========== SLOTS REDESIGN: Payline Patterns ==========
@@ -3157,27 +3157,26 @@ class Casino(commands.Cog):
         # ========== SLOTS REDESIGN: Weighted Reel Strips ==========
         # Each reel has weighted symbol distribution for ~96% RTP
         # Format: {symbol_key: weight} - higher weight = more likely
-        # Adjusted for ~90% RTP (more favorable to casino)
         self.SLOTS_REEL_WEIGHTS = {
             0: {  # Reel 1 (The Hook): High frequency of premium symbols
                 "lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
                 "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1
             },
             1: {  # Reel 2 (The Tease): Keeps player invested with 2-of-a-kinds
-                "lemon": 40, "slot_machine": 35, "cherry": 8, "star": 5,
+                "lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
                 "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1
             },
             2: {  # Reel 3 (The Choke): Drastically drops premium symbols, removes Wilds
-                "lemon": 50, "slot_machine": 40, "cherry": 6, "star": 3,
+                "lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
                 "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1
             },
             3: {  # Reel 4 (The Dilution): Almost entirely junk symbols to prevent 4-of-a-kinds
-                "lemon": 50, "slot_machine": 40, "cherry": 5, "star": 2,
+                "lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
                 "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1
             },
             4: {  # Reel 5 (The Blocker): Kills 5-of-a-kinds, but keeps 1 diamond for the jackpot dream
-                "lemon": 55, "slot_machine": 40, "cherry": 2, "star": 1,
-                "bell": 0, "seven": 0, "diamond": 1, "wild": 0, "scatter": 1
+                "lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
+                "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1
             },
         }
 
