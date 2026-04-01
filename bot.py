@@ -164,6 +164,25 @@ class DiscordBot(commands.Bot):
         except Exception as e:
             self.logger.error(f"Error collecting economic metrics: {e}")
 
+    @tasks.loop(hours=4)
+    async def economic_rebalance_task(self) -> None:
+        await self.wait_until_ready()
+        try:
+            result = await self.database.perform_economic_rebalance()
+            action = result.get("action", "unknown")
+            if action in ("mint", "burn"):
+                self.logger.info(
+                    f"[REBALANCE] {action.upper()} {result.get('amount', 0)} — "
+                    f"health {result.get('health_before', '?')} → {result.get('health_after', '?')} "
+                    f"(target {result.get('target', '?')})"
+                )
+            elif action == "error":
+                self.logger.error(f"[REBALANCE] Error: {result.get('reason', 'unknown')}")
+            else:
+                self.logger.debug(f"[REBALANCE] Skipped: {result.get('reason', 'no action needed')}")
+        except Exception as e:
+            self.logger.error(f"Error in economic rebalance task: {e}")
+
     def is_coolguy(self, user_id: int):
         return user_id in self.cool_guys
 
@@ -210,6 +229,7 @@ class DiscordBot(commands.Bot):
             self.cache_songs.start()
             self.stats_retention_task.start()
             self.economic_metrics_collection_task.start()
+            self.economic_rebalance_task.start()
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")

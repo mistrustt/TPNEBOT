@@ -320,7 +320,7 @@ class Wallet(Base):
     user_id = Column(BigInteger, nullable=False, unique=True)
     balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
     bank_balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
-    wallet_frozen = Column(Boolean, default=False)
+    wallet_frozen = Column(Boolean, default=False, server_default="false")
     client_seed = Column(String(64), nullable=True)  # widened (future-proof)
     nonce = Column(Integer, default=0)
     server_seed = Column(String(64), nullable=True)  # widened
@@ -699,6 +699,11 @@ class EconomicMetricsHistory(Base):
     # Rates
     fee_rate = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
     passive_income_rate = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+
+    # Auto-rebalance tracking
+    auto_minted_today = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"), nullable=True)
+    auto_burned_today = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"), nullable=True)
+    rebalance_target = Column(Numeric(precision=10, scale=4), default=Decimal("0.5000"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint('date', name='uq_economic_metrics_date'),

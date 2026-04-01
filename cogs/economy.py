@@ -2772,6 +2772,7 @@ class Economy(commands.Cog):
                     amount=total_theft,
                     description=f"Critical Robbery by {ctx.author.name}",
                     guild_id=ctx.guild.id if ctx.guild else None,
+                    fee_from_amount=True,
                 )
                 result_message = (
                     f"🔥 **YOU STOLE BASICALLY EVERYTHING LMFAOOOOOOOOOOOO**.\n"
@@ -2798,6 +2799,7 @@ class Economy(commands.Cog):
                     amount=amount_stolen,
                     description=f"Robbery by {ctx.author.name}",
                     guild_id=ctx.guild.id if ctx.guild else None,
+                    fee_from_amount=True,
                 )
 
                 result_message = (
@@ -2820,6 +2822,7 @@ class Economy(commands.Cog):
                     amount=net_gain,
                     description=f"Partial Robbery by {ctx.author.name}",
                     guild_id=ctx.guild.id if ctx.guild else None,
+                    fee_from_amount=True,
                 )
                 result_message = (
                     f"🤏 You **robbed** {target.mention} but they fought back, you managed to steal "
@@ -2965,6 +2968,7 @@ class Economy(commands.Cog):
                     amount=target_balance,
                     description=f"Drained by {ctx.author.name}",
                     guild_id=ctx.guild.id if ctx.guild else None,
+                    fee_from_amount=True,
                 )
 
                 await self.bot.database.set_cooldown(

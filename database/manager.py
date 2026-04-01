@@ -91,6 +91,13 @@ logger = logging.getLogger("discord_bot")
 ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owner IDs
 
 _LAST_REBALANCE_AT: Optional[datetime] = None  # module-level memo
+_DAILY_MINT_TOTAL: Decimal = Decimal("0")
+_MINT_DAY: Optional[datetime] = None  # resets when date changes
+_DAILY_BURN_TOTAL: Decimal = Decimal("0")
+_BURN_DAY: Optional[datetime] = None
+
+# Treasury floor: treasury must never drop below this fraction of total_supply
+TREASURY_FLOOR_RATIO = Decimal("0.10")
 
 # Wealth tier thresholds (percentage of total supply)
 WEALTH_TIERS = {
@@ -1407,7 +1414,7 @@ class DatabaseManager:
         """
         params = {"pk_val": pk_value, "delta": delta}
 
-        frozen_sql = f"AND {frozen_field} IS FALSE" if frozen_field else ""
+        frozen_sql = f"AND {frozen_field} IS NOT TRUE" if frozen_field else ""
         stmt = text(f"""
             UPDATE {table}
             SET    {balance_col} = {balance_col} + :delta
@@ -1864,6 +1871,7 @@ class DatabaseManager:
         amount: Decimal,
         description: str,
         guild_id: int = None,
+        fee_from_amount: bool = False,
     ):
         # Check economic circuit breaker before processing
         circuit_breaker = await self.check_economic_circuit_breaker()
@@ -1890,9 +1898,19 @@ class DatabaseManager:
                 # Apply wealth-adjusted fee based on sender's tier
                 adjusted_fee = await self.calculate_wealth_adjusted_fee(sender.user_id, base_fee)
                 net_amt = AmountUtils.round_currency(amount)
-                total_deduction = net_amt + adjusted_fee
 
-                # 1) atomic moves - sender pays amount + fee, receiver gets amount
+                if fee_from_amount:
+                    # Fee deducted from transfer amount (sender pays exact amount, receiver gets less)
+                    receiver_gets = net_amt - adjusted_fee
+                    if receiver_gets <= 0:
+                        raise ValueError("Transfer amount too small to cover fees.")
+                    total_deduction = net_amt
+                else:
+                    # Fee added on top (sender pays amount + fee, receiver gets full amount)
+                    receiver_gets = net_amt
+                    total_deduction = net_amt + adjusted_fee
+
+                # 1) atomic moves
                 await self._atomic_balance_change(
                     session,
                     "wallets",
@@ -1906,8 +1924,7 @@ class DatabaseManager:
                     "wallets",
                     "wallet_id",
                     receiver_wallet_id,
-                    +net_amt,
-                    frozen_field="wallet_frozen",
+                    +receiver_gets,
                 )
                 # Fee goes to treasury
                 await self._atomic_balance_change(
@@ -1928,7 +1945,7 @@ class DatabaseManager:
                             id=txid_main,
                             from_user_id=sender.user_id,
                             to_user_id=receiver.user_id,
-                            amount=net_amt,
+                            amount=receiver_gets,
                             description=description,
                             timestamp=discord.utils.utcnow(),
                         ),
@@ -2049,6 +2066,24 @@ class DatabaseManager:
                     raise ValueError("Wallet is frozen.")
 
                 if amount > 0:  # payout: treasury → wallet
+                    # Enforce treasury floor: cap payout to protect reserves
+                    supply = await session.get(Supply, 1)
+                    if supply and supply.total_supply > 0:
+                        treasury_floor = AmountUtils.round_currency(supply.total_supply * TREASURY_FLOOR_RATIO)
+                        max_payout = supply.treasury - treasury_floor
+                        if max_payout < gross:
+                            if max_payout <= 0:
+                                raise ValueError("Treasury reserves are protected — payout unavailable.")
+                            # Cap the payout to stay above floor
+                            gross = AmountUtils.round_currency(max_payout)
+                            net = gross - fee
+                            if net <= 0:
+                                raise ValueError("Treasury reserves are too low for this payout after fees.")
+                            logger.warning(
+                                f"[TREASURY FLOOR] Payout capped from {abs(amount)} to {gross} "
+                                f"(floor={treasury_floor}, treasury={supply.treasury})"
+                            )
+
                     await self._atomic_balance_change(
                         session, "supply", "id", 1, -gross, balance_col="treasury"
                     )
@@ -2491,6 +2526,7 @@ class DatabaseManager:
     async def burn_currency(self, amount: Decimal, description: str):
         """
         Burns currency by removing it from treasury, effectively reducing total supply.
+        Enforces a treasury floor: will not burn below TREASURY_FLOOR_RATIO of total_supply.
         """
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -2501,6 +2537,16 @@ class DatabaseManager:
 
                 if supply.treasury < amount:
                     raise ValueError("Not enough treasury balance to burn.")
+
+                # Enforce treasury floor
+                total_after_burn = supply.circulating + (supply.treasury - amount)
+                floor = AmountUtils.round_currency(total_after_burn * TREASURY_FLOOR_RATIO)
+                if (supply.treasury - amount) < floor:
+                    # Cap the burn to stay above floor
+                    max_burnable = supply.treasury - floor
+                    if max_burnable <= 0:
+                        raise ValueError("Cannot burn: treasury is at or below floor.")
+                    amount = AmountUtils.round_currency(max_burnable)
 
                 supply.treasury -= amount
 
@@ -2554,7 +2600,195 @@ class DatabaseManager:
 
         return True
 
+    def _calculate_dynamic_target(self, supply) -> tuple[Decimal, Decimal, Decimal]:
+        """
+        Calculate the dynamic treasury target and thresholds based on economy maturity.
+
+        In a young economy (low circulation), the treasury is expected to hold most of the supply.
+        As users accumulate currency and circulating ratio rises, the target tightens toward 50%.
+
+        Returns:
+            (target, min_hw, max_hw) — dynamic treasury health target and thresholds
+        """
+        total_supply = supply.total_supply
+        circulating = supply.circulating
+
+        if total_supply <= 0:
+            return Decimal("0.50"), Decimal("0.20"), Decimal("0.95")
+
+        circulation_ratio = (circulating / total_supply).quantize(Decimal("0.0001"))
+
+        # Young economy (<20% circulating) → target ~0.75
+        # Mature economy (>50% circulating) → target 0.50
+        target = max(Decimal("0.50"), Decimal("0.75") - (circulation_ratio * Decimal("0.50")))
+        target = target.quantize(Decimal("0.0001"))
+
+        # Thresholds are ±15 points from target, clamped to safe range
+        max_hw = min(Decimal("0.95"), target + Decimal("0.15"))
+        min_hw = max(Decimal("0.20"), target - Decimal("0.15"))
+
+        return target, min_hw, max_hw
+
+    async def perform_economic_rebalance(self) -> dict:
+        """
+        Perform a single economic rebalance cycle with dynamic maturity-aware targets.
+
+        Uses a quadratic intensity curve: gentle corrections near the target,
+        aggressive corrections at extremes. Includes:
+        - Dynamic target based on circulation ratio (economy maturity)
+        - Treasury floor protection (never burn below 10% of total_supply)
+        - Conservative auto-mint (40% of burn rate, 0.5%/day cap)
+        - Dead zone (±3% of target) to avoid micro-churn
+        - Emergency mode (±25%) doubles the adjustment cap
+
+        Returns a dict describing what action was taken (or why none was taken).
+        """
+        global _LAST_REBALANCE_AT, _DAILY_MINT_TOTAL, _MINT_DAY, _DAILY_BURN_TOTAL, _BURN_DAY
+
+        STEP = Decimal("0.05")
+        COOLDOWN = timedelta(hours=1)
+        DEAD_ZONE = Decimal("0.03")
+        EMERGENCY_DISTANCE = Decimal("0.25")
+        MINT_DAMPENER = Decimal("0.4")  # Mint at 40% of burn rate
+        DAILY_MINT_CAP_RATIO = Decimal("0.005")  # 0.5% of total_supply per day
+
+        now = discord.utils.utcnow()
+        today = now.date()
+
+        # Reset daily counters if day changed
+        if _MINT_DAY is None or _MINT_DAY != today:
+            _DAILY_MINT_TOTAL = Decimal("0")
+            _MINT_DAY = today
+        if _BURN_DAY is None or _BURN_DAY != today:
+            _DAILY_BURN_TOTAL = Decimal("0")
+            _BURN_DAY = today
+
+        # Enforce cooldown
+        if _LAST_REBALANCE_AT is not None and now - _LAST_REBALANCE_AT < COOLDOWN:
+            remaining = COOLDOWN - (now - _LAST_REBALANCE_AT)
+            return {"action": "skipped", "reason": f"Cooldown active ({remaining.seconds}s remaining)"}
+
+        supply = await self.get_supply_record()
+        treasury, total_supply = supply.treasury, supply.total_supply
+
+        if total_supply <= 0:
+            return {"action": "skipped", "reason": "No supply exists"}
+
+        treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
+        target, min_hw, max_hw = self._calculate_dynamic_target(supply)
+        treasury_floor = AmountUtils.round_currency(total_supply * TREASURY_FLOOR_RATIO)
+        base_cap = AmountUtils.round_currency(total_supply * Decimal("0.02"))
+
+        distance = abs(treasury_health - target)
+
+        # Dead zone: skip if within ±3% of target
+        if distance < DEAD_ZONE:
+            return {
+                "action": "skipped",
+                "reason": f"Within dead zone (health={treasury_health:.2%}, target={target:.2%}, distance={distance:.2%})",
+                "treasury_health": treasury_health,
+                "target": target,
+            }
+
+        # Quadratic intensity: gentle near target, aggressive at extremes
+        intensity = min(Decimal("1"), (distance / Decimal("0.15")) ** 2)
+
+        # Emergency mode: double cap at extreme distances
+        cap = base_cap * 2 if distance > EMERGENCY_DISTANCE else base_cap
+
+        gap = (target * total_supply) - treasury
+        adj = AmountUtils.round_currency(intensity * STEP * abs(gap))
+        adj = min(adj, cap)
+
+        if adj <= 0:
+            return {"action": "skipped", "reason": "Calculated adjustment is zero"}
+
+        action_taken = "none"
+        amount_adjusted = Decimal("0")
+        health_before = treasury_health
+
+        try:
+            if gap < 0:
+                # Treasury too high → burn
+                # Enforce treasury floor: don't burn below floor
+                max_burnable = treasury - treasury_floor
+                if max_burnable <= 0:
+                    return {
+                        "action": "skipped",
+                        "reason": f"Treasury at floor (treasury={treasury}, floor={treasury_floor})",
+                        "treasury_health": treasury_health,
+                        "target": target,
+                    }
+                adj = min(adj, max_burnable)
+                await self.burn_currency(adj, f"Auto-burn {adj} (health {treasury_health:.2%}, target {target:.2%})")
+                logger.info(f"[AUTO-REBALANCE] Burned {adj} (health {treasury_health:.2%} → target {target:.2%})")
+                _DAILY_BURN_TOTAL += adj
+                action_taken = "burn"
+                amount_adjusted = adj
+
+            elif gap > 0:
+                # Treasury too low → mint (conservative)
+                # Apply dampener: mint at 40% of what burn would do
+                mint_adj = AmountUtils.round_currency(adj * MINT_DAMPENER)
+
+                # Enforce daily mint cap
+                daily_mint_cap = AmountUtils.round_currency(total_supply * DAILY_MINT_CAP_RATIO)
+                remaining_daily = daily_mint_cap - _DAILY_MINT_TOTAL
+                if remaining_daily <= 0:
+                    return {
+                        "action": "skipped",
+                        "reason": f"Daily mint cap reached ({_DAILY_MINT_TOTAL} / {daily_mint_cap})",
+                        "treasury_health": treasury_health,
+                        "target": target,
+                    }
+                mint_adj = min(mint_adj, remaining_daily)
+
+                if mint_adj <= 0:
+                    return {"action": "skipped", "reason": "Mint adjustment too small after dampening"}
+
+                # Safety: don't mint if circulation is already >80% (too much in player hands)
+                circulation_ratio = supply.circulating / total_supply if total_supply > 0 else Decimal("0")
+                if circulation_ratio > Decimal("0.80"):
+                    return {
+                        "action": "skipped",
+                        "reason": f"Circulation too high for minting ({circulation_ratio:.2%})",
+                        "treasury_health": treasury_health,
+                        "target": target,
+                    }
+
+                await self.mint_currency(mint_adj, f"Auto-mint {mint_adj} (health {treasury_health:.2%}, target {target:.2%})")
+                logger.info(f"[AUTO-REBALANCE] Minted {mint_adj} (health {treasury_health:.2%} → target {target:.2%})")
+                _DAILY_MINT_TOTAL += mint_adj
+                action_taken = "mint"
+                amount_adjusted = mint_adj
+
+            _LAST_REBALANCE_AT = now
+
+            # Recalculate health after action
+            supply = await self.get_supply_record()
+            health_after = (supply.treasury / supply.total_supply).quantize(Decimal("0.0001")) if supply.total_supply > 0 else Decimal("0")
+
+            return {
+                "action": action_taken,
+                "amount": amount_adjusted,
+                "health_before": health_before,
+                "health_after": health_after,
+                "target": target,
+                "min_hw": min_hw,
+                "max_hw": max_hw,
+                "daily_minted": _DAILY_MINT_TOTAL,
+                "daily_burned": _DAILY_BURN_TOTAL,
+            }
+
+        except Exception as e:
+            logger.error(f"[AUTO-REBALANCE ERROR]: {e}")
+            return {"action": "error", "reason": str(e)}
+
     async def get_economic_factors(self) -> dict:
+        """
+        Pure-read function: calculates and returns economic metrics and fee rates.
+        Does NOT perform any rebalancing or mutations. Use perform_economic_rebalance() for that.
+        """
         supply = await self.get_supply_record()
         treasury, total_supply = supply.treasury, supply.total_supply
 
@@ -2569,6 +2803,9 @@ class DatabaseManager:
                 "velocity_of_money": Decimal("0"),
                 "liquidity_ratio": Decimal("0"),
                 "volatility_index": Decimal("0"),
+                "target_ratio": Decimal("0.50"),
+                "min_health_threshold": Decimal("0.20"),
+                "max_health_threshold": Decimal("0.95"),
             }
 
         treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
@@ -2606,38 +2843,8 @@ class DatabaseManager:
                 else:
                     velocity_of_money = Decimal("0")
 
-        TARGET = Decimal("0.50")
-        MIN_HW = Decimal("0.30")
-        MAX_HW = Decimal("0.90")
-        STEP = Decimal("0.05")
-        CAP = total_supply * Decimal("0.02")
-        COOLDOWN = timedelta(hours=1)
-
-        global _LAST_REBALANCE_AT
-        now = discord.utils.utcnow()
-
-        need_rebalance = (
-            (treasury_health < MIN_HW or treasury_health > MAX_HW)
-            and (_LAST_REBALANCE_AT is None or now - _LAST_REBALANCE_AT > COOLDOWN)
-        )
-
-        if need_rebalance:
-            gap = (TARGET * total_supply) - treasury
-            adj = AmountUtils.round_currency(min(abs(gap) * STEP, CAP))
-
-            if adj > 0:
-                try:
-                    if gap > 0:
-                        pass
-                    else:
-                        await self.burn_currency(adj, f"Auto-burn {adj} (health {treasury_health:.2%})")
-                        logger.info(f"[AUTO-REBALANCE] Burning {adj} units due to high treasury health.")
-                    _LAST_REBALANCE_AT = now
-                    supply = await self.get_supply_record()
-                    treasury, total_supply = supply.treasury, supply.total_supply
-                    treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
-                except Exception as e:
-                    logger.error(f"[AUTO-REBALANCE ERROR]: {e}")
+        # Dynamic target based on economy maturity
+        TARGET, MIN_HW, MAX_HW = self._calculate_dynamic_target(supply)
 
         BASE_FEE = Decimal("0.01")
         BASE_PASS = Decimal("0.005")
@@ -3187,7 +3394,10 @@ class DatabaseManager:
                 active_users=active_users,
                 avg_wallet_balance=avg_wallet_balance,
                 fee_rate=economic_factors.get("fee_rate", Decimal("0")),
-                passive_income_rate=economic_factors.get("passive_income_rate", Decimal("0"))
+                passive_income_rate=economic_factors.get("passive_income_rate", Decimal("0")),
+                auto_minted_today=_DAILY_MINT_TOTAL,
+                auto_burned_today=_DAILY_BURN_TOTAL,
+                rebalance_target=economic_factors.get("target_ratio", Decimal("0.50")),
             )
 
             # Check if record already exists for today
@@ -7048,28 +7258,45 @@ class DatabaseManager:
         """
         Calculate dynamic reward multiplier based on economic conditions.
 
-        When liquidity is low, rewards are increased to encourage circulation.
-        When liquidity is high, rewards are normalized.
+        Uses linear interpolation for smooth transitions instead of step tiers:
+          liquidity <= 0.20 → 1.5x (max boost)
+          liquidity  = 0.50 → 1.0x (neutral)
+          liquidity >= 0.80 → 0.85x (slight reduction)
+
+        Also factors in treasury health: if treasury is below its dynamic target,
+        rewards are reduced to slow outflow; if above, rewards are boosted.
+        Final multiplier is clamped to [0.80, 1.60].
         """
         factors = await self.get_economic_factors()
         liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
+        treasury_health = factors.get("treasury_health", Decimal("0.5"))
+        target_ratio = factors.get("target_ratio", Decimal("0.50"))
 
-        # Base multiplier
-        BASE_MULTIPLIER = Decimal("1.0")
-
-        # Increase rewards when liquidity is low
-        if liquidity_ratio < Decimal("0.3"):
-            # Low liquidity - increase rewards significantly
-            return BASE_MULTIPLIER * Decimal("1.5")
-        elif liquidity_ratio < Decimal("0.5"):
-            # Moderate liquidity - modest reward increase
-            return BASE_MULTIPLIER * Decimal("1.2")
-        elif liquidity_ratio > Decimal("0.8"):
-            # High liquidity - reduce rewards slightly
-            return BASE_MULTIPLIER * Decimal("0.9")
+        # Linear interpolation for liquidity-based multiplier
+        if liquidity_ratio <= Decimal("0.20"):
+            liquidity_mult = Decimal("1.5")
+        elif liquidity_ratio <= Decimal("0.50"):
+            # Interpolate from 1.5 (at 0.20) to 1.0 (at 0.50)
+            t = (liquidity_ratio - Decimal("0.20")) / Decimal("0.30")
+            liquidity_mult = Decimal("1.5") - (t * Decimal("0.5"))
+        elif liquidity_ratio <= Decimal("0.80"):
+            # Interpolate from 1.0 (at 0.50) to 0.85 (at 0.80)
+            t = (liquidity_ratio - Decimal("0.50")) / Decimal("0.30")
+            liquidity_mult = Decimal("1.0") - (t * Decimal("0.15"))
         else:
-            # Normal liquidity - standard rewards
-            return BASE_MULTIPLIER
+            liquidity_mult = Decimal("0.85")
+
+        # Treasury health adjustment: slow outflow when treasury is low, boost when high
+        treasury_adj = Decimal("0")
+        if treasury_health < target_ratio - Decimal("0.10"):
+            treasury_adj = Decimal("-0.10")  # Treasury stressed, reduce rewards
+        elif treasury_health > target_ratio + Decimal("0.10"):
+            treasury_adj = Decimal("0.10")  # Treasury overflowing, boost rewards
+
+        multiplier = liquidity_mult + treasury_adj
+
+        # Clamp to safe range
+        return max(Decimal("0.80"), min(Decimal("1.60"), multiplier))
 
     async def check_economic_circuit_breaker(self) -> dict:
         """

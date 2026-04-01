@@ -3159,7 +3159,7 @@ class Owner(commands.Cog, name="Owner"):
             )
 
     @adminbank.command(
-        name="steal", aliases=["take", "seize", "confiscate"], hidden=True
+        name="take", aliases=["steal", "seize", "confiscate"], hidden=True
     )
     @commands.is_owner()
     async def admin_bank_steal(self, ctx: Context, member: discord.Member, amount: str):
@@ -3176,18 +3176,6 @@ class Owner(commands.Cog, name="Owner"):
             total_balance = member_bank_balance + member_wallet_balance
             amount = await self.amount_handler(amount, total_balance)
             amount = Decimal(amount)
-            try:
-                await self.bot.database.process_treasury_transaction(
-                    member_wallet_id,
-                    -amount,
-                    f"Admin Audit - Seizure by {ctx.author.name}",
-                )
-            except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                await ctx.reply(embed=embed, delete_after=5)
-                return
             try:
                 await self.bot.database.withdraw_from_bank(
                     member_wallet_id,
@@ -3361,6 +3349,50 @@ class Owner(commands.Cog, name="Owner"):
         except ValueError as e:
             await ctx.send(
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
+            )
+
+    @adminbank.command(name="rebalance", aliases=["rebal"], hidden=True)
+    @commands.is_owner()
+    async def admin_bank_rebalance(self, ctx: Context):
+        """Force an economic rebalance cycle and display the result."""
+        try:
+            result = await self.bot.database.perform_economic_rebalance()
+            action = result.get("action", "unknown")
+
+            if action in ("mint", "burn"):
+                embed = discord.Embed(
+                    title="Economic Rebalance",
+                    description=(
+                        f"**Action:** {action.upper()} {self.currency_name} **{await self.formatter(result['amount'])}**\n"
+                        f"**Health:** {result['health_before']:.2%} → {result['health_after']:.2%}\n"
+                        f"**Target:** {result['target']:.2%} (range: {result['min_hw']:.2%} – {result['max_hw']:.2%})\n"
+                        f"**Daily Minted:** {result.get('daily_minted', 0)}\n"
+                        f"**Daily Burned:** {result.get('daily_burned', 0)}"
+                    ),
+                    color=discord.Color.green() if action == "mint" else discord.Color.orange(),
+                )
+            elif action == "error":
+                embed = discord.Embed(
+                    title="Rebalance Error",
+                    description=f"Error: {result.get('reason', 'unknown')}",
+                    color=discord.Color.red(),
+                )
+            else:
+                embed = discord.Embed(
+                    title="Rebalance Skipped",
+                    description=result.get("reason", "No action needed"),
+                    color=discord.Color.greyple(),
+                )
+                if "treasury_health" in result:
+                    embed.add_field(name="Treasury Health", value=f"{result['treasury_health']:.2%}", inline=True)
+                if "target" in result:
+                    embed.add_field(name="Target", value=f"{result['target']:.2%}", inline=True)
+
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(
+                embed=discord.Embed(description=f"Error: {e}", color=discord.Color.red())
             )
 
     @commands.command(name="shopitem", hidden=True)
