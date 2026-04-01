@@ -1488,16 +1488,24 @@ class Economy(commands.Cog):
                 icon_url=self.utils.get_avatar_url(member),
             )
 
+
+
+            now = datetime.now(timezone.utc)
+            if now.month != 4 or now.day != 1:
+                wallet_str = f"{self.currency_name} **???**"
+                bank_str = f"{self.currency_name} **???**"
+            else:
+                wallet_str = f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**"
+                bank_str = f"{self.currency_name} **{await self.short_formatter(bank_balance)}**"
+
             embed.add_field(
                 name="Wallet",
-                #value=f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**",
-                value=f"{self.currency_name} `**???**`",
+                value=wallet_str,
                 inline=False
             )
             embed.add_field(
                 name="Bank",
-                #value=f"{self.currency_name} **{await self.short_formatter(bank_balance)}**",
-                value=f"{self.currency_name} `**???**`",
+                value=bank_str,
                 inline=False
             )
 
@@ -1582,9 +1590,15 @@ class Economy(commands.Cog):
                 )
                 display_name = user.display_name if user else f"Unknown {user_id}"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
-                top_list.append(
-                    f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)"
-                )
+
+                now = datetime.now(timezone.utc)
+                if now.month != 4 or now.day != 1:
+                    lb_str = f"{emoji} **{display_name}** (`{self.currency_name} ???`)"
+                else:
+                    lb_str = f"{emoji} **{display_name}** (`{self.currency_name} {await self.short_formatter(total_balance)}`)"
+
+                top_list.append(lb_str)
+                
             embed.add_field(
                 name="Top 10 Users by Net Balance",
                 value="\n".join(top_list),
