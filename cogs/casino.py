@@ -1177,6 +1177,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
 ROULETTE_RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 ROULETTE_BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
 ROULETTE_ALL_NUMBERS = list(range(0, 37)) + ["00"]
+ROULETTE_MAX_BETS = 10
 
 ROULETTE_PAYTABLE_TEXT = (
     "```"
@@ -1229,7 +1230,16 @@ class RouletteNumberModal(discord.ui.Modal, title="Pick a Number"):
                 "Invalid number. Enter 0–36 or 00.", ephemeral=True
             )
             return
-        self.roulette_view.selected_choice = value
+        # Toggle: add if not present, remove if present
+        if value in self.roulette_view.selected_bets:
+            self.roulette_view.selected_bets.discard(value)
+        else:
+            if len(self.roulette_view.selected_bets) >= ROULETTE_MAX_BETS:
+                await interaction.response.send_message(
+                    f"Maximum {ROULETTE_MAX_BETS} bets allowed.", ephemeral=True
+                )
+                return
+            self.roulette_view.selected_bets.add(value)
         self.roulette_view._rebuild_container()
         await interaction.response.edit_message(view=self.roulette_view)
 
@@ -1250,7 +1260,7 @@ class RouletteView(discord.ui.LayoutView):
         self.ctx = ctx
         self.message: discord.Message | None = None
 
-        self.selected_choice: str | None = None
+        self.selected_bets: set[str] = set()
         self.game_phase = "betting"  # "betting" | "result"
         self.session_id = None
         self.lock = asyncio.Lock()
@@ -1291,11 +1301,13 @@ class RouletteView(discord.ui.LayoutView):
         self.btn_paytable = discord.ui.Button(label="ℹ Paytable", style=discord.ButtonStyle.gray, custom_id="roul_paytable")
         self.btn_paytable.callback = self._paytable_callback
 
-        # ── Spin / Play Again button (Row 4) ──
+        # ── Spin / Play Again / Clear button (Row 4) ──
         self.btn_spin = discord.ui.Button(label="🎰 Spin!", style=discord.ButtonStyle.green, custom_id="roul_spin", disabled=True)
         self.btn_spin.callback = self._spin_callback
         self.btn_play_again = discord.ui.Button(label="🔄 Play Again", style=discord.ButtonStyle.green, custom_id="roul_again")
         self.btn_play_again.callback = self._play_again_callback
+        self.btn_clear = discord.ui.Button(label="🗑 Clear", style=discord.ButtonStyle.red, custom_id="roul_clear")
+        self.btn_clear.callback = self._clear_callback
 
         # All bet buttons for easy iteration
         self._bet_buttons = {
@@ -1308,32 +1320,87 @@ class RouletteView(discord.ui.LayoutView):
 
         self._rebuild_container()
 
-    def _get_choice_display(self) -> str:
-        if self.selected_choice is None:
+    def _get_bets_display(self) -> str:
+        """Return a human-readable string of all selected bets."""
+        if not self.selected_bets:
             return "None"
-        label = ROULETTE_BET_LABELS.get(self.selected_choice)
-        if label:
-            return label
-        return f"Number {self.selected_choice}"
+        labels = []
+        # Show named bets first, then numbers sorted numerically
+        named = sorted(b for b in self.selected_bets if b in self._bet_buttons or b in ROULETTE_BET_LABELS)
+        numbers = sorted(
+            (b for b in self.selected_bets if b not in self._bet_buttons and b not in ROULETTE_BET_LABELS),
+            key=lambda x: -1 if x == "00" else int(x),
+        )
+        for bet in named:
+            labels.append(ROULETTE_BET_LABELS.get(bet, bet))
+        for bet in numbers:
+            labels.append(f"#{bet}")
+        return ", ".join(labels)
+
+    @staticmethod
+    def _evaluate_single_bet(choice: str, spin_result, is_int: bool, is_red: bool,
+                              is_black: bool, is_green: bool, is_odd: bool, is_even: bool) -> Decimal:
+        """Return the payout multiplier for a single bet (0 if lost)."""
+        if choice == "green" and is_green:
+            return Decimal(14)
+        elif choice == "red" and is_red:
+            return Decimal(2)
+        elif choice == "black" and is_black:
+            return Decimal(2)
+        elif choice == "odd" and is_odd:
+            return Decimal(2)
+        elif choice == "even" and is_even:
+            return Decimal(2)
+        elif choice == "high" and is_int and 19 <= spin_result <= 36:
+            return Decimal(2)
+        elif choice == "low" and is_int and 1 <= spin_result <= 18:
+            return Decimal(2)
+        elif choice == "dozen1" and is_int and 1 <= spin_result <= 12:
+            return Decimal(3)
+        elif choice == "dozen2" and is_int and 13 <= spin_result <= 24:
+            return Decimal(3)
+        elif choice == "dozen3" and is_int and 25 <= spin_result <= 36:
+            return Decimal(3)
+        elif choice == "column1" and is_int and (spin_result % 3 == 1):
+            return Decimal(3)
+        elif choice == "column2" and is_int and (spin_result % 3 == 2):
+            return Decimal(3)
+        elif choice == "column3" and is_int and (spin_result % 3 == 0 and spin_result != 0):
+            return Decimal(3)
+        elif (choice.isdigit() and is_int and int(choice) == spin_result) or (choice == "00" and spin_result == "00"):
+            return Decimal(36)
+        return Decimal(0)
 
     def _rebuild_container(self):
         """Rebuild the container based on current game phase."""
         self.clear_items()
 
         if self.game_phase == "betting":
-            # Highlight the selected bet button
+            # Highlight all selected bet buttons
             for key, btn in self._bet_buttons.items():
-                btn.style = discord.ButtonStyle.blurple if key == self.selected_choice else discord.ButtonStyle.gray
+                btn.style = discord.ButtonStyle.blurple if key in self.selected_bets else discord.ButtonStyle.gray
                 btn.disabled = False
-            # Number button highlighted if a number is selected
-            is_number_selected = (
-                self.selected_choice is not None
-                and self.selected_choice not in self._bet_buttons
-            )
-            self.btn_number.style = discord.ButtonStyle.blurple if is_number_selected else discord.ButtonStyle.gray
-            self.btn_spin.disabled = self.selected_choice is None
+            # Number button highlighted if any number is selected
+            numbers_selected = self.selected_bets - set(self._bet_buttons.keys())
+            if numbers_selected:
+                self.btn_number.style = discord.ButtonStyle.blurple
+                self.btn_number.label = f"# ({len(numbers_selected)})"
+            else:
+                self.btn_number.style = discord.ButtonStyle.gray
+                self.btn_number.label = "# Number"
+            self.btn_spin.disabled = len(self.selected_bets) == 0
+            self.btn_clear.disabled = len(self.selected_bets) == 0
 
-            status_text = f"**Bet:** {self.currency_name} **{self.formatted_bet}** │ **Selected:** {self._get_choice_display()}"
+            num_bets = len(self.selected_bets)
+            total_wager = self.bet_amount * num_bets
+            total_str = self.cog._fmt_no_sci(total_wager, max_frac=2) if num_bets > 0 else "0"
+
+            status_text = (
+                f"**Per Bet:** {self.currency_name} **{self.formatted_bet}** │ "
+                f"**Bets:** {num_bets}/{ROULETTE_MAX_BETS} │ "
+                f"**Total Wager:** {self.currency_name} **{total_str}**\n"
+                f"**Selected:** {self._get_bets_display()}"
+            )
 
             container = discord.ui.Container(
                 discord.ui.TextDisplay("## 🎰 Roulette"),
@@ -1343,7 +1410,7 @@ class RouletteView(discord.ui.LayoutView):
                 discord.ui.ActionRow(self.btn_odd, self.btn_even, self.btn_dozen1, self.btn_dozen2, self.btn_dozen3),
                 discord.ui.ActionRow(self.btn_col1, self.btn_col2, self.btn_col3, self.btn_number, self.btn_paytable),
                 discord.ui.Separator(),
-                discord.ui.ActionRow(self.btn_spin),
+                discord.ui.ActionRow(self.btn_spin, self.btn_clear),
                 accent_color=0xFCD34D,  # Gold
             )
             self.add_item(container)
@@ -1365,7 +1432,15 @@ class RouletteView(discord.ui.LayoutView):
                 return await interaction.response.send_message("This isn't your game!", ephemeral=True)
             if self.game_phase != "betting":
                 return await interaction.response.defer()
-            self.selected_choice = choice
+            # Toggle: add if not present, remove if present
+            if choice in self.selected_bets:
+                self.selected_bets.discard(choice)
+            else:
+                if len(self.selected_bets) >= ROULETTE_MAX_BETS:
+                    return await interaction.response.send_message(
+                        f"Maximum {ROULETTE_MAX_BETS} bets allowed.", ephemeral=True
+                    )
+                self.selected_bets.add(choice)
             self._rebuild_container()
             await interaction.response.edit_message(view=self)
         return callback
@@ -1382,10 +1457,19 @@ class RouletteView(discord.ui.LayoutView):
             f"**🎰 Roulette Paytable**\n{ROULETTE_PAYTABLE_TEXT}", ephemeral=True
         )
 
+    async def _clear_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
+        if self.game_phase != "betting":
+            return await interaction.response.defer()
+        self.selected_bets.clear()
+        self._rebuild_container()
+        await interaction.response.edit_message(view=self)
+
     async def _spin_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("This isn't your game!", ephemeral=True)
-        if self.game_phase != "betting" or self.selected_choice is None:
+        if self.game_phase != "betting" or not self.selected_bets:
             return await interaction.response.defer()
 
         async with self.lock:
@@ -1395,14 +1479,16 @@ class RouletteView(discord.ui.LayoutView):
 
         await interaction.response.defer()
 
-        choice = self.selected_choice
+        bets = list(self.selected_bets)
+        num_bets = len(bets)
+        total_wager = self.bet_amount * num_bets
 
         # ── Fairness & session ──
         PF = await self.cog.prove_fairness(self.user_id)
 
         try:
             await self.bot.database.process_treasury_transaction(
-                wallet_id=self.wallet_id, amount=Decimal(-self.bet_amount), description="Roulette Bet"
+                wallet_id=self.wallet_id, amount=Decimal(-total_wager), description="Roulette Bet"
             )
         except ValueError as e:
             self.game_phase = "betting"
@@ -1412,14 +1498,14 @@ class RouletteView(discord.ui.LayoutView):
             return
 
         self.session_id = await self.cog._create_game_session(
-            self.ctx, "roulette", owner_id=self.user_id, wager_total=self.bet_amount,
+            self.ctx, "roulette", owner_id=self.user_id, wager_total=total_wager,
             state={"user_id": self.user_id, "bet": str(self.bet_amount),
-                   "wallet_id": str(self.wallet_id), "choice": choice},
+                   "wallet_id": str(self.wallet_id), "bets": bets},
             rng=PF,
         )
         await self.cog._add_refund(
             self.session_id, user_id=self.user_id,
-            wallet_id=str(self.wallet_id), amount=self.bet_amount, reason="roulette_bet",
+            wallet_id=str(self.wallet_id), amount=total_wager, reason="roulette_bet",
         )
 
         # ── House edge & RTP boost ──
@@ -1441,61 +1527,41 @@ class RouletteView(discord.ui.LayoutView):
         is_odd = is_int and (spin_result % 2 == 1)
         color_label = "Green" if is_green else ("Red" if is_red else "Black")
 
-        # ── Determine winnings ──
-        winnings = Decimal(0)
-        amount = self.bet_amount
+        # ── Evaluate each bet ──
+        total_winnings = Decimal(0)
+        bet_results = []  # list of (choice_label, multiplier, payout)
+        for choice in bets:
+            multiplier = self._evaluate_single_bet(
+                choice, spin_result, is_int, is_red, is_black, is_green, is_odd, is_even
+            )
+            payout = Decimal(0)
+            if multiplier > 0:
+                payout = AmountUtils.round_currency(self.bet_amount * multiplier * rtp_boost)
+                total_winnings += payout
+            label = ROULETTE_BET_LABELS.get(choice)
+            if not label:
+                label = f"#{choice}"
+            bet_results.append((label, multiplier, payout))
 
-        if choice == "green" and is_green:
-            winnings = amount * Decimal(14)
-        elif choice == "red" and is_red:
-            winnings = amount * Decimal(2)
-        elif choice == "black" and is_black:
-            winnings = amount * Decimal(2)
-        elif choice == "odd" and is_odd:
-            winnings = amount * Decimal(2)
-        elif choice == "even" and is_even:
-            winnings = amount * Decimal(2)
-        elif choice == "high" and is_int and 19 <= spin_result <= 36:
-            winnings = amount * Decimal(2)
-        elif choice == "low" and is_int and 1 <= spin_result <= 18:
-            winnings = amount * Decimal(2)
-        elif choice == "dozen1" and is_int and 1 <= spin_result <= 12:
-            winnings = amount * Decimal(3)
-        elif choice == "dozen2" and is_int and 13 <= spin_result <= 24:
-            winnings = amount * Decimal(3)
-        elif choice == "dozen3" and is_int and 25 <= spin_result <= 36:
-            winnings = amount * Decimal(3)
-        elif choice == "column1" and is_int and (spin_result % 3 == 1):
-            winnings = amount * Decimal(3)
-        elif choice == "column2" and is_int and (spin_result % 3 == 2):
-            winnings = amount * Decimal(3)
-        elif choice == "column3" and is_int and (spin_result % 3 == 0 and spin_result != 0):
-            winnings = amount * Decimal(3)
-        elif (choice.isdigit() and is_int and int(choice) == spin_result) or (choice == "00" and spin_result == "00"):
-            winnings = amount * Decimal(36)
-
-        if winnings > 0:
-            winnings = AmountUtils.round_currency(winnings * rtp_boost)
-
-        await self.cog.process_game_result(self.user_id, "roulette", amount)
+        await self.cog.process_game_result(self.user_id, "roulette", total_wager)
 
         # ── Record outcome ──
-        won = winnings > 0
-        if won:
+        net_won = total_winnings > 0
+        if net_won:
             await self.bot.database.increment_win(
-                self.user_id, "roulette", amount,
+                self.user_id, "roulette", total_wager,
                 client_seed=PF["client_seed"], seed_used=None,
                 nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
             )
             try:
                 await self.bot.database.process_treasury_transaction(
-                    wallet_id=self.wallet_id, amount=winnings, description="Roulette Win"
+                    wallet_id=self.wallet_id, amount=total_winnings, description="Roulette Win"
                 )
             except ValueError:
                 pass
         else:
             await self.bot.database.increment_loss(
-                self.user_id, "roulette", amount,
+                self.user_id, "roulette", total_wager,
                 client_seed=PF["client_seed"], seed_used=None,
                 nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
             )
@@ -1503,18 +1569,31 @@ class RouletteView(discord.ui.LayoutView):
         await self.bot.database.set_cooldown(self.user_id, "roulette", 5)
 
         # ── Build result display ──
-        formatted_winnings = await self.cog.formatter(winnings if won else amount)
-        bet_label = self._get_choice_display()
+        result_lines = []
+        for label, multiplier, payout in bet_results:
+            if multiplier > 0:
+                fmt_payout = await self.cog.formatter(payout)
+                result_lines.append(f"✅ {label} → {multiplier}× (+{self.currency_name} {fmt_payout})")
+            else:
+                result_lines.append(f"❌ {label} → 0×")
 
         self._result_status = (
-            f"The ball landed on **{color_label} {spin_result}**\n"
-            f"**Your Bet:** {bet_label} │ **Spin:** {color_label} {spin_result}"
+            f"The ball landed on **{color_label} {spin_result}**\n\n"
+            + "\n".join(result_lines)
         )
-        if won:
-            self._result_detail = f"🎉 You won {self.currency_name} **{formatted_winnings}**!"
+
+        net_profit = total_winnings - total_wager
+        if net_won:
+            formatted_winnings = await self.cog.formatter(total_winnings)
+            formatted_profit = await self.cog.formatter(net_profit)
+            self._result_detail = (
+                f"🎉 Total payout: {self.currency_name} **{formatted_winnings}** "
+                f"(+{self.currency_name} {formatted_profit} profit)"
+            )
             self._result_accent = 0x57F287  # Green
         else:
-            self._result_detail = f"You lost {self.currency_name} **{formatted_winnings}**. Better luck next time!"
+            formatted_loss = await self.cog.formatter(total_wager)
+            self._result_detail = f"You lost {self.currency_name} **{formatted_loss}**. Better luck next time!"
             self._result_accent = 0xED4245  # Red
 
         # Check if Play Again is affordable
@@ -1528,12 +1607,13 @@ class RouletteView(discord.ui.LayoutView):
         await self.cog._remove_refund(self.session_id, user_id=self.user_id)
         await self.cog._log_game_event(
             self.session_id, "result",
-            {"outcome": "win" if won else "loss", "amount": str(winnings or amount),
-             "spin": str(spin_result), "color": color_label},
+            {"outcome": "win" if net_won else "loss",
+             "total_wager": str(total_wager), "total_winnings": str(total_winnings),
+             "bets": bets, "spin": str(spin_result), "color": color_label},
         )
         await self.cog._end_game_session(
-            self.session_id, outcome="win" if won else "loss",
-            final_state={"amount": str(winnings or amount)},
+            self.session_id, outcome="win" if net_won else "loss",
+            final_state={"total_wager": str(total_wager), "total_winnings": str(total_winnings)},
         )
 
     async def _play_again_callback(self, interaction: discord.Interaction):
@@ -1548,7 +1628,7 @@ class RouletteView(discord.ui.LayoutView):
                 ephemeral=True,
             )
 
-        self.selected_choice = None
+        self.selected_bets.clear()
         self.game_phase = "betting"
         self.session_id = None
         self._rebuild_container()
@@ -4912,7 +4992,9 @@ class Casino(commands.Cog):
                 title="Roulette",
                 description=(
                     "Usage: `!roulette <amount>`\n\n"
-                    "An interactive roulette table will appear where you can pick your bet type and spin.\n\n"
+                    "An interactive roulette table will appear where you can place **multiple bets** "
+                    f"(up to {ROULETTE_MAX_BETS}) on different positions. Each bet costs the specified amount.\n\n"
+                    "Click bet types to toggle them on/off, then spin!\n\n"
                     f"**Paytable:**\n{ROULETTE_PAYTABLE_TEXT}"
                 ),
                 color=discord.Color.blue(),
