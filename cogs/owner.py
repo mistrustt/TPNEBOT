@@ -4432,7 +4432,8 @@ class Owner(commands.Cog, name="Owner"):
             name="Theory",
             value=(
                 "Win: 15% × (85% × 6x + 15% × 8x)\n"
-                "= 15% × (5.1 + 1.2) = 15% × 6.3 = **94.50% RTP**"
+                "= 15% × (5.1 + 1.2) = 15% × 6.3 = **94.50% RTP**\n"
+                "_Note: Loss recovery (10% × 20% bet when treasury > 10%) not modeled._"
             ),
             inline=False,
         )
@@ -4882,59 +4883,95 @@ class Owner(commands.Cog, name="Owner"):
                 cum.append(running)
             reel_data[reel_idx] = (symbols, cum, total)
 
+        # Free spins awarded by scatter count (matches actual game)
+        free_spins_table = {3: 7, 4: 10, 5: 15}
+        house_edge_factor = 0.92  # 8% house edge applied to all payouts
+
+        def _generate_grid():
+            grid = []
+            for reel_idx in range(5):
+                syms, cum, total = reel_data[reel_idx]
+                reel = []
+                for _ in range(4):
+                    pos = random.randrange(total)
+                    selected = syms[0]
+                    for i, bound in enumerate(cum):
+                        if pos < bound:
+                            selected = syms[i]
+                            break
+                    reel.append(selected)
+                grid.append(reel)
+            return grid
+
+        def _evaluate_grid(grid):
+            """Evaluate paylines + scatters for a grid. Returns (payout, scatter_count)."""
+            spin_payout = 0.0
+            for line in paylines:
+                symbols_on_line = [grid[col][row] for row, col in line]
+
+                first_symbol = None
+                match_count = 0
+                for sym in symbols_on_line:
+                    if sym == "scatter":
+                        break
+                    if first_symbol is None:
+                        if sym != "wild":
+                            first_symbol = sym
+                            match_count = 1
+                    elif sym == first_symbol or sym == "wild":
+                        match_count += 1
+                    else:
+                        break
+
+                if match_count >= 4 and first_symbol:
+                    payouts = symbols_payouts.get(first_symbol, {})
+                    payout = payouts.get(match_count, 0)
+                    spin_payout += payout
+
+            scatter_count = sum(
+                1 for col in grid for sym in col if sym == "scatter"
+            )
+            if scatter_count >= 4:
+                spin_payout += symbols_payouts["scatter"].get(scatter_count, 0)
+
+            return spin_payout, scatter_count
+
         def _run():
             total_payout = 0.0
             hit_count = 0
+            free_spin_triggers = 0
+            total_free_spins = 0
 
             for _ in range(trials):
-                grid = []
-                for reel_idx in range(5):
-                    syms, cum, total = reel_data[reel_idx]
-                    reel = []
-                    for _ in range(4):
-                        pos = random.randrange(total)
-                        selected = syms[0]
-                        for i, bound in enumerate(cum):
-                            if pos < bound:
-                                selected = syms[i]
-                                break
-                        reel.append(selected)
-                    grid.append(reel)
+                # Base spin
+                grid = _generate_grid()
+                spin_payout, scatter_count = _evaluate_grid(grid)
 
-                spin_payout = 0.0
-                for line in paylines:
-                    symbols_on_line = [grid[col][row] for row, col in line]
+                # Apply house edge to base spin
+                spin_payout *= house_edge_factor
 
-                    first_symbol = None
-                    match_count = 0
-                    for sym in symbols_on_line:
-                        if sym == "scatter":
-                            break
-                        if first_symbol is None:
-                            if sym != "wild":
-                                first_symbol = sym
-                                match_count = 1
-                        elif sym == first_symbol or sym == "wild":
-                            match_count += 1
-                        else:
-                            break
-
-                    if match_count >= 4 and first_symbol:
-                        payouts = symbols_payouts.get(first_symbol, {})
-                        payout = payouts.get(match_count, 0)
-                        spin_payout += payout
-
-                scatter_count = sum(
-                    1 for col in grid for sym in col if sym == "scatter"
-                )
-                if scatter_count >= 4:
-                    spin_payout += symbols_payouts["scatter"].get(scatter_count, 0)
+                # Free spins (3+ scatters trigger)
+                if scatter_count >= 3:
+                    free_spin_triggers += 1
+                    fs_count = free_spins_table.get(scatter_count, 15)
+                    total_free_spins += fs_count
+                    retriggers = 0
+                    for _ in range(fs_count):
+                        fs_grid = _generate_grid()
+                        fs_payout, fs_scatter = _evaluate_grid(fs_grid)
+                        spin_payout += fs_payout * house_edge_factor
+                        # Max 1 retrigger per base spin (matches actual game)
+                        if fs_scatter >= 3 and retriggers < 1:
+                            extra = free_spins_table.get(fs_scatter, 15)
+                            fs_count += extra
+                            total_free_spins += extra
+                            retriggers += 1
 
                 if spin_payout > 0:
                     hit_count += 1
                 total_payout += spin_payout
 
-            return total_payout, hit_count
+            return total_payout, hit_count, free_spin_triggers, total_free_spins
 
         msg = await ctx.send(
             embed=discord.Embed(
@@ -4943,21 +4980,35 @@ class Owner(commands.Cog, name="Owner"):
             )
         )
 
-        total_payout, hit_count = await asyncio.to_thread(_run)
+        total_payout, hit_count, fs_triggers, total_fs = await asyncio.to_thread(_run)
 
         rtp = (total_payout / trials) * 100
         hit_rate = (hit_count / trials) * 100
         avg_win = total_payout / hit_count if hit_count else 0
+        fs_rate = (fs_triggers / trials) * 100
 
         embed = discord.Embed(
             title="Slots Simulation",
-            description=f"**{trials:,}** spins | 5×4 grid | 10 paylines",
+            description=f"**{trials:,}** spins | 5×4 grid | 10 paylines | 8% house edge",
             color=discord.Color.green(),
         )
         embed.add_field(name="RTP", value=self._sim_format_pct(rtp), inline=True)
         embed.add_field(name="Hit Rate", value=self._sim_format_pct(hit_rate), inline=True)
         embed.add_field(name="Avg Win (when hit)", value=f"{avg_win:.2f}x bet", inline=True)
         embed.add_field(name="Total Wins", value=f"{hit_count:,} / {trials:,}", inline=True)
+        embed.add_field(
+            name="Free Spins",
+            value=f"Triggered: {fs_triggers:,} ({fs_rate:.2f}%) | Total spins: {total_fs:,}",
+            inline=False,
+        )
+        embed.add_field(
+            name="Theory",
+            value=(
+                "Base paylines × 0.92 (8% house edge) + free spins contribution.\n"
+                "Free spins: 3 scatters → 7, 4 → 10, 5 → 15 (max 1 retrigger)."
+            ),
+            inline=False,
+        )
         await msg.edit(embed=embed)
 
     @simulate.command(name="all")
@@ -4982,11 +5033,11 @@ class Owner(commands.Cog, name="Owner"):
             p = sum(1 for _ in range(trials) if random.randrange(2) == 1)
             results["Gamble"] = (p * 2.0 / trials) * 100
 
-            # SuperGamble
+            # SuperGamble (15% win: 85% chance 6x, 15% chance 8x)
             sg = 0.0
             for _ in range(trials):
                 if random.randrange(100) < 15:
-                    sg += 12.0 if random.randrange(100) < 15 else 8.0
+                    sg += 8.0 if random.randrange(100) < 15 else 6.0
             results["SuperGamble"] = (sg / trials) * 100
 
             # Dice (bet on 7, most common)
@@ -5039,6 +5090,69 @@ class Owner(commands.Cog, name="Owner"):
                 else:
                     cp += 20.0 + 30.0 * random.random()
             results["Crash (avg point)"] = (cp / trials) * 100
+
+            # Slots (base spin only, 8% house edge, no free spins for speed)
+            reel_weights_all = {
+                0: {"lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
+                    "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1},
+                1: {"lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
+                    "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1},
+                2: {"lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
+                    "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
+                3: {"lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
+                    "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1},
+                4: {"lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
+                    "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
+            }
+            slot_payouts = {
+                "diamond": {5: 25, 4: 8}, "seven": {5: 20, 4: 6},
+                "bell": {5: 15, 4: 4}, "star": {5: 8, 4: 2},
+                "cherry": {5: 5, 4: 1.5}, "lemon": {5: 3.8, 4: 0.5},
+                "slot_machine": {5: 2.5, 4: 0.3}, "wild": {5: 25, 4: 10},
+                "scatter": {5: 20, 4: 5},
+            }
+            slot_lines = [
+                [(0,0),(0,1),(0,2),(0,3),(0,4)], [(1,0),(1,1),(1,2),(1,3),(1,4)],
+                [(2,0),(2,1),(2,2),(2,3),(2,4)], [(3,0),(3,1),(3,2),(3,3),(3,4)],
+                [(0,0),(1,1),(2,2),(1,3),(0,4)], [(3,0),(2,1),(1,2),(2,3),(3,4)],
+                [(0,0),(2,1),(0,2),(2,3),(0,4)], [(3,0),(1,1),(3,2),(1,3),(3,4)],
+                [(0,0),(1,1),(2,2),(3,3),(3,4)], [(3,0),(2,1),(1,2),(0,3),(0,4)],
+            ]
+            # Precompute cumulative weights
+            rd = {}
+            for ri, wts in reel_weights_all.items():
+                syms = list(wts.keys()); vals = list(wts.values()); tot = sum(vals)
+                cum = []; run = 0
+                for v in vals: run += v; cum.append(run)
+                rd[ri] = (syms, cum, tot)
+
+            sp_total = 0.0
+            for _ in range(trials):
+                grid = []
+                for ri2 in range(5):
+                    sy, cu, to = rd[ri2]; reel = []
+                    for _ in range(4):
+                        pos = random.randrange(to); sel = sy[0]
+                        for ii, bd in enumerate(cu):
+                            if pos < bd: sel = sy[ii]; break
+                        reel.append(sel)
+                    grid.append(reel)
+                sp = 0.0
+                for ln in slot_lines:
+                    sol = [grid[c][r2] for r2, c in ln]
+                    fs2 = None; mc = 0
+                    for s2 in sol:
+                        if s2 == "scatter": break
+                        if fs2 is None:
+                            if s2 != "wild": fs2 = s2; mc = 1
+                        elif s2 == fs2 or s2 == "wild": mc += 1
+                        else: break
+                    if mc >= 4 and fs2:
+                        sp += slot_payouts.get(fs2, {}).get(mc, 0)
+                sc = sum(1 for co in grid for s3 in co if s3 == "scatter")
+                if sc >= 4: sp += slot_payouts["scatter"].get(sc, 0)
+                sp_total += sp * 0.92
+            results["Slots (base)"] = (sp_total / trials) * 100
 
             return results
 
