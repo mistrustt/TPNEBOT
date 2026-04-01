@@ -4834,26 +4834,26 @@ class Owner(commands.Cog, name="Owner"):
         reel_weights = {
             0: {"lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
                 "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1},
-            1: {"lemon": 40, "slot_machine": 35, "cherry": 8, "star": 5,
+            1: {"lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
                 "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1},
-            2: {"lemon": 50, "slot_machine": 40, "cherry": 6, "star": 3,
+            2: {"lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
                 "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
-            3: {"lemon": 50, "slot_machine": 40, "cherry": 5, "star": 2,
+            3: {"lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
                 "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1},
-            4: {"lemon": 55, "slot_machine": 40, "cherry": 2, "star": 1,
-                "bell": 0, "seven": 0, "diamond": 1, "wild": 0, "scatter": 1},
+            4: {"lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
+                "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
         }
 
         symbols_payouts = {
-            "diamond": {5: 50, 4: 15},
-            "seven": {5: 50, 4: 12},
-            "bell": {5: 40, 4: 8},
-            "star": {5: 25, 4: 6},
-            "cherry": {5: 15, 4: 4},
-            "lemon": {5: 10, 4: 2},
-            "slot_machine": {5: 8, 4: 1.5},
-            "wild": {5: 50, 4: 20},
-            "scatter": {5: 50, 4: 8},
+            "diamond": {5: 25, 4: 8},
+            "seven": {5: 20, 4: 6},
+            "bell": {5: 15, 4: 4},
+            "star": {5: 8, 4: 2},
+            "cherry": {5: 5, 4: 1.5},
+            "lemon": {5: 3.8, 4: 0.5},
+            "slot_machine": {5: 2.5, 4: 0.3},
+            "wild": {5: 25, 4: 10},
+            "scatter": {5: 20, 4: 5},
         }
 
         paylines = [
@@ -4863,8 +4863,8 @@ class Owner(commands.Cog, name="Owner"):
             [(3,0),(3,1),(3,2),(3,3),(3,4)],
             [(0,0),(1,1),(2,2),(1,3),(0,4)],
             [(3,0),(2,1),(1,2),(2,3),(3,4)],
-            [(3,0),(2,1),(1,2),(2,3),(3,4)],
-            [(0,0),(1,1),(2,2),(1,3),(0,4)],
+            [(0,0),(2,1),(0,2),(2,3),(0,4)],
+            [(3,0),(1,1),(3,2),(1,3),(3,4)],
             [(0,0),(1,1),(2,2),(3,3),(3,4)],
             [(3,0),(2,1),(1,2),(0,3),(0,4)],
         ]
