@@ -2534,11 +2534,17 @@ class DatabaseManager:
             result_bank = await session.execute(select(func.sum(Wallet.bank_balance)))
             total_bank = result_bank.scalar() or Decimal("0.00")
 
+            cryptocurrency_total_result = await session.execute(
+                select(func.sum(CryptoAsset.amount * CryptoPrice.price))
+                .join(CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol)
+            )
+            cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal("0.00")
+
             supply = await session.get(Supply, 1)
             if not supply:
                 return False
 
-            if (total_wallet + total_bank) != supply.circulating:
+            if (total_wallet + total_bank + cryptocurrency_total) != supply.circulating:
                 logging.error("Circulating mismatch!")
                 return False
 
