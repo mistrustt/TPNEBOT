@@ -19,7 +19,20 @@ from utils.amount import AmountUtils
 from collections import defaultdict
 from decimal import Decimal
 from typing import Sequence, List, Any, Optional
-from utils.fairness import ProvenFairness
+from utils.fairness import (
+    ProvenFairness, U64_RANGE,
+    DICE_PAYOUTS, DICE_EVEN_ODD_PAYOUT,
+    LADDER_STEP_PROBS, LADDER_STEP_MULTS, LADDER_MAX_STEP,
+    HILO_CARDS, HILO_CARD_VALUES,
+    ROULETTE_ALL_NUMBERS, ROULETTE_RED_NUMBERS, ROULETTE_BLACK_NUMBERS,
+    KENO_PAYOUTS,
+    SLOTS_SYMBOLS, SLOTS_PAYLINES, SLOTS_REEL_WEIGHTS,
+    SUPERGAMBLE_WIN_THRESHOLD, SUPERGAMBLE_BASE_MULTIPLIER,
+    SUPERGAMBLE_BONUS_MULTIPLIER, SUPERGAMBLE_RECOVERY_THRESHOLD,
+    SUPERGAMBLE_RECOVERY_MULTIPLIER, SUPERGAMBLE_MEGA_THRESHOLD,
+    CRASH_RANGES,
+    evaluate_slots,
+)
 from textwrap import shorten
 
 logger = logging.getLogger("discord_bot")
@@ -1174,9 +1187,6 @@ class DoubleOrNothingView(discord.ui.LayoutView):
 
 # ==================== ROULETTE — Components V2 ====================
 
-ROULETTE_RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
-ROULETTE_BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
-ROULETTE_ALL_NUMBERS = list(range(0, 37)) + ["00"]
 ROULETTE_MAX_BETS = 10
 
 ROULETTE_PAYTABLE_TEXT = (
@@ -1670,9 +1680,6 @@ HILO_CARD_EMOJIS = {
     "K": "<:king:1361825747051741475>",
     "back": "<:uncovered:1361825843525194029>",
 }
-
-HILO_CARDS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
-HILO_CARD_VALUES = {card: idx for idx, card in enumerate(HILO_CARDS)}
 
 
 class HiLoView(discord.ui.LayoutView):
@@ -2307,19 +2314,9 @@ class LadderView(discord.ui.LayoutView):
     Rebalanced for ~95.5% RTP with EV-neutral climbing at every step.
     """
 
-    # ── probability of SUCCESS when climbing FROM this step ──
-    STEP_PROBS = {
-        0: 83, 1: 80, 2: 75, 3: 70, 4: 65,
-        5: 58, 6: 52, 7: 46, 8: 40, 9: 35,
-    }
-    # ── multiplier the player HOLDS when standing on this step ──
-    STEP_MULTS = {
-        0: Decimal("1.00"),  1: Decimal("1.15"),  2: Decimal("1.45"),
-        3: Decimal("1.90"),  4: Decimal("2.75"),  5: Decimal("4.20"),
-        6: Decimal("7.25"),  7: Decimal("14.00"), 8: Decimal("30.00"),
-        9: Decimal("75.00"), 10: Decimal("215.00"),
-    }
-    MAX_STEP = 10
+    STEP_PROBS = LADDER_STEP_PROBS
+    STEP_MULTS = LADDER_STEP_MULTS
+    MAX_STEP = LADDER_MAX_STEP
 
     def __init__(
         self, *, bot, cog, user_id: int, bet: Decimal, wallet_id,
@@ -3150,36 +3147,6 @@ class GameHistoryPaginator(discord.ui.View):
         return embed
 
 
-U64_RANGE = 1 << 64
-
-
-def _u64_from_hmac(server_seed: str, client_seed: str, nonce: int, tag: str) -> int:
-    """
-    Produce a 64-bit unsigned int via HMAC(server_seed, f"{client_seed}:{nonce}:{tag}").
-    'tag' provides domain-separation across functions so the same nonce doesn't correlate outputs.
-    """
-    msg = f"{client_seed}:{nonce}:{tag}".encode()
-    digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
-    return int.from_bytes(digest[:8], "big")
-
-
-def _rehash_u64(u64: int) -> int:
-    """Deterministically 'stretch' to a fresh 64-bit value for rejection sampling."""
-    return int.from_bytes(hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big")
-
-
-def _rand_below_unbiased(u64: int, n: int) -> int:
-    """
-    Rejection sampling to remove modulo bias. Returns x in [0, n).
-    """
-    if n <= 0:
-        raise ValueError("upper bound must be positive")
-    limit = U64_RANGE - (U64_RANGE % n)
-    while u64 >= limit:
-        u64 = _rehash_u64(u64)
-    return u64 % n
-
-
 class Casino(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -3208,74 +3175,10 @@ class Casino(commands.Cog):
         ]
         self.fair = ProvenFairness()
 
-        # ========== SLOTS REDESIGN: Symbol Set & Grid Structure ==========
-        # 5x4 grid (5 reels × 4 rows = 20 positions)
-        # Symbol tiers: High (rare), Medium, Low (common), Special (Wild, Scatter)
-        self.SLOTS_SYMBOLS = {
-            # High-value symbols: Rare but rewarding
-            "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 25, 4: 8}},
-            "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 20, 4: 6}},
-            "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 15, 4: 4}},
-            
-            # Medium-value symbols
-            "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 8, 4: 2}},
-            "cherry": {"emoji": "🍒", "name": "Cherry", "tier": "medium", "payouts": {5: 5, 4: 1.5}},
-            
-            # Low-value symbols
-            "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 3.8, 4: 0.5}},
-            "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 2.5, 4: 0.3}},
-            
-            # Special symbols
-            "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 25, 4: 10}, "substitutes": True},
-            "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 20, 4: 5, "scatter_pays": True}},
-        }
-
-        # ========== SLOTS REDESIGN: Payline Patterns ==========
-        # 10 fixed paylines for 5x4 grid
-        # Each payline is a list of (row, col) coordinates for matching left-to-right
-        # Grid coordinates: rows 0-3 (top to bottom), cols 0-4 (left to right)
-        self.SLOTS_PAYLINES = [
-            # Horizontal lines (rows 0-3)
-            {"id": 1, "name": "Top Row", "coords": [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)], "color": "🔴"},
-            {"id": 2, "name": "Upper Middle", "coords": [(1, 0), (1, 1), (1, 2), (1, 3), (1, 4)], "color": "🟡"},
-            {"id": 3, "name": "Lower Middle", "coords": [(2, 0), (2, 1), (2, 2), (2, 3), (2, 4)], "color": "🟢"},
-            {"id": 4, "name": "Bottom Row", "coords": [(3, 0), (3, 1), (3, 2), (3, 3), (3, 4)], "color": "🔵"},
-            # V-shapes
-            {"id": 5, "name": "V-Shape Top", "coords": [(0, 0), (1, 1), (2, 2), (1, 3), (0, 4)], "color": "🟣"},
-            {"id": 6, "name": "V-Shape Bottom", "coords": [(3, 0), (2, 1), (1, 2), (2, 3), (3, 4)], "color": "🟠"},
-            # W-shape and M-shape
-            {"id": 7, "name": "W-Shape", "coords": [(0, 0), (2, 1), (0, 2), (2, 3), (0, 4)], "color": "⚪"},
-            {"id": 8, "name": "M-Shape", "coords": [(3, 0), (1, 1), (3, 2), (1, 3), (3, 4)], "color": "⚫"},
-            # Diagonal lines
-            {"id": 9, "name": "Diagonal Down", "coords": [(0, 0), (1, 1), (2, 2), (3, 3), (3, 4)], "color": "🟤"},
-            {"id": 10, "name": "Diagonal Up", "coords": [(3, 0), (2, 1), (1, 2), (0, 3), (0, 4)], "color": "🔷"},
-        ]
-
-        # ========== SLOTS REDESIGN: Weighted Reel Strips ==========
-        # Each reel has weighted symbol distribution for ~96% RTP
-        # Format: {symbol_key: weight} - higher weight = more likely
-        self.SLOTS_REEL_WEIGHTS = {
-            0: {  # Reel 1 (The Hook): High frequency of premium symbols
-                "lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
-                "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1
-            },
-            1: {  # Reel 2 (The Tease): Keeps player invested with 2-of-a-kinds
-                "lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
-                "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1
-            },
-            2: {  # Reel 3 (The Choke): Drastically drops premium symbols, removes Wilds
-                "lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
-                "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1
-            },
-            3: {  # Reel 4 (The Dilution): Almost entirely junk symbols to prevent 4-of-a-kinds
-                "lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
-                "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1
-            },
-            4: {  # Reel 5 (The Blocker): Kills 5-of-a-kinds, but keeps 1 diamond for the jackpot dream
-                "lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
-                "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1
-            },
-        }
+        # SLOTS constants imported from fairness.py
+        self.SLOTS_SYMBOLS = SLOTS_SYMBOLS
+        self.SLOTS_PAYLINES = SLOTS_PAYLINES
+        self.SLOTS_REEL_WEIGHTS = SLOTS_REEL_WEIGHTS
 
     def _json_safe(self, value: Any) -> Any:
         if isinstance(value, Decimal):
@@ -4347,10 +4250,10 @@ class Casino(commands.Cog):
             win_roll = await self.fair_randbelow(user_id, 100)
             bonus_roll = await self.fair_randbelow(user_id, 100)
 
-            win_chance = 15
+            win_chance = SUPERGAMBLE_WIN_THRESHOLD
             win = win_roll < win_chance
-            base_multiplier = Decimal("6.0")
-            bonus_multiplier = Decimal("8.0")
+            base_multiplier = SUPERGAMBLE_BASE_MULTIPLIER
+            bonus_multiplier = SUPERGAMBLE_BONUS_MULTIPLIER
 
             supply = await self.bot.database.get_supply_record()
             treasury = supply.treasury
@@ -4366,11 +4269,11 @@ class Casino(commands.Cog):
 
             if win:
                 raw_multiplier = (
-                    bonus_multiplier if bonus_roll < 15 else base_multiplier
+                    bonus_multiplier if bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD else base_multiplier
                 )
                 bonus_text = (
                     "\n🌟 **MEGA WIN!** Extra multiplier applied!"
-                    if bonus_roll < 15
+                    if bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD
                     else ""
                 )
 
@@ -4419,11 +4322,11 @@ class Casino(commands.Cog):
 
             else:
                 recovery_roll = bonus_roll
-                recovery_allowed = recovery_roll < 10 and treasury_ratio >= Decimal(
+                recovery_allowed = recovery_roll < SUPERGAMBLE_RECOVERY_THRESHOLD and treasury_ratio >= Decimal(
                     "0.1"
                 )
                 if recovery_allowed:
-                    recovery = AmountUtils.round_currency(amount * Decimal("0.20"))
+                    recovery = AmountUtils.round_currency(amount * SUPERGAMBLE_RECOVERY_MULTIPLIER)
                     if recovery > treasury:
                         recovery = treasury
 
@@ -4895,20 +4798,8 @@ class Casino(commands.Cog):
         # Calculate house edge for RTP tracking and bonus
         house_edge = await self.calculate_house_edge(user_id)
 
-        payout_multipliers = {
-            2: 34.2,
-            3: 17.1,
-            4: 11.4,
-            5: 8.55,
-            6: 6.85,
-            7: 5.7,
-            8: 6.85,
-            9: 8.55,
-            10: 11.4,
-            11: 17.1,
-            12: 34.2,
-        }
-        even_odd_payout = 1.9
+        payout_multipliers = DICE_PAYOUTS
+        even_odd_payout = DICE_EVEN_ODD_PAYOUT
         color = discord.Color.blurple()
         if isinstance(ctx.channel, discord.DMChannel):
             color = discord.Color.blurple()
@@ -6641,41 +6532,7 @@ async def setup(bot: commands.Bot):
     logger.debug("Casino cog initialized successfully")
 
 
-keno_payouts = {
-    "low_stakes": {
-        0: {0: 0},
-        1: {0: 0.7, 1: 1.8},
-        2: {0: 0, 1: 2, 2: 3.5},
-        3: {0: 0, 1: 1, 2: 1.3, 3: 20},
-        4: {0: 0, 1: 0, 2: 2, 3: 7, 4: 70},
-        5: {0: 0, 1: 0, 2: 1.3, 3: 4, 4: 12, 5: 250},
-        6: {0: 0, 1: 0, 2: 1, 3: 2, 4: 6, 5: 100, 6: 600},
-        7: {0: 0, 1: 0, 2: 1, 3: 1.5, 4: 3, 5: 15, 6: 200, 7: 600},
-        8: {0: 0, 1: 0, 2: 1, 3: 1.2, 4: 2, 5: 5, 6: 30, 7: 100, 8: 700},
-    },
-    "med_stakes": {
-        0: {0: 0},
-        1: {0: 0.4, 1: 2.5},
-        2: {0: 0, 1: 1.7, 2: 4.5},
-        3: {0: 0, 1: 0, 2: 2.5, 3: 45},
-        4: {0: 0, 1: 0, 2: 1.5, 3: 9, 4: 90},
-        5: {0: 0, 1: 0, 2: 1.2, 3: 3.5, 4: 12, 5: 350},
-        6: {0: 0, 1: 0, 2: 0, 3: 2.5, 4: 8, 5: 160, 6: 600},
-        7: {0: 0, 1: 0, 2: 0, 3: 2, 4: 6, 5: 25, 6: 350, 7: 700},
-        8: {0: 0, 1: 0, 2: 0, 3: 1.8, 4: 4, 5: 10, 6: 60, 7: 350, 8: 800},
-    },
-    "high_stakes": {
-        0: {0: 0},
-        1: {0: 0, 1: 3.5},
-        2: {0: 0, 1: 0, 2: 15},
-        3: {0: 0, 1: 0, 2: 0, 3: 70},
-        4: {0: 0, 1: 0, 2: 0, 3: 9, 4: 230},
-        5: {0: 0, 1: 0, 2: 0, 3: 4, 4: 45, 5: 400},
-        6: {0: 0, 1: 0, 2: 0, 3: 0, 4: 10, 5: 320, 6: 600},
-        7: {0: 0, 1: 0, 2: 0, 3: 0, 4: 6, 5: 80, 6: 350, 7: 700},
-        8: {0: 0, 1: 0, 2: 0, 3: 0, 4: 4.5, 5: 15, 6: 250, 7: 500, 8: 800},
-    },
-}
+keno_payouts = KENO_PAYOUTS
 
 
 class GameUI(discord.ui.LayoutView):

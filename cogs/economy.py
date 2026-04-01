@@ -1490,12 +1490,14 @@ class Economy(commands.Cog):
 
             embed.add_field(
                 name="Wallet",
-                value=f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**",
+                #value=f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**",
+                value=f"{self.currency_name} `**???**`",
                 inline=False
             )
             embed.add_field(
                 name="Bank",
-                value=f"{self.currency_name} **{await self.short_formatter(bank_balance)}**",
+                #value=f"{self.currency_name} **{await self.short_formatter(bank_balance)}**",
+                value=f"{self.currency_name} `**???**`",
                 inline=False
             )
 
@@ -1528,7 +1530,8 @@ class Economy(commands.Cog):
                         description = description[:22] + "..."
                     
                     transactions_text.append(
-                        f"{direction} **{formatted_amount}** • {description}"
+                        #f"{direction} **{formatted_amount}** • {description}"
+                        f"{direction} `**???**` • ???"
                     )
                 
                 embed.add_field(

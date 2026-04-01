@@ -1,6 +1,7 @@
 # --- UPDATED PROVABLE FAIRNESS ---
 import hmac, hashlib
-from typing import List, Tuple, Dict
+from decimal import Decimal
+from typing import Any, List, Sequence, Tuple, Dict
 
 U64_RANGE = 1 << 64
 
@@ -29,114 +30,477 @@ def _rand_below_unbiased(u64: int, n: int) -> int:
     return u64 % n
 
 
+# ══════════════════════════════════════════════════════════════
+#  Pure Stateless RNG Helpers
+# ══════════════════════════════════════════════════════════════
+# These mirror the Casino class async methods but are pure functions.
+# Each takes (server_seed, client_seed, nonce, ...) and returns (result, next_nonce).
+
+
+def fair_randbelow(
+    server_seed: str, client_seed: str, nonce: int, upper: int, *, tag: str = "randbelow"
+) -> Tuple[int, int]:
+    u64 = _u64_from_hmac(server_seed, client_seed, nonce, tag)
+    return _rand_below_unbiased(u64, upper), nonce + 1
+
+
+def fair_random(server_seed: str, client_seed: str, nonce: int) -> Tuple[float, int]:
+    u64 = _u64_from_hmac(server_seed, client_seed, nonce, "random")
+    return u64 / float(U64_RANGE), nonce + 1
+
+
+def fair_choice(
+    server_seed: str, client_seed: str, nonce: int, seq: Sequence[Any], *, tag: str = "choice"
+) -> Tuple[Any, int]:
+    idx, next_nonce = fair_randbelow(server_seed, client_seed, nonce, len(seq), tag=tag)
+    return seq[idx], next_nonce
+
+
+def fair_shuffle(
+    server_seed: str, client_seed: str, start_nonce: int, deck: List[Any]
+) -> int:
+    """Shuffle deck in-place via Fisher-Yates. Returns next_nonce."""
+    nonce = start_nonce
+    for i in range(len(deck) - 1, 0, -1):
+        j, nonce = fair_randbelow(server_seed, client_seed, nonce, i + 1, tag=f"shuffle:{i}")
+        deck[i], deck[j] = deck[j], deck[i]
+    return nonce
+
+
+def fair_sample(
+    server_seed: str, client_seed: str, start_nonce: int, seq: Sequence[Any], k: int
+) -> Tuple[List[Any], int]:
+    clone = list(seq)
+    next_nonce = fair_shuffle(server_seed, client_seed, start_nonce, clone)
+    return clone[:k], next_nonce
+
+
+def fair_uniform(
+    server_seed: str, client_seed: str, nonce: int, min_value: float, max_value: float
+) -> Tuple[float, int]:
+    r, next_nonce = fair_random(server_seed, client_seed, nonce)
+    return min_value + (max_value - min_value) * r, next_nonce
+
+
+# ══════════════════════════════════════════════════════════════
+#  Game Constants  (single source of truth)
+# ══════════════════════════════════════════════════════════════
+
+# ── Dice ──
+DICE_PAYOUTS = {
+    2: 34.2, 3: 17.1, 4: 11.4, 5: 8.55, 6: 6.85,
+    7: 5.7, 8: 6.85, 9: 8.55, 10: 11.4, 11: 17.1, 12: 34.2,
+}
+DICE_EVEN_ODD_PAYOUT = 1.9
+
+# ── SuperGamble ──
+SUPERGAMBLE_WIN_THRESHOLD = 15
+SUPERGAMBLE_MEGA_THRESHOLD = 15
+SUPERGAMBLE_RECOVERY_THRESHOLD = 10
+SUPERGAMBLE_BASE_MULTIPLIER = Decimal("6.0")
+SUPERGAMBLE_BONUS_MULTIPLIER = Decimal("8.0")
+SUPERGAMBLE_RECOVERY_MULTIPLIER = Decimal("0.20")
+
+# ── Ladder ──
+LADDER_STEP_PROBS = {
+    0: 83, 1: 80, 2: 75, 3: 70, 4: 65,
+    5: 58, 6: 52, 7: 46, 8: 40, 9: 35,
+}
+LADDER_STEP_MULTS = {
+    0: Decimal("1.00"), 1: Decimal("1.15"), 2: Decimal("1.45"),
+    3: Decimal("1.90"), 4: Decimal("2.75"), 5: Decimal("4.20"),
+    6: Decimal("7.25"), 7: Decimal("14.00"), 8: Decimal("30.00"),
+    9: Decimal("75.00"), 10: Decimal("215.00"),
+}
+LADDER_MAX_STEP = 10
+
+# ── Crash ──
+# Each tuple: (cumulative_threshold, min_value, max_value)
+CRASH_RANGES = [
+    (0.45, 1.0, 2.0),
+    (0.80, 2.0, 5.0),
+    (0.95, 5.0, 20.0),
+    (1.00, 20.0, 50.0),
+]
+CRASH_BUCKET_NAMES = ["low", "med_low", "med", "high"]
+
+# ── HiLo ──
+HILO_CARDS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+HILO_CARD_VALUES = {card: idx for idx, card in enumerate(HILO_CARDS)}
+
+# ── Roulette ──
+ROULETTE_ALL_NUMBERS = list(range(0, 37)) + ["00"]
+ROULETTE_RED_NUMBERS = {
+    1, 3, 5, 7, 9, 12, 14, 16, 18,
+    19, 21, 23, 25, 27, 30, 32, 34, 36,
+}
+ROULETTE_BLACK_NUMBERS = {
+    2, 4, 6, 8, 10, 11, 13, 15, 17,
+    20, 22, 24, 26, 28, 29, 31, 33, 35,
+}
+
+# ── Keno ──
+KENO_PAYOUTS = {
+    "low_stakes": {
+        0: {0: 0},
+        1: {0: 0.7, 1: 1.8},
+        2: {0: 0, 1: 2, 2: 3.5},
+        3: {0: 0, 1: 1, 2: 1.3, 3: 20},
+        4: {0: 0, 1: 0, 2: 2, 3: 7, 4: 70},
+        5: {0: 0, 1: 0, 2: 1.3, 3: 4, 4: 12, 5: 250},
+        6: {0: 0, 1: 0, 2: 1, 3: 2, 4: 6, 5: 100, 6: 600},
+        7: {0: 0, 1: 0, 2: 1, 3: 1.5, 4: 3, 5: 15, 6: 200, 7: 600},
+        8: {0: 0, 1: 0, 2: 1, 3: 1.2, 4: 2, 5: 5, 6: 30, 7: 100, 8: 700},
+    },
+    "med_stakes": {
+        0: {0: 0},
+        1: {0: 0.4, 1: 2.5},
+        2: {0: 0, 1: 1.7, 2: 4.5},
+        3: {0: 0, 1: 0, 2: 2.5, 3: 45},
+        4: {0: 0, 1: 0, 2: 1.5, 3: 9, 4: 90},
+        5: {0: 0, 1: 0, 2: 1.2, 3: 3.5, 4: 12, 5: 350},
+        6: {0: 0, 1: 0, 2: 0, 3: 2.5, 4: 8, 5: 160, 6: 600},
+        7: {0: 0, 1: 0, 2: 0, 3: 2, 4: 6, 5: 25, 6: 350, 7: 700},
+        8: {0: 0, 1: 0, 2: 0, 3: 1.8, 4: 4, 5: 10, 6: 60, 7: 350, 8: 800},
+    },
+    "high_stakes": {
+        0: {0: 0},
+        1: {0: 0, 1: 3.5},
+        2: {0: 0, 1: 0, 2: 15},
+        3: {0: 0, 1: 0, 2: 0, 3: 70},
+        4: {0: 0, 1: 0, 2: 0, 3: 9, 4: 230},
+        5: {0: 0, 1: 0, 2: 0, 3: 4, 4: 45, 5: 400},
+        6: {0: 0, 1: 0, 2: 0, 3: 0, 4: 10, 5: 320, 6: 600},
+        7: {0: 0, 1: 0, 2: 0, 3: 0, 4: 6, 5: 80, 6: 350, 7: 700},
+        8: {0: 0, 1: 0, 2: 0, 3: 0, 4: 4.5, 5: 15, 6: 250, 7: 500, 8: 800},
+    },
+}
+
+# ── Slots ──
+SLOTS_SYMBOLS = {
+    "diamond": {"emoji": "💎", "name": "Diamond", "tier": "high", "payouts": {5: 25, 4: 8}},
+    "seven": {"emoji": "7️⃣", "name": "Lucky Seven", "tier": "high", "payouts": {5: 20, 4: 6}},
+    "bell": {"emoji": "🔔", "name": "Bell", "tier": "high", "payouts": {5: 15, 4: 4}},
+    "star": {"emoji": "⭐", "name": "Star", "tier": "medium", "payouts": {5: 8, 4: 2}},
+    "cherry": {"emoji": "🍒", "name": "Cherry", "tier": "medium", "payouts": {5: 5, 4: 1.5}},
+    "lemon": {"emoji": "🍋", "name": "Lemon", "tier": "low", "payouts": {5: 3.8, 4: 0.5}},
+    "slot_machine": {"emoji": "🎰", "name": "Slot Machine", "tier": "low", "payouts": {5: 2.5, 4: 0.3}},
+    "wild": {"emoji": "🃏", "name": "Wild", "tier": "special", "payouts": {5: 25, 4: 10}, "substitutes": True},
+    "scatter": {"emoji": "💰", "name": "Scatter", "tier": "special", "payouts": {5: 20, 4: 5}, "scatter_pays": True},
+}
+
+SLOTS_PAYLINES = [
+    {"id": 1, "name": "Top Row", "coords": [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)], "color": "🔴"},
+    {"id": 2, "name": "Upper Middle", "coords": [(1, 0), (1, 1), (1, 2), (1, 3), (1, 4)], "color": "🟡"},
+    {"id": 3, "name": "Lower Middle", "coords": [(2, 0), (2, 1), (2, 2), (2, 3), (2, 4)], "color": "🟢"},
+    {"id": 4, "name": "Bottom Row", "coords": [(3, 0), (3, 1), (3, 2), (3, 3), (3, 4)], "color": "🔵"},
+    {"id": 5, "name": "V-Shape Top", "coords": [(0, 0), (1, 1), (2, 2), (1, 3), (0, 4)], "color": "🟣"},
+    {"id": 6, "name": "V-Shape Bottom", "coords": [(3, 0), (2, 1), (1, 2), (2, 3), (3, 4)], "color": "🟠"},
+    {"id": 7, "name": "W-Shape", "coords": [(0, 0), (2, 1), (0, 2), (2, 3), (0, 4)], "color": "⚪"},
+    {"id": 8, "name": "M-Shape", "coords": [(3, 0), (1, 1), (3, 2), (1, 3), (3, 4)], "color": "⚫"},
+    {"id": 9, "name": "Diagonal Down", "coords": [(0, 0), (1, 1), (2, 2), (3, 3), (3, 4)], "color": "🟤"},
+    {"id": 10, "name": "Diagonal Up", "coords": [(3, 0), (2, 1), (1, 2), (0, 3), (0, 4)], "color": "🔷"},
+]
+
+SLOTS_REEL_WEIGHTS = {
+    0: {
+        "lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
+        "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1,
+    },
+    1: {
+        "lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
+        "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1,
+    },
+    2: {
+        "lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
+        "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1,
+    },
+    3: {
+        "lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
+        "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1,
+    },
+    4: {
+        "lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
+        "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1,
+    },
+}
+
+
+# ══════════════════════════════════════════════════════════════
+#  Outcome Functions  (single source of truth for all games)
+# ══════════════════════════════════════════════════════════════
+# Pure functions: (server_seed, client_seed, nonce, ...) → deterministic result dict.
+# No DB calls, no Discord objects — just math.
+
+def outcome_gamble(server_seed: str, client_seed: str, nonce: int) -> dict:
+    roll, n = fair_randbelow(server_seed, client_seed, nonce, 2)
+    return {"won": roll == 1, "roll": roll, "nonce_end": n}
+
+
+def outcome_supergamble(server_seed: str, client_seed: str, nonce: int) -> dict:
+    win_roll, n = fair_randbelow(server_seed, client_seed, nonce, 100)
+    bonus_roll, n = fair_randbelow(server_seed, client_seed, n, 100)
+    return {
+        "win_roll": win_roll,
+        "bonus_roll": bonus_roll,
+        "won": win_roll < SUPERGAMBLE_WIN_THRESHOLD,
+        "mega": bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD,
+        "recovery_eligible": bonus_roll < SUPERGAMBLE_RECOVERY_THRESHOLD,
+        "nonce_end": n,
+    }
+
+
+def outcome_dice(server_seed: str, client_seed: str, nonce: int) -> dict:
+    d1, n = fair_randbelow(server_seed, client_seed, nonce, 6)
+    d2, n = fair_randbelow(server_seed, client_seed, n, 6)
+    d1 += 1
+    d2 += 1
+    return {"die1": d1, "die2": d2, "total": d1 + d2, "nonce_end": n}
+
+
+def outcome_roulette(server_seed: str, client_seed: str, nonce: int) -> dict:
+    result, n = fair_choice(server_seed, client_seed, nonce, ROULETTE_ALL_NUMBERS)
+    is_int = isinstance(result, int)
+    is_green = (result == 0) or (result == "00")
+    is_red = is_int and result in ROULETTE_RED_NUMBERS
+    is_black = is_int and result in ROULETTE_BLACK_NUMBERS
+    color = "Green" if is_green else ("Red" if is_red else "Black")
+    return {
+        "spin_result": result,
+        "color": color,
+        "is_red": is_red,
+        "is_black": is_black,
+        "is_green": is_green,
+        "is_even": is_int and result != 0 and (result % 2 == 0),
+        "is_odd": is_int and (result % 2 == 1),
+        "nonce_end": n,
+    }
+
+
+def outcome_crash(
+    server_seed: str, client_seed: str, nonce: int, house_edge: float = 0.04
+) -> dict:
+    r, n = fair_random(server_seed, client_seed, nonce)
+    edge_factor = house_edge / 0.04
+    for i, (threshold, lo, hi) in enumerate(CRASH_RANGES):
+        scaled = min(threshold * edge_factor, 0.9999)
+        if r < scaled or i == len(CRASH_RANGES) - 1:
+            v, n = fair_uniform(server_seed, client_seed, n, lo, hi)
+            return {"crash_point": round(v, 2), "bucket": CRASH_BUCKET_NAMES[i], "nonce_end": n}
+
+
+def outcome_double_round(server_seed: str, client_seed: str, nonce: int) -> dict:
+    result, n = fair_choice(server_seed, client_seed, nonce, [True, False])
+    return {"won": result, "nonce_end": n}
+
+
+def outcome_ladder_step(
+    server_seed: str, client_seed: str, nonce: int, step: int
+) -> dict:
+    roll, n = fair_randbelow(server_seed, client_seed, nonce, 10000)
+    threshold = LADDER_STEP_PROBS.get(step, 0) * 100
+    return {"roll": roll, "threshold": threshold, "survived": roll < threshold, "nonce_end": n}
+
+
+def outcome_hilo_initial(server_seed: str, client_seed: str, nonce: int) -> dict:
+    card, n = fair_choice(server_seed, client_seed, nonce, HILO_CARDS[1:-1])
+    return {"card": card, "card_index": HILO_CARD_VALUES[card], "nonce_end": n}
+
+
+def outcome_hilo_draw(server_seed: str, client_seed: str, nonce: int) -> dict:
+    card, n = fair_choice(server_seed, client_seed, nonce, HILO_CARDS)
+    return {"card": card, "card_index": HILO_CARD_VALUES[card], "nonce_end": n}
+
+
+def outcome_shuffle_deck(
+    server_seed: str, client_seed: str, start_nonce: int
+) -> Tuple[List[str], int]:
+    suits = ["♥", "♦", "♣", "♠"]
+    ranks = [str(n) for n in range(2, 11)] + ["J", "Q", "K", "A"]
+    deck = [f"{r}{s}" for s in suits for r in ranks]
+    next_nonce = fair_shuffle(server_seed, client_seed, start_nonce, deck)
+    return deck, next_nonce
+
+
+def outcome_blackjack(server_seed: str, client_seed: str, start_nonce: int) -> dict:
+    deck, n = outcome_shuffle_deck(server_seed, client_seed, start_nonce)
+    player = [deck.pop(), deck.pop()]
+    dealer = [deck.pop()]
+    return {"deck": deck, "player": player, "dealer": dealer, "nonce_end": n}
+
+
+def outcome_poker(server_seed: str, client_seed: str, start_nonce: int) -> dict:
+    deck, n = outcome_shuffle_deck(server_seed, client_seed, start_nonce)
+    player = [deck.pop(), deck.pop()]
+    bot = [deck.pop(), deck.pop()]
+    community = [deck.pop() for _ in range(5)]
+    return {"deck": deck, "player": player, "bot": bot, "community": community, "nonce_end": n}
+
+
+def outcome_mines(
+    server_seed: str, client_seed: str, start_nonce: int,
+    board_size: int = 25, num_bombs: int = 3,
+) -> dict:
+    positions, n = fair_sample(server_seed, client_seed, start_nonce, list(range(board_size)), num_bombs)
+    return {"bomb_positions": sorted(positions), "nonce_end": n}
+
+
+def outcome_keno(
+    server_seed: str, client_seed: str, start_nonce: int,
+    num_buttons: int = 30, num_picks: int = 8,
+) -> dict:
+    positions, n = fair_sample(server_seed, client_seed, start_nonce, list(range(num_buttons)), num_picks)
+    return {"winning_positions": sorted(positions), "nonce_end": n}
+
+
+def outcome_slots_grid(
+    server_seed: str, client_seed: str, start_nonce: int,
+    reel_weights: dict = None,
+) -> dict:
+    if reel_weights is None:
+        reel_weights = SLOTS_REEL_WEIGHTS
+    grid = []
+    nonce = start_nonce
+    for reel_idx in range(5):
+        weights = reel_weights[reel_idx]
+        symbols = list(weights.keys())
+        weight_values = list(weights.values())
+        total_weight = sum(weight_values)
+        cumulative = []
+        running = 0
+        for w in weight_values:
+            running += w
+            cumulative.append(running)
+        reel_symbols = []
+        for _row in range(4):
+            pos, nonce = fair_randbelow(server_seed, client_seed, nonce, total_weight)
+            selected = symbols[0]
+            for i, bound in enumerate(cumulative):
+                if pos < bound:
+                    selected = symbols[i]
+                    break
+            reel_symbols.append(selected)
+        grid.append(reel_symbols)
+    return {"grid": grid, "nonce_end": nonce}
+
+
+# ══════════════════════════════════════════════════════════════
+#  Evaluation Helpers  (pure, no RNG)
+# ══════════════════════════════════════════════════════════════
+
+def evaluate_slots(
+    grid: List[List[str]],
+    symbols: dict = None,
+    paylines: list = None,
+) -> dict:
+    if symbols is None:
+        symbols = SLOTS_SYMBOLS
+    if paylines is None:
+        paylines = SLOTS_PAYLINES
+    wins = []
+    for payline in paylines:
+        coords = payline["coords"]
+        symbols_on_line = []
+        for row, col in coords:
+            if col < len(grid) and row < len(grid[col]):
+                symbols_on_line.append(grid[col][row])
+        if len(symbols_on_line) != 5:
+            continue
+        first_symbol = None
+        match_count = 0
+        for sym in symbols_on_line:
+            if sym == "scatter":
+                break
+            if first_symbol is None:
+                if sym != "wild":
+                    first_symbol = sym
+                    match_count = 1
+            elif sym == first_symbol or sym == "wild":
+                match_count += 1
+            else:
+                break
+        if match_count >= 4 and first_symbol:
+            symbol_data = symbols.get(first_symbol, {})
+            payouts = symbol_data.get("payouts", {})
+            payout_mult = payouts.get(match_count, 0)
+            if payout_mult > 0:
+                wins.append({
+                    "payline_id": payline["id"],
+                    "payline_name": payline["name"],
+                    "symbol": first_symbol,
+                    "symbol_emoji": symbol_data.get("emoji", "❓"),
+                    "count": match_count,
+                    "payout": payout_mult,
+                })
+    scatter_count = sum(1 for col in grid for sym in col if sym == "scatter")
+    scatter_data = symbols.get("scatter", {})
+    scatter_payouts = scatter_data.get("payouts", {})
+    scatter_payout = scatter_payouts.get(scatter_count, 0)
+    total_payout = sum(w["payout"] for w in wins) + scatter_payout
+    return {
+        "wins": wins,
+        "scatter_count": scatter_count,
+        "scatter_payout": scatter_payout,
+        "total_payout": total_payout,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+#  ProvenFairness Class  (verification wrappers)
+# ══════════════════════════════════════════════════════════════
+
 class ProvenFairness:
-    """
-    Mirror the Casino/Economy RNG semantics for verification.
-    Adjust TAGS below only if your live game code used different tags.
-    """
+    """Verification wrappers that delegate to the canonical outcome functions."""
 
     class TAGS:
-        # Default tags that match your helpers' defaults/usage:
-        RANDBELOW = "randbelow"  # fair_randbelow(..., tag default)
-        RANDOM = "random"  # fair_random(...)
+        RANDBELOW = "randbelow"
+        RANDOM = "random"
 
-        # Shuffles use explicit per-swap tags in your cog:
         @staticmethod
         def SHUFFLE(i: int) -> str:
             return f"shuffle:{i}"
 
-        # If you gave specific tags per game draw in your cog,
-        # add them here and use them below instead of RANDBELOW.
+    # ── legacy helpers (kept for any external callers) ──
 
-    # ---------- Core single-draw helpers (for verifier use) ----------
     @staticmethod
     def _randbelow(
         server_seed: str, client_seed: str, nonce: int, upper: int, tag: str
     ) -> int:
-        u64 = _u64_from_hmac(server_seed, client_seed, nonce, tag)
-        return _rand_below_unbiased(u64, upper)
+        result, _ = fair_randbelow(server_seed, client_seed, nonce, upper, tag=tag)
+        return result
 
     @staticmethod
     def _random01(server_seed: str, client_seed: str, nonce: int, tag: str) -> float:
         u64 = _u64_from_hmac(server_seed, client_seed, nonce, tag)
         return u64 / float(U64_RANGE)
 
-    # ---------- Game verifiers ----------
+    # ── game verifiers ──
+
     @staticmethod
     def verify_gamble(server_seed: str, client_seed: str, nonce: int) -> bool:
-        """
-        Mirrors: fair_randbelow(user, 2) with default tag='randbelow'
-        Returns True if roll==1, else False.
-        """
-        roll = ProvenFairness._randbelow(
-            server_seed, client_seed, nonce, 2, ProvenFairness.TAGS.RANDBELOW
-        )
-        return roll == 1
+        return outcome_gamble(server_seed, client_seed, nonce)["won"]
 
     @staticmethod
     def verify_supergamble(server_seed: str, client_seed: str, nonce: int) -> dict:
-        """
-        Two back-to-back draws (same as your previous logic), using default 'randbelow' tag.
-        Assumes live code consumed 2 nonces in one game.
-        """
-        win_roll = ProvenFairness._randbelow(
-            server_seed, client_seed, nonce, 100, ProvenFairness.TAGS.RANDBELOW
-        )
-        bonus_roll = ProvenFairness._randbelow(
-            server_seed, client_seed, nonce + 1, 100, ProvenFairness.TAGS.RANDBELOW
-        )
+        r = outcome_supergamble(server_seed, client_seed, nonce)
         return {
-            "win_roll": win_roll,
-            "bonus_roll": bonus_roll,
-            "win": (win_roll < 15),
-            "mega_win": (bonus_roll < 15),
+            "win_roll": r["win_roll"],
+            "bonus_roll": r["bonus_roll"],
+            "win": r["won"],
+            "mega_win": r["mega"],
         }
 
     @staticmethod
     def verify_dice(server_seed: str, client_seed: str, nonce: int) -> Tuple[int, int]:
-        """
-        Two consecutive fair d6 rolls using 'randbelow' (nonce, nonce+1).
-        """
-        d1 = (
-            ProvenFairness._randbelow(
-                server_seed, client_seed, nonce, 6, ProvenFairness.TAGS.RANDBELOW
-            )
-            + 1
-        )
-        d2 = (
-            ProvenFairness._randbelow(
-                server_seed, client_seed, nonce + 1, 6, ProvenFairness.TAGS.RANDBELOW
-            )
-            + 1
-        )
-        return d1, d2
+        r = outcome_dice(server_seed, client_seed, nonce)
+        return r["die1"], r["die2"]
 
     @staticmethod
     def verify_ladder(
         server_seed: str, client_seed: str, nonce: int, step: int
-    ) -> Tuple[float, float]:
-        """
-        Roll in [0,10000) using unbiased randbelow; convert to percent with 2dp.
-        Prob thresholds mirror your command implementation table.
-        """
-        roll_raw = ProvenFairness._randbelow(
-            server_seed, client_seed, nonce, 10000, ProvenFairness.TAGS.RANDBELOW
-        )
-        roll_pct = roll_raw / 100.0
-        probabilities = {
-            0: 83,
-            1: 80,
-            2: 75,
-            3: 70,
-            4: 65,
-            5: 58,
-            6: 52,
-            7: 46,
-            8: 40,
-            9: 35,
-        }
-        threshold = float(probabilities.get(step, 0))
-        return roll_pct, threshold
+    ) -> Tuple[int, int]:
+        r = outcome_ladder_step(server_seed, client_seed, nonce, step)
+        return r["roll"], r["threshold"]
 
     @staticmethod
     def verify_slots(
@@ -147,411 +511,97 @@ class ProvenFairness:
         symbols_data: dict = None,
         paylines: list = None,
     ) -> Dict[str, any]:
-        """
-        Verify 5x4 slots grid with 20 paylines, wilds, and scatters.
-        
-        Mirrors the live game's _async_generate_spin_grid logic using static RNG.
-        
-        Args:
-            server_seed: Revealed server seed
-            client_seed: Client seed from wallet
-            start_nonce: Starting nonce for the spin
-            reel_weights: Optional custom reel weights (defaults to standard weights)
-            symbols_data: Optional custom symbols data (defaults to standard symbols)
-            paylines: Optional custom paylines (defaults to standard 20 paylines)
-        
-        Returns:
-            dict with:
-                - grid: 5x4 grid as list of columns (reels)
-                - grid_display: Formatted emoji grid string
-                - wins: List of winning paylines with payouts
-                - scatter_count: Number of scatter symbols
-                - scatter_payout: Scatter payout multiplier
-                - total_payout: Sum of all win payouts
-                - nonce_end: Final nonce after 20 RNG calls
-        """
-        # Default reel weights (matching casino.py SLOTS_REEL_WEIGHTS)
-        if reel_weights is None:
-            reel_weights = {
-                0: {"lemon": 25, "slot_machine": 22, "cherry": 18, "star": 12,
-                    "bell": 8, "seven": 6, "diamond": 5, "wild": 3, "scatter": 1},
-                1: {"lemon": 23, "slot_machine": 20, "cherry": 17, "star": 14,
-                    "bell": 10, "seven": 7, "diamond": 5, "wild": 3, "scatter": 1},
-                2: {"lemon": 20, "slot_machine": 18, "cherry": 16, "star": 15,
-                    "bell": 12, "seven": 9, "diamond": 6, "wild": 3, "scatter": 1},
-                3: {"lemon": 18, "slot_machine": 16, "cherry": 15, "star": 16,
-                    "bell": 14, "seven": 11, "diamond": 7, "wild": 2, "scatter": 1},
-                4: {"lemon": 15, "slot_machine": 14, "cherry": 14, "star": 16,
-                    "bell": 15, "seven": 13, "diamond": 10, "wild": 2, "scatter": 1},
-            }
-        
-        # Default symbols data (matching casino.py SLOTS_SYMBOLS)
-        if symbols_data is None:
-            symbols_data = {
-                "diamond": {"emoji": "💎", "payouts": {5: 100, 4: 25, 3: 8}},
-                "seven": {"emoji": "7️⃣", "payouts": {5: 75, 4: 20, 3: 6}},
-                "bell": {"emoji": "🔔", "payouts": {5: 50, 4: 15, 3: 5}},
-                "star": {"emoji": "⭐", "payouts": {5: 30, 4: 10, 3: 3}},
-                "cherry": {"emoji": "🍒", "payouts": {5: 20, 4: 8, 3: 2.5}},
-                "lemon": {"emoji": "🍋", "payouts": {5: 15, 4: 5, 3: 1.5}},
-                "slot_machine": {"emoji": "🎰", "payouts": {5: 10, 4: 4, 3: 1}},
-                "wild": {"emoji": "🃏", "payouts": {5: 500, 4: 100, 3: 25}},
-                "scatter": {"emoji": "💰", "payouts": {5: 50, 4: 20, 3: 5}},
-            }
-        
-        # Default paylines (matching casino.py SLOTS_PAYLINES)
-        if paylines is None:
-            paylines = [
-                {"id": 1, "name": "Top Row", "coords": [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]},
-                {"id": 2, "name": "Upper Middle", "coords": [(1, 0), (1, 1), (1, 2), (1, 3), (1, 4)]},
-                {"id": 3, "name": "Lower Middle", "coords": [(2, 0), (2, 1), (2, 2), (2, 3), (2, 4)]},
-                {"id": 4, "name": "Bottom Row", "coords": [(3, 0), (3, 1), (3, 2), (3, 3), (3, 4)]},
-                {"id": 5, "name": "V-Shape Top", "coords": [(0, 0), (1, 1), (2, 2), (1, 3), (0, 4)]},
-                {"id": 6, "name": "V-Shape Bottom", "coords": [(3, 0), (2, 1), (1, 2), (2, 3), (3, 4)]},
-                {"id": 7, "name": "Inverted V Top", "coords": [(3, 0), (2, 1), (1, 2), (2, 3), (3, 4)]},
-                {"id": 8, "name": "Inverted V Bottom", "coords": [(0, 0), (1, 1), (2, 2), (1, 3), (0, 4)]},
-                {"id": 9, "name": "Diagonal Down", "coords": [(0, 0), (1, 1), (2, 2), (3, 3), (3, 4)]},
-                {"id": 10, "name": "Diagonal Up", "coords": [(3, 0), (2, 1), (1, 2), (0, 3), (0, 4)]},
-                {"id": 11, "name": "Zigzag 1", "coords": [(0, 0), (1, 1), (0, 2), (1, 3), (0, 4)]},
-                {"id": 12, "name": "Zigzag 2", "coords": [(3, 0), (2, 1), (3, 2), (2, 3), (3, 4)]},
-                {"id": 13, "name": "Zigzag 3", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)]},
-                {"id": 14, "name": "Zigzag 4", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)]},
-                {"id": 15, "name": "W-Shape Top", "coords": [(0, 0), (1, 1), (0, 2), (1, 3), (0, 4)]},
-                {"id": 16, "name": "W-Shape Bottom", "coords": [(3, 0), (2, 1), (3, 2), (2, 3), (3, 4)]},
-                {"id": 17, "name": "M-Shape Top", "coords": [(1, 0), (0, 1), (1, 2), (0, 3), (1, 4)]},
-                {"id": 18, "name": "M-Shape Bottom", "coords": [(2, 0), (3, 1), (2, 2), (3, 3), (2, 4)]},
-                {"id": 19, "name": "Step Down", "coords": [(0, 0), (0, 1), (1, 2), (1, 3), (2, 4)]},
-                {"id": 20, "name": "Step Up", "coords": [(2, 0), (2, 1), (1, 2), (1, 3), (0, 4)]},
-            ]
-        
-        # Generate 5x4 grid (column-major: grid[col][row])
-        grid = []
-        nonce = start_nonce
-        
-        for reel_idx in range(5):
-            weights = reel_weights[reel_idx]
-            symbols = list(weights.keys())
-            weight_values = list(weights.values())
-            total_weight = sum(weight_values)
-            
-            # Build cumulative weights for selection
-            cumulative = []
-            running = 0
-            for w in weight_values:
-                running += w
-                cumulative.append(running)
-            
-            reel_symbols = []
-            for row_idx in range(4):
-                # Get random position using provably fair RNG
-                pos = ProvenFairness._randbelow(
-                    server_seed, client_seed, nonce, total_weight, ProvenFairness.TAGS.RANDBELOW
-                )
-                nonce += 1
-                
-                # Select symbol based on weighted position
-                selected = symbols[0]
-                for i, bound in enumerate(cumulative):
-                    if pos < bound:
-                        selected = symbols[i]
-                        break
-                reel_symbols.append(selected)
-            
-            grid.append(reel_symbols)
-        
-        # Evaluate paylines
-        wins = []
-        for payline in paylines:
-            coords = payline["coords"]
-            symbols_on_line = []
-            
-            for row, col in coords:
-                if col < len(grid) and row < len(grid[col]):
-                    symbols_on_line.append(grid[col][row])
-            
-            if len(symbols_on_line) != 5:
-                continue
-            
-            # Find longest matching sequence from left (wilds substitute)
-            first_symbol = None
-            match_count = 0
-            
-            for i, sym in enumerate(symbols_on_line):
-                if sym == "scatter":
-                    break  # Scatter doesn't form paylines
-                
-                if first_symbol is None:
-                    if sym != "wild":
-                        first_symbol = sym
-                        match_count = 1
-                    # Wild at position 0 - keep looking for actual symbol
-                elif sym == first_symbol or sym == "wild":
-                    match_count += 1
-                else:
-                    break  # Mismatch - stop counting
-            
-            # Check for winning combination (3+ matches)
-            if match_count >= 3 and first_symbol:
-                symbol_data = symbols_data.get(first_symbol, {})
-                payouts = symbol_data.get("payouts", {})
-                payout_mult = payouts.get(match_count, 0)
-                
-                if payout_mult > 0:
-                    wins.append({
-                        "payline_id": payline["id"],
-                        "payline_name": payline["name"],
-                        "symbol": first_symbol,
-                        "symbol_emoji": symbol_data.get("emoji", "❓"),
-                        "count": match_count,
-                        "payout": payout_mult,
-                        "coords": coords[:match_count],
-                    })
-        
-        # Count scatters
-        scatter_count = 0
-        for col in grid:
-            for sym in col:
-                if sym == "scatter":
-                    scatter_count += 1
-        
-        # Calculate scatter payout
-        scatter_data = symbols_data.get("scatter", {})
-        scatter_payouts = scatter_data.get("payouts", {})
-        scatter_payout = scatter_payouts.get(scatter_count, 0)
-        
-        # Calculate total payout
-        total_payout = sum(w["payout"] for w in wins) + scatter_payout
-        
-        # Format grid display
-        winning_coords = []
-        for w in wins:
-            winning_coords.extend(w.get("coords", []))
-        winning_set = set(winning_coords)
-        
-        grid_lines = []
-        for row in range(4):
-            row_display = []
-            for col in range(5):
-                sym = grid[col][row]
-                sym_data = symbols_data.get(sym, {})
-                emoji = sym_data.get("emoji", "❓")
-                
-                if (row, col) in winning_set:
-                    row_display.append(f"【{emoji}】")
-                else:
-                    row_display.append(f"｜{emoji}｜")
-            grid_lines.append("".join(row_display))
-        grid_display = "\n".join(grid_lines)
-        
+        grid_result = outcome_slots_grid(server_seed, client_seed, start_nonce, reel_weights)
+        eval_result = evaluate_slots(grid_result["grid"], symbols=symbols_data, paylines=paylines)
         return {
-            "grid": grid,
-            "grid_display": grid_display,
-            "wins": wins,
-            "scatter_count": scatter_count,
-            "scatter_payout": scatter_payout,
-            "total_payout": total_payout,
-            "nonce_end": nonce,
+            "grid": grid_result["grid"],
+            "wins": eval_result["wins"],
+            "scatter_count": eval_result["scatter_count"],
+            "scatter_payout": eval_result["scatter_payout"],
+            "total_payout": eval_result["total_payout"],
+            "nonce_end": grid_result["nonce_end"],
         }
 
     @staticmethod
     def _shuffle_deck(
         server_seed: str, client_seed: str, start_nonce: int
     ) -> Tuple[List[str], int]:
-        """
-        Fisher–Yates with per-swap tag f"shuffle:{i}" just like your cog.
-        NOTE: If your runtime shuffle used default 'randbelow' instead,
-        replace TAGS.SHUFFLE(i) with TAGS.RANDBELOW below.
-        """
-        suits = ["♥", "♦", "♣", "♠"]
-        ranks = [str(n) for n in range(2, 11)] + ["J", "Q", "K", "A"]
-        deck = [f"{r}{s}" for s in suits for r in ranks]
-
-        nonce = start_nonce
-        for i in range(len(deck) - 1, 0, -1):
-            # draw j in [0, i]
-            u64 = _u64_from_hmac(
-                server_seed, client_seed, nonce, ProvenFairness.TAGS.SHUFFLE(i)
-            )
-            j = _rand_below_unbiased(u64, i + 1)
-            deck[i], deck[j] = deck[j], deck[i]
-            nonce += 1
-        return deck, nonce
+        return outcome_shuffle_deck(server_seed, client_seed, start_nonce)
 
     @staticmethod
     def verify_blackjack(
         server_seed: str, client_seed: str, start_nonce: int
     ) -> Dict[str, List[str]]:
-        deck, next_nonce = ProvenFairness._shuffle_deck(
-            server_seed, client_seed, start_nonce
-        )
-        player = [deck.pop(), deck.pop()]
-        dealer = [deck.pop()]
+        r = outcome_blackjack(server_seed, client_seed, start_nonce)
         return {
-            "shuffled_deck": deck,
-            "player_cards": player,
-            "dealer_cards": dealer,
-            "next_nonce": next_nonce,
+            "shuffled_deck": r["deck"],
+            "player_cards": r["player"],
+            "dealer_cards": r["dealer"],
+            "next_nonce": r["nonce_end"],
         }
 
     @staticmethod
     def verify_roulette(server_seed: str, client_seed: str, nonce: int) -> dict:
-        """
-        Mirrors roulette spin:
-          spin_result = fair_choice(user, [0..36, "00"], tag="choice")
-        Returns a dict with the landed value and derived labels.
-        """
-        # Sequence & tag must match runtime exactly
-        all_numbers = list(range(0, 37)) + ["00"]
-        tag = "choice"
-
-        # Draw unbiased index in [0, 38)
-        u64 = _u64_from_hmac(server_seed, client_seed, nonce, tag)
-        idx = _rand_below_unbiased(u64, len(all_numbers))
-        spin_result = all_numbers[idx]
-
-        # Color/props, matching your command logic
-        red_numbers = {
-            1,
-            3,
-            5,
-            7,
-            9,
-            12,
-            14,
-            16,
-            18,
-            19,
-            21,
-            23,
-            25,
-            27,
-            30,
-            32,
-            34,
-            36,
-        }
-        black_numbers = {
-            2,
-            4,
-            6,
-            8,
-            10,
-            11,
-            13,
-            15,
-            17,
-            20,
-            22,
-            24,
-            26,
-            28,
-            29,
-            31,
-            33,
-            35,
-        }
-
-        is_int = isinstance(spin_result, int)
-        is_red = is_int and spin_result in red_numbers
-        is_black = is_int and spin_result in black_numbers
-        is_green = (spin_result == 0) or (spin_result == "00")
-        color = "Green" if is_green else ("Red" if is_red else "Black")
-
+        r = outcome_roulette(server_seed, client_seed, nonce)
         return {
-            "spin_result": spin_result,  # int in 0..36 or "00"
-            "color": color,  # "Red" | "Black" | "Green"
-            "is_red": is_red,
-            "is_black": is_black,
-            "is_green": is_green,
-            "is_even": is_int and (spin_result % 2 == 0),
-            "is_odd": is_int and (spin_result % 2 == 1),
+            "spin_result": r["spin_result"],
+            "color": r["color"],
+            "is_red": r["is_red"],
+            "is_black": r["is_black"],
+            "is_green": r["is_green"],
+            "is_even": r["is_even"],
+            "is_odd": r["is_odd"],
         }
 
     @staticmethod
     def verify_poker(
         server_seed: str, client_seed: str, start_nonce: int
     ) -> Dict[str, List[str]]:
-        deck, next_nonce = ProvenFairness._shuffle_deck(
-            server_seed, client_seed, start_nonce
-        )
-        player = [deck.pop(), deck.pop()]
-        bot = [deck.pop(), deck.pop()]
-        community = [deck.pop() for _ in range(5)]
+        r = outcome_poker(server_seed, client_seed, start_nonce)
         return {
-            "player_hand": player,
-            "bot_hand": bot,
-            "community": community,
-            "remaining_deck": deck,
-            "next_nonce": next_nonce,
+            "player_hand": r["player"],
+            "bot_hand": r["bot"],
+            "community": r["community"],
+            "remaining_deck": r["deck"],
+            "next_nonce": r["nonce_end"],
         }
 
     @staticmethod
     def verify_ridebus(
         server_seed: str, client_seed: str, start_nonce: int
     ) -> Dict[str, List[str]]:
-        deck, next_nonce = ProvenFairness._shuffle_deck(
-            server_seed, client_seed, start_nonce
-        )
+        deck, next_nonce = outcome_shuffle_deck(server_seed, client_seed, start_nonce)
         return {"shuffled_deck": deck, "next_nonce": next_nonce}
 
-    # ------- Optional: add verifiers for games you asked about earlier -------
     @staticmethod
     def verify_double(server_seed: str, client_seed: str, nonce: int) -> bool:
-        """
-        Double-or-Nothing: 1 draw in [0,2) via randbelow; True==win.
-        If your live code used a custom tag, change TAGS.RANDBELOW.
-        """
-        return (
-            ProvenFairness._randbelow(
-                server_seed, client_seed, nonce, 2, ProvenFairness.TAGS.RANDBELOW
-            )
-            == 1
-        )
+        return outcome_double_round(server_seed, client_seed, nonce)["won"]
 
     @staticmethod
     def verify_mines(
-        server_seed: str,
-        client_seed: str,
-        start_nonce: int,
-        board_size: int,
-        bombs: int,
-    ) -> Dict[str, List[int]]:
-        """
-        Rebuild a deterministic mines layout by selecting `bombs` unique cells
-        from range(board_size) with successive unbiased draws.
-        NOTE: This mirrors a typical approach: Fisher–Yates style sampling.
-        """
-        indices = list(range(board_size))
-        nonce = start_nonce
-        # partial Fisher–Yates to pick `bombs` unique slots
-        for i in range(bombs):
-            # choose index j in [i, board_size-1]
-            u64 = _u64_from_hmac(
-                server_seed, client_seed, nonce, ProvenFairness.TAGS.RANDBELOW
-            )
-            j = i + _rand_below_unbiased(u64, board_size - i)
-            indices[i], indices[j] = indices[j], indices[i]
-            nonce += 1
-        bomb_cells = indices[:bombs]
-        return {"bomb_cells": sorted(bomb_cells), "next_nonce": nonce}
+        server_seed: str, client_seed: str, start_nonce: int,
+        board_size: int = 25, bombs: int = 3,
+    ) -> Dict[str, Any]:
+        r = outcome_mines(server_seed, client_seed, start_nonce, board_size, bombs)
+        return {"bomb_cells": r["bomb_positions"], "next_nonce": r["nonce_end"]}
 
     @staticmethod
-    def verify_crash(server_seed: str, client_seed: str, nonce: int) -> float:
-        """
-        Example crash seed → multiplier mapping using a single uniform [0,1).
-        Replace with your exact function if different.
-        """
-        r = ProvenFairness._random01(
-            server_seed, client_seed, nonce, ProvenFairness.TAGS.RANDOM
-        )  # (0,1)
-        # Simple, common crash curve example:
-        # Prevent 0 by clamping tiny epsilon
-        eps = 1e-12
-        r = max(r, eps)
-        # Example multiplier formula (tweak to match your live logic):
-        # m = floor( (1 / (1 - r)) * 100 ) / 100
-        m = 1.0 / (1.0 - r)
-        return float(f"{m:.2f}")
+    def verify_crash(
+        server_seed: str, client_seed: str, nonce: int, house_edge: float = 0.04
+    ) -> float:
+        return outcome_crash(server_seed, client_seed, nonce, house_edge)["crash_point"]
 
+    @staticmethod
+    def verify_hilo_initial(server_seed: str, client_seed: str, nonce: int) -> dict:
+        return outcome_hilo_initial(server_seed, client_seed, nonce)
 
-# --- END UPDATED PROVABLE FAIRNESS ---
+    @staticmethod
+    def verify_hilo_draw(server_seed: str, client_seed: str, nonce: int) -> dict:
+        return outcome_hilo_draw(server_seed, client_seed, nonce)
+
+    @staticmethod
+    def verify_keno(
+        server_seed: str, client_seed: str, start_nonce: int,
+        num_buttons: int = 30, num_picks: int = 8,
+    ) -> dict:
+        return outcome_keno(server_seed, client_seed, start_nonce, num_buttons, num_picks)

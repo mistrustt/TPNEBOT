@@ -18,6 +18,16 @@ import psutil
 from utils.misc import MiscUtils
 from utils.admin_api import AdminAPIServer
 from utils.metrics_charts import MetricsChartView
+from utils.fairness import (
+    SUPERGAMBLE_WIN_THRESHOLD, SUPERGAMBLE_BASE_MULTIPLIER,
+    SUPERGAMBLE_BONUS_MULTIPLIER, SUPERGAMBLE_MEGA_THRESHOLD,
+    DICE_PAYOUTS, DICE_EVEN_ODD_PAYOUT,
+    LADDER_STEP_PROBS, LADDER_STEP_MULTS, LADDER_MAX_STEP,
+    CRASH_RANGES, CRASH_BUCKET_NAMES,
+    ROULETTE_ALL_NUMBERS, ROULETTE_RED_NUMBERS, ROULETTE_BLACK_NUMBERS,
+    SLOTS_REEL_WEIGHTS, SLOTS_PAYLINES, SLOTS_SYMBOLS,
+    evaluate_slots,
+)
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from sqlalchemy import text, select, func
@@ -4397,6 +4407,9 @@ class Owner(commands.Cog, name="Owner"):
         trials = max(1, min(trials, 1_000_000))
         import random
 
+        base_mult = float(SUPERGAMBLE_BASE_MULTIPLIER)
+        bonus_mult = float(SUPERGAMBLE_BONUS_MULTIPLIER)
+
         def _run():
             wins = 0
             mega_wins = 0
@@ -4404,13 +4417,13 @@ class Owner(commands.Cog, name="Owner"):
             for _ in range(trials):
                 win_roll = random.randrange(100)
                 bonus_roll = random.randrange(100)
-                if win_roll < 15:
+                if win_roll < SUPERGAMBLE_WIN_THRESHOLD:
                     wins += 1
-                    if bonus_roll < 15:
+                    if bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD:
                         mega_wins += 1
-                        total_payout += 8.0
+                        total_payout += bonus_mult
                     else:
-                        total_payout += 6.0
+                        total_payout += base_mult
             return wins, mega_wins, total_payout
 
         wins, mega_wins, total_payout = await asyncio.to_thread(_run)
@@ -4446,10 +4459,7 @@ class Owner(commands.Cog, name="Owner"):
         trials = max(1, min(trials, 1_000_000))
         import random
 
-        payout_multipliers = {
-            2: 34.2, 3: 17.1, 4: 11.4, 5: 8.55, 6: 6.85,
-            7: 5.7, 8: 6.85, 9: 8.55, 10: 11.4, 11: 17.1, 12: 34.2,
-        }
+        payout_multipliers = DICE_PAYOUTS
 
         def _run():
             results = {}
@@ -4475,9 +4485,9 @@ class Owner(commands.Cog, name="Owner"):
                 d2 = random.randrange(6) + 1
                 total = d1 + d2
                 if total % 2 == 0:
-                    even_payout += 1.9
+                    even_payout += DICE_EVEN_ODD_PAYOUT
                 else:
-                    odd_payout += 1.9
+                    odd_payout += DICE_EVEN_ODD_PAYOUT
             return results, even_payout, odd_payout
 
         results, even_payout, odd_payout = await asyncio.to_thread(_run)
@@ -4495,8 +4505,8 @@ class Owner(commands.Cog, name="Owner"):
                 f"**{target}** ({payout_multipliers[target]}x): "
                 f"Win {r['win_rate']:.2f}% | RTP {r['rtp']:.2f}%"
             )
-        lines.append(f"**Even** (1.5x): RTP {(even_payout / trials) * 100:.2f}%")
-        lines.append(f"**Odd** (1.5x): RTP {(odd_payout / trials) * 100:.2f}%")
+        lines.append(f"**Even** ({DICE_EVEN_ODD_PAYOUT}x): RTP {(even_payout / trials) * 100:.2f}%")
+        lines.append(f"**Odd** ({DICE_EVEN_ODD_PAYOUT}x): RTP {(odd_payout / trials) * 100:.2f}%")
 
         embed.add_field(name="Results by Target", value="\n".join(lines), inline=False)
         await ctx.send(embed=embed)
@@ -4508,15 +4518,9 @@ class Owner(commands.Cog, name="Owner"):
         trials = max(1, min(trials, 1_000_000))
         import random
 
-        step_probs = {
-            0: 83, 1: 80, 2: 75, 3: 70, 4: 65,
-            5: 58, 6: 52, 7: 46, 8: 40, 9: 35,
-        }
-        step_mults = {
-            0: 1.00, 1: 1.15, 2: 1.45, 3: 1.90, 4: 2.75,
-            5: 4.20, 6: 7.25, 7: 14.00, 8: 30.00, 9: 75.00, 10: 215.00,
-        }
-        max_step = 10
+        step_probs = LADDER_STEP_PROBS
+        step_mults = {k: float(v) for k, v in LADDER_STEP_MULTS.items()}
+        max_step = LADDER_MAX_STEP
 
         def _run():
             total_payout = 0.0
@@ -4596,27 +4600,16 @@ class Owner(commands.Cog, name="Owner"):
 
         def _run():
             total_payout = 0.0
-            bracket_counts = {"1-2x": 0, "2-5x": 0, "5-20x": 0, "20-50x": 0}
+            bracket_counts = {name: 0 for name in CRASH_BUCKET_NAMES}
 
             for _ in range(trials):
                 r = random.random()
-                t_low = min(0.45 * edge_factor, 0.9999)
-                t_med_low = min(0.80 * edge_factor, 0.9999)
-                t_med = min(0.95 * edge_factor, 0.9999)
-
-                if r < t_low:
-                    v = 1.0 + (2.0 - 1.0) * random.random()
-                    bracket_counts["1-2x"] += 1
-                elif r < t_med_low:
-                    v = 2.0 + (5.0 - 2.0) * random.random()
-                    bracket_counts["2-5x"] += 1
-                elif r < t_med:
-                    v = 5.0 + (20.0 - 5.0) * random.random()
-                    bracket_counts["5-20x"] += 1
-                else:
-                    v = 20.0 + (50.0 - 20.0) * random.random()
-                    bracket_counts["20-50x"] += 1
-
+                for i, (threshold, lo, hi) in enumerate(CRASH_RANGES):
+                    scaled = min(threshold * edge_factor, 0.9999)
+                    if r < scaled or i == len(CRASH_RANGES) - 1:
+                        v = lo + (hi - lo) * random.random()
+                        bracket_counts[CRASH_BUCKET_NAMES[i]] += 1
+                        break
                 total_payout += round(v, 2)
             return total_payout, bracket_counts
 
@@ -4634,8 +4627,9 @@ class Owner(commands.Cog, name="Owner"):
         embed.add_field(name="RTP (bet at 1x, ride to crash)", value=self._sim_format_pct(rtp), inline=True)
 
         bracket_lines = []
-        for bracket, count in bracket_counts.items():
-            bracket_lines.append(f"**{bracket}**: {(count/trials)*100:.2f}%")
+        display_names = {name: f"{lo:.0f}-{hi:.0f}x" for name, (_, lo, hi) in zip(CRASH_BUCKET_NAMES, CRASH_RANGES)}
+        for bucket, count in bracket_counts.items():
+            bracket_lines.append(f"**{display_names[bucket]}**: {(count/trials)*100:.2f}%")
         embed.add_field(name="Crash Distribution", value="\n".join(bracket_lines), inline=False)
 
         embed.add_field(
@@ -4710,8 +4704,8 @@ class Owner(commands.Cog, name="Owner"):
         trials = max(1, min(trials, 1_000_000))
         import random
 
-        all_numbers = list(range(0, 37)) + ["00"]
-        red_numbers = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+        all_numbers = ROULETTE_ALL_NUMBERS
+        red_numbers = ROULETTE_RED_NUMBERS
 
         multipliers = {
             "Red (2x)": 2, "Black (2x)": 2, "Green (14x)": 14,
@@ -4720,7 +4714,7 @@ class Owner(commands.Cog, name="Owner"):
             "Single# (36x)": 36,
         }
 
-        black_numbers = {2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35}
+        black_numbers = ROULETTE_BLACK_NUMBERS
 
         bet_checks = {
             "Red (2x)": lambda s: isinstance(s, int) and s in red_numbers,
@@ -4832,43 +4826,11 @@ class Owner(commands.Cog, name="Owner"):
         trials = max(1, min(trials, 1_000_000))
         import random
 
-        reel_weights = {
-            0: {"lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
-                "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1},
-            1: {"lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
-                "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1},
-            2: {"lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
-                "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
-            3: {"lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
-                "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1},
-            4: {"lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
-                "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
-        }
+        reel_weights = SLOTS_REEL_WEIGHTS
 
-        symbols_payouts = {
-            "diamond": {5: 25, 4: 8},
-            "seven": {5: 20, 4: 6},
-            "bell": {5: 15, 4: 4},
-            "star": {5: 8, 4: 2},
-            "cherry": {5: 5, 4: 1.5},
-            "lemon": {5: 3.8, 4: 0.5},
-            "slot_machine": {5: 2.5, 4: 0.3},
-            "wild": {5: 25, 4: 10},
-            "scatter": {5: 20, 4: 5},
-        }
+        symbols_payouts = {k: v["payouts"] for k, v in SLOTS_SYMBOLS.items()}
 
-        paylines = [
-            [(0,0),(0,1),(0,2),(0,3),(0,4)],
-            [(1,0),(1,1),(1,2),(1,3),(1,4)],
-            [(2,0),(2,1),(2,2),(2,3),(2,4)],
-            [(3,0),(3,1),(3,2),(3,3),(3,4)],
-            [(0,0),(1,1),(2,2),(1,3),(0,4)],
-            [(3,0),(2,1),(1,2),(2,3),(3,4)],
-            [(0,0),(2,1),(0,2),(2,3),(0,4)],
-            [(3,0),(1,1),(3,2),(1,3),(3,4)],
-            [(0,0),(1,1),(2,2),(3,3),(3,4)],
-            [(3,0),(2,1),(1,2),(0,3),(0,4)],
-        ]
+        paylines = [pl["coords"] for pl in SLOTS_PAYLINES]
 
         # Precompute cumulative weights per reel
         reel_data = {}
@@ -5034,15 +4996,17 @@ class Owner(commands.Cog, name="Owner"):
             results["Gamble"] = (p * 2.0 / trials) * 100
 
             # SuperGamble (15% win: 85% chance 6x, 15% chance 8x)
+            sg_base = float(SUPERGAMBLE_BASE_MULTIPLIER)
+            sg_bonus = float(SUPERGAMBLE_BONUS_MULTIPLIER)
             sg = 0.0
             for _ in range(trials):
-                if random.randrange(100) < 15:
-                    sg += 8.0 if random.randrange(100) < 15 else 6.0
+                if random.randrange(100) < SUPERGAMBLE_WIN_THRESHOLD:
+                    sg += sg_bonus if random.randrange(100) < SUPERGAMBLE_MEGA_THRESHOLD else sg_base
             results["SuperGamble"] = (sg / trials) * 100
 
             # Dice (bet on 7, most common)
             d7 = sum(
-                2.0
+                DICE_PAYOUTS[7]
                 for _ in range(trials)
                 if (random.randrange(6) + 1 + random.randrange(6) + 1) == 7
             )
@@ -5050,7 +5014,7 @@ class Owner(commands.Cog, name="Owner"):
 
             # Ladder (cashout step 1)
             l1 = sum(
-                1.15 for _ in range(trials) if random.randrange(10000) < 8300
+                float(LADDER_STEP_MULTS[1]) for _ in range(trials) if random.randrange(10000) < LADDER_STEP_PROBS[0] * 100
             )
             results["Ladder (step 1)"] = (l1 / trials) * 100
 
@@ -5059,12 +5023,10 @@ class Owner(commands.Cog, name="Owner"):
             results["Double (1 round)"] = (dn / trials) * 100
 
             # Roulette (red)
-            wheel = list(range(0, 37)) + ["00"]
-            red = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
             rr = sum(
                 2.0
                 for _ in range(trials)
-                if random.choice(wheel) in red
+                if random.choice(ROULETTE_ALL_NUMBERS) in ROULETTE_RED_NUMBERS
             )
             results["Roulette (red)"] = (rr / trials) * 100
 
@@ -5081,46 +5043,18 @@ class Owner(commands.Cog, name="Owner"):
             cp = 0.0
             for _ in range(trials):
                 r = random.random()
-                if r < 0.45:
-                    cp += 1.0 + random.random()
-                elif r < 0.80:
-                    cp += 2.0 + 3.0 * random.random()
-                elif r < 0.95:
-                    cp += 5.0 + 15.0 * random.random()
-                else:
-                    cp += 20.0 + 30.0 * random.random()
+                for i, (threshold, lo, hi) in enumerate(CRASH_RANGES):
+                    if r < threshold or i == len(CRASH_RANGES) - 1:
+                        cp += lo + (hi - lo) * random.random()
+                        break
             results["Crash (avg point)"] = (cp / trials) * 100
 
             # Slots (base spin only, 8% house edge, no free spins for speed)
-            reel_weights_all = {
-                0: {"lemon": 30, "slot_machine": 25, "cherry": 15, "star": 10,
-                    "bell": 8, "seven": 6, "diamond": 4, "wild": 1, "scatter": 1},
-                1: {"lemon": 45, "slot_machine": 35, "cherry": 7, "star": 4,
-                    "bell": 3, "seven": 2, "diamond": 1, "wild": 0, "scatter": 1},
-                2: {"lemon": 55, "slot_machine": 45, "cherry": 4, "star": 2,
-                    "bell": 1, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
-                3: {"lemon": 55, "slot_machine": 45, "cherry": 3, "star": 1,
-                    "bell": 1, "seven": 1, "diamond": 0, "wild": 0, "scatter": 1},
-                4: {"lemon": 60, "slot_machine": 45, "cherry": 1, "star": 1,
-                    "bell": 0, "seven": 0, "diamond": 0, "wild": 0, "scatter": 1},
-            }
-            slot_payouts = {
-                "diamond": {5: 25, 4: 8}, "seven": {5: 20, 4: 6},
-                "bell": {5: 15, 4: 4}, "star": {5: 8, 4: 2},
-                "cherry": {5: 5, 4: 1.5}, "lemon": {5: 3.8, 4: 0.5},
-                "slot_machine": {5: 2.5, 4: 0.3}, "wild": {5: 25, 4: 10},
-                "scatter": {5: 20, 4: 5},
-            }
-            slot_lines = [
-                [(0,0),(0,1),(0,2),(0,3),(0,4)], [(1,0),(1,1),(1,2),(1,3),(1,4)],
-                [(2,0),(2,1),(2,2),(2,3),(2,4)], [(3,0),(3,1),(3,2),(3,3),(3,4)],
-                [(0,0),(1,1),(2,2),(1,3),(0,4)], [(3,0),(2,1),(1,2),(2,3),(3,4)],
-                [(0,0),(2,1),(0,2),(2,3),(0,4)], [(3,0),(1,1),(3,2),(1,3),(3,4)],
-                [(0,0),(1,1),(2,2),(3,3),(3,4)], [(3,0),(2,1),(1,2),(0,3),(0,4)],
-            ]
+            slot_payouts = {k: v["payouts"] for k, v in SLOTS_SYMBOLS.items()}
+            slot_lines = [pl["coords"] for pl in SLOTS_PAYLINES]
             # Precompute cumulative weights
             rd = {}
-            for ri, wts in reel_weights_all.items():
+            for ri, wts in SLOTS_REEL_WEIGHTS.items():
                 syms = list(wts.keys()); vals = list(wts.values()); tot = sum(vals)
                 cum = []; run = 0
                 for v in vals: run += v; cum.append(run)
