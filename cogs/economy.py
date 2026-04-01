@@ -1598,9 +1598,9 @@ class Economy(commands.Cog):
 
                 now = datetime.now(timezone.utc)
                 if now.month != 4 or now.day != 1:
-                    lb_str = f"{emoji} **{display_name}** (`{self.currency_name} ???`)"
+                    lb_str = f"{emoji} **{display_name}** (`???`)"
                 else:
-                    lb_str = f"{emoji} **{display_name}** (`{self.currency_name} {await self.short_formatter(total_balance)}`)"
+                    lb_str = f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)"
 
                 top_list.append(lb_str)
                 
