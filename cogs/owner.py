@@ -4447,8 +4447,8 @@ class Owner(commands.Cog, name="Owner"):
         import random
 
         payout_multipliers = {
-            2: 10, 3: 7, 4: 5, 5: 4, 6: 3,
-            7: 2, 8: 3, 9: 4, 10: 5, 11: 7, 12: 10,
+            2: 34.2, 3: 17.1, 4: 11.4, 5: 8.55, 6: 6.85,
+            7: 5.7, 8: 6.85, 9: 8.55, 10: 11.4, 11: 17.1, 12: 34.2,
         }
 
         def _run():
@@ -4475,9 +4475,9 @@ class Owner(commands.Cog, name="Owner"):
                 d2 = random.randrange(6) + 1
                 total = d1 + d2
                 if total % 2 == 0:
-                    even_payout += 1.5
+                    even_payout += 1.9
                 else:
-                    odd_payout += 1.5
+                    odd_payout += 1.9
             return results, even_payout, odd_payout
 
         results, even_payout, odd_payout = await asyncio.to_thread(_run)

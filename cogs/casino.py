@@ -1860,13 +1860,19 @@ class HiLoView(discord.ui.LayoutView):
             )
             return None
 
-    async def _show_result(self, interaction: discord.Interaction, win: bool):
+    async def _show_result(self, interaction: discord.Interaction, win: bool, *, auto_cashout_card: str | None = None):
         if win:
             formatted = await self.cog.formatter(self.bet_amount * self.multiplier)
-            result_text = (
-                f"Cashed out with a **{self.multiplier:.2f}x** multiplier\n"
-                f"Won **{formatted}** **{self.currency_name}**"
-            )
+            if auto_cashout_card:
+                result_text = (
+                    f"Drew a **{auto_cashout_card}** — auto cashout at **{self.multiplier:.2f}x**\n"
+                    f"Won **{formatted}** **{self.currency_name}**"
+                )
+            else:
+                result_text = (
+                    f"Cashed out with a **{self.multiplier:.2f}x** multiplier\n"
+                    f"Won **{formatted}** **{self.currency_name}**"
+                )
             status = "Cashed Out"
         else:
             formatted = await self.cog.formatter(self.bet_amount)
@@ -1899,12 +1905,6 @@ class HiLoView(discord.ui.LayoutView):
             self.history.append(self.current_card)
             next_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
 
-            if next_card in ["A", "K"]:
-                self.current_card = next_card
-                await self._end_game(False)
-                await self._show_result(interaction, False)
-                return
-
             multiplier_increase = self._calculate_multiplier(self.history[-1], "higher")
 
             current_value = HILO_CARD_VALUES[self.history[-1]]
@@ -1913,6 +1913,18 @@ class HiLoView(discord.ui.LayoutView):
             if next_value > current_value:
                 self.multiplier *= multiplier_increase
                 self.current_card = next_card
+                if next_card in ["A", "K"]:
+                    winnings = self.bet_amount * self.multiplier
+                    try:
+                        await self.bot.database.process_treasury_transaction(
+                            wallet_id=self.wallet_id, amount=winnings, description="HiLo Win"
+                        )
+                    except ValueError as e:
+                        await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
+                        return
+                    await self._end_game(True)
+                    await self._show_result(interaction, True, auto_cashout_card=next_card)
+                    return
             elif next_value == current_value:
                 self.current_card = next_card  # Push — no multiplier change
             else:
@@ -1940,12 +1952,6 @@ class HiLoView(discord.ui.LayoutView):
             self.history.append(self.current_card)
             next_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
 
-            if next_card in ["A", "K"]:
-                self.current_card = next_card
-                await self._end_game(False)
-                await self._show_result(interaction, False)
-                return
-
             multiplier_increase = self._calculate_multiplier(self.history[-1], "lower")
 
             current_value = HILO_CARD_VALUES[self.history[-1]]
@@ -1954,6 +1960,18 @@ class HiLoView(discord.ui.LayoutView):
             if next_value < current_value:
                 self.multiplier *= multiplier_increase
                 self.current_card = next_card
+                if next_card in ["A", "K"]:
+                    winnings = self.bet_amount * self.multiplier
+                    try:
+                        await self.bot.database.process_treasury_transaction(
+                            wallet_id=self.wallet_id, amount=winnings, description="HiLo Win"
+                        )
+                    except ValueError as e:
+                        await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
+                        return
+                    await self._end_game(True)
+                    await self._show_result(interaction, True, auto_cashout_card=next_card)
+                    return
             elif next_value == current_value:
                 self.current_card = next_card  # Push — no multiplier change
             else:
@@ -4878,19 +4896,19 @@ class Casino(commands.Cog):
         house_edge = await self.calculate_house_edge(user_id)
 
         payout_multipliers = {
-            2: 10,
-            3: 7,
-            4: 5,
-            5: 4,
-            6: 3,
-            7: 2,
-            8: 3,
-            9: 4,
-            10: 5,
-            11: 7,
-            12: 10,
+            2: 34.2,
+            3: 17.1,
+            4: 11.4,
+            5: 8.55,
+            6: 6.85,
+            7: 5.7,
+            8: 6.85,
+            9: 8.55,
+            10: 11.4,
+            11: 17.1,
+            12: 34.2,
         }
-        even_odd_payout = 1.5
+        even_odd_payout = 1.9
         color = discord.Color.blurple()
         if isinstance(ctx.channel, discord.DMChannel):
             color = discord.Color.blurple()
