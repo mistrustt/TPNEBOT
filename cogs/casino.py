@@ -4251,10 +4251,10 @@ class Casino(commands.Cog):
             win_roll = await self.fair_randbelow(user_id, 100)
             bonus_roll = await self.fair_randbelow(user_id, 100)
 
-            win_chance = 10
+            win_chance = 15
             win = win_roll < win_chance
-            base_multiplier = Decimal("8.0")
-            bonus_multiplier = Decimal("12.0")
+            base_multiplier = Decimal("6.0")
+            bonus_multiplier = Decimal("8.0")
 
             supply = await self.bot.database.get_supply_record()
             treasury = supply.treasury
