@@ -1490,13 +1490,9 @@ class Economy(commands.Cog):
 
 
 
-            now = datetime.now(timezone.utc)
-            if now.month == 4 and now.day == 1:
-                wallet_str = f"{self.currency_name} **???**"
-                bank_str = f"{self.currency_name} **???**"
-            else:
-                wallet_str = f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**"
-                bank_str = f"{self.currency_name} **{await self.short_formatter(bank_balance)}**"
+
+            wallet_str = f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**"
+            bank_str = f"{self.currency_name} **{await self.short_formatter(bank_balance)}**"
 
             embed.add_field(
                 name="Wallet",
@@ -1537,11 +1533,7 @@ class Economy(commands.Cog):
                     if len(description) > 25:
                         description = description[:22] + "..."
                     
-                    now = datetime.now(timezone.utc)
-                    if now.month == 4 and now.day == 1:
-                        tx_txt = f"{direction} `???` • ???"
-                    else:
-                        tx_txt = f"{direction} **{formatted_amount}** • {description}"
+                    tx_txt = f"{direction} **{formatted_amount}** • {description}"
 
                     transactions_text.append(
                         tx_txt
@@ -1596,11 +1588,8 @@ class Economy(commands.Cog):
                 display_name = user.display_name if user else f"Unknown {user_id}"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
 
-                now = datetime.now(timezone.utc)
-                if now.month == 4 or now.day == 1:
-                    lb_str = f"{emoji} **{display_name}** (`???`)"
-                else:
-                    lb_str = f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)"
+
+                lb_str = f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)"
 
                 top_list.append(lb_str)
                 
