@@ -1491,7 +1491,7 @@ class Economy(commands.Cog):
 
 
             now = datetime.now(timezone.utc)
-            if now.month != 4 or now.day != 1:
+            if now.month == 4 and now.day == 1:
                 wallet_str = f"{self.currency_name} **???**"
                 bank_str = f"{self.currency_name} **???**"
             else:
@@ -1538,8 +1538,8 @@ class Economy(commands.Cog):
                         description = description[:22] + "..."
                     
                     now = datetime.now(timezone.utc)
-                    if now.month != 4 or now.day != 1:
-                        tx_txt = f"{direction} `**???**` • ???"
+                    if now.month == 4 and now.day == 1:
+                        tx_txt = f"{direction} `???` • ???"
                     else:
                         tx_txt = f"{direction} **{formatted_amount}** • {description}"
 
@@ -1597,7 +1597,7 @@ class Economy(commands.Cog):
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
 
                 now = datetime.now(timezone.utc)
-                if now.month != 4 or now.day != 1:
+                if now.month == 4 or now.day == 1:
                     lb_str = f"{emoji} **{display_name}** (`???`)"
                 else:
                     lb_str = f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)"
@@ -3325,8 +3325,9 @@ class Economy(commands.Cog):
     @commands.command(name="newyear", description="Open your New Year's gift!")
     async def newyear(self, ctx: commands.Context):
         """Open your New Year's gift!"""
-        # Implementation for New Year's gift goes here
-        now = datetime.now(timezone.utc)    
+        
+        # 1. Date Check: Only allow on January 1st
+        now = datetime.now(timezone.utc)
         if now.month != 1 or now.day != 1:
             embed = discord.Embed(
                 description="🎉 **It's not New Year's Day yet!** This command only works on January 1st.",
@@ -3336,6 +3337,7 @@ class Economy(commands.Cog):
                 ctx.author.id, ctx.command.qualified_name, 86400
             )
             return await ctx.reply(embed=embed, delete_after=10)
+        
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         gift_amount = Decimal(str(user_id)) * Decimal("3")
