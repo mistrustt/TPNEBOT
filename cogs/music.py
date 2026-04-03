@@ -2069,7 +2069,7 @@ class Music(commands.Cog, name="Music"):
             song_map = {str(song['id']): song for song in sorted_songs}
 
             options = [
-                discord.SelectOption(label=( lambda t: f'{t[0]} ({', '.join(t[1:])})' if len(t) > 1 else t[0])(song.get('track_titles'))[:100], value=str(song['id']))
+                discord.SelectOption(label=( lambda t: f'{t[0]} ({", ".join(t[1:])})' if len(t) > 1 else (t[0] if t else 'Unknown'))(song.get('track_titles', []))[:100], value=str(song['id']))
                 for song in sorted_songs
             ]
 
@@ -2103,8 +2103,8 @@ class Music(commands.Cog, name="Music"):
             options = [
                 discord.SelectOption(
                     label=(
-                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles"))[:100],
+                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else (t[0] if t else "Unknown")
+                    )(song.get("track_titles", []))[:100],
                     value=str(song["id"]),
                 )
                 for song in results
@@ -2167,8 +2167,8 @@ class Music(commands.Cog, name="Music"):
             options = [
                 discord.SelectOption(
                     label=(
-                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles"))[:100],
+                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else (t[0] if t else "Unknown")
+                    )(song.get("track_titles", []))[:100],
                     value=str(song["id"]),
                 )
                 for song in results
@@ -2351,8 +2351,8 @@ class Music(commands.Cog, name="Music"):
             options = [
                 discord.SelectOption(
                     label=(
-                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else t[0]
-                    )(song.get("track_titles"))[:100],
+                        lambda t: f"{t[0]} ({', '.join(t[1:])})" if len(t) > 1 else (t[0] if t else "Unknown")
+                    )(song.get("track_titles", []))[:100],
                     value=str(song["id"]),
                 )
                 for song in results
