@@ -3352,6 +3352,7 @@ class Music(commands.Cog, name="Music"):
                         options = []
                         self.real_view = view
                         self.author = author
+                        self.chosen_song = None
                         self.avail_options_map = {}
                         for name, song in songs.items():
                             self.avail_options_map[name] = song
