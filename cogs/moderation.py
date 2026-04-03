@@ -1479,7 +1479,7 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
             lifted_at = discord.utils.utcnow()
-            time_str = humanfriendly.format_date(lifted_at)
+            time_str = lifted_at.strftime("%Y/%m/%d %I:%M:%S %p")
 
             moderator_avatar = self.utils.get_avatar_url(ctx.author)
             dm_embed = discord.Embed(
@@ -2815,7 +2815,7 @@ class Moderation(commands.Cog, name="Moderation"):
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
-    async def image_unmute_user(self, ctx: Context, *identifier: str):
+    async def image_unmute_user(self, ctx: Context, *, identifier: str):
         """Restore a users image permissions"""
         guild_id = ctx.guild.id
         mute_settings = await self.bot.database.get_mute_settings(guild_id)
