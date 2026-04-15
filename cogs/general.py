@@ -967,7 +967,7 @@ class General(commands.Cog, name="General"):
                 else discord.Color.blurple()
             )
         embed = discord.Embed(
-            description=f"Developed and maintained by `mistrusttt`, `chaosokay`, `cqllmetoxic`, `juicewrldapi`, `yvngxenvy`, `flow`",
+            description=f"Developed and maintained by `mistrusttt`, `chaosokay`, `freecqllmetoxic`, `juicewrldapi`, `yvngxenvy`, `flow`",
             color=color,
         )
         embed.set_author(name="TPNE Bot")
