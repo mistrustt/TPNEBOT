@@ -1363,6 +1363,56 @@ class General(commands.Cog, name="General"):
             await ctx.reply(embed=embed)
 
     @commands.command(
+        name="banner",
+        description="Get your banner or another user's banner.",
+    )
+    async def banner(
+        self, ctx: commands.Context, member: discord.Member = None
+    ) -> None:
+        member = member or ctx.author
+
+        banner_url = member.banner.url if member.banner else None
+
+        if banner_url:
+            embed = discord.Embed(
+                title=f"{member.display_name}'s Banner",
+                color=member.accent_color or discord.Color.blue(),
+            )
+            embed.set_image(url=banner_url)
+            await ctx.reply(embed=embed)
+        else:
+            embed = discord.Embed(
+                description=f"{member.display_name} does not have a banner.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed)
+
+    @commands.command(
+        name="sbanner",
+        description="Get the server banner.",
+    )
+    async def sbanner(self, ctx: commands.Context) -> None:
+        if not ctx.guild:
+            await ctx.reply("This command can only be used in a server.")
+            return
+
+        banner_url = ctx.guild.banner.url if ctx.guild.banner else None
+
+        if banner_url:
+            embed = discord.Embed(
+                title=f"{ctx.guild.name} Banner",
+                color=discord.Color.blue(),
+            )
+            embed.set_image(url=banner_url)
+            await ctx.reply(embed=embed)
+        else:
+            embed = discord.Embed(
+                description=f"{ctx.guild.name} does not have a server banner.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed)
+
+    @commands.command(
         name="invite",
         description="Get the invite link of the bot to be able to invite it.",
     )
