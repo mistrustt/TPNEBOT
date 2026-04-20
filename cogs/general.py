@@ -1389,25 +1389,29 @@ class General(commands.Cog, name="General"):
 
     @commands.command(
         name="sbanner",
-        description="Get the server banner.",
+        description="Get your server-specific banner (Nitro) or another user's.",
     )
-    async def sbanner(self, ctx: commands.Context) -> None:
+    async def sbanner(
+        self, ctx: commands.Context, member: discord.Member = None
+    ) -> None:
         if not ctx.guild:
             await ctx.reply("This command can only be used in a server.")
             return
 
-        banner_url = ctx.guild.banner.url if ctx.guild.banner else None
+        member = member or ctx.author
+
+        banner_url = member.banner.url if member.banner else None
 
         if banner_url:
             embed = discord.Embed(
-                title=f"{ctx.guild.name} Banner",
-                color=discord.Color.blue(),
+                title=f"{member.display_name}'s Server Banner",
+                color=member.accent_color or discord.Color.blue(),
             )
             embed.set_image(url=banner_url)
             await ctx.reply(embed=embed)
         else:
             embed = discord.Embed(
-                description=f"{ctx.guild.name} does not have a server banner.",
+                description=f"{member.display_name} does not have a server-specific banner.",
                 color=discord.Color.red(),
             )
             await ctx.reply(embed=embed)
