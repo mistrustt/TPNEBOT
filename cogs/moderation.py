@@ -178,8 +178,8 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(
         name="msg",
-        aliases=["announce"],
-        help="Send a message to a member or channel in this server.",
+        aliases=["announce", "pm"],
+        help="Send a message to a member or channel in this server. Attach your own files to forward them.",
         hidden=True,
     )
     @commands.guild_only()
@@ -189,55 +189,50 @@ class Moderation(commands.Cog, name="Moderation"):
         ctx: Context,
         target: Union[discord.Member, discord.TextChannel],
         *,
-        message: str,
+        message: str = "",
     ):
-        """Send a message via the bot to a member or text channel in the current server.
-        NOTE: cannot contact users or channels outside the server, and cannot be run from DMs.
-        """
 
         if ctx.guild is None:
-            return await ctx.reply(
-                "🚫 This command cannot be used in DMs.", mention_author=False
-            )
+            return await ctx.reply("🚫 This command cannot be used in DMs.", mention_author=False)
+
+        if len(ctx.message.attachments) > 10:
+            return await ctx.reply("🚫 At most 10 file attachments.", mention_author=False)
+
+        content = message.strip() if message else ""
+        files = []
+        for att in ctx.message.attachments:
+            data = await att.read()
+            files.append(discord.File(io.BytesIO(data), filename=att.filename))
+
+        if not content and not files:
+            return await ctx.reply("🚫 Provide a message and/or at least one file attachment.", mention_author=False)
+
+        send_kwargs = {}
+        if content:
+            send_kwargs["content"] = content
+        if files:
+            send_kwargs["files"] = files
 
         if isinstance(target, discord.TextChannel):
             if target.guild != ctx.guild:
-                return await ctx.reply(
-                    "🚫 You may only send messages to channels in this server.",
-                    mention_author=False,
-                )
+                return await ctx.reply("🚫 You may only send messages to channels in this server.", mention_author=False)
 
             try:
-                await target.send(message)
+                await target.send(**send_kwargs)
             except discord.Forbidden:
-                return await ctx.reply(
-                    f"🚫 I don't have permission to send messages in {target.mention}.",
-                    mention_author=False,
-                )
+                return await ctx.reply(f"🚫 I don't have permission to send messages in {target.mention}.", mention_author=False)
 
-            return await ctx.reply(
-                f"📢 Message successfully sent in {target.mention}.",
-                mention_author=False,
-            )
+            return await ctx.reply(f"📢 Message successfully sent in {target.mention}.", mention_author=False)
 
         if isinstance(target, discord.Member):
             try:
-                await target.send(message)
+                await target.send(**send_kwargs)
             except discord.Forbidden:
-                return await ctx.reply(
-                    f"🚫 I can't DM {target.mention}; they might have DMs disabled.",
-                    mention_author=False,
-                )
+                return await ctx.reply(f"🚫 I can't DM {target.mention}; they might have DMs disabled.", mention_author=False)
 
-            return await ctx.reply(
-                f"📩 Message successfully sent to {target.mention}.",
-                mention_author=False,
-            )
+            return await ctx.reply(f"📩 Message successfully sent to {target.mention}.", mention_author=False)
 
-        return await ctx.reply(
-            "🚫 You may only target members or channels within this server.",
-            mention_author=False,
-        )
+        return await ctx.reply("🚫 You may only target members or channels within this server.", mention_author=False)
 
     @commands.command(name="mcc", description="Create a member count channel")
     @commands.has_permissions(manage_channels=True)
