@@ -842,14 +842,14 @@ class Moderation(commands.Cog, name="Moderation"):
             return
 
         #try:
-        if member.top_role.position >= ctx.author.top_role.position:
+        if member.top_role.position >= ctx.author.top_role.position and isinstance(member, discord.Member):
             embed = discord.Embed(
                 description="🚫 You cannot ban a user with a role higher than or equal to yours!",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
             return
-        if member.top_role.position >= ctx.guild.me.top_role.position:
+        if member.top_role.position >= ctx.guild.me.top_role.position and isinstance(member, discord.Member):
             embed = discord.Embed(
                 description="🚫 I cannot ban a user with a role higher than or equal to mine!",
                 color=discord.Color.red(),
