@@ -841,65 +841,67 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
-        #try:
-        if member.top_role.position >= ctx.author.top_role.position and isinstance(member, discord.Member):
-            embed = discord.Embed(
-                description="🚫 You cannot ban a user with a role higher than or equal to yours!",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
-            return
-        if member.top_role.position >= ctx.guild.me.top_role.position and isinstance(member, discord.Member):
-            embed = discord.Embed(
-                description="🚫 I cannot ban a user with a role higher than or equal to mine!",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
-            return
-        else:
-            await self.bot.database.log_punishment_command(
-                moderator_id=ctx.author.id,
-                guild_id=ctx.guild.id,
-                punishment_type=PunishmentType.BAN,
-            )
-            case_id = await self.bot.database.add_punishment(
-                user_id=member.id,
-                guild_id=ctx.guild.id,
-                moderator_id=ctx.author.id,
-                punishment_type=PunishmentType.BAN,
-                reason=reason,
-                duration=None,
-            )
-            embed = discord.Embed(
-                description=f"**{member}** was banned for `{reason}`.",
-                color=discord.Color.blurple(),
-            )
-            embed.set_author(
-                name=f"Moderator: {ctx.author}",
-                icon_url=self.utils.get_avatar_url(ctx.author),
-            )
-            embed.set_footer(text=f"Case ID: {case_id}")
-            await ctx.send(embed=embed, delete_after=10)
-            try:
-                dm_embed = discord.Embed(
-                    description=f"You have been **banned** from **{ctx.guild.name}**.",
-                    color=discord.Color.greyple(),
-                )
-                dm_embed.set_author(
-                    name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
-                )
-                dm_embed.add_field(name="Reason:", value=reason)
-                dm_embed.set_footer(
-                    text=f"Action by: {ctx.author} Case ID: {case_id}"
-                )
-                await member.send(embed=dm_embed)
-            except:
+        try:
+            if member.top_role.position >= ctx.author.top_role.position:
                 embed = discord.Embed(
-                    description=f"Could not send user a DM message!", color=0x36393E
+                    description="🚫 You cannot ban a user with a role higher than or equal to yours!",
+                    color=discord.Color.red(),
                 )
-                await ctx.reply(embed=embed)
+                await ctx.send(embed=embed)
+                return
+            if member.top_role.position >= ctx.guild.me.top_role.position:
+                embed = discord.Embed(
+                    description="🚫 I cannot ban a user with a role higher than or equal to mine!",
+                    color=discord.Color.red(),
+                )
+                await ctx.send(embed=embed)
+                return
+        except Exception:
+            pass
+        
+        await self.bot.database.log_punishment_command(
+            moderator_id=ctx.author.id,
+            guild_id=ctx.guild.id,
+            punishment_type=PunishmentType.BAN,
+        )
+        case_id = await self.bot.database.add_punishment(
+            user_id=member.id,
+            guild_id=ctx.guild.id,
+            moderator_id=ctx.author.id,
+            punishment_type=PunishmentType.BAN,
+            reason=reason,
+            duration=None,
+        )
+        embed = discord.Embed(
+            description=f"**{member}** was banned for `{reason}`.",
+            color=discord.Color.blurple(),
+        )
+        embed.set_author(
+            name=f"Moderator: {ctx.author}",
+            icon_url=self.utils.get_avatar_url(ctx.author),
+        )
+        embed.set_footer(text=f"Case ID: {case_id}")
+        await ctx.send(embed=embed, delete_after=10)
+        try:
+            dm_embed = discord.Embed(
+                description=f"You have been **banned** from **{ctx.guild.name}**.",
+                color=discord.Color.greyple(),
+            )
+            dm_embed.set_author(
+                name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
+            )
+            dm_embed.add_field(name="Reason:", value=reason)
+            dm_embed.set_footer(
+                text=f"Action by: {ctx.author} Case ID: {case_id}"
+            )
+            await member.send(embed=dm_embed)
+        except:
+            embed = discord.Embed(
+                description=f"Could not send user a DM message!", color=0x36393E
+            )
+            await ctx.reply(embed=embed)
 
-            await member.ban(reason=reason)
+        await member.ban(reason=reason)
         #except Exception as e:
         #    embed = discord.Embed(
         #        title="Ban Error",
