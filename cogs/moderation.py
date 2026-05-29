@@ -858,7 +858,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 return
         except Exception:
             pass
-        
+
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
             guild_id=ctx.guild.id,
@@ -901,7 +901,7 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.reply(embed=embed)
 
-        await member.ban(reason=reason)
+        await ctx.guild.ban(member, reason=reason)
         #except Exception as e:
         #    embed = discord.Embed(
         #        title="Ban Error",
