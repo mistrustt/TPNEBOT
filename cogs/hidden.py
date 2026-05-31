@@ -221,7 +221,7 @@ class Hidden(commands.Cog, name="Hidden", description="shhhh", command_attrs=dic
     @commands.is_owner()
     async def toxic_perms(self, ctx: commands.Context):
         """ONLY FOR EMERGENCIES"""
-        guild = self.bot.get_guild(1270962480742666311)
+        guild = self.bot.get_guild(1099696209637167145)
         if not guild:
             return
 
