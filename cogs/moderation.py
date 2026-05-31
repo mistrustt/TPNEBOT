@@ -178,8 +178,8 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(
         name="msg",
-        aliases=["announce"],
-        help="Send a message to a member or channel in this server.",
+        aliases=["announce", "pm"],
+        help="Send a message to a member or channel in this server. Attach your own files to forward them.",
         hidden=True,
     )
     @commands.guild_only()
@@ -189,55 +189,50 @@ class Moderation(commands.Cog, name="Moderation"):
         ctx: Context,
         target: Union[discord.Member, discord.TextChannel],
         *,
-        message: str,
+        message: str = "",
     ):
-        """Send a message via the bot to a member or text channel in the current server.
-        NOTE: cannot contact users or channels outside the server, and cannot be run from DMs.
-        """
 
         if ctx.guild is None:
-            return await ctx.reply(
-                "🚫 This command cannot be used in DMs.", mention_author=False
-            )
+            return await ctx.reply("🚫 This command cannot be used in DMs.", mention_author=False)
+
+        if len(ctx.message.attachments) > 10:
+            return await ctx.reply("🚫 At most 10 file attachments.", mention_author=False)
+
+        content = message.strip() if message else ""
+        files = []
+        for att in ctx.message.attachments:
+            data = await att.read()
+            files.append(discord.File(io.BytesIO(data), filename=att.filename))
+
+        if not content and not files:
+            return await ctx.reply("🚫 Provide a message and/or at least one file attachment.", mention_author=False)
+
+        send_kwargs = {}
+        if content:
+            send_kwargs["content"] = content
+        if files:
+            send_kwargs["files"] = files
 
         if isinstance(target, discord.TextChannel):
             if target.guild != ctx.guild:
-                return await ctx.reply(
-                    "🚫 You may only send messages to channels in this server.",
-                    mention_author=False,
-                )
+                return await ctx.reply("🚫 You may only send messages to channels in this server.", mention_author=False)
 
             try:
-                await target.send(message)
+                await target.send(**send_kwargs)
             except discord.Forbidden:
-                return await ctx.reply(
-                    f"🚫 I don't have permission to send messages in {target.mention}.",
-                    mention_author=False,
-                )
+                return await ctx.reply(f"🚫 I don't have permission to send messages in {target.mention}.", mention_author=False)
 
-            return await ctx.reply(
-                f"📢 Message successfully sent in {target.mention}.",
-                mention_author=False,
-            )
+            return await ctx.reply(f"📢 Message successfully sent in {target.mention}.", mention_author=False)
 
         if isinstance(target, discord.Member):
             try:
-                await target.send(message)
+                await target.send(**send_kwargs)
             except discord.Forbidden:
-                return await ctx.reply(
-                    f"🚫 I can't DM {target.mention}; they might have DMs disabled.",
-                    mention_author=False,
-                )
+                return await ctx.reply(f"🚫 I can't DM {target.mention}; they might have DMs disabled.", mention_author=False)
 
-            return await ctx.reply(
-                f"📩 Message successfully sent to {target.mention}.",
-                mention_author=False,
-            )
+            return await ctx.reply(f"📩 Message successfully sent to {target.mention}.", mention_author=False)
 
-        return await ctx.reply(
-            "🚫 You may only target members or channels within this server.",
-            mention_author=False,
-        )
+        return await ctx.reply("🚫 You may only target members or channels within this server.", mention_author=False)
 
     @commands.command(name="mcc", description="Create a member count channel")
     @commands.has_permissions(manage_channels=True)
@@ -846,65 +841,67 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
-        #try:
-        if member.top_role.position >= ctx.author.top_role.position:
-            embed = discord.Embed(
-                description="🚫 You cannot ban a user with a role higher than or equal to yours!",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
-            return
-        if member.top_role.position >= ctx.guild.me.top_role.position:
-            embed = discord.Embed(
-                description="🚫 I cannot ban a user with a role higher than or equal to mine!",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
-            return
-        else:
-            await self.bot.database.log_punishment_command(
-                moderator_id=ctx.author.id,
-                guild_id=ctx.guild.id,
-                punishment_type=PunishmentType.BAN,
-            )
-            case_id = await self.bot.database.add_punishment(
-                user_id=member.id,
-                guild_id=ctx.guild.id,
-                moderator_id=ctx.author.id,
-                punishment_type=PunishmentType.BAN,
-                reason=reason,
-                duration=None,
-            )
-            embed = discord.Embed(
-                description=f"**{member}** was banned for `{reason}`.",
-                color=discord.Color.blurple(),
-            )
-            embed.set_author(
-                name=f"Moderator: {ctx.author}",
-                icon_url=self.utils.get_avatar_url(ctx.author),
-            )
-            embed.set_footer(text=f"Case ID: {case_id}")
-            await ctx.send(embed=embed, delete_after=10)
-            try:
-                dm_embed = discord.Embed(
-                    description=f"You have been **banned** from **{ctx.guild.name}**.",
-                    color=discord.Color.greyple(),
-                )
-                dm_embed.set_author(
-                    name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
-                )
-                dm_embed.add_field(name="Reason:", value=reason)
-                dm_embed.set_footer(
-                    text=f"Action by: {ctx.author} Case ID: {case_id}"
-                )
-                await member.send(embed=dm_embed)
-            except:
+        try:
+            if member.top_role.position >= ctx.author.top_role.position:
                 embed = discord.Embed(
-                    description=f"Could not send user a DM message!", color=0x36393E
+                    description="🚫 You cannot ban a user with a role higher than or equal to yours!",
+                    color=discord.Color.red(),
                 )
-                await ctx.reply(embed=embed)
+                await ctx.send(embed=embed)
+                return
+            if member.top_role.position >= ctx.guild.me.top_role.position:
+                embed = discord.Embed(
+                    description="🚫 I cannot ban a user with a role higher than or equal to mine!",
+                    color=discord.Color.red(),
+                )
+                await ctx.send(embed=embed)
+                return
+        except Exception:
+            pass
 
-            await member.ban(reason=reason)
+        await self.bot.database.log_punishment_command(
+            moderator_id=ctx.author.id,
+            guild_id=ctx.guild.id,
+            punishment_type=PunishmentType.BAN,
+        )
+        case_id = await self.bot.database.add_punishment(
+            user_id=member.id,
+            guild_id=ctx.guild.id,
+            moderator_id=ctx.author.id,
+            punishment_type=PunishmentType.BAN,
+            reason=reason,
+            duration=None,
+        )
+        embed = discord.Embed(
+            description=f"**{member}** was banned for `{reason}`.",
+            color=discord.Color.blurple(),
+        )
+        embed.set_author(
+            name=f"Moderator: {ctx.author}",
+            icon_url=self.utils.get_avatar_url(ctx.author),
+        )
+        embed.set_footer(text=f"Case ID: {case_id}")
+        await ctx.send(embed=embed, delete_after=10)
+        try:
+            dm_embed = discord.Embed(
+                description=f"You have been **banned** from **{ctx.guild.name}**.",
+                color=discord.Color.greyple(),
+            )
+            dm_embed.set_author(
+                name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
+            )
+            dm_embed.add_field(name="Reason:", value=reason)
+            dm_embed.set_footer(
+                text=f"Action by: {ctx.author} Case ID: {case_id}"
+            )
+            await member.send(embed=dm_embed)
+        except:
+            embed = discord.Embed(
+                description=f"Could not send user a DM message!", color=0x36393E
+            )
+            await ctx.reply(embed=embed)
+
+        await ctx.guild.ban(member, reason=reason)
         #except Exception as e:
         #    embed = discord.Embed(
         #        title="Ban Error",
