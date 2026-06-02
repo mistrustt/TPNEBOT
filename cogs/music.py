@@ -2320,12 +2320,14 @@ class Music(commands.Cog, name="Music"):
 
             songs = Cache.get_songs()
             if not songs:
+                await ctx.reply('no songs? what did envy do')
                 return
             
             if not self.latest_surfaces:
                 await self.store_latest_surfaces()
 
                 if not self.latest_surfaces:
+                    await ctx.reply('no songs? what did envy do')
                     return
 
             view = LatestSurfacesView(self, self.latest_surfaces, ctx.author)
