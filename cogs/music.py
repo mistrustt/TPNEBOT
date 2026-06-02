@@ -2316,20 +2316,24 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
-        songs = Cache.get_songs()
-        if not songs:
-            return
-        
-        if not self.latest_surfaces:
-            await self.store_latest_surfaces()
+        try:
 
-            if not self.latest_surfaces:
+            songs = Cache.get_songs()
+            if not songs:
                 return
+            
+            if not self.latest_surfaces:
+                await self.store_latest_surfaces()
 
-        view = LatestSurfacesView(self, self.latest_surfaces, ctx.author)
-        await view.build_page()
-        msg = await ctx.reply(view=view)
-        view.message = msg
+                if not self.latest_surfaces:
+                    return
+
+            view = LatestSurfacesView(self, self.latest_surfaces, ctx.author)
+            await view.build_page()
+            msg = await ctx.reply(view=view)
+            view.message = msg
+        except Exception as e:
+            await ctx.send(e)
         
     @commands.command("snippet", aliases=["snip"])
     async def snippet(self, ctx: commands.Context, *, query: str):
