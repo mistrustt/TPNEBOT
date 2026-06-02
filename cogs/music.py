@@ -1804,13 +1804,17 @@ class Music(commands.Cog, name="Music"):
     def parse_dates(self, text: str) -> datetime | None:
         if not text:
             return None
-        
-        match = re.search(r'([A-Za-z]+ \d{1,2}, \d{4})', text)
+
+        match = re.search(r'([A-Za-z]+ \d{1,2}(?:st|nd|rd|th)?, \d{4})', text)
+
         if not match:
             return None
 
+        date_str = match.group(1)
+        date_str = re.sub(r'(\d{1,2})(st|nd|rd|th)', r'\1', date_str)
+
         try:
-            dt = datetime.strptime(match.group(1), '%B %d, %Y')
+            dt = datetime.strptime(date_str, '%B %d, %Y')
             dt = dt.replace(hour=14, minute=0, second=0, tzinfo=ZoneInfo("America/New_York"))
             return dt
         except ValueError:
@@ -3299,7 +3303,7 @@ class Music(commands.Cog, name="Music"):
         self.snippet_debounce[ctx.author.id] = True
 
         async with self.session.get(
-            f"{JUICEWRLD_API}/juicewrld/files/browse/", params={"search": query}
+            f"{JUICEWRLD_API}s", params={"search": query}
         ) as response:
 
             async def handle_request_failed(ctx, code=None):
