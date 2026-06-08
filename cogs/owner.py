@@ -4872,7 +4872,8 @@ class Owner(commands.Cog, name="Owner"):
 
         grid_size = 25
         safe_total = grid_size - bombs
-        house_edge = 0.04
+        # Match the actual game's house edge (see MinesGridLayout._compute_mines_multiplier).
+        house_edge = 0.01
 
         mult_table = {}
         for gems in range(1, safe_total + 1):
@@ -4896,7 +4897,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(
             title=f"Mines Simulation ({bombs} bombs)",
-            description=f"**{trials:,}** trials | Grid: 5×5 | House edge: 4%",
+            description=f"**{trials:,}** trials | Grid: 5×5 | House edge: 1%",
             color=discord.Color.green(),
         )
 

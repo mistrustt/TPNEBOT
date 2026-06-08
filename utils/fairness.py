@@ -280,12 +280,21 @@ def outcome_roulette(server_seed: str, client_seed: str, nonce: int) -> dict:
 def outcome_crash(
     server_seed: str, client_seed: str, nonce: int, house_edge: float = 0.04
 ) -> dict:
+    """Crash outcome with the same VIP boost as the live game.
+
+    Bucket boundaries are fixed; the house-edge (vs. the 4% base) is applied
+    as a multiplier boost *within* the chosen bucket, not as a scaling of
+    the bucket thresholds. This keeps the verify path in sync with the live
+    game's distribution.
+    """
     r, n = fair_random(server_seed, client_seed, nonce)
-    edge_factor = house_edge / 0.04
+    base_edge = 0.04
     for i, (threshold, lo, hi) in enumerate(CRASH_RANGES):
-        scaled = min(threshold * edge_factor, 0.9999)
-        if r < scaled or i == len(CRASH_RANGES) - 1:
+        if r < threshold or i == len(CRASH_RANGES) - 1:
             v, n = fair_uniform(server_seed, client_seed, n, lo, hi)
+            if 0 < house_edge < base_edge:
+                boost = (base_edge - house_edge) / base_edge
+                v = v + (hi - v) * boost
             return {"crash_point": round(v, 2), "bucket": CRASH_BUCKET_NAMES[i], "nonce_end": n}
 
 
@@ -307,8 +316,21 @@ def outcome_hilo_initial(server_seed: str, client_seed: str, nonce: int) -> dict
     return {"card": card, "card_index": HILO_CARD_VALUES[card], "nonce_end": n}
 
 
-def outcome_hilo_draw(server_seed: str, client_seed: str, nonce: int) -> dict:
-    card, n = fair_choice(server_seed, client_seed, nonce, HILO_CARDS)
+def outcome_hilo_draw(
+    server_seed: str, client_seed: str, nonce: int, current_card: str = None
+) -> dict:
+    """Draw the next HiLo card, excluding ``current_card`` from the deck.
+
+    Excluding the current card is what the multiplier math assumes (12
+    remaining cards out of which ``favorable`` make the guess correct). If
+    ``current_card`` is None we fall back to drawing from the full 13-card
+    deck (legacy behaviour).
+    """
+    if current_card is None or current_card not in HILO_CARDS:
+        candidates = HILO_CARDS
+    else:
+        candidates = [c for c in HILO_CARDS if c != current_card]
+    card, n = fair_choice(server_seed, client_seed, nonce, candidates)
     return {"card": card, "card_index": HILO_CARD_VALUES[card], "nonce_end": n}
 
 
@@ -596,8 +618,10 @@ class ProvenFairness:
         return outcome_hilo_initial(server_seed, client_seed, nonce)
 
     @staticmethod
-    def verify_hilo_draw(server_seed: str, client_seed: str, nonce: int) -> dict:
-        return outcome_hilo_draw(server_seed, client_seed, nonce)
+    def verify_hilo_draw(
+        server_seed: str, client_seed: str, nonce: int, current_card: str = None
+    ) -> dict:
+        return outcome_hilo_draw(server_seed, client_seed, nonce, current_card)
 
     @staticmethod
     def verify_keno(

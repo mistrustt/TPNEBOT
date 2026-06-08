@@ -213,7 +213,7 @@ class CrashView(discord.ui.LayoutView):
 
             self.players[uid] = bet
             # Capture PF data before generate_crash_point consumes the nonce
-            self.pf_data[uid] = await self.casino.prove_fairness(uid)
+            self.pf_data[uid] = await self.casino.start_game_proof(uid)
             self.crash_points[uid] = await self.generate_crash_point(uid)
 
             await self.casino._log_game_event(
@@ -262,7 +262,7 @@ class CrashView(discord.ui.LayoutView):
         await self.bot.database.increment_win(
             uid, "crash", bet=bet,
             client_seed=pf.get("client_seed"),
-            seed_used=None,
+            seed_used=pf["server_seed"],
             nonce=pf.get("nonce"),
             hash_hex=pf.get("server_seed_hash"),
         )
@@ -282,33 +282,31 @@ class CrashView(discord.ui.LayoutView):
 
         r = await self.casino.fair_random(user_id)
 
-        # Adjust probability distribution based on house edge
-        # Lower house edge = higher chance of better multipliers
-        # Base edge is 4%, so scale probabilities accordingly
-        edge_factor = float(house_edge) / 0.04  # Ratio relative to standard 4% edge
-
-        # Apply house edge by shifting probability thresholds
-        # Higher VIP (lower edge) = more favorable distribution
-        # Capped at 50x max for treasury protection
-        thresholds = {
-            "low": 0.45 * edge_factor,      # 1-2x multiplier
-            "med_low": 0.80 * edge_factor,  # 2-5x multiplier
-            "med": 0.95 * edge_factor,      # 5-20x multiplier
-            "high": 0.999 * edge_factor,    # 20-50x multiplier (capped)
-        }
-
-        # Cap thresholds at sensible limits
-        for key in thresholds:
-            thresholds[key] = min(thresholds[key], 0.9999)
-
-        if r < thresholds["low"]:
-            v = await self.casino.fair_uniform(user_id, 1.0, 2.0)
-        elif r < thresholds["med_low"]:
-            v = await self.casino.fair_uniform(user_id, 2.0, 5.0)
-        elif r < thresholds["med"]:
-            v = await self.casino.fair_uniform(user_id, 5.0, 20.0)
+        # Bucket boundaries are FIXED — every tier gets the same probability
+        # of landing in each bucket (~45/35/15/5). The VIP boost is applied
+        # below to the *multiplier value* within the chosen bucket, not to
+        # the bucket thresholds (which previously collapsed for low-edge VIPs
+        # and dumped ~50% of draws into the 20-50x bucket).
+        base_edge = 0.04
+        if r < 0.45:
+            lo, hi = 1.0, 2.0
+        elif r < 0.80:
+            lo, hi = 2.0, 5.0
+        elif r < 0.95:
+            lo, hi = 5.0, 20.0
         else:
-            v = await self.casino.fair_uniform(user_id, 20.0, 50.0)
+            lo, hi = 20.0, 50.0
+
+        v = await self.casino.fair_uniform(user_id, lo, hi)
+
+        # VIP boost: shift the sampled multiplier toward the top of its
+        # bucket by an amount proportional to how much the user's house edge
+        # is below the base. Non-VIPs (house_edge >= base_edge) get no boost.
+        user_edge = float(house_edge)
+        if 0 < user_edge < base_edge:
+            boost = (base_edge - user_edge) / base_edge  # 0..1
+            v = v + (hi - v) * boost
+
         return Decimal(str(round(v, 2)))
 
     async def start_game(self, ctx: commands.Context):
@@ -371,7 +369,7 @@ class CrashView(discord.ui.LayoutView):
                             await self.bot.database.increment_loss(
                                 uid, "crash", bet=self.players[uid],
                                 client_seed=pf.get("client_seed"),
-                                seed_used=None,
+                                seed_used=pf["server_seed"],
                                 nonce=pf.get("nonce"),
                                 hash_hex=pf.get("server_seed_hash"),
                             )
@@ -395,7 +393,7 @@ class CrashView(discord.ui.LayoutView):
                             await self.bot.database.increment_loss(
                                 uid, "crash", bet=self.players[uid],
                                 client_seed=pf.get("client_seed"),
-                                seed_used=None,
+                                seed_used=pf["server_seed"],
                                 nonce=pf.get("nonce"),
                                 hash_hex=pf.get("server_seed_hash"),
                             )
@@ -576,7 +574,7 @@ class MinesGridLayout(discord.ui.LayoutView):
                 "mines",
                 self.bet_amount,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -654,7 +652,7 @@ class MinesGridLayout(discord.ui.LayoutView):
                 "mines",
                 self.bet_amount,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -683,16 +681,83 @@ class MinesGridLayout(discord.ui.LayoutView):
 
         await interaction.response.edit_message(view=self)
 
+    @staticmethod
+    def _compute_mines_multiplier(
+        bomb_count: int, gem_count: int, house_edge: float = 0.01
+    ) -> float:
+        """Compute the mines payout multiplier from probability.
+
+        Uses the binomial probability of revealing ``gem_count`` gems in a row
+        on a 5x5 grid with ``bomb_count`` bombs. The fair multiplier is the
+        reciprocal of that probability, scaled down by ``house_edge``.
+
+        Args:
+            bomb_count: Number of bombs placed on the 25-cell grid (1-24).
+            gem_count: Number of gems the player has successfully revealed.
+            house_edge: House edge fraction (default 1%).
+
+        Returns:
+            The fair multiplier for the current state. Returns 1.0 when no
+            gems have been revealed (no risk taken yet).
+        """
+        total_cells = 25
+        if gem_count <= 0:
+            return 1.0
+        if bomb_count <= 0 or bomb_count >= total_cells:
+            return 1.0
+        if gem_count > total_cells - bomb_count:
+            return 1.0
+
+        # P(success) = C(total_cells - bomb_count, gem_count) / C(total_cells, gem_count)
+        gems_left = total_cells - bomb_count
+        # Compute C(n, k) for both numerator and denominator
+        def comb(n: int, k: int) -> float:
+            if k < 0 or k > n:
+                return 0.0
+            k = min(k, n - k)
+            result = 1.0
+            for i in range(1, k + 1):
+                result *= (n - k + i) / i
+            return result
+
+        prob = comb(gems_left, gem_count) / comb(total_cells, gem_count)
+        if prob <= 0:
+            return 1.0
+        return (1.0 - house_edge) / prob
+
     async def _calculate_multiplier(self) -> float:
-        """Calculate the current multiplier."""
+        """Calculate the current multiplier.
+
+        Prefers the database value when present, but falls back to a
+        probability-based calculation if the DB row is missing or the stored
+        value is clearly wrong (e.g. a 22-bomb / 1-gem payout of 825x instead
+        of ~8.25x). This keeps the game playable even if the mines_settings
+        table is mis-populated.
+        """
+        bomb_count = len(self.bomb_positions)
+        gem_count = self.gems_clicked
+        fallback = self._compute_mines_multiplier(bomb_count, gem_count)
         try:
             multiplier = await self.bot.database.get_mines_multiplier(
-                len(self.bomb_positions), self.gems_clicked
+                bomb_count, gem_count
             )
-            return float(multiplier) if multiplier else 1.0
+            if multiplier is None:
+                return fallback
+            value = float(multiplier)
+            # Sanity check: probability-derived value should be within an
+            # order of magnitude of the stored value. If the stored value is
+            # wildly off (off by >=10x), it's bad data and we trust the math.
+            if fallback > 0 and (value > fallback * 10 or value < fallback / 10):
+                logger.warning(
+                    "Mines multiplier sanity check failed: bomb=%s gem=%s "
+                    "db=%s math=%s — using math-derived value",
+                    bomb_count, gem_count, value, fallback,
+                )
+                return fallback
+            return value
         except Exception as e:
             logger.error(f"Error calculating multiplier: {str(e)}")
-            return 1.0
+            return fallback
 
     def _create_final_grid(self) -> str:
         """Create the final grid display."""
@@ -790,7 +855,7 @@ class MinesGridLayout(discord.ui.LayoutView):
                 "mines",
                 self.bet_amount,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -1049,7 +1114,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 "double",
                 self.initial_amount,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -1076,7 +1141,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 "double",
                 self.initial_amount,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -1494,7 +1559,7 @@ class RouletteView(discord.ui.LayoutView):
         total_wager = self.bet_amount * num_bets
 
         # ── Fairness & session ──
-        PF = await self.cog.prove_fairness(self.user_id)
+        PF = await self.cog.start_game_proof(self.user_id)
 
         try:
             await self.bot.database.process_treasury_transaction(
@@ -1560,7 +1625,7 @@ class RouletteView(discord.ui.LayoutView):
         if net_won:
             await self.bot.database.increment_win(
                 self.user_id, "roulette", total_wager,
-                client_seed=PF["client_seed"], seed_used=None,
+                client_seed=PF["client_seed"], seed_used=PF["server_seed"],
                 nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
             )
             try:
@@ -1572,7 +1637,7 @@ class RouletteView(discord.ui.LayoutView):
         else:
             await self.bot.database.increment_loss(
                 self.user_id, "roulette", total_wager,
-                client_seed=PF["client_seed"], seed_used=None,
+                client_seed=PF["client_seed"], seed_used=PF["server_seed"],
                 nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
             )
 
@@ -1845,7 +1910,7 @@ class HiLoView(discord.ui.LayoutView):
         if win:
             await self.bot.database.increment_win(
                 self.user_id, "hilo", self.bet_amount,
-                client_seed=self.PF["client_seed"], seed_used=None,
+                client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
             )
             await self.cog._remove_refund(self.session_id, user_id=self.user_id)
@@ -1857,7 +1922,7 @@ class HiLoView(discord.ui.LayoutView):
         else:
             await self.bot.database.increment_loss(
                 self.user_id, "hilo", self.bet_amount,
-                client_seed=self.PF["client_seed"], seed_used=None,
+                client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
             )
             await self.cog._remove_refund(self.session_id, user_id=self.user_id)
@@ -1910,7 +1975,10 @@ class HiLoView(discord.ui.LayoutView):
             await interaction.response.defer()
             self.has_played = True
             self.history.append(self.current_card)
-            next_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
+            # Exclude the current card so the multiplier math (which assumes
+            # 12 remaining cards) lines up with the actual draw distribution.
+            candidates = [c for c in HILO_CARDS if c != self.current_card]
+            next_card = await self.cog.fair_choice(self.user_id, candidates)
 
             multiplier_increase = self._calculate_multiplier(self.history[-1], "higher")
 
@@ -1932,9 +2000,9 @@ class HiLoView(discord.ui.LayoutView):
                     await self._end_game(True)
                     await self._show_result(interaction, True, auto_cashout_card=next_card)
                     return
-            elif next_value == current_value:
-                self.current_card = next_card  # Push — no multiplier change
             else:
+                # next_value < current_value (same-card is impossible now that
+                # current_card is excluded from the draw).
                 self.current_card = next_card
                 await self._end_game(False)
                 await self._show_result(interaction, False)
@@ -1957,7 +2025,10 @@ class HiLoView(discord.ui.LayoutView):
             await interaction.response.defer()
             self.has_played = True
             self.history.append(self.current_card)
-            next_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
+            # Exclude the current card so the multiplier math (which assumes
+            # 12 remaining cards) lines up with the actual draw distribution.
+            candidates = [c for c in HILO_CARDS if c != self.current_card]
+            next_card = await self.cog.fair_choice(self.user_id, candidates)
 
             multiplier_increase = self._calculate_multiplier(self.history[-1], "lower")
 
@@ -1979,9 +2050,9 @@ class HiLoView(discord.ui.LayoutView):
                     await self._end_game(True)
                     await self._show_result(interaction, True, auto_cashout_card=next_card)
                     return
-            elif next_value == current_value:
-                self.current_card = next_card  # Push — no multiplier change
             else:
+                # next_value > current_value (same-card is impossible now
+                # that current_card is excluded from the draw).
                 self.current_card = next_card
                 await self._end_game(False)
                 await self._show_result(interaction, False)
@@ -2198,6 +2269,7 @@ class PokerView(View):
         player_rank = self.evaluate_hand(self.player_hand + self.community)
         bot_rank = self.evaluate_hand(self.bot_hand + self.community)
         player_wins = player_rank > bot_rank
+        player_ties = player_rank == bot_rank
 
         if player_wins:
             revealed_seed, new_hash = await self.bot.database.increment_win(
@@ -2205,7 +2277,7 @@ class PokerView(View):
                 "poker",
                 self.bet,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -2216,13 +2288,32 @@ class PokerView(View):
             formatted = await self.cog.formatter(payout)
             result = f"You win! You won **{formatted}**."
             color = discord.Color.green()
+        elif player_ties:
+            # Tied hand → push. Record the round as a push (counts toward
+            # total wagered but not toward wins or losses) and refund the bet.
+            revealed_seed, new_hash = await self.bot.database.record_game(
+                self.user_id,
+                "poker",
+                outcome="push",
+                bet=self.bet,
+                client_seed=self.PF["client_seed"],
+                seed_used=self.PF["server_seed"],
+                nonce=self.PF["nonce"],
+                hash_hex=self.PF["server_seed_hash"],
+            )
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=self.wallet_id, amount=self.bet, description="Poker Push"
+            )
+            formatted = await self.cog.formatter(self.bet)
+            result = f"It's a tie! Your bet of **{formatted}** has been refunded."
+            color = discord.Color.greyple()
         else:
             revealed_seed, new_hash = await self.bot.database.increment_loss(
                 self.user_id,
                 "poker",
                 self.bet,
                 client_seed=self.PF["client_seed"],
-                seed_used=None,
+                seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"],
                 hash_hex=self.PF["server_seed_hash"],
             )
@@ -2262,7 +2353,7 @@ class PokerView(View):
             "poker",
             self.bet,
             client_seed=self.PF["client_seed"],
-            seed_used=None,
+            seed_used=self.PF["server_seed"],
             nonce=self.PF["nonce"],
             hash_hex=self.PF["server_seed_hash"],
         )
@@ -2430,7 +2521,7 @@ class LadderView(discord.ui.LayoutView):
                 await self.cog.process_game_result(self.user_id, "ladder", self.bet)
                 await self.bot.database.increment_win(
                     self.user_id, "ladder", self.bet,
-                    client_seed=self.PF["client_seed"], seed_used=None,
+                    client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
                     nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
                 )
                 await self.bot.database.process_treasury_transaction(
@@ -2475,7 +2566,7 @@ class LadderView(discord.ui.LayoutView):
             await self.cog.process_game_result(self.user_id, "ladder", self.bet)
             await self.bot.database.increment_loss(
                 self.user_id, "ladder", self.bet,
-                client_seed=self.PF["client_seed"], seed_used=None,
+                client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
                 nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
             )
             formatted_bet = await self.cog.formatter(self.bet)
@@ -2509,7 +2600,7 @@ class LadderView(discord.ui.LayoutView):
         await self.cog.process_game_result(self.user_id, "ladder", self.bet)
         await self.bot.database.increment_win(
             self.user_id, "ladder", self.bet,
-            client_seed=self.PF["client_seed"], seed_used=None,
+            client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
             nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
         )
         await self.bot.database.process_treasury_transaction(
@@ -2829,7 +2920,7 @@ class SlotsView(discord.ui.LayoutView):
             
             # Get user ID and provable fairness data for this spin
             user_id = interaction.user.id
-            PF = await self.cog.prove_fairness(user_id)
+            PF = await self.cog.start_game_proof(user_id)
             
             # Generate new grid
             grid, verification = await self.cog._async_generate_spin_grid(user_id, PF["nonce"])
@@ -2855,6 +2946,26 @@ class SlotsView(discord.ui.LayoutView):
                     wallet_id=wallet_id,
                     amount=total_winnings,
                     description="Slots Win"
+                )
+
+            # Record this spin in game_history (spin-again was previously
+            # missing the increment call, so all but the first spin in a
+            # session were absent from history and from wager metrics).
+            if total_winnings > 0:
+                await self.bot.database.increment_win(
+                    user_id, "slots", self.bet,
+                    client_seed=PF["client_seed"],
+                    seed_used=PF["server_seed"],
+                    nonce=PF["nonce"],
+                    hash_hex=PF["server_seed_hash"],
+                )
+            else:
+                await self.bot.database.increment_loss(
+                    user_id, "slots", self.bet,
+                    client_seed=PF["client_seed"],
+                    seed_used=PF["server_seed"],
+                    nonce=PF["nonce"],
+                    hash_hex=PF["server_seed_hash"],
                 )
             
             # Check for free spins trigger (max 1 retrigger)
@@ -3412,6 +3523,27 @@ class Casino(commands.Cog):
             "nonce": nonce,
         }
 
+    async def start_game_proof(self, user_id: int) -> dict:
+        """
+        Capture full provable-fairness state for a single game, including the
+        raw server seed.
+
+        This is the preferred entry point for any game command that records
+        into ``game_history``. Unlike :meth:`prove_fairness`, it bumps the
+        wallet nonce and returns the live server seed (not just its hash) so
+        the post-game ``record_game`` call can write a non-null
+        ``used_server_seed`` at insert time. That makes the most recent game
+        immediately verifiable via ``!casino verify`` — without waiting for
+        the user's *next* game to back-fill via seed rotation.
+        """
+        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)
+        return {
+            "server_seed": server_seed,
+            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
+            "client_seed": client_seed,
+            "nonce": nonce,
+        }
+
     def _fmt_no_sci(
         self, x: Decimal, *, max_frac: int = 2, rounding=ROUND_HALF_UP
     ) -> str:
@@ -3852,11 +3984,14 @@ class Casino(commands.Cog):
                 )
 
                 bar_len = 20
-                filled = int(min(max(roll_pct, 0), 100) / 100 * bar_len)
+                # roll is the raw 0-9999 draw from fair_randbelow; convert to
+                # a 0-100 percentage for display. threshold is already 0-100.
+                roll_pct_disp = roll_pct / 100
+                filled = int(min(max(roll_pct_disp, 0), 100) / 100 * bar_len)
                 bar = "█" * filled + "░" * (bar_len - filled)
                 embed.add_field(
                     name="🪜 Ladder Roll",
-                    value=f"Step: **{step}**\nRoll: `{roll_pct:.2f}%` • Threshold: `{threshold:.2f}%`\n`{bar}`",
+                    value=f"Step: **{step}**\nRoll: `{roll_pct_disp:.2f}%` • Threshold: `{threshold:.2f}%`\n`{bar}`",
                     inline=False,
                 )
 
@@ -4041,7 +4176,7 @@ class Casino(commands.Cog):
             user_id = ctx.author.id
             session_id = None
 
-            PF = await self.prove_fairness(user_id)
+            PF = await self.start_game_proof(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -4111,7 +4246,7 @@ class Casino(commands.Cog):
                     "gamble",
                     amount,
                     client_seed=PF["client_seed"],
-                    seed_used=None,
+                    seed_used=PF["server_seed"],
                     nonce=PF["nonce"],
                     hash_hex=PF["server_seed_hash"],
                 )
@@ -4153,7 +4288,7 @@ class Casino(commands.Cog):
                     "gamble",
                     amount,
                     client_seed=PF["client_seed"],
-                    seed_used=None,
+                    seed_used=PF["server_seed"],
                     nonce=PF["nonce"],
                     hash_hex=PF["server_seed_hash"],
                 )
@@ -4192,7 +4327,7 @@ class Casino(commands.Cog):
             user_id = ctx.author.id
             session_id = None
 
-            PF = await self.prove_fairness(user_id)
+            PF = await self.start_game_proof(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -4292,7 +4427,7 @@ class Casino(commands.Cog):
                     "supergamble",
                     amount,
                     client_seed=PF["client_seed"],
-                    seed_used=None,
+                    seed_used=PF["server_seed"],
                     nonce=PF["nonce"],
                     hash_hex=PF["server_seed_hash"],
                 )
@@ -4359,7 +4494,7 @@ class Casino(commands.Cog):
                         "supergamble",
                         amount,
                         client_seed=PF["client_seed"],
-                        seed_used=None,
+                        seed_used=PF["server_seed"],
                         nonce=PF["nonce"],
                         hash_hex=PF["server_seed_hash"],
                     )
@@ -4623,7 +4758,7 @@ class Casino(commands.Cog):
             )
 
         # Get provable fairness data
-        PF = await self.prove_fairness(user_id)
+        PF = await self.start_game_proof(user_id)
 
         # Generate initial spin grid
         grid, verification = await self._async_generate_spin_grid(user_id, PF["nonce"])
@@ -4653,7 +4788,7 @@ class Casino(commands.Cog):
             await self.bot.database.increment_win(
                 user_id, "slots", stake,
                 client_seed=PF["client_seed"],
-                seed_used=None,
+                seed_used=PF["server_seed"],
                 nonce=PF["nonce"],
                 hash_hex=PF["server_seed_hash"],
             )
@@ -4661,7 +4796,7 @@ class Casino(commands.Cog):
             await self.bot.database.increment_loss(
                 user_id, "slots", stake,
                 client_seed=PF["client_seed"],
-                seed_used=None,
+                seed_used=PF["server_seed"],
                 nonce=PF["nonce"],
                 hash_hex=PF["server_seed_hash"],
             )
@@ -4709,7 +4844,7 @@ class Casino(commands.Cog):
         user_id = ctx.author.id
         session_id = None
 
-        PF = await self.prove_fairness(user_id)
+        PF = await self.start_game_proof(user_id)
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -4852,7 +4987,7 @@ class Casino(commands.Cog):
                 "dice",
                 amount,
                 client_seed=PF["client_seed"],
-                seed_used=None,
+                seed_used=PF["server_seed"],
                 nonce=PF["nonce"],
                 hash_hex=PF["server_seed_hash"],
             )
@@ -4862,7 +4997,7 @@ class Casino(commands.Cog):
                 "dice",
                 amount,
                 client_seed=PF["client_seed"],
-                seed_used=None,
+                seed_used=PF["server_seed"],
                 nonce=PF["nonce"],
                 hash_hex=PF["server_seed_hash"],
             )
@@ -4952,7 +5087,7 @@ class Casino(commands.Cog):
         user_id = ctx.author.id
         session_id = None
 
-        PF = await self.prove_fairness(user_id)
+        PF = await self.start_game_proof(user_id)
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -5050,7 +5185,7 @@ class Casino(commands.Cog):
         user_id = ctx.author.id
         session_id = None
 
-        PF = await self.prove_fairness(user_id)
+        PF = await self.start_game_proof(user_id)
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -5197,7 +5332,7 @@ class Casino(commands.Cog):
                     "blackjack",
                     hand_bet,
                     client_seed=PF["client_seed"],
-                    seed_used=None,
+                    seed_used=PF["server_seed"],
                     nonce=PF["nonce"],
                     hash_hex=PF["server_seed_hash"],
                 )
@@ -5208,7 +5343,7 @@ class Casino(commands.Cog):
                     "blackjack",
                     hand_bet,
                     client_seed=PF["client_seed"],
-                    seed_used=None,
+                    seed_used=PF["server_seed"],
                     nonce=PF["nonce"],
                     hash_hex=PF["server_seed_hash"],
                 )
@@ -5244,12 +5379,13 @@ class Casino(commands.Cog):
                 outcome = "tie"
                 winnings = Decimal(hand_bet)
                 try:
-                    revealed_seed, new_hash = await self.bot.database.increment_win(
+                    revealed_seed, new_hash = await self.bot.database.record_game(
                         user_id,
                         "blackjack",
-                        hand_bet,
+                        outcome="push",
+                        bet=hand_bet,
                         client_seed=PF["client_seed"],
-                        seed_used=None,
+                        seed_used=PF["server_seed"],
                         nonce=PF["nonce"],
                         hash_hex=PF["server_seed_hash"],
                     )
@@ -5278,7 +5414,7 @@ class Casino(commands.Cog):
                     "blackjack",
                     hand_bet,
                     client_seed=PF["client_seed"],
-                    seed_used=None,
+                    seed_used=PF["server_seed"],
                     nonce=PF["nonce"],
                     hash_hex=PF["server_seed_hash"],
                 )
@@ -5779,7 +5915,7 @@ class Casino(commands.Cog):
     )
     async def poker(self, ctx: commands.Context, bet_amount: str):
         user_id = ctx.author.id
-        PF = await self.prove_fairness(user_id)
+        PF = await self.start_game_proof(user_id)
         session_id = None
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -5890,7 +6026,7 @@ class Casino(commands.Cog):
         self.active_players.add(user_id)
 
         try:
-            PF = await self.prove_fairness(user_id)
+            PF = await self.start_game_proof(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -5969,7 +6105,7 @@ class Casino(commands.Cog):
     async def luckyladder(self, ctx: Context, bet_amount: str):
         """Start climbing the Lucky Ladder with a bet. Uses Components V2 Container system."""
         user_id = ctx.author.id
-        PF = await self.prove_fairness(user_id)
+        PF = await self.start_game_proof(user_id)
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -6383,7 +6519,7 @@ class Casino(commands.Cog):
                 await ctx.reply(view=view)
                 return
 
-            PF = await self.prove_fairness(user_id)
+            PF = await self.start_game_proof(user_id)
             session_id = await self._create_game_session(
                 ctx,
                 "mines",
@@ -6412,7 +6548,13 @@ class Casino(commands.Cog):
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
             init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
-            multiplier = float(init_multi) if init_multi else 1.0
+            db_multi = float(init_multi) if init_multi else 1.0
+            math_multi = MinesGridLayout._compute_mines_multiplier(num_bombs, 0)
+            # Prefer DB value when sane, fall back to math-derived value.
+            if math_multi > 0 and (db_multi > math_multi * 10 or db_multi < math_multi / 10):
+                multiplier = math_multi
+            else:
+                multiplier = db_multi
 
             # Calculate house edge for RTP tracking
             house_edge = await self.calculate_house_edge(user_id)
@@ -6462,7 +6604,7 @@ class Casino(commands.Cog):
         try:
             user_id = ctx.author.id
 
-            PF = await self.prove_fairness(user_id)
+            PF = await self.start_game_proof(user_id)
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -6837,9 +6979,9 @@ class BetButton(discord.ui.Button):
                     await self.bot.database.increment_win(
                         table_ui_view.player.id,
                         "keno",
-                        total_win,
+                        player_bet,
                         client_seed=self.PF["client_seed"],
-                        seed_used=None,
+                        seed_used=self.PF["server_seed"],
                         nonce=self.PF["nonce"],
                         hash_hex=self.PF["server_seed_hash"],
                     )
@@ -6849,7 +6991,7 @@ class BetButton(discord.ui.Button):
                         "keno",
                         player_bet,
                         client_seed=self.PF["client_seed"],
-                        seed_used=None,
+                        seed_used=self.PF["server_seed"],
                         nonce=self.PF["nonce"],
                         hash_hex=self.PF["server_seed_hash"],
                     )

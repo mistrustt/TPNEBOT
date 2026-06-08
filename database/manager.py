@@ -6403,6 +6403,50 @@ class DatabaseManager:
             location = result.scalar_one_or_none()
             return location
 
+    async def record_game(
+        self,
+        user_id: int,
+        game_name: str,
+        outcome: str,
+        bet,
+        client_seed: str,
+        seed_used: str,
+        nonce: int,
+        hash_hex: str,
+    ) -> tuple[str, str]:
+        """Insert a game history entry with the given outcome and rotate the seed.
+
+        ``outcome`` is one of ``"win"``, ``"loss"``, or ``"push"``. Pushes (ties
+        in poker/blackjack) are recorded so the row exists for audit and
+        wager-volume metrics, but they are intentionally excluded from win
+        and loss counts by the aggregate queries elsewhere in this module
+        (which all filter on ``outcome == "win"|"loss"``).
+
+        ``seed_used`` should be the raw server seed that was live for this
+        game (i.e. the value returned by ``start_game_proof`` in the cog).
+        Writing it at insert time means the most-recent game is verifiable
+        immediately, without waiting for the next game's rotation to
+        back-fill via ``_reveal_and_rotate_in_tx``.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                session.add(
+                    GameHistory(
+                        user_id=user_id,
+                        game_name=game_name,
+                        outcome=outcome,
+                        wagered=bet,
+                        client_seed=client_seed,
+                        used_server_seed=seed_used,
+                        nonce=nonce,
+                        hash=hash_hex,
+                    )
+                )
+                revealed_seed, new_hash = await self._reveal_and_rotate_in_tx(
+                    session, user_id
+                )
+                return revealed_seed, new_hash
+
     async def increment_win(
         self,
         user_id: int,
@@ -6414,24 +6458,16 @@ class DatabaseManager:
         hash_hex: str,
     ) -> tuple[str, str]:
         """Insert a win entry into game history."""
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                session.add(
-                    GameHistory(
-                        user_id=user_id,
-                        game_name=game_name,
-                        outcome="win",
-                        wagered=bet,
-                        client_seed=client_seed,
-                        used_server_seed=seed_used,  # should be None at insert time
-                        nonce=nonce,
-                        hash=hash_hex,
-                    )
-                )
-                revealed_seed, new_hash = await self._reveal_and_rotate_in_tx(
-                    session, user_id
-                )
-                return revealed_seed, new_hash
+        return await self.record_game(
+            user_id=user_id,
+            game_name=game_name,
+            outcome="win",
+            bet=bet,
+            client_seed=client_seed,
+            seed_used=seed_used,
+            nonce=nonce,
+            hash_hex=hash_hex,
+        )
 
     async def increment_loss(
         self,
@@ -6444,24 +6480,16 @@ class DatabaseManager:
         hash_hex: str,
     ) -> tuple[str, str]:
         """Insert a loss entry into game history."""
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                session.add(
-                    GameHistory(
-                        user_id=user_id,
-                        game_name=game_name,
-                        outcome="loss",
-                        wagered=bet,
-                        client_seed=client_seed,
-                        used_server_seed=seed_used,  # should be None at insert time
-                        nonce=nonce,
-                        hash=hash_hex,
-                    )
-                )
-                revealed_seed, new_hash = await self._reveal_and_rotate_in_tx(
-                    session, user_id
-                )
-                return revealed_seed, new_hash
+        return await self.record_game(
+            user_id=user_id,
+            game_name=game_name,
+            outcome="loss",
+            bet=bet,
+            client_seed=client_seed,
+            seed_used=seed_used,
+            nonce=nonce,
+            hash_hex=hash_hex,
+        )
 
     async def get_total_wins(self, user_id: int) -> int:
         """Count the total wins for a user based on game history."""
