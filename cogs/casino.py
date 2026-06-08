@@ -515,6 +515,21 @@ class MinesGridLayout(discord.ui.LayoutView):
                 pos = row_idx * 5 + col_idx
                 self.grid_buttons.append(button)
 
+    @property
+    def _channel_id(self) -> int | None:
+        """The channel id this view's message was sent in, if any."""
+        if self.message is not None:
+            return self.message.channel.id
+        return None
+
+    def _cleanup_registry(self) -> None:
+        """Pop this view from Casino.active_mines_views, if registered."""
+        if self._channel_id is None:
+            return
+        casino: Casino = self.bot.get_cog("Casino")
+        if casino is not None:
+            casino._pop_mines_view(self._channel_id)
+
     async def handle_click(self, interaction: Interaction, pos: int):
         """Handle a grid button click."""
         try:
@@ -596,6 +611,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             outcome="loss",
             final_state={"reason": "bomb", "bomb_pos": pos},
         )
+        self._cleanup_registry()
 
         await interaction.response.edit_message(view=self)
 
@@ -678,6 +694,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             outcome="win",
             final_state={"reason": "all_gems", "winnings": str(winnings)},
         )
+        self._cleanup_registry()
 
         await interaction.response.edit_message(view=self)
 
@@ -802,6 +819,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             outcome="cancelled",
             final_state={"reason": "emergency_end"},
         )
+        self._cleanup_registry()
 
         try:
             await interaction.response.edit_message(view=self)
@@ -882,6 +900,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             outcome="win",
             final_state={"reason": "cashout", "winnings": str(winnings)},
         )
+        self._cleanup_registry()
 
         await interaction.response.edit_message(view=self)
 
@@ -909,6 +928,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             outcome="forced_end",
             final_state={"refund": refund},
         )
+        self._cleanup_registry()
 
 
 class MinesContainer(discord.ui.Container):
@@ -3265,6 +3285,7 @@ class Casino(commands.Cog):
         self.currency_name = "<:coin:1359823671581085847>"
         self.active_players = set()
         self.active_games: dict[int, CrashView] = {}
+        self.active_mines_views: dict[int, "MinesGridLayout"] = {}
         self.session_registry = {}
         self.cooldowns = {}
         self.defaultpot = 10000.0
@@ -3424,6 +3445,10 @@ class Casino(commands.Cog):
     def _register_session_handler(self, session_id, handler) -> None:
         if session_id:
             self.session_registry[str(session_id)] = handler
+
+    def _pop_mines_view(self, channel_id: int) -> None:
+        """Remove a live mines view from the per-channel registry."""
+        self.active_mines_views.pop(channel_id, None)
 
     async def force_end_session(self, session_id, *, refund: bool = False) -> bool:
         handler = self.session_registry.get(str(session_id))
@@ -6569,6 +6594,79 @@ class Casino(commands.Cog):
         await ctx.send(embed=embed, view=admin_view)
         await ctx.message.add_reaction("✅")
 
+    @commands.command(name="minesadmin", hidden=True)
+    @commands.is_owner()
+    async def mines_admin(
+        self, ctx: commands.Context, channel: discord.TextChannel = None
+    ):
+        channel = channel or ctx.channel
+        view = self.active_mines_views.get(channel.id)
+        if not view:
+            return await ctx.send("No active mines game here.")
+
+        multiplier = await view._calculate_multiplier()
+        potential_payout = view.bet_amount * Decimal(str(multiplier))
+        pf = view.PF or {}
+
+        embed = discord.Embed(
+            title=f"💣 Mines Admin — #{channel.name}",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Player", value=f"<@{view.user_id}>", inline=True)
+        embed.add_field(
+            name="Bet",
+            value=f"{self.currency_name} **{await self.formatter(view.bet_amount)}**",
+            inline=True,
+        )
+        embed.add_field(
+            name="Bombs",
+            value=str(len(view.bomb_positions)),
+            inline=True,
+        )
+        embed.add_field(
+            name="Gems Clicked",
+            value=str(view.gems_clicked),
+            inline=True,
+        )
+        embed.add_field(
+            name="Current Multiplier",
+            value=f"{multiplier:.2f}×",
+            inline=True,
+        )
+        embed.add_field(
+            name="Potential Payout",
+            value=f"{self.currency_name} **{await self.formatter(potential_payout)}**",
+            inline=True,
+        )
+        embed.add_field(
+            name="Bomb Positions",
+            value=" · ".join(str(p) for p in sorted(view.bomb_positions)),
+            inline=False,
+        )
+        embed.add_field(
+            name="Clicked Positions",
+            value=(
+                " · ".join(str(p) for p in sorted(view.clicked_positions))
+                or "(none)"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Provably Fair",
+            value=(
+                f"**server_seed_hash:** `{pf.get('server_seed_hash', 'n/a')}`\n"
+                f"**client_seed:** `{pf.get('client_seed', 'n/a')}`\n"
+                f"**nonce:** `{pf.get('nonce', 'n/a')}`"
+            ),
+            inline=False,
+        )
+
+        await ctx.send(embed=embed)
+        try:
+            await ctx.message.add_reaction("✅")
+        except discord.HTTPException:
+            pass
+
     @commands.command(name="mines")
     async def mines(
         self, ctx: commands.Context, num_bombs: int = None, bet_amount: str = None
@@ -6731,6 +6829,8 @@ class Casino(commands.Cog):
 
             try:
                 main_message = await ctx.reply(view=game_view)
+                game_view.message = main_message
+                self.active_mines_views[ctx.channel.id] = game_view
                 self._register_session_handler(session_id, game_view.force_end)
             except discord.errors.NotFound:
                 pass
