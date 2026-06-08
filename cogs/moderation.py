@@ -2889,7 +2889,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(name="ce", aliases=["enablecommand"], hidden=True)
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def enable_channel_command(
         self, ctx: Context, command_name: str, channel: discord.TextChannel = None
     ):
@@ -2920,7 +2920,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(name="cd", aliases=["disablecommand"], hidden=True)
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True)) # people be begging to disable shit cuz spam lol
     async def disable_channel_command(
         self, ctx: Context, command_name: str, channel: discord.TextChannel = None
     ):
