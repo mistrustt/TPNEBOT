@@ -54,7 +54,7 @@ class CrashView(discord.ui.LayoutView):
         self.game_task: asyncio.Task | None = None
         self.is_running = False
         self.start_time: datetime.datetime = None
-        self.countdown_end: int = None
+        self.start_event: asyncio.Event = asyncio.Event()
         self.game_phase: str = None
         self.current_multiplier = Decimal("1.0")
 
@@ -69,6 +69,11 @@ class CrashView(discord.ui.LayoutView):
         )
         self.join_btn.callback = self.join_callback
 
+        self.start_btn = discord.ui.Button(
+            label="Start Game", style=discord.ButtonStyle.blurple
+        )
+        self.start_btn.callback = self.start_btn_callback
+
         self.cashout_btn = discord.ui.Button(
             label="Cash Out", style=discord.ButtonStyle.red, disabled=True
         )
@@ -80,7 +85,14 @@ class CrashView(discord.ui.LayoutView):
         """Build the game container with current state."""
         if self.game_phase == "starting":
             title = "🚀 Crash – Lobby"
-            content = f"Click **Join** starting <t:{self.countdown_end}:R>"
+            player_count = len(self.players)
+            if player_count == 0:
+                content = "Click **Join** to enter. The host can press **Start Game** when ready."
+            else:
+                content = (
+                    f"**{player_count} player{'s' if player_count != 1 else ''} joined.** "
+                    "The host can press **Start Game** when ready."
+                )
             accent_color = 0x57F287  # Green
             show_buttons = True
             buttons_disabled = False
@@ -129,13 +141,25 @@ class CrashView(discord.ui.LayoutView):
         # Update button states
         self.join_btn.disabled = self.game_phase != "starting"
         self.cashout_btn.disabled = buttons_disabled if self.game_phase == "running" else True
+        # Start button is only visible/enabled in lobby for the host
+        if self.game_phase == "starting":
+            self.start_btn.label = "Start Game" if not self.players else f"Start Game ({len(self.players)})"
+        else:
+            self.start_btn.disabled = True
+            self.start_btn.label = "Start Game"
 
         if show_buttons:
+            if self.game_phase == "starting":
+                action_row = discord.ui.ActionRow(
+                    self.join_btn, self.start_btn, self.cashout_btn
+                )
+            else:
+                action_row = discord.ui.ActionRow(self.join_btn, self.cashout_btn)
             container = discord.ui.Container(
                 discord.ui.TextDisplay(f"## {title}"),
                 discord.ui.TextDisplay(content),
                 discord.ui.Separator(),
-                discord.ui.ActionRow(self.join_btn, self.cashout_btn),
+                action_row,
                 accent_color=accent_color
             )
         else:
@@ -150,8 +174,7 @@ class CrashView(discord.ui.LayoutView):
     async def join_callback(self, interaction: Interaction):
         """Show the bet modal when someone clicks Join."""
 
-        now = discord.utils.utcnow()
-        if self.game_phase != "starting" or now.timestamp() >= self.countdown_end:
+        if self.game_phase != "starting":
             return await interaction.response.send_message(
                 "Too late to join!", ephemeral=True
             )
@@ -231,6 +254,26 @@ class CrashView(discord.ui.LayoutView):
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
+
+    async def start_btn_callback(self, interaction: discord.Interaction):
+        """Host-only: advance from lobby to running phase."""
+        if interaction.user.id != self.host_id:
+            return await interaction.response.send_message(
+                "Only the host can start the game.", ephemeral=True
+            )
+        if self.game_phase != "starting":
+            return await interaction.response.send_message(
+                "The game has already started.", ephemeral=True
+            )
+        if not self.players:
+            return await interaction.response.send_message(
+                "Need at least one player before starting.", ephemeral=True
+            )
+
+        self.start_event.set()
+        await interaction.response.send_message(
+            "Starting now!", ephemeral=True
+        )
 
     async def cashout_callback(self, interaction: discord.Interaction):
         """Cash out for the clicking user."""
@@ -317,8 +360,7 @@ class CrashView(discord.ui.LayoutView):
             self.start_time = now
             self.game_phase = "starting"
             self.current_multiplier = Decimal("1.0")
-
-            self.countdown_end = int((now + datetime.timedelta(seconds=20)).timestamp())
+            self.start_event.clear()
 
             container = await self.build_container()
             self.clear_items()
@@ -328,9 +370,26 @@ class CrashView(discord.ui.LayoutView):
                 self.session_id, message_id=self.game_message.id
             )
 
-            while discord.utils.utcnow().timestamp() < self.countdown_end:
-                await asyncio.sleep(2)
-                await self.update_game_message()
+            # Wait for the host to press Start (with a 5-minute safety timeout
+            # so the game doesn't hang forever if the host walks away).
+            try:
+                await asyncio.wait_for(self.start_event.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                container = discord.ui.Container(
+                    discord.ui.TextDisplay("## 🚀 Crash – Cancelled"),
+                    discord.ui.TextDisplay("Host never started the game."),
+                    accent_color=0xED4245
+                )
+                self.clear_items()
+                self.add_item(container)
+                await self.game_message.edit(view=self)
+                await self.casino._end_game_session(
+                    self.session_id,
+                    outcome="cancelled",
+                    reason="host_timeout",
+                    final_state={"phase": "starting"},
+                )
+                return
 
             if not self.players:
                 container = discord.ui.Container(
