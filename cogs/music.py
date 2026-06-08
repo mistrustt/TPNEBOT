@@ -66,7 +66,7 @@ class Music(commands.Cog, name="Music"):
         }
         self.testing_ids = [
             1095747082599530627,  # ENVY (DUMB IDIOT)
-            1219090700407279656,  # TOXIC (GOAT ASF)
+            1099696209637167145,  # TOXIC (GOAT ASF)
         ]
         self.ongoing_heardle = []
         self.heardle_answers = {}
@@ -1804,13 +1804,17 @@ class Music(commands.Cog, name="Music"):
     def parse_dates(self, text: str) -> datetime | None:
         if not text:
             return None
-        
-        match = re.search(r'([A-Za-z]+ \d{1,2}, \d{4})', text)
+
+        match = re.search(r'([A-Za-z]+ \d{1,2}(?:st|nd|rd|th)?, \d{4})', text)
+
         if not match:
             return None
 
+        date_str = match.group(1)
+        date_str = re.sub(r'(\d{1,2})(st|nd|rd|th)', r'\1', date_str)
+
         try:
-            dt = datetime.strptime(match.group(1), '%B %d, %Y')
+            dt = datetime.strptime(date_str, '%B %d, %Y')
             dt = dt.replace(hour=14, minute=0, second=0, tzinfo=ZoneInfo("America/New_York"))
             return dt
         except ValueError:
@@ -2316,20 +2320,26 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command('surfaces', aliases=['leaks'])
     async def surfaces(self, ctx: commands.Context):
-        songs = Cache.get_songs()
-        if not songs:
-            return
-        
-        if not self.latest_surfaces:
-            await self.store_latest_surfaces()
+        try:
 
-            if not self.latest_surfaces:
+            songs = Cache.get_songs()
+            if not songs:
+                await ctx.reply('no songs? what did envy do')
                 return
+            
+            if not self.latest_surfaces:
+                await self.store_latest_surfaces()
 
-        view = LatestSurfacesView(self, self.latest_surfaces, ctx.author)
-        await view.build_page()
-        msg = await ctx.reply(view=view)
-        view.message = msg
+                if not self.latest_surfaces:
+                    await ctx.reply('no latest surfaces? what did envy do')
+                    return
+
+            view = LatestSurfacesView(self, self.latest_surfaces, ctx.author)
+            await view.build_page()
+            msg = await ctx.reply(view=view)
+            view.message = msg
+        except Exception as e:
+            await ctx.send(e)
         
     @commands.command("snippet", aliases=["snip"])
     async def snippet(self, ctx: commands.Context, *, query: str):
@@ -3293,7 +3303,7 @@ class Music(commands.Cog, name="Music"):
         self.snippet_debounce[ctx.author.id] = True
 
         async with self.session.get(
-            f"{JUICEWRLD_API}/juicewrld/files/browse/", params={"search": query}
+            f"{JUICEWRLD_API}s", params={"search": query}
         ) as response:
 
             async def handle_request_failed(ctx, code=None):
