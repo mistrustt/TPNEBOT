@@ -3895,28 +3895,127 @@ class Casino(commands.Cog):
         hidden=True,
     )
     async def casino_verify(
-        self, ctx: commands.Context, game: str, nonce: int, *extra_args: str
+        self, ctx: commands.Context, game: str, *args: str
     ):
         """
         Usage examples:
+          !casino verify gamble 42
           !casino verify gamble @user 42
           !casino verify supergamble @user 7
           !casino verify dice @user 5
+          !casino verify ladder 3 2
           !casino verify ladder @user 3 2
           !casino verify slots @user 10
           !casino verify blackjack @user 15
           !casino verify poker @user 12
           !casino verify roulette @user 9
-        """
+          !casino verify mines @user 12
 
+        The user mention is optional and defaults to the command author.
+        For ladder, supply the step number as the last argument.
+        """
+        # ── parse the trailing arguments: optional user + nonce + game extras
+        # Two valid shapes (plus ladder's extra step):
+        #   <game> <nonce> [step]
+        #   <game> <user> <nonce> [step]
+        # Disambiguation: a bare integer (e.g. "42") is always a nonce. To
+        # verify another user's game by ID, the caller must use the <@id>
+        # mention form (or a username/display name).
         game_key = (game or "").lower()
-        user_id = ctx.author.id
+        is_ladder = game_key == "ladder"
+        member: discord.Member | discord.User = ctx.author
+        nonce: int | None = None
+        extra_args: list[str] = []
+
+        if not args:
+            return await ctx.reply(
+                f"Usage: `!casino verify {game} [@user] <nonce>`"
+                + (" `<step>`" if is_ladder else ""),
+                mention_author=False,
+            )
+
+        def _looks_like_user_mention(token: str) -> bool:
+            """A token is treated as a user mention only if it has explicit
+            mention syntax (`<@id>` / `<@!id>`) or a non-numeric name. A
+            bare integer is always a nonce.
+            """
+            if not token:
+                return False
+            stripped = token.strip().strip("<>@!").strip()
+            # `<@123>` or `<@!123>` => user. bare "123" => nonce.
+            return bool(token.strip().startswith("<@")) or not stripped.isdigit()
+
+        async def _resolve_user(token: str):
+            if not token:
+                return None
+            cleaned = token.strip().strip("<>@!").strip()
+            if not cleaned:
+                return None
+            if cleaned.isdigit():
+                uid = int(cleaned)
+                resolved = None
+                if ctx.guild:
+                    resolved = ctx.guild.get_member(uid)
+                if resolved is None:
+                    resolved = self.bot.get_user(uid)
+                if resolved is not None:
+                    return resolved
+                try:
+                    return await self.bot.fetch_user(uid)
+                except (discord.NotFound, discord.HTTPException):
+                    return None
+            if ctx.guild:
+                for mm in ctx.guild.members:
+                    if (
+                        str(mm) == cleaned
+                        or mm.display_name == cleaned
+                        or mm.name == cleaned
+                    ):
+                        return mm
+            return None
+
+        first = args[0]
+        if _looks_like_user_mention(first):
+            resolved = await _resolve_user(first)
+            if resolved is not None:
+                member = resolved
+                remainder = list(args[1:])
+            else:
+                # Looked like a user mention but didn't resolve. Tell the
+                # caller instead of silently dropping it on the floor.
+                return await ctx.reply(
+                    f"Could not resolve user `{first}`. "
+                    "Use a `@mention`, a username, or `<@id>`.",
+                    mention_author=False,
+                )
+        else:
+            remainder = list(args)
+
+        if not remainder:
+            return await ctx.reply(
+                f"Provide a nonce to verify, e.g. `!casino verify {game} 42`.",
+                mention_author=False,
+            )
+
+        try:
+            nonce = int(remainder[0])
+        except (TypeError, ValueError):
+            return await ctx.reply(
+                f"Nonce must be an integer, got `{remainder[0]}`.",
+                mention_author=False,
+            )
+        extra_args = remainder[1:]
+
+        user_id = member.id
 
         record = await self.bot.database.fetch_game_for_user(user_id, game_key, nonce)
         if not record:
             embed = discord.Embed(
                 title="🔎 Verification — Error",
-                description=f"No record found for `{game_key}` nonce `{nonce}` for {ctx.author.name}.",
+                description=(
+                    f"No record found for `{game_key}` nonce `{nonce}` for "
+                    f"{member.display_name}."
+                ),
                 color=discord.Color.red(),
             )
             return await ctx.reply(embed=embed, delete_after=8, mention_author=False)
@@ -3928,14 +4027,17 @@ class Casino(commands.Cog):
         pf = self.fair
         title = f"🔒 Provably Fair — {game_key.title()}"
         desc = (
-            f"User: {ctx.author.name}\n"
+            f"User: {member.display_name}\n"
             f"Nonce: `{nonce}` • Client Seed: `{client_seed}`\n"
             f"Server Hash: `{server_hash_short}`"
         )
         embed = discord.Embed(
             title=title, description=desc, color=discord.Color.blurple()
         )
-        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+        try:
+            embed.set_thumbnail(url=member.display_avatar.url)
+        except (AttributeError, discord.HTTPException):
+            pass
 
         try:
             if game_key == "gamble":
@@ -4096,6 +4198,53 @@ class Casino(commands.Cog):
                 embed.add_field(
                     name="🎡 Roulette",
                     value=f"{emoji} {color.title()} • **{spin_result}**",
+                    inline=False,
+                )
+
+            elif game_key == "mines":
+                # Mines needs the bomb count, which is not stored in
+                # GameHistory. Pull it from the GameSession that was created
+                # alongside the game; fall back to 3 (legacy default) only if
+                # the session row is gone.
+                bombs = await self.bot.database.fetch_mines_bomb_count(
+                    user_id, nonce
+                )
+                if bombs is None:
+                    bombs = 3
+                    embed.add_field(
+                        name="⚠️ Note",
+                        value=(
+                            "Could not locate the session for this game, so "
+                            "verification used the default bomb count of 3. "
+                            "If the result below doesn't match, the session "
+                            "row may have been pruned."
+                        ),
+                        inline=False,
+                    )
+                mines_result = pf.verify_mines(
+                    server_seed, client_seed, nonce,
+                    board_size=25, bombs=bombs,
+                )
+                bomb_cells = sorted(mines_result.get("bomb_cells", []))
+
+                bomb_emoji = "<:bombs:1278849752301309994>"
+                gem_emoji = "<:gems:1278849818025918497>"
+                bomb_set = set(bomb_cells)
+                grid = ""
+                for row in range(5):
+                    grid += "".join(
+                        bomb_emoji if (row * 5 + col) in bomb_set else gem_emoji
+                        for col in range(5)
+                    ) + "\n"
+
+                embed.add_field(
+                    name="💣 Mines — Revealed Board",
+                    value=(
+                        f"Bombs: **{bombs}** • Safe cells: **{25 - bombs}**\n"
+                        f"Positions: `{bomb_cells}`\n"
+                        f"Next nonce: `{mines_result.get('next_nonce')}`\n"
+                        f"{grid}"
+                    ),
                     inline=False,
                 )
 

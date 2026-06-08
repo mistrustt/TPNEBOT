@@ -6582,6 +6582,46 @@ class DatabaseManager:
             )
             return result.scalar_one_or_none()
 
+    async def fetch_mines_bomb_count(
+        self, user_id: int, nonce: int, *, lookback: int = 200
+    ) -> int | None:
+        """Return the ``bombs`` count used for a given mines game.
+
+        Mines has a per-game parameter (number of bombs) that is not stored in
+        ``GameHistory``. The session row that *does* record it (``state``
+        JSON column, ``state->>'bombs'``) is created alongside the game, so
+        we walk back through the user's most recent mines sessions and match
+        on the ``nonce`` recorded in the ``rng`` JSON column.
+
+        Returns ``None`` when no matching session is found (caller should
+        fall back to a sensible default and surface the gap to the user).
+        """
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(GameSession)
+                .where(
+                    GameSession.owner_id == user_id,
+                    GameSession.game_name == "mines",
+                )
+                .order_by(GameSession.created_at.desc())
+                .limit(lookback)
+            )
+            sessions = result.scalars().all()
+
+        for gs in sessions:
+            rng = gs.rng or {}
+            if rng.get("nonce") != nonce:
+                continue
+            state = gs.state or {}
+            bombs = state.get("bombs")
+            if bombs is None:
+                continue
+            try:
+                return int(bombs)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     async def get_wager_stats(
         self, user_id: int, game_name: str
     ) -> tuple[Decimal, Decimal, Decimal]:
