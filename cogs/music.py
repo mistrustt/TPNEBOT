@@ -3787,13 +3787,13 @@ class CoverArtistView(discord.ui.LayoutView):
                     label="◀ Previous",
                     style=discord.ButtonStyle.secondary,
                     custom_id="cover_prev",
-                    disabled=(self.expired or self.page == 0),
+                    disabled=self.expired,
                 )
                 next_btn = discord.ui.Button(
                     label="Next ▶",
                     style=discord.ButtonStyle.secondary,
                     custom_id="cover_next",
-                    disabled=(self.expired or self.page >= total - 1),
+                    disabled=self.expired,
                 )
                 nav = discord.ui.ActionRow()
                 nav.add_item(prev_btn)
@@ -3828,6 +3828,16 @@ class CoverArtistView(discord.ui.LayoutView):
 
         self._media_names = media_names
         self._build()
+        
+        neighbours = []
+        if total > 1:
+            for pidx in {(self.page - 1) % total, (self.page + 1) % total}:
+                s = pidx * self.PER_PAGE
+                neighbours.extend(url for url, _name in covers[s:s + self.PER_PAGE])
+        neighbours = [u for u in neighbours if u not in self.cog.thumb_cache]
+        if neighbours:
+            self.cog._spawn(self.cog.prefetch(neighbours))
+
         return files
 
     def _clone(self, author_id: int) -> "CoverArtistView":
@@ -3854,10 +3864,10 @@ class CoverArtistView(discord.ui.LayoutView):
                 target.page = 0
                 refresh_media = True
         elif custom_id == "cover_prev":
-            target.page -= 1
+            target.page = (target.page - 1) % target._total_pages()  # wraps to last page
             refresh_media = True
         elif custom_id == "cover_next":
-            target.page += 1
+            target.page = (target.page + 1) % target._total_pages()  # wraps to first page
             refresh_media = True
         else:
             return False
@@ -3893,6 +3903,13 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
         self.bot = bot
         self.session = None
         self.thumb_cache = {}
+        self._inflight = {}
+        self._bg_tasks = set()
+
+    def _spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def cog_unload(self):
         if self.session is not None and not self.session.closed:
@@ -3906,6 +3923,7 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
     @staticmethod
     def _resize(raw: bytes, size: int) -> bytes:
         with Image.open(BytesIO(raw)) as im:
+            im.draft("RGB", (size, size))
             im = im.convert("RGB")
             im.thumbnail((size, size))
             out = BytesIO()
@@ -3913,10 +3931,22 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
             return out.getvalue()
 
     async def fetch_thumb(self, url: str):
-        """GET a cover, downscale it, and cache the bytes. Returns None on failure."""
+        """GET a cover, downscale it, and cache the bytes, returns None on failure
+
+        if a page render and a background prefetch happen to want the same cover
+        at the same time, they wait on the one download instead of grabbing it twice
+        """
         cached = self.thumb_cache.get(url)
         if cached is not None:
             return cached
+        if url not in self._inflight:
+            self._inflight[url] = asyncio.ensure_future(self._download_resize(url))
+        try:
+            return await self._inflight[url]
+        except Exception:
+            return None
+
+    async def _download_resize(self, url: str):
         try:
             session = await self._get_session()
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
@@ -3924,10 +3954,21 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
                     return None
                 raw = await resp.read()
             data = await asyncio.to_thread(self._resize, raw, self.THUMB_SIZE)
+            self.thumb_cache[url] = data
+            return data
         except Exception:
             return None
-        self.thumb_cache[url] = data
-        return data
+        finally:
+            self._inflight.pop(url, None)
+
+    async def prefetch(self, urls):
+        sem = asyncio.Semaphore(6)
+
+        async def warm(u):
+            async with sem:
+                await self.fetch_thumb(u)
+
+        await asyncio.gather(*[warm(u) for u in urls], return_exceptions=True)
 
     @commands.command(name="cover", help="Search for available covers of a song")
     async def cover(self, ctx: commands.Context, *, song_name: str = None):
@@ -3985,8 +4026,6 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
                 continue
             cover_files.append((parts[1], path, item.get("name", parts[-1])))
 
-        # Prefer covers whose filename starts with the query to cut substring
-        # noise; fall back to all matches so a strict miss never reports "none".
         query = song_name.lower()
         relevant = [
             cf for cf in cover_files
