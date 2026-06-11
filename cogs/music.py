@@ -3680,8 +3680,9 @@ class CoverArtistView(discord.ui.LayoutView):
     PREV_ARTISTS = "__artists_prev__"
     NEXT_ARTISTS = "__artists_next__"
 
-    def __init__(self, song_name: str, covers_by_artist: dict, author_id: int):
+    def __init__(self, cog: "CoverSearch", song_name: str, covers_by_artist: dict, author_id: int):
         super().__init__(timeout=180)
+        self.cog = cog
         self.song_name = song_name
         self.covers_by_artist = covers_by_artist
         self.artists = sorted(covers_by_artist, key=lambda a: (-len(covers_by_artist[a]), a.lower()))
@@ -3692,7 +3693,8 @@ class CoverArtistView(discord.ui.LayoutView):
         self.artist_page = 0
         self.expired = False
         self.message = None
-        self.build()
+        self._media_names = []  # attachment filenames for the current page's gallery
+        self._build()
 
     def _current_covers(self):
         if self.selected == self.ALL:
@@ -3702,7 +3704,7 @@ class CoverArtistView(discord.ui.LayoutView):
     def _total_pages(self):
         return max((len(self._current_covers()) + self.PER_PAGE - 1) // self.PER_PAGE, 1)
 
-    def build(self):
+    def _build(self):
         self.clear_items()
 
         container = discord.ui.Container(accent_color=0xffffff)
@@ -3766,15 +3768,15 @@ class CoverArtistView(discord.ui.LayoutView):
             covers = self._current_covers()
             total = self._total_pages()
             self.page = max(0, min(self.page, total - 1))
-            start = self.page * self.PER_PAGE
-            page_covers = covers[start:start + self.PER_PAGE]
 
             container.add_item(discord.ui.Separator())
-            if page_covers:
+            if self._media_names:
                 container.add_item(discord.ui.MediaGallery(*[
-                    discord.MediaGalleryItem(media=discord.UnfurledMediaItem(url=url))
-                    for url, _name in page_covers
+                    discord.MediaGalleryItem(media=discord.UnfurledMediaItem(url=f"attachment://{fname}"))
+                    for fname in self._media_names
                 ]))
+            else:
+                container.add_item(discord.ui.TextDisplay("⚠️ Couldn't load these covers."))
             label = "All artists" if self.selected == self.ALL else self.selected
             container.add_item(discord.ui.TextDisplay(
                 f"-# {label} • {len(covers)} cover(s) • Page {self.page + 1}/{total}"
@@ -3800,12 +3802,41 @@ class CoverArtistView(discord.ui.LayoutView):
 
         self.add_item(container)
 
+    async def render(self) -> list[discord.File]:
+        """fetch + downscale the current page's covers and return them as attachments using containers (s/o flow)"""
+        if self.selected is None:
+            self._media_names = []
+            self._build()
+            return []
+
+        covers = self._current_covers()
+        total = self._total_pages()
+        self.page = max(0, min(self.page, total - 1))
+        start = self.page * self.PER_PAGE
+        page_covers = covers[start:start + self.PER_PAGE]
+
+        results = await asyncio.gather(*[self.cog.fetch_thumb(url) for url, _name in page_covers])
+
+        files = []
+        media_names = []
+        for idx, ((url, _name), data) in enumerate(zip(page_covers, results)):
+            if data is None:
+                continue
+            fname = f"cover_{idx}.jpg"
+            files.append(discord.File(BytesIO(data), filename=fname))
+            media_names.append(fname)
+
+        self._media_names = media_names
+        self._build()
+        return files
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("This isn't your embed.", ephemeral=True)
             return False
 
         custom_id = interaction.data.get("custom_id")
+        refresh_media = False
         if custom_id == "cover_artist_select":
             value = interaction.data["values"][0]
             if value == self.PREV_ARTISTS:
@@ -3815,20 +3846,28 @@ class CoverArtistView(discord.ui.LayoutView):
             else:
                 self.selected = value
                 self.page = 0
+                refresh_media = True
         elif custom_id == "cover_prev":
             self.page -= 1
+            refresh_media = True
         elif custom_id == "cover_next":
             self.page += 1
+            refresh_media = True
         else:
             return False
 
-        self.build()
-        await interaction.response.edit_message(view=self)
+        await interaction.response.defer()
+        if refresh_media:
+            files = await self.render()
+            await interaction.edit_original_response(view=self, attachments=files)
+        else:
+            self._build()
+            await interaction.edit_original_response(view=self)
         return False
 
     async def on_timeout(self):
         self.expired = True
-        self.build()
+        self._build()
         try:
             if self.message is not None:
                 await self.message.edit(view=self)
@@ -3836,8 +3875,47 @@ class CoverArtistView(discord.ui.LayoutView):
             pass
 
 class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
+    THUMB_SIZE = 1024
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.session = None
+        self.thumb_cache = {}
+
+    async def cog_unload(self):
+        if self.session is not None and not self.session.closed:
+            await self.session.close()
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self.session
+
+    @staticmethod
+    def _resize(raw: bytes, size: int) -> bytes:
+        with Image.open(BytesIO(raw)) as im:
+            im = im.convert("RGB")
+            im.thumbnail((size, size))
+            out = BytesIO()
+            im.save(out, format="JPEG", quality=85)
+            return out.getvalue()
+
+    async def fetch_thumb(self, url: str):
+        """GET a cover, downscale it, and cache the bytes. Returns None on failure."""
+        cached = self.thumb_cache.get(url)
+        if cached is not None:
+            return cached
+        try:
+            session = await self._get_session()
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    return None
+                raw = await resp.read()
+            data = await asyncio.to_thread(self._resize, raw, self.THUMB_SIZE)
+        except Exception:
+            return None
+        self.thumb_cache[url] = data
+        return data
 
     @commands.command(name="cover", help="Search for available covers of a song")
     async def cover(self, ctx: commands.Context, *, song_name: str = None):
@@ -3864,13 +3942,13 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
         ))
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{JUICEWRLD_API}/juicewrld/files/browse/",
-                    params={"search": song_name},
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as response:
-                    data = await response.json() if response.status == 200 else None
+            session = await self._get_session()
+            async with session.get(
+                f"{JUICEWRLD_API}/juicewrld/files/browse/",
+                params={"search": song_name},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                data = await response.json() if response.status == 200 else None
         except Exception:
             data = None
 
@@ -3895,6 +3973,8 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
                 continue
             cover_files.append((parts[1], path, item.get("name", parts[-1])))
 
+        # Prefer covers whose filename starts with the query to cut substring
+        # noise; fall back to all matches so a strict miss never reports "none".
         query = song_name.lower()
         relevant = [
             cf for cf in cover_files
@@ -3921,7 +4001,7 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
 
         await progress_msg.delete()
 
-        view = CoverArtistView(song_name, covers_by_artist, ctx.author.id)
+        view = CoverArtistView(self, song_name, covers_by_artist, ctx.author.id)
         view.message = await ctx.send(view=view)
 
 async def setup(bot: commands.Bot) -> None:
