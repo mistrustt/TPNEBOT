@@ -3830,39 +3830,51 @@ class CoverArtistView(discord.ui.LayoutView):
         self._build()
         return files
 
+    def _clone(self, author_id: int) -> "CoverArtistView":
+        clone = CoverArtistView(self.cog, self.song_name, self.covers_by_artist, author_id)
+        clone.selected = self.selected
+        clone.page = self.page
+        clone.artist_page = self.artist_page
+        return clone
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message("This isn't your embed.", ephemeral=True)
-            return False
+        is_owner = interaction.user.id == self.author_id
+        target = self if is_owner else self._clone(interaction.user.id)
 
         custom_id = interaction.data.get("custom_id")
         refresh_media = False
         if custom_id == "cover_artist_select":
             value = interaction.data["values"][0]
             if value == self.PREV_ARTISTS:
-                self.artist_page -= 1
+                target.artist_page -= 1
             elif value == self.NEXT_ARTISTS:
-                self.artist_page += 1
+                target.artist_page += 1
             else:
-                self.selected = value
-                self.page = 0
+                target.selected = value
+                target.page = 0
                 refresh_media = True
         elif custom_id == "cover_prev":
-            self.page -= 1
+            target.page -= 1
             refresh_media = True
         elif custom_id == "cover_next":
-            self.page += 1
+            target.page += 1
             refresh_media = True
         else:
             return False
 
+        if not is_owner:
+            await interaction.response.defer(thinking=True, ephemeral=True)
+            files = await target.render()
+            target.message = await interaction.followup.send(view=target, files=files, ephemeral=True)
+            return False
+
         await interaction.response.defer()
         if refresh_media:
-            files = await self.render()
-            await interaction.edit_original_response(view=self, attachments=files)
+            files = await target.render()
+            await interaction.edit_original_response(view=target, attachments=files)
         else:
-            self._build()
-            await interaction.edit_original_response(view=self)
+            target._build()
+            await interaction.edit_original_response(view=target)
         return False
 
     async def on_timeout(self):
