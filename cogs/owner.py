@@ -2323,6 +2323,14 @@ class Owner(commands.Cog, name="Owner"):
                 self.bot = bot
                 self.current = 0
 
+            async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                if not await self.bot.is_owner(interaction.user):
+                    await interaction.response.send_message(
+                        "🚫 Only bot admins can interact with these buttons.", ephemeral=True
+                    )
+                    return False
+                return True
+
             @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
             async def previous(
                 self, interaction: discord.Interaction, _: discord.ui.Button
