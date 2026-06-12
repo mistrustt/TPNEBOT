@@ -21,6 +21,8 @@ from moviepy import AudioFileClip, ImageClip
 
 logger = logging.getLogger("discord_bot")
 
+# 6 7
+
 JUICEWRLD_API = "https://juicewrldapi.com"
 
 DOWNLOAD_CACHE_FOLDER_NAME = "__download_cache"
