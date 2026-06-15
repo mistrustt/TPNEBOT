@@ -61,6 +61,8 @@ def format_duration(seconds: int) -> str:
 class Moderation(commands.Cog, name="Moderation"):
     def __init__(self, bot) -> None:
         self.bot = bot
+        if not hasattr(self.bot, "forced_nicks"):
+            self.bot.forced_nicks = {}  # (guild_id, user_id) -> forced nickname
         self.utils = MiscUtils(self)
         self.lockdown_channels = []
         self.new_members = []
@@ -131,6 +133,13 @@ class Moderation(commands.Cog, name="Moderation"):
             role = member.guild.get_role(jailed.jail_role_id)
             if role:
                 await member.add_roles(role, reason="Re-adding jail role after rejoin")
+
+        forced_nick = getattr(self.bot, "forced_nicks", {}).get((member.guild.id, member.id))
+        if forced_nick:
+            try:
+                await member.edit(nick=forced_nick, reason="Re-applying forced nickname after rejoin")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
     async def _check_command_exists(self, command_name: str):
         """
@@ -1573,6 +1582,121 @@ class Moderation(commands.Cog, name="Moderation"):
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
+
+    @commands.command(
+        name="forcenick",
+        aliases=["fn"],
+        description="Lock a user's nickname. Run again on a forced user to unforce.",
+    )
+    @commands.guild_only()
+    @commands.has_permissions(manage_nicknames=True)
+    @commands.bot_has_permissions(manage_nicknames=True)
+    async def forcenick(
+        self, ctx: Context, identifier: str, *, nickname: str = None
+    ) -> None:
+        """Toggle a forced nickname on a user."""
+        member = None
+
+        if re.match(r"^\d+$", identifier):
+            try:
+                member = ctx.guild.get_member(int(identifier))
+                if not member:
+                    member = await self.bot.fetch_user(int(identifier))
+            except discord.NotFound:
+                pass
+
+        elif re.match(r"^<@!?(\d+)>$", identifier):
+            mention_match = re.match(r"^<@!?(\d+)>$", identifier)
+            mention_id = mention_match.group(1)
+            member = ctx.guild.get_member(int(mention_id))
+            if not member:
+                member = await self.bot.fetch_user(int(mention_id))
+
+        else:
+            identifier = identifier.lower()
+            member = discord.utils.find(
+                lambda m: identifier in m.name.lower(), ctx.guild.members
+            )
+
+        if not member:
+            embed = discord.Embed(
+                description=f"No user found with the identifier: {identifier}. Please try again.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if member.top_role >= ctx.author.top_role:
+            embed = discord.Embed(
+                description="🚫 You cannot change the nickname of someone with a role higher than or equal to yours!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+        if member.top_role >= ctx.guild.me.top_role:
+            embed = discord.Embed(
+                description="🚫 I cannot change the nickname of someone with a role higher than or equal to mine!",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        key = (ctx.guild.id, member.id)
+        forced = self.bot.forced_nicks
+
+        if key in forced:
+            del forced[key]
+            embed = discord.Embed(
+                description=f"🔓 Removed the forced nickname on **{member}**. They can change it now.",
+                color=discord.Color.blurple(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if not nickname:
+            embed = discord.Embed(
+                description="🚫 Provide a nickname to lock. (Run it again on a locked user to unlock.)",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        forced[key] = nickname
+        try:
+            await member.edit(nick=nickname, reason=f"Force nicknamed by {ctx.author}")
+            embed = discord.Embed(
+                description=f"🔒 **{member}** is now force nicknamed to **{nickname}**.",
+                color=discord.Color.blurple(),
+            )
+            await ctx.send(embed=embed)
+        except:
+            del forced[key]
+            embed = discord.Embed(
+                description="An error occurred while trying to change the nickname of the user. Make sure my role is above their role.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+
+    @commands.Cog.listener("on_member_update")
+    async def enforce_forced_nick(
+        self, before: discord.Member, after: discord.Member
+    ) -> None:
+        """Revert nickname changes for users with a forced nickname."""
+        forced = getattr(self.bot, "forced_nicks", None)
+        if not forced:
+            return
+
+        key = (after.guild.id, after.id)
+        nickname = forced.get(key)
+        if nickname is None or after.nick == nickname:
+            return
+
+        try:
+            await after.edit(nick=nickname, reason="Force nicknamed")
+        except discord.Forbidden:
+            del forced[key]
+        except discord.HTTPException:
+            pass
 
     @commands.command(
         name="warn",
