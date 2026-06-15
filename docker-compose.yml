@@ -41,7 +41,7 @@ services:
       DB_USER: ${POSTGRES_USER}
       DB_NAME: ${POSTGRES_DB}
       DB_PW: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-      ADMIN_API_PORT: ${ADMIN_API_PORT:-8080}
+      ADMIN_API_PORT: 8080
       # Allow the in-container admin API to bind 0.0.0.0 (still behind your network).
       # utils/admin_api.py also accepts the older ADMIN_API_ALLOW_EXTERNAL_BIND alias.
       ADMIN_API_BIND_EXTERNAL: "true"
@@ -49,8 +49,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      # Expose the admin API (aiohttp) on the host. Drop or change if you don't need it.
-      - "${ADMIN_API_PORT:-8080}:${ADMIN_API_PORT:-8080}"
+      # Expose the admin API (aiohttp) on the host. Override with ADMIN_API_PORT in .env.
+      - "${ADMIN_API_PORT:-8080}:8080"
     volumes:
       # Persist discord.log + any runtime artifacts outside the container.
       # Mounted on /app (not /app/data) so the RotatingFileHandler in bot.py,
