@@ -1366,8 +1366,13 @@ class AdminAPIServer:
             return
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
-        # bind to localhost by default unless explicitly allowed to bind externally
-        allow_external = os.getenv("ADMIN_API_BIND_EXTERNAL", "false").lower() == "true"
+        # bind to localhost by default unless explicitly allowed to bind externally.
+        # Accept both ADMIN_API_BIND_EXTERNAL (the canonical name) and the older
+        # ADMIN_API_ALLOW_EXTERNAL_BIND alias used in .env.example/README/compose.
+        allow_external = os.getenv(
+            "ADMIN_API_BIND_EXTERNAL",
+            os.getenv("ADMIN_API_ALLOW_EXTERNAL_BIND", "false"),
+        ).lower() == "true"
         bind_host = self.host if allow_external else "127.0.0.1"
         self.site = web.TCPSite(self.runner, bind_host, self.port)
         await self.site.start()

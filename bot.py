@@ -70,9 +70,16 @@ logger = logging.getLogger("discord_bot")
 class DiscordBot(commands.Bot):
     def __init__(self) -> None:
         self.logger = logger
-        self.db_pw = urllib.parse.quote_plus(os.getenv("DB_PW"))
+        # Database connection. Defaults preserve the original `localhost` / `postgres` /
+        # `postgres` behavior for bare-metal runs; Docker compose sets these to reach the
+        # `db` service. Password is URL-quoted so special characters don't break the DSN.
+        self.db_user = os.getenv("DB_USER", "postgres")
+        self.db_name = os.getenv("DB_NAME", "postgres")
+        self.db_host = os.getenv("DB_HOST", "localhost")
+        self.db_port = os.getenv("DB_PORT", "5432")
+        self.db_pw = urllib.parse.quote_plus(os.getenv("DB_PW", ""))
         self.database = DatabaseManager(
-            f"postgresql+asyncpg://postgres:{self.db_pw}@localhost/postgres"
+            f"postgresql+asyncpg://{self.db_user}:{self.db_pw}@{self.db_host}:{self.db_port}/{self.db_name}"
         )
         self.config = self.database.load_config()
         self.debug_mode_active = False
@@ -236,7 +243,7 @@ class DiscordBot(commands.Bot):
             # Start Admin API server if configured via environment variables
             try:
                 host = os.getenv("ADMIN_API_HOST", "127.0.0.1")
-                port = int(os.getenv("ADMIN_API_PORT", "9203"))
+                port = int(os.getenv("ADMIN_API_PORT", "8080"))
                 secret = os.getenv("ADMIN_API_SECRET")
                 if not secret:
                     self.logger.warning("ADMIN_API_SECRET not set; Admin API will not be started.")

@@ -90,6 +90,22 @@ Runtime configuration stored in database tables (BotConfig, ServerSettings, Comm
 ## Deployment
 Production deployment guidance (containers, systemd, Docker) is documented in [DEPLOYMENT.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/DEPLOYMENT.md).
 
+### Docker (quick start)
+
+```bash
+cp .env.example .env       # fill in TOKEN, POSTGRES_PASSWORD, ADMIN_API_SECRET
+docker compose build
+docker compose up -d
+docker compose logs -f app
+```
+
+`docker-compose.yml` brings up the bot and a PostgreSQL 16 service with a named volume
+(`tpnebot_pgdata`). The `app` service waits for the database to become healthy before
+starting. The in-process admin API (aiohttp) is exposed on `127.0.0.1:8080` by default.
+Set `ADMIN_API_ALLOW_EXTERNAL_BIND=1` in `.env` to make the admin API bind to `0.0.0.0`
+inside the container. The bot itself never opens a host port — it connects outbound to
+Discord.
+
 ## Security
 Follow least privilege for Postgres credentials and secure storage of seeds and private keys. See [SECURITY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/SECURITY.md).
 

@@ -1,0 +1,52 @@
+# Build / VCS
+.git
+.gitignore
+.gitattributes
+.github
+
+# Local environments
+.venv
+venv
+env
+.env
+.env.*
+!.env.example
+
+# Python artifacts
+__pycache__
+**/__pycache__
+*.py[cod]
+*$py.class
+*.so
+*.egg-info
+.eggs
+build
+dist
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# IDE / editor
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# Project-local state that should not be baked into the image
+.claude
+discord.log
+discord.log.*
+data/
+*.sqlite3
+*.db
+
+# Docker self-references
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+README.md
+CLAUDE.md
+docs/
