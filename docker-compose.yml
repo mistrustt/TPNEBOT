@@ -1,6 +1,6 @@
 # Docker Compose for TPNEBOT
 # - `app` runs the Discord bot (and the in-process admin API on :8080)
-# - `db`  runs PostgreSQL 16 with a named volume for persistence
+# - `db`  runs PostgreSQL 17 with a named volume for persistence
 #
 # Usage:
 #   1. Copy .env.example to .env and fill in TOKEN, DB_PW, etc.
@@ -10,7 +10,7 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
