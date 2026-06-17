@@ -17,8 +17,29 @@ from utils.cooldown import CooldownUtils
 from utils.admin_api import AdminAPIServer
 from database.manager import DatabaseManager
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from utils.cache import Cache
 from utils.stats import hash_user_id
+
+_DB_ERROR_TYPES: tuple[type[Exception], ...] = (SQLAlchemyError,)
+try:
+    import asyncpg.exceptions as _apg_exc
+
+    _DB_ERROR_TYPES += (_apg_exc.PostgresError,)
+except Exception:
+    pass
+
+
+def _root_cause_is_db_error(error) -> bool:
+    """Return True if *error* or its wrapped original is a DB connection failure."""
+    if isinstance(error, _DB_ERROR_TYPES):
+        return True
+    original = getattr(error, "original", None)
+    if isinstance(original, _DB_ERROR_TYPES):
+        return True
+    if original is not None and DatabaseManager._is_retryable_db_error(original):
+        return True
+    return False
 
 class LoggingFormatter(logging.Formatter):
     COLORS = {
@@ -376,6 +397,20 @@ class DiscordBot(commands.Bot):
             ctx._stats_started_at = time.perf_counter()
             await super().invoke(ctx)
         except commands.CommandInvokeError as exc:
+            if _root_cause_is_db_error(exc):
+                self.logger.warning(
+                    f"Database error while invoking {ctx.command.qualified_name}: "
+                    f"{type(exc.original).__name__}: {exc.original}"
+                )
+                embed = discord.Embed(
+                    title="⚠️ Database Temporarily Unavailable",
+                    description=(
+                        "The database connection dropped. Your command was not processed. "
+                        "Please try again in a moment."
+                    ),
+                    color=discord.Color.orange(),
+                )
+                return await ctx.reply(embed=embed, delete_after=10)
             if self._is_transient_discord_api_error(exc.original):
                 self.logger.warning(
                     f"Discord API error while invoking {ctx.command.qualified_name}: "
@@ -383,6 +418,19 @@ class DiscordBot(commands.Bot):
                 )
                 return
             raise
+        except SQLAlchemyError as exc:
+            self.logger.warning(
+                f"Database error during command pre-checks: {type(exc).__name__}: {exc}"
+            )
+            embed = discord.Embed(
+                title="⚠️ Database Temporarily Unavailable",
+                description=(
+                    "The database connection dropped. Your command was not processed. "
+                    "Please try again in a moment."
+                ),
+                color=discord.Color.orange(),
+            )
+            return await ctx.reply(embed=embed, delete_after=10)
         except (discord.errors.DiscordServerError, discord.HTTPException):
             return
 
@@ -538,6 +586,21 @@ class DiscordBot(commands.Bot):
         command = getattr(interaction, "command", None)
         command_name = getattr(command, "qualified_name", "unknown")
 
+        if _root_cause_is_db_error(error):
+            original = getattr(error, "original", error)
+            self.logger.warning(
+                f"Database error in slash /{command_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            message = (
+                "⚠️ Database Temporarily Unavailable\n\n"
+                "The database connection dropped. Your command was not processed. Please try again in a moment."
+            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(message, ephemeral=True)
+            else:
+                await interaction.followup.send(message, ephemeral=True)
+            return
         if self._is_transient_discord_api_error(error):
             self.logger.warning(
                 f"Discord API error in slash /{command_name}: "
@@ -674,6 +737,21 @@ class DiscordBot(commands.Bot):
             pass
         elif isinstance(error, commands.CheckAnyFailure):
             pass
+        elif _root_cause_is_db_error(error):
+            original = getattr(error, "original", error)
+            self.logger.warning(
+                f"Database error in command {ctx.command.qualified_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            embed = discord.Embed(
+                title="⚠️ Database Temporarily Unavailable",
+                description=(
+                    "The database connection dropped. Your command was not processed. "
+                    "Please try again in a moment."
+                ),
+                color=discord.Color.orange(),
+            )
+            return await ctx.reply(embed=embed, delete_after=10)
         elif self._is_transient_discord_api_error(error):
             self.logger.warning(
                 f"Discord API error in command {ctx.command.qualified_name}: "
