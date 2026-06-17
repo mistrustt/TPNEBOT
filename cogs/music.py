@@ -38,19 +38,37 @@ class Music(commands.Cog, name="Music"):
         self.bot = bot
         self.session = aiohttp.ClientSession()
         self.default_avatar_url = "https://cdn.discordapp.com/embed/avatars/1.png"
-        self.font_path = "DejaVuSans-ExtraLight.ttf"
+        self.font_path = self._resolve_font_path("DejaVuSans-ExtraLight.ttf")
         self.default_font = ImageFont.truetype(self.font_path, 24)
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
 
         self.latest_surfaces = []
         self.cache_songs.start()
-        self.is_blacktea_synced = False 
+        self.is_blacktea_synced = False
 
         self.valid_names = []
         self.producer_counts = {}
         self.ongoing_blacktea = []
         self.ongoing_higherlower = []
+
+    @staticmethod
+    def _resolve_font_path(filename: str) -> str:
+        """Return a usable path for a TrueType font, checking CWD then system dirs."""
+        if os.path.exists(filename):
+            return filename
+        system_candidates = [
+            f"/usr/share/fonts/truetype/dejavu/{filename}",
+            f"/usr/share/fonts/truetype/{filename}",
+            f"/usr/share/fonts/{filename}",
+            f"/usr/local/share/fonts/{filename}",
+        ]
+        for path in system_candidates:
+            if os.path.exists(path):
+                return path
+        raise FileNotFoundError(f"Font file not found: {filename}")
+
+    def dynamic_font(self, text, max_width, font_path, max_font_size):
 
         self.standard_colors = {
             "black": "#000000",
