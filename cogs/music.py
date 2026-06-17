@@ -1797,7 +1797,7 @@ class Music(commands.Cog, name="Music"):
 
     # start of my beautiful commands
 
-    async def fetch_song(self, ctx: commands.Context, query: str):
+    async def fetch_song(self, ctx: commands.Context, query: str, allow_unsurfaced: bool = True):
         query = query.replace('’', "'")
         async with self.session.get(
             JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
@@ -1819,7 +1819,7 @@ class Music(commands.Cog, name="Music"):
             for song in data.get("results", [])
             if song.get("leak_type")
             and "session" not in song["leak_type"].lower()
-            and not self._is_unsurfaced(song)
+            and (allow_unsurfaced or not self._is_unsurfaced(song))
         ]
 
         return song_list
@@ -1847,7 +1847,7 @@ class Music(commands.Cog, name="Music"):
             return data
         return None
 
-    async def fetch_session(self, ctx: commands.Context, query: str):
+    async def fetch_session(self, ctx: commands.Context, query: str, allow_unsurfaced: bool = True):
         query = query.replace('’', "'")
         async with self.session.get(
             JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
@@ -1868,7 +1868,7 @@ class Music(commands.Cog, name="Music"):
             song
             for song in data.get("results", [])
             if "session" in song.get("leak_type").lower()
-            and not self._is_unsurfaced(song)
+            and (allow_unsurfaced or not self._is_unsurfaced(song))
         ]
 
         return song_list
@@ -2197,7 +2197,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command('groupbuy', aliases=['gb', 'gbinfo', 'groupbuyinfo'], help='Find a songs groupbuy information')
     async def groupbuy(self, ctx: commands.Context, *, query: str):
-        songs = await self.fetch_song(ctx, query)
+        songs = await self.fetch_song(ctx, query, allow_unsurfaced=True)
         if songs is None:
             return
 
@@ -2238,7 +2238,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.command("leak", description="Search for a Juice WRLD leak by name")
     async def leak(self, ctx: commands.Context, *, query: str):
-        song_list = await self.fetch_song(ctx, query)
+        song_list = await self.fetch_song(ctx, query, allow_unsurfaced=True)
         if song_list is None:
             return
 
@@ -2489,7 +2489,7 @@ class Music(commands.Cog, name="Music"):
         
     @commands.command("snippet", aliases=["snip"])
     async def snippet(self, ctx: commands.Context, *, query: str):
-        song_list = await self.fetch_song(ctx, query)
+        song_list = await self.fetch_song(ctx, query, allow_unsurfaced=False)
         if song_list is None:
             return
 
@@ -3444,9 +3444,6 @@ class Music(commands.Cog, name="Music"):
             return
         self.snippet_debounce[ctx.author.id] = True
 
-        # Query the songs endpoint the same way the leaks search does.
-        # Normalize the apostrophe like fetch_song does so users with `’`
-        # (curly) in their search get the same results as `'` (straight).
         normalized_query = query.replace("’", "'")
         async with self.session.get(
             JUICEWRLD_API + "/juicewrld/songs/", params={"search": normalized_query}
@@ -3471,12 +3468,6 @@ class Music(commands.Cog, name="Music"):
 
             data = await response.json()
 
-            # Match fetch_song's filter: drop session tracks so users get
-            # the same set of results the leaks search would surface.
-            # Match fetch_song's filter: drop session tracks so users get
-            # the same set of results the leaks search would surface.
-            # Also drop unsurfaced songs — they have no audio on the server,
-            # so the download endpoint would 404 and make_snippet would error.
             matches = [
                 song for song in data.get("results", [])
                 if song.get("leak_type") and "session" not in song["leak_type"].lower()
