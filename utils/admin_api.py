@@ -123,16 +123,12 @@ class AdminAPIServer:
             raise
 
     async def handle_status(self, request: web.Request) -> web.Response:
-        uptime = None
-        try:
-            uptime = (self.bot.owner_cog.start_time and (web.json_response))
-        except Exception:
-            pass
-
         data = {
             "uptime": str(getattr(self.bot, "uptime", "unknown")),
             "guild_count": len(self.bot.guilds) if hasattr(self.bot, "guilds") else 0,
-            "user_count": sum(g.member_count for g in self.bot.guilds) if hasattr(self.bot, "guilds") else 0,
+            "user_count": sum(
+                g.member_count or 0 for g in self.bot.guilds
+            ) if hasattr(self.bot, "guilds") else 0,
         }
         return web.json_response(data)
 
