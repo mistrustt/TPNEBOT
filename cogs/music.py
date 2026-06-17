@@ -3350,8 +3350,11 @@ class Music(commands.Cog, name="Music"):
                     embed.set_image(url=f"https://http.cat/{code}")
                 await ctx.reply(embed=embed, delete_after=5)
 
-            if response.status != 200:
-                await handle_request_failed(ctx, response.status)
+            content_type = response.headers.get("Content-Type", "")
+            if response.status != 200 or "application/json" not in content_type:
+                await handle_request_failed(
+                    ctx, response.status if response.status != 200 else 500
+                )
                 self.handle_user_done_snippet(ctx.author.id)
                 return
 
