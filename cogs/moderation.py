@@ -868,49 +868,137 @@ class Moderation(commands.Cog, name="Moderation"):
         except Exception:
             pass
 
-        await self.bot.database.log_punishment_command(
-            moderator_id=ctx.author.id,
-            guild_id=ctx.guild.id,
-            punishment_type=PunishmentType.BAN,
+        async def _do_ban() -> int:
+            await self.bot.database.log_punishment_command(
+                moderator_id=ctx.author.id,
+                guild_id=ctx.guild.id,
+                punishment_type=PunishmentType.BAN,
+            )
+            case_id = await self.bot.database.add_punishment(
+                user_id=member.id,
+                guild_id=ctx.guild.id,
+                moderator_id=ctx.author.id,
+                punishment_type=PunishmentType.BAN,
+                reason=reason,
+                duration=None,
+            )
+            embed = discord.Embed(
+                description=f"**{member}** was banned for `{reason}`.",
+                color=discord.Color.blurple(),
+            )
+            embed.set_author(
+                name=f"Moderator: {ctx.author}",
+                icon_url=self.utils.get_avatar_url(ctx.author),
+            )
+            embed.set_footer(text=f"Case ID: {case_id}")
+            await ctx.send(embed=embed, delete_after=10)
+            try:
+                dm_embed = discord.Embed(
+                    description=f"You have been **banned** from **{ctx.guild.name}**.",
+                    color=discord.Color.greyple(),
+                )
+                dm_embed.set_author(
+                    name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
+                )
+                dm_embed.add_field(name="Reason:", value=reason)
+                dm_embed.set_footer(
+                    text=f"Action by: {ctx.author} Case ID: {case_id}"
+                )
+                await member.send(embed=dm_embed)
+            except:
+                embed = discord.Embed(
+                    description=f"Could not send user a DM message!", color=0x36393E
+                )
+                await ctx.reply(embed=embed)
+
+            await ctx.guild.ban(member, reason=reason, delete_message_seconds=0)
+            return case_id
+
+        is_booster = (
+            isinstance(member, discord.Member)
+            and (
+                member.premium_since is not None
+                or any(role.is_premium_subscriber() for role in member.roles if role)
+            )
         )
-        case_id = await self.bot.database.add_punishment(
-            user_id=member.id,
-            guild_id=ctx.guild.id,
-            moderator_id=ctx.author.id,
-            punishment_type=PunishmentType.BAN,
-            reason=reason,
-            duration=None,
+
+        if not is_booster:
+            await _do_ban()
+            return
+
+        class BanConfirmView(discord.ui.View):
+            def __init__(self, *, timeout=60):
+                super().__init__(timeout=timeout)
+                self.value = None
+
+            async def interaction_check(
+                self, interaction: discord.Interaction
+            ) -> bool:
+                if interaction.user.id != ctx.author.id:
+                    await interaction.response.send_message(
+                        "Only the command invoker can use these buttons.",
+                        ephemeral=True,
+                    )
+                    return False
+                return True
+
+            @discord.ui.button(label="Ban", style=discord.ButtonStyle.danger)
+            async def ban_button(
+                self, interaction: discord.Interaction, button: discord.ui.Button
+            ):
+                self.value = "confirm"
+                for child in self.children:
+                    child.disabled = True
+                await interaction.response.edit_message(
+                    embed=discord.Embed(
+                        description=f"Confirmed by {interaction.user.mention}. Proceeding with ban...",
+                        color=discord.Color.red(),
+                    ),
+                    view=self,
+                )
+                self.stop()
+
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+            async def cancel_button(
+                self, interaction: discord.Interaction, button: discord.ui.Button
+            ):
+                self.value = "cancel"
+                for child in self.children:
+                    child.disabled = True
+                await interaction.response.edit_message(
+                    embed=discord.Embed(
+                        description="Ban cancelled.",
+                        color=discord.Color.green(),
+                    ),
+                    view=self,
+                )
+                self.stop()
+
+        view = BanConfirmView()
+        confirm_embed = discord.Embed(
+            title="⚠️ Booster Detected",
+            description=f"**{member}** is a server booster. Are you sure you want to ban them?\n\nReason: `{reason}`",
+            color=discord.Color.orange(),
         )
-        embed = discord.Embed(
-            description=f"**{member}** was banned for `{reason}`.",
-            color=discord.Color.blurple(),
-        )
-        embed.set_author(
+        confirm_embed.set_author(
             name=f"Moderator: {ctx.author}",
             icon_url=self.utils.get_avatar_url(ctx.author),
         )
-        embed.set_footer(text=f"Case ID: {case_id}")
-        await ctx.send(embed=embed, delete_after=10)
-        try:
-            dm_embed = discord.Embed(
-                description=f"You have been **banned** from **{ctx.guild.name}**.",
-                color=discord.Color.greyple(),
-            )
-            dm_embed.set_author(
-                name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
-            )
-            dm_embed.add_field(name="Reason:", value=reason)
-            dm_embed.set_footer(
-                text=f"Action by: {ctx.author} Case ID: {case_id}"
-            )
-            await member.send(embed=dm_embed)
-        except:
-            embed = discord.Embed(
-                description=f"Could not send user a DM message!", color=0x36393E
-            )
-            await ctx.reply(embed=embed)
+        confirm_message = await ctx.send(embed=confirm_embed, view=view)
+        await view.wait()
 
-        await ctx.guild.ban(member, reason=reason)
+        if view.value == "confirm":
+            await _do_ban()
+        elif view.value is None:
+            for child in view.children:
+                child.disabled = True
+            await confirm_message.edit(
+                embed=discord.Embed(
+                    description="Ban confirmation timed out.",
+                    color=discord.Color.red(),
+                ),
+                view=view,
+            )
         #except Exception as e:
         #    embed = discord.Embed(
         #        title="Ban Error",
