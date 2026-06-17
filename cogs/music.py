@@ -3170,6 +3170,7 @@ class Music(commands.Cog, name="Music"):
                         song_data.get("name", "Unknown Title")
                     )
 
+                    self.assert_download_cache()
                     image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
                     async with session.get(f"{JUICEWRLD_API}/juicewrld/cover/{best_track_title.lower().replace(" ", "")}.png") as cover_response:
                         async with session.get(f"{JUICEWRLD_API}/juicewrld/files/cover-art/", params={"path": path}) as album_art_response:
@@ -3458,6 +3459,7 @@ class Music(commands.Cog, name="Music"):
             best_track_title = self.get_most_acceptable_track_name(
                 song.get("name", "Unknown Title").replace(".mp3", "")
             )
+            self.assert_download_cache()
             image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
 
             # Try the dedicated cover file first, then the album art endpoint.
