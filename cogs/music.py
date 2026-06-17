@@ -1249,7 +1249,7 @@ class Music(commands.Cog, name="Music"):
             async with ctx.typing():
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
-                        "https://m.juicewrldapi.com/analytics/now-playing/discord",
+                        f"{JUICEWRLD_API}/analytics/now-playing/discord",
                         params={"discord_user_id": member.id},
                     ) as response:
                         if response.status == 404:
@@ -1610,7 +1610,7 @@ class Music(commands.Cog, name="Music"):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://m.juicewrldapi.com/auth/discord/bot-link",
+                    f"{JUICEWRLD_API}/auth/discord/bot-link",
                     json={"code": pairing_code, "discord_user_id": ctx.author.id},
                 ) as response:
                     if response.status == 200:
@@ -1751,7 +1751,7 @@ class Music(commands.Cog, name="Music"):
                 
                 fixed_path = quote(path, safe="/") # lowkey wanted to use envys special_url_encode
                 valid_snippets.append(
-                    "https://juicewrldapi.com/juicewrld/files/download/?path="
+                    f"{JUICEWRLD_API}/juicewrld/files/download/?path="
                     + fixed_path
                 )
 
@@ -1885,7 +1885,7 @@ class Music(commands.Cog, name="Music"):
                 engineers = song.get('engineers')
                 era_name = song.get('era', {}).get('name', 'N/A')
                 _image_url = song.get('image_url')
-                image_url = f'https://juicewrldapi.com{_image_url}' if _image_url != '' else 'https://discord.com/example.png'
+                image_url = f'{JUICEWRLD_API}{_image_url}' if _image_url != '' else 'https://discord.com/example.png'
 
                 album = self.ALBUMS.get(era_name)
                 accent_color = int(album['color'].lstrip('#'), 16) if album else 0x2B2D31
@@ -1926,11 +1926,11 @@ class Music(commands.Cog, name="Music"):
                 field_map = self.FIELDS if not random_leak else self.RANDOM_LEAK_FIELDS
                 self._add_song_fields(song, field_map)
 
-                MAIN_URL = 'https://juicewrldapi.com/juicewrld/files/download/?path='
+                MAIN_URL = f'{JUICEWRLD_API}/juicewrld/files/download/?path='
                 TRACKER = discord.ui.Button(
                     label='Tracker', 
                     emoji='<:fart:1445127619744890911>', 
-                    url='https://juicewrldapi.com/'
+                    url=f'{JUICEWRLD_API}/'
                 )
 
                 rows = self._create_download_rows(downloads, song, MAIN_URL)
@@ -2256,7 +2256,7 @@ class Music(commands.Cog, name="Music"):
         self.latest_surfaces = sorted(hydrated, key=lambda s: s['date_leaked_dt'], reverse=True)
     
     async def build_song_items(self, container: discord.ui.Container, songs: list[dict]):
-        MAIN_URL = 'https://juicewrldapi.com/juicewrld/files/download/?path='
+        MAIN_URL = f'{JUICEWRLD_API}/juicewrld/files/download/?path='
 
         for ii, song in enumerate(songs):
             name = song.get('name', 'N/A')
@@ -3305,7 +3305,7 @@ class Music(commands.Cog, name="Music"):
         self.snippet_debounce[ctx.author.id] = True
 
         async with self.session.get(
-            f"{JUICEWRLD_API}s", params={"search": query}
+            f"{JUICEWRLD_API}", params={"search": query}
         ) as response:
 
             async def handle_request_failed(ctx, code=None):
@@ -4095,7 +4095,7 @@ class LatestSurfacesView(discord.ui.LayoutView):
         nav = discord.ui.ActionRow()
         nav.add_item(discord.ui.Button(label='Previous', style=discord.ButtonStyle.grey, custom_id='latest_prev'))
         nav.add_item(discord.ui.Button(label='Next', style=discord.ButtonStyle.grey, custom_id='latest_next'))
-        nav.add_item(discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/'))
+        nav.add_item(discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url=f'{JUICEWRLD_API}/'))
         
         container.add_item(discord.ui.Separator())
         container.add_item(nav)
@@ -4220,7 +4220,7 @@ class GroupbuyContainer(discord.ui.Container):
             self.add_item(discord.ui.TextDisplay(f'**Notes**\n{gb_extra_info}'))
         
         action_row = discord.ui.ActionRow()
-        action_row.add_item(discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url='https://juicewrldapi.com/'))
+        action_row.add_item(discord.ui.Button(label='Tracker', emoji='<:fart:1445127619744890911>', url=f'{JUICEWRLD_API}/'))
 
         self.add_item(discord.ui.Separator())
         self.add_item(action_row)
