@@ -38,7 +38,7 @@ class Music(commands.Cog, name="Music"):
         self.bot = bot
         self.session = aiohttp.ClientSession()
         self.default_avatar_url = "https://cdn.discordapp.com/embed/avatars/1.png"
-        self.font_path = self._resolve_font_path("DejaVuSans.ttf")
+        self.font_path = self._resolve_font_path("DejaVuSans-ExtraLight.ttf")
         self.default_font = ImageFont.truetype(self.font_path, 24)
         self.font_small = ImageFont.truetype(self.font_path, 20)
         self.font_large = ImageFont.truetype(self.font_path, 40)
@@ -51,25 +51,9 @@ class Music(commands.Cog, name="Music"):
         self.producer_counts = {}
         self.ongoing_blacktea = []
         self.ongoing_higherlower = []
-
-    @staticmethod
-    def _resolve_font_path(filename: str) -> str:
-        """Return a usable path for a TrueType font, checking CWD then system dirs."""
-        if os.path.exists(filename):
-            return filename
-        system_candidates = [
-            f"/usr/share/fonts/truetype/dejavu/{filename}",
-            f"/usr/share/fonts/truetype/{filename}",
-            f"/usr/share/fonts/{filename}",
-            f"/usr/local/share/fonts/{filename}",
-        ]
-        for path in system_candidates:
-            if os.path.exists(path):
-                return path
-        raise FileNotFoundError(f"Font file not found: {filename}")
-
-    def dynamic_font(self, text, max_width, font_path, max_font_size):
-
+        self.ongoing_heardle = []
+        self.heardle_answers = {}
+        self.snippet_debounce = {}
         self.standard_colors = {
             "black": "#000000",
             "white": "#FFFFFF",
@@ -88,10 +72,6 @@ class Music(commands.Cog, name="Music"):
             1095747082599530627,  # ENVY (DUMB IDIOT)
             1099696209637167145,  # TOXIC (GOAT ASF)
         ]
-        self.ongoing_heardle = []
-        self.heardle_answers = {}
-        self.snippet_debounce = {}
-
         self.ALBUMS = {
             "jute": {"name": "JUICED UP THE EP", "color": "#FFE602"},
             "LND": {"name": "Legends Never Die", "color": "#F700FF"},
@@ -143,10 +123,10 @@ class Music(commands.Cog, name="Music"):
 
         def check_question_marks(s):
             return "?" in s
-        
+
         def remove_question_marks(s):
             return s.replace("?", "")
-        
+
         def question_mark_to_spaces(s):
             return s.replace("?", " ")
 
@@ -161,7 +141,7 @@ class Music(commands.Cog, name="Music"):
 
         def remove_brackets(s):
             return re.sub(r"\[.*?\]", "", s).strip()
-        
+
         def check_semi_brackets(s):
             return "{" in s and "}" in s
 
@@ -169,8 +149,8 @@ class Music(commands.Cog, name="Music"):
             return re.sub(r"\{.*?\}", "", s).strip()
 
         def check_apostrophes(s):
-            return "'" in s    
-    
+            return "'" in s
+
         def remove_apostrophes(s):
             return s.replace("'", "")
 
@@ -188,7 +168,7 @@ class Music(commands.Cog, name="Music"):
 
         def remove_commas(s):
             return s.replace(",", "")
-        
+
         def comma_to_spaces(s):
             return s.replace(",", " ")
 
@@ -211,6 +191,41 @@ class Music(commands.Cog, name="Music"):
             check_question_marks: [remove_question_marks, question_mark_to_spaces],
             check_hyphens: [remove_hyphens, hyphen_to_spaces],
         }
+
+    @staticmethod
+    def _resolve_font_path(filename: str) -> str:
+        """Return a usable path for a TrueType font, checking CWD then system dirs."""
+        if os.path.exists(filename):
+            return filename
+        system_candidates = [
+            f"/usr/share/fonts/truetype/dejavu/{filename}",
+            f"/usr/share/fonts/truetype/{filename}",
+            f"/usr/share/fonts/{filename}",
+            f"/usr/local/share/fonts/{filename}",
+        ]
+        for path in system_candidates:
+            if os.path.exists(path):
+                return path
+        raise FileNotFoundError(f"Font file not found: {filename}")
+
+    def dynamic_font(self, text: str, max_width: int, font_path: str, max_font_size: int):
+        """Return a PIL ImageFont that fits `text` within `max_width`."""
+        if not text:
+            return ImageFont.truetype(font_path, max_font_size)
+        try:
+            test_font = ImageFont.truetype(font_path, max_font_size)
+            if test_font.getlength(text) <= max_width:
+                return test_font
+        except Exception:
+            pass
+        for size in range(max_font_size, 8, -1):
+            try:
+                font = ImageFont.truetype(font_path, size)
+                if font.getlength(text) <= max_width:
+                    return font
+            except Exception:
+                continue
+        return ImageFont.truetype(font_path, 8)
 
     async def cog_unload(self):
         await self.session.close()
