@@ -52,9 +52,10 @@ services:
       # Expose the admin API (aiohttp) on the host. Override with ADMIN_API_PORT in .env.
       - "${ADMIN_API_PORT:-8080}:8080"
     volumes:
-      - appdata:/app/logs
+      - appdata:/app
     # Run as the unprivileged `tpnebot` user defined in the Dockerfile
     user: "1000:1000"
+volumes:
   pgdata:
     name: tpnebot_pgdata
   appdata:
