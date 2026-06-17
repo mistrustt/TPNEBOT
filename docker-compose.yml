@@ -27,10 +27,7 @@ services:
     # Postgres only listens inside the compose network by default; no host port published.
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: tpnebot:latest
+    image: git.silverside-grouse.ts.net/dirtymonkeysquad/tpnebot:latest
     restart: unless-stopped
     env_file:
       - .env
