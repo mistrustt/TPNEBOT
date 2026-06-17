@@ -102,7 +102,7 @@ class Moderation(commands.Cog, name="Moderation"):
         name = template.format(count=guild.member_count)
         overwrites = {guild.default_role: discord.PermissionOverwrite(connect=False)}
         vc = await guild.create_voice_channel(name=name, overwrites=overwrites)
-        await self.bot.database.set_member_count_channel(guild.id, vc.id, template)
+        await self.bot.database.set_member_count_channel(guild.id, vc.id)
         return vc
 
     async def _update_channel(self, guild: discord.Guild):
