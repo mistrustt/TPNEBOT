@@ -58,8 +58,6 @@ services:
       - appdata:/app
     # Run as the unprivileged `tpnebot` user defined in the Dockerfile
     user: "1000:1000"
-
-volumes:
   pgdata:
     name: tpnebot_pgdata
   appdata:
