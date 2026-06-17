@@ -252,7 +252,7 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.reply(
                 embed=discord.Embed(
                     title="🚫 Already Exists",
-                    description=f"Member count channel already exists: {mcc.mention}",
+                    description=f"Member count channel already exists: {mcc.name}",
                     color=discord.Color.red(),
                 )
             )
@@ -264,7 +264,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.reply(
             embed=discord.Embed(
                 title="✅ Member Count Channel Created",
-                description=f"{vc.mention} now shows your member count.",
+                description=f"{vc.name} now shows your member count.",
                 color=discord.Color.green(),
             )
         )
@@ -279,7 +279,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.reply(
             embed=discord.Embed(
                 title="✅ Member Count Channel Set",
-                description=f"Now using {channel} as the member count channel.",
+                description=f"Now using {ctx.guild.get_channel(channel).name} as the member count channel.",
                 color=discord.Color.green(),
             )
         )

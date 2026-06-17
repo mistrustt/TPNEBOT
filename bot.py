@@ -192,6 +192,15 @@ class DiscordBot(commands.Bot):
     def is_coolguy(self, user_id: int):
         return user_id in self.cool_guys
 
+    @staticmethod
+    def _is_transient_discord_api_error(error: Exception) -> bool:
+        """Return True if *error* is a Discord server-side API failure (5xx)."""
+        if isinstance(error, discord.errors.DiscordServerError):
+            return True
+        if isinstance(error, discord.HTTPException) and getattr(error, "status", 0) >= 500:
+            return True
+        return False
+
     async def setup_hook(self) -> None:
         try:
             self.logger.info(f"Logged in as {self.user.name}")
@@ -366,9 +375,15 @@ class DiscordBot(commands.Bot):
 
             ctx._stats_started_at = time.perf_counter()
             await super().invoke(ctx)
-        except discord.errors.DiscordServerError:
-            return
-        except discord.HTTPException:
+        except commands.CommandInvokeError as exc:
+            if self._is_transient_discord_api_error(exc.original):
+                self.logger.warning(
+                    f"Discord API error while invoking {ctx.command.qualified_name}: "
+                    f"{type(exc.original).__name__}: {exc.original}"
+                )
+                return
+            raise
+        except (discord.errors.DiscordServerError, discord.HTTPException):
             return
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
@@ -520,6 +535,26 @@ class DiscordBot(commands.Bot):
         except Exception as e:
             self.logger.warning(f"Stats tracking failed: {e}")
 
+        command = getattr(interaction, "command", None)
+        command_name = getattr(command, "qualified_name", "unknown")
+
+        if self._is_transient_discord_api_error(error):
+            self.logger.warning(
+                f"Discord API error in slash /{command_name}: "
+                f"{type(error).__name__}: {error}"
+            )
+            return
+        if (
+            isinstance(error, app_commands.CommandInvokeError)
+            and self._is_transient_discord_api_error(error.original)
+        ):
+            original = error.original
+            self.logger.warning(
+                f"Discord API error in slash /{command_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            return
+
         if isinstance(error, app_commands.CommandOnCooldown):
             retry = error.retry_after
             if not interaction.response.is_done():
@@ -639,6 +674,22 @@ class DiscordBot(commands.Bot):
             pass
         elif isinstance(error, commands.CheckAnyFailure):
             pass
+        elif self._is_transient_discord_api_error(error):
+            self.logger.warning(
+                f"Discord API error in command {ctx.command.qualified_name}: "
+                f"{type(error).__name__}: {error}"
+            )
+            return
+        elif (
+            isinstance(error, commands.CommandInvokeError)
+            and self._is_transient_discord_api_error(error.original)
+        ):
+            original = error.original
+            self.logger.warning(
+                f"Discord API error in command {ctx.command.qualified_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            return
         elif isinstance(error, Exception):
             dev_channel_id = int(os.getenv("DEVELOPER_CHANNEL_ID"))
             dev_channel = self.get_channel(dev_channel_id)
