@@ -1817,10 +1817,35 @@ class Music(commands.Cog, name="Music"):
         song_list = [
             song
             for song in data.get("results", [])
-            if "session" not in song.get("leak_type").lower()
+            if song.get("leak_type")
+            and "session" not in song["leak_type"].lower()
+            and not self._is_unsurfaced(song)
         ]
 
         return song_list
+
+    async def fetch_random_playable_song(self, max_retries: int = 8) -> dict | None:
+        """Hit /juicewrld/radio/random/ until we get a song with audio.
+
+        The radio endpoint occasionally returns `unsurfaced` tracks that have
+        metadata only — those 404 on the download endpoint. Retry a few times
+        before giving up.
+        """
+        for _ in range(max_retries):
+            async with self.session.get(
+                f"{JUICEWRLD_API}/juicewrld/radio/random/"
+            ) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+
+            song_data = data.get("song")
+            if not song_data:
+                continue
+            if self._is_unsurfaced(song_data):
+                continue
+            return data
+        return None
 
     async def fetch_session(self, ctx: commands.Context, query: str):
         query = query.replace('’', "'")
@@ -1843,6 +1868,7 @@ class Music(commands.Cog, name="Music"):
             song
             for song in data.get("results", [])
             if "session" in song.get("leak_type").lower()
+            and not self._is_unsurfaced(song)
         ]
 
         return song_list
@@ -2536,19 +2562,15 @@ class Music(commands.Cog, name="Music"):
     )
     async def randomleak(self, ctx: commands.Context):
         # lets save eli some sanity and do this a bit nicer... haha maybe some other people will get the idea hahahahahahahahahahahah @ENVY
-        async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/radio/random/"
-        ) as response:
-            if response.status != 200:
-                return await ctx.send(
-                    embed=discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red(),
-                    ).set_image(url=f"https://http.cat/{response.status}"),
-                    delete_after=5,
-                )
-
-            data = await response.json()
+        data = await self.fetch_random_playable_song()
+        if data is None:
+            return await ctx.send(
+                embed=discord.Embed(
+                    description="Request failed. Please try again later.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=5,
+            )
 
         song_data = data.get("song")
 
@@ -2682,6 +2704,15 @@ class Music(commands.Cog, name="Music"):
             for func in funcs:
                 name = func(name)
         return name
+
+    @staticmethod
+    def _is_unsurfaced(song: dict) -> bool:
+        """`unsurfaced` songs have metadata only — no audio on the server.
+
+        Trying to download or snippet them 404s, so callers must filter them
+        out before letting the user pick one.
+        """
+        return (song.get("category") or "").lower() == "unsurfaced"
 
     def get_acceptable_track_names(self, orig_name: str):
         name = orig_name.lower().strip()
@@ -3221,186 +3252,185 @@ class Music(commands.Cog, name="Music"):
         # clear existing files
         self.handle_user_done_heardle(ctx.author.id)
 
-        async with self.session.get(
-            f"{JUICEWRLD_API}/juicewrld/radio/random/"
-        ) as response:
-            async def handle_request_failed(ctx, code=None):
-                embed = discord.Embed(
-                    description="Request failed. Please try again later.",
-                    color=discord.Color.red(),
-                )
-                if code:
-                    embed.set_image(url=f"https://http.cat/{code}")
-                await ctx.reply(embed=embed, delete_after=5)
+        async def handle_request_failed(ctx, code=None):
+            embed = discord.Embed(
+                description="Request failed. Please try again later.",
+                color=discord.Color.red(),
+            )
+            if code:
+                embed.set_image(url=f"https://http.cat/{code}")
+            await ctx.reply(embed=embed, delete_after=5)
 
-            if response.status != 200:
-                await handle_request_failed(ctx, response.status)
-                return
+        # /juicewrld/radio/random/ occasionally returns unsurfaced tracks
+        # that have no audio file on the server; retry until we get a
+        # playable one.
+        data = await self.fetch_random_playable_song()
+        if data is None:
+            await handle_request_failed(ctx)
+            return
 
-            data = await response.json()
+        song_data = data.get("song", None)
+        if not song_data:
+            await handle_request_failed(ctx)
+            return
 
-            song_data = data.get("song", None)
-            if not song_data:
-                await handle_request_failed(ctx)
-                return
+        self.ongoing_heardle.append(ctx.author.id)
+        track_tiles = song_data.get("track_titles", [])
+        path = data.get("path", "")
 
-            self.ongoing_heardle.append(ctx.author.id)
-            track_tiles = song_data.get("track_titles", [])
-            path = data.get("path", "")
-
-            async with ctx.typing():
-                raw_track_title = song_data.get("name", "Unknown Title")
-                best_track_title = self.get_most_acceptable_track_name(
-                    song_data.get("name", "Unknown Title")
-                )
-
-                # Run the cover + album-art + avatar fetches concurrently via
-                # the shared helper (uses the bot's persistent HTTP session).
-                image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
-                cover_slug = best_track_title.lower().replace(" ", "")
-                await self._fetch_best_cover(
-                    cover_url=f"{JUICEWRLD_API}/juicewrld/cover/{cover_slug}.png",
-                    album_art_url=f"{JUICEWRLD_API}/juicewrld/files/cover-art/",
-                    album_art_params={"path": path},
-                    avatar_url=str(ctx.author.display_avatar.url),
-                    target_path=image_file_name,
-                )
-
-                download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/"
-                result, payload = await self.make_snippet(
-                    image_file_name,
-                    download_url,
-                    f"{ctx.author.id}_heardle",
-                    HEARDLE_CLIP_DURATION,
-                    path=path,
-                )
-                if result == False:
-                    await handle_request_failed(ctx, payload)
-                    self.handle_user_done_heardle(ctx.author.id)
-                    return
-
-                class HeardleContainer(discord.ui.Container):
-                    def __init__(self, thumbnail_url, snippet):
-                        super().__init__()
-
-                        header = discord.ui.Section(
-                            accessory=discord.ui.Thumbnail(media=thumbnail_url)
-                        )
-                        header.add_item(
-                            discord.ui.TextDisplay(f"# Heardle\nPlease send a message of a song title to guess the song\n-# Type `exit` to quit the game.\n-# Duration: {HEARDLE_CLIP_DURATION} seconds")
-                        )
-                        self.add_item(header)
-                        self.add_item(discord.ui.Separator())
-
-                        media_gallery = discord.ui.MediaGallery()
-                        media_gallery.add_item(media=snippet)
-                        self.add_item(media_gallery)
-
-                message = await ctx.send(file=discord.File(payload))
-                self.remove_file(payload)
-
-            has_guessed = False
-            attempt = 1
-            acceptable_answers = []
-            self.heardle_answers[ctx.author.id] = best_track_title
-            for title in track_tiles:
-                acceptable_alt_name_list = self.get_acceptable_track_names(title)
-                acceptable_answers.extend(acceptable_alt_name_list)
-
-            # Cache the last hint rendered so we only edit the message when the
-            # hint actually changes (was firing every second).
-            last_hint = None
-
-            async def update_timer_message(
-                message: discord.Message, full_name, start_time, author
-            ):
-                nonlocal last_hint
-                try:
-                    while True:
-                        elapsed = asyncio.get_event_loop().time() - start_time
-                        hint_chars = int(
-                            elapsed // 3
-                        )  # reveal a character every 3 seconds, max 3 as curteousy of silmar
-
-                        if hint_chars > 3:
-                            raise asyncio.CancelledError
-
-                        hint = full_name[:hint_chars]
-                        for i in range(len(full_name) - hint_chars):
-                            if full_name[i + hint_chars] == " ":
-                                hint += " "
-                            else:
-                                hint += "?"
-                        if hint != last_hint:
-                            last_hint = hint
-                            await message.edit(
-                                embed=discord.Embed(title="Heardle", description=f"{author.mention} Hint ({round(hint_chars)}/3): {hint}", color=author.color)
-                            )
-                        await asyncio.sleep(1)
-                except asyncio.CancelledError:
-                    return
-
-            start_time = asyncio.get_event_loop().time()
-            update_task = asyncio.create_task(
-                update_timer_message(message, best_track_title, start_time, ctx.author)
+        async with ctx.typing():
+            raw_track_title = song_data.get("name", "Unknown Title")
+            best_track_title = self.get_most_acceptable_track_name(
+                song_data.get("name", "Unknown Title")
             )
 
-            while has_guessed == False:
-                def check_guess(m):
-                    return m.author == ctx.author and m.channel == ctx.channel
-
-                try:
-                    elapsed = asyncio.get_event_loop().time() - start_time
-                    remaining_time = HEARDLE_GAME_DURATION - elapsed
-                    if remaining_time <= 0:
-                        raise TimeoutError
-
-                    guess_msg = await self.bot.wait_for(
-                        "message", check=check_guess, timeout=remaining_time
-                    )
-                except TimeoutError:
-                    await Embeds.send_warning_embed(
-                        ctx.channel,
-                        ctx.author,
-                        f"Time's up! You didn't guess the song ({best_track_title} [{raw_track_title}]) in time.",
-                    )
-                    try:
-                        await message.delete()
-                    except:
-                        pass
-                    self.handle_user_done_heardle(ctx.author.id)
-                    update_task.cancel()
-                    await self.bot.database.add_heardle_loss(ctx.author.id)
-                    return
-
-                guess = guess_msg.content.strip().lower()
-                if guess == "exit":
-                    await guess_msg.add_reaction("👋")
-                    try:
-                        await message.delete()
-                    except:
-                        pass
-                    await self.bot.database.add_heardle_loss(ctx.author.id)
-                    self.handle_user_done_heardle(ctx.author.id)
-                    update_task.cancel()
-                    return
-                elif guess in acceptable_answers:
-                    has_guessed = True
-                else:
-                    attempt += 1
-            elapsed = asyncio.get_event_loop().time() - start_time
-            await Embeds.send_success_embed(
-                ctx.channel,
-                ctx.author,
-                f"Congratulations! You guessed the song correctly: **{best_track_title}** in {round(elapsed)} seconds ({attempt} attempts)!",
+            # Run the cover + album-art + avatar fetches concurrently via
+            # the shared helper (uses the bot's persistent HTTP session).
+            image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
+            cover_slug = best_track_title.lower().replace(" ", "")
+            await self._fetch_best_cover(
+                cover_url=f"{JUICEWRLD_API}/juicewrld/cover/{cover_slug}.png",
+                album_art_url=f"{JUICEWRLD_API}/juicewrld/files/cover-art/",
+                album_art_params={"path": path},
+                avatar_url=str(ctx.author.display_avatar.url),
+                target_path=image_file_name,
             )
-            await self.bot.database.add_heardle_win(ctx.author.id)
+
+            download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/"
+            result, payload = await self.make_snippet(
+                image_file_name,
+                download_url,
+                f"{ctx.author.id}_heardle",
+                HEARDLE_CLIP_DURATION,
+                path=path,
+            )
+            if result == False:
+                await handle_request_failed(ctx, payload)
+                self.handle_user_done_heardle(ctx.author.id)
+                return
+
+            class HeardleContainer(discord.ui.Container):
+                def __init__(self, thumbnail_url, snippet):
+                    super().__init__()
+
+                    header = discord.ui.Section(
+                        accessory=discord.ui.Thumbnail(media=thumbnail_url)
+                    )
+                    header.add_item(
+                        discord.ui.TextDisplay(f"# Heardle\nPlease send a message of a song title to guess the song\n-# Type `exit` to quit the game.\n-# Duration: {HEARDLE_CLIP_DURATION} seconds")
+                    )
+                    self.add_item(header)
+                    self.add_item(discord.ui.Separator())
+
+                    media_gallery = discord.ui.MediaGallery()
+                    media_gallery.add_item(media=snippet)
+                    self.add_item(media_gallery)
+
+            message = await ctx.send(file=discord.File(payload))
+            self.remove_file(payload)
+
+        has_guessed = False
+        attempt = 1
+        acceptable_answers = []
+        self.heardle_answers[ctx.author.id] = best_track_title
+        for title in track_tiles:
+            acceptable_alt_name_list = self.get_acceptable_track_names(title)
+            acceptable_answers.extend(acceptable_alt_name_list)
+
+        # Cache the last hint rendered so we only edit the message when the
+        # hint actually changes (was firing every second).
+        last_hint = None
+
+        async def update_timer_message(
+            message: discord.Message, full_name, start_time, author
+        ):
+            nonlocal last_hint
             try:
-                await message.delete()
-            except:
-                pass
-            self.handle_user_done_heardle(ctx.author.id)
-            update_task.cancel()
+                while True:
+                    elapsed = asyncio.get_event_loop().time() - start_time
+                    hint_chars = int(
+                        elapsed // 3
+                    )  # reveal a character every 3 seconds, max 3 as curteousy of silmar
+
+                    if hint_chars > 3:
+                        raise asyncio.CancelledError
+
+                    hint = full_name[:hint_chars]
+                    for i in range(len(full_name) - hint_chars):
+                        if full_name[i + hint_chars] == " ":
+                            hint += " "
+                        else:
+                            hint += "?"
+                    if hint != last_hint:
+                        last_hint = hint
+                        await message.edit(
+                            embed=discord.Embed(title="Heardle", description=f"{author.mention} Hint ({round(hint_chars)}/3): {hint}", color=author.color)
+                        )
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                return
+
+        start_time = asyncio.get_event_loop().time()
+        update_task = asyncio.create_task(
+            update_timer_message(message, best_track_title, start_time, ctx.author)
+        )
+
+        while has_guessed == False:
+            def check_guess(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+
+            try:
+                elapsed = asyncio.get_event_loop().time() - start_time
+                remaining_time = HEARDLE_GAME_DURATION - elapsed
+                if remaining_time <= 0:
+                    raise TimeoutError
+
+                guess_msg = await self.bot.wait_for(
+                    "message", check=check_guess, timeout=remaining_time
+                )
+            except TimeoutError:
+                await Embeds.send_warning_embed(
+                    ctx.channel,
+                    ctx.author,
+                    f"Time's up! You didn't guess the song ({best_track_title} [{raw_track_title}]) in time.",
+                )
+                try:
+                    await message.delete()
+                except:
+                    pass
+                self.handle_user_done_heardle(ctx.author.id)
+                update_task.cancel()
+                await self.bot.database.add_heardle_loss(ctx.author.id)
+                return
+
+            guess = guess_msg.content.strip().lower()
+            if guess == "exit":
+                await guess_msg.add_reaction("👋")
+                try:
+                    await message.delete()
+                except:
+                    pass
+                await self.bot.database.add_heardle_loss(ctx.author.id)
+                self.handle_user_done_heardle(ctx.author.id)
+                update_task.cancel()
+                return
+            elif guess in acceptable_answers:
+                has_guessed = True
+            else:
+                attempt += 1
+        elapsed = asyncio.get_event_loop().time() - start_time
+        await Embeds.send_success_embed(
+            ctx.channel,
+            ctx.author,
+            f"Congratulations! You guessed the song correctly: **{best_track_title}** in {round(elapsed)} seconds ({attempt} attempts)!",
+        )
+        await self.bot.database.add_heardle_win(ctx.author.id)
+        try:
+            await message.delete()
+        except:
+            pass
+        self.handle_user_done_heardle(ctx.author.id)
+        update_task.cancel()
 
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
@@ -3443,9 +3473,14 @@ class Music(commands.Cog, name="Music"):
 
             # Match fetch_song's filter: drop session tracks so users get
             # the same set of results the leaks search would surface.
+            # Match fetch_song's filter: drop session tracks so users get
+            # the same set of results the leaks search would surface.
+            # Also drop unsurfaced songs — they have no audio on the server,
+            # so the download endpoint would 404 and make_snippet would error.
             matches = [
                 song for song in data.get("results", [])
                 if song.get("leak_type") and "session" not in song["leak_type"].lower()
+                and song.get("category", "").lower() != "unsurfaced"
             ]
 
             # De-duplicate by best-name and keep the first occurrence (songs
@@ -3682,76 +3717,80 @@ class Music(commands.Cog, name="Music"):
         if ctx.author.id in self.ongoing_higherlower:
             await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Higher or Lower!")
             return
-        
-        async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response1:
-            response1_data = await response1.json()
 
-            song1_genius_data = await self.get_genius_data(response1_data.get("song", {}).get("name", ""))
-            if not song1_genius_data:
+        response1_data = await self.fetch_random_playable_song()
+        if response1_data is None:
+            await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+            return
+
+        song1_genius_data = await self.get_genius_data(response1_data.get("song", {}).get("name", ""))
+        if not song1_genius_data:
+            await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+            return
+        song1_id = song1_genius_data.get("id", None)
+        if not song1_id:
+            await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract song ID. Please try again later.")
+            return
+
+        song2_id = song1_id
+        retry = 0
+        while song2_id == song1_id:
+            response2_data = await self.fetch_random_playable_song()
+            if response2_data is None:
+                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
+                return
+
+            song2_genius_data = await self.get_genius_data(response2_data.get("song", {}).get("name", ""))
+            if not song2_genius_data:
+                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
+                return
+            song2_id = song2_genius_data.get("id", None)
+            if not song2_id:
+                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
+                return
+            if not song2_id and retry > 5:
                 await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
                 return
-            song1_id = song1_genius_data.get("id", None)
-            if not song1_id:
-                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract song ID. Please try again later.")
-                return
+            retry += 1
+
+        self.ongoing_higherlower.append(ctx.author.id)
             
-            song2_id = song1_id
-            retry = 0
-            while song2_id == song1_id:
-                async with self.session.get(f"{JUICEWRLD_API}/juicewrld/radio/random/") as response2:
-                    response2_data = await response2.json()
+        # were using the genius title rather than api title because if we get wrong song from genius,
+        # the user can still guess based on song retrieved from geniu  
+        song1_title = self.get_most_acceptable_track_name(song1_genius_data.get("full_title", "Unknown Title"))
+        song2_title = self.get_most_acceptable_track_name(song2_genius_data.get("full_title", "Unknown Title"))
+        song1_pageviews = song1_genius_data.get("stats", {}).get("pageviews", 0)
+        song2_pageviews = song2_genius_data.get("stats", {}).get("pageviews", 0)
 
-                    song2_genius_data = await self.get_genius_data(response2_data.get("song", {}).get("name", ""))
-                    if not song2_genius_data:
-                        await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
-                        return
-                    song2_id = song2_genius_data.get("id", None)
-                    if not song2_id:
-                        await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
-                        return
-                    if not song2_id and retry > 5:
-                        await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
-                        return
-                    retry += 1
+        song1_title = song1_title[:song1_title.rfind("by")].strip() if "by" in song1_title else song1_title
+        song2_title = song2_title[:song2_title.rfind("by")].strip() if "by" in song2_title else song2_title
+        
+        embed = discord.Embed(
+            description=f"Do you think **{song1_title}** has *more* or *less* views than **{song2_title}**?",
+            color=ctx.author.color
+        )
+        embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        # embed.set_footer(text="info from genius.com", icon_url=song1_genius_data.get("song_art_image_url", ""))
+        message = await ctx.send(embed=embed)
+        await message.add_reaction("⬆️")
+        await message.add_reaction("⬇️")
+        def check(reaction, user):
+            return user == ctx.author and str(reaction.emoji) in ["⬆️", "⬇️"] and reaction.message.id == message.id
+        try:    
+            # TODO: add data row and stats similar to headle (!hstats for heardle so like !highlowstats or something like that)
+            # TODO: make game continue system after: Automatically play again but add an X reaction to quit
 
-            self.ongoing_higherlower.append(ctx.author.id)
-                
-            # were using the genius title rather than api title because if we get wrong song from genius,
-            # the user can still guess based on song retrieved from geniu  
-            song1_title = self.get_most_acceptable_track_name(song1_genius_data.get("full_title", "Unknown Title"))
-            song2_title = self.get_most_acceptable_track_name(song2_genius_data.get("full_title", "Unknown Title"))
-            song1_pageviews = song1_genius_data.get("stats", {}).get("pageviews", 0)
-            song2_pageviews = song2_genius_data.get("stats", {}).get("pageviews", 0)
-
-            song1_title = song1_title[:song1_title.rfind("by")].strip() if "by" in song1_title else song1_title
-            song2_title = song2_title[:song2_title.rfind("by")].strip() if "by" in song2_title else song2_title
-            
-            embed = discord.Embed(
-                description=f"Do you think **{song1_title}** has *more* or *less* views than **{song2_title}**?",
-                color=ctx.author.color
-            )
-            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
-            # embed.set_footer(text="info from genius.com", icon_url=song1_genius_data.get("song_art_image_url", ""))
-            message = await ctx.send(embed=embed)
-            await message.add_reaction("⬆️")
-            await message.add_reaction("⬇️")
-            def check(reaction, user):
-                return user == ctx.author and str(reaction.emoji) in ["⬆️", "⬇️"] and reaction.message.id == message.id
-            try:    
-                # TODO: add data row and stats similar to headle (!hstats for heardle so like !highlowstats or something like that)
-                # TODO: make game continue system after: Automatically play again but add an X reaction to quit
-
-                reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=30)
-                if (reaction.emoji == "⬆️" and song1_pageviews > song2_pageviews) or (reaction.emoji == "⬇️" and song1_pageviews < song2_pageviews):
-                    # TODO: use some format lib to format the page views to big num (1.2m instead of 1200000, 100k instead of 100000 etc)
-                    # or maybe not
-                    await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
-                else:
-                    await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
-            except asyncio.TimeoutError:
-                await Embeds.send_warning_embed(ctx.channel, ctx.author, "You took too long to react! Please try again.")
-                self.ongoing_higherlower.remove(ctx.author.id)
-                return
+            reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=30)
+            if (reaction.emoji == "⬆️" and song1_pageviews > song2_pageviews) or (reaction.emoji == "⬇️" and song1_pageviews < song2_pageviews):
+                # TODO: use some format lib to format the page views to big num (1.2m instead of 1200000, 100k instead of 100000 etc)
+                # or maybe not
+                await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
+            else:
+                await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
+        except asyncio.TimeoutError:
+            await Embeds.send_warning_embed(ctx.channel, ctx.author, "You took too long to react! Please try again.")
+            self.ongoing_higherlower.remove(ctx.author.id)
+            return
 
 class CoverArtistView(discord.ui.LayoutView):
     PER_PAGE = 9
