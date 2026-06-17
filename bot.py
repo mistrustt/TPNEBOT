@@ -55,7 +55,7 @@ def setup_logging():
     console_handler.setFormatter(console_formatter)
 
     file_handler = logging.handlers.RotatingFileHandler(
-        "discord.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8", mode="a"
+        "data/discord.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8", mode="a"
     )
     file_handler.setFormatter(file_formatter)
 
