@@ -3338,7 +3338,7 @@ class Music(commands.Cog, name="Music"):
         self.snippet_debounce[ctx.author.id] = True
 
         async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
+            JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": query}
         ) as response:
 
             async def handle_request_failed(ctx, code=None):
