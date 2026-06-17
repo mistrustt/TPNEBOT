@@ -116,6 +116,18 @@ class Moderation(commands.Cog, name="Moderation"):
         if vc.name != new_name:
             await vc.edit(name=new_name, reason="Member count auto-sync")
 
+    def _get_mcc_embed(
+        self,
+        title: str,
+        description: str,
+        color: discord.Color = discord.Color.blue(),
+    ) -> discord.Embed:
+        return discord.Embed(title=title, description=description, color=color)
+
+    def _bot_can_manage(self, channel: discord.VoiceChannel) -> bool:
+        me = channel.guild.me
+        return channel.permissions_for(me).manage_channels
+
     @tasks.loop(minutes=10)
     async def sync_counts(self):
         """Periodic sync in case events were missed."""
@@ -243,70 +255,289 @@ class Moderation(commands.Cog, name="Moderation"):
 
         return await ctx.reply("🚫 You may only target members or channels within this server.", mention_author=False)
 
-    @commands.command(name="mcc", description="Create a member count channel")
+    class _MCCDeleteConfirm(discord.ui.View):
+        def __init__(self, timeout: float = 30.0) -> None:
+            super().__init__(timeout=timeout)
+            self.confirmed = None
+
+        @discord.ui.button(label="Delete", style=discord.ButtonStyle.red, emoji="🗑️")
+        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.confirmed = True
+            for child in self.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=self)
+            self.stop()
+
+        @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey, emoji="❌")
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.confirmed = False
+            for child in self.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=self)
+            self.stop()
+
+    @commands.command(
+        name="mcc",
+        aliases=["membercountchannel"],
+        description="Create a locked voice channel that displays the server's member count.",
+        help="Create a locked voice channel that displays the server's member count.",
+    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def member_count_vc(self, ctx):
-        mcc = await self.bot.database.get_member_count_channel(ctx.guild.id)
-
-        if mcc:
-            return await ctx.reply(
-                embed=discord.Embed(
-                    title="🚫 Already Exists",
-                    description=f"Member count channel already exists: {mcc.name}",
-                    color=discord.Color.red(),
+    @commands.bot_has_permissions(manage_channels=True)
+    async def member_count_vc(self, ctx: Context):
+        existing_id = await self.bot.database.get_member_count_channel(ctx.guild.id)
+        if existing_id:
+            existing = ctx.guild.get_channel(existing_id)
+            if existing:
+                prefix = await self.bot.get_prefix(ctx.message)
+                return await ctx.reply(
+                    embed=self._get_mcc_embed(
+                        title="🚫 Already Exists",
+                        description=(
+                            f"A member count channel is already configured: {existing.mention}.\n\n"
+                            f"• Use `{prefix}setmcc <voice channel>` to switch channels.\n"
+                            f"• Use `{prefix}delmcc` to remove it."
+                        ),
+                        color=discord.Color.red(),
+                    ),
+                    delete_after=15,
                 )
-            )
+            # stale entry; clear it and continue
+            await self.bot.database.set_member_count_channel(ctx.guild.id, None)
 
-        vc = await self._ensure_channel(ctx.guild, "Members: {count:,}")
+        try:
+            vc = await self._ensure_channel(ctx.guild, "Members: {count:,}")
+        except discord.Forbidden:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description="I need the **Manage Channels** permission to create a member count channel.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
 
         await self.bot.database.set_member_count_channel(ctx.guild.id, vc.id)
-
         await ctx.reply(
-            embed=discord.Embed(
+            embed=self._get_mcc_embed(
                 title="✅ Member Count Channel Created",
-                description=f"{vc.name} now shows your member count.",
+                description=(
+                    f"Created {vc.mention}. It will automatically update as members join and leave.\n\n"
+                    f"Current count: **{ctx.guild.member_count:,}**"
+                ),
                 color=discord.Color.green(),
-            )
+            ),
+            delete_after=15,
         )
 
-    @commands.command(name="setmcc", help="Set the member count channel")
+    @commands.command(
+        name="setmcc",
+        aliases=["setmembercountchannel"],
+        description="Set an existing voice channel as the member count channel.",
+        help="Set an existing voice channel as the member count channel. Accepts a mention, ID, or name.",
+    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def set_member_count_channel(self, ctx, channel: int):
-        await self.bot.database.set_member_count_channel(ctx.guild.id, channel)
-        await ctx.guild.get_channel(channel).edit(
-            name=f"Members: {ctx.guild.member_count:,}"
-        )
+    @commands.bot_has_permissions(manage_channels=True)
+    async def set_member_count_channel(self, ctx: Context, channel: discord.VoiceChannel):
+        if channel.guild.id != ctx.guild.id:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Invalid Channel",
+                    description="The channel must be in this server.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
+        if not self._bot_can_manage(channel):
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I need **Manage Channels** permission in {channel.mention} to update its name.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
+        await self.bot.database.set_member_count_channel(ctx.guild.id, channel.id)
+        try:
+            await channel.edit(
+                name=f"Members: {ctx.guild.member_count:,}",
+                reason=f"Set as member count channel by {ctx.author}",
+            )
+        except discord.Forbidden:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I couldn't rename {channel.mention}. Please check my channel permissions.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
         await ctx.reply(
-            embed=discord.Embed(
+            embed=self._get_mcc_embed(
                 title="✅ Member Count Channel Set",
-                description=f"Now using {ctx.guild.get_channel(channel).name} as the member count channel.",
+                description=(
+                    f"Now using {channel.mention} as the member count channel.\n\n"
+                    f"Current count: **{ctx.guild.member_count:,}**"
+                ),
                 color=discord.Color.green(),
-            )
+            ),
+            delete_after=15,
         )
-        await self._update_channel(ctx.guild)
 
-    @commands.command(name="delmcc", help="Delete the member count channel")
+    @commands.command(
+        name="delmcc",
+        aliases=["deletemembercountchannel"],
+        description="Delete the configured member count channel.",
+        help="Delete the configured member count channel after confirmation.",
+    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def delete_member_count_vc(self, ctx):
+    @commands.bot_has_permissions(manage_channels=True)
+    async def delete_member_count_vc(self, ctx: Context):
         channel_id, _ = await self._get_settings(ctx.guild)
         if not channel_id:
             return await ctx.reply(
-                embed=discord.Embed(
+                embed=self._get_mcc_embed(
                     title="🚫 None Found",
-                    description="No member count channel is configured.",
+                    description="No member count channel is configured for this server.",
                     color=discord.Color.red(),
-                )
+                ),
+                delete_after=10,
             )
+
+        vc = ctx.guild.get_channel(channel_id)
+        if not vc:
+            await self.bot.database.set_member_count_channel(ctx.guild.id, None)
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🧹 Cleared",
+                    description="The configured channel no longer exists, so I removed it from the settings.",
+                    color=discord.Color.orange(),
+                ),
+                delete_after=10,
+            )
+
+        if not self._bot_can_manage(vc):
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I need **Manage Channels** permission in {vc.mention} to delete it.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
+        view = self._MCCDeleteConfirm(timeout=30.0)
+        prompt = await ctx.reply(
+            embed=self._get_mcc_embed(
+                title="🗑️ Confirm Deletion",
+                description=(
+                    f"Are you sure you want to delete {vc.mention}?\n\n"
+                    f"This will **permanently delete the channel** and clear the member count setting.\n"
+                    f"Click **Delete** to confirm or **Cancel** to keep it."
+                ),
+                color=discord.Color.orange(),
+            ),
+            view=view,
+        )
+
+        await view.wait()
+        if view.confirmed is None:
+            for child in view.children:
+                child.disabled = True
+            await prompt.edit(
+                embed=self._get_mcc_embed(
+                    title="⏰ Timed Out",
+                    description="Deletion confirmation timed out. The member count channel was not changed.",
+                    color=discord.Color.red(),
+                ),
+                view=view,
+            )
+            return
+
+        if view.confirmed is False:
+            await prompt.edit(
+                embed=self._get_mcc_embed(
+                    title="❌ Cancelled",
+                    description="Member count channel deletion cancelled.",
+                    color=discord.Color.green(),
+                ),
+                view=view,
+            )
+            return
+
+        try:
+            await vc.delete(reason=f"Member count channel removed by {ctx.author}")
+        except discord.Forbidden:
+            return await prompt.edit(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I couldn't delete {vc.mention}. Please check my channel permissions.",
+                    color=discord.Color.red(),
+                ),
+                view=None,
+            )
+
+        await self.bot.database.set_member_count_channel(ctx.guild.id, None)
+        await prompt.edit(
+            embed=self._get_mcc_embed(
+                title="🗑️ Deleted",
+                description="The member count channel has been deleted and the setting has been cleared.",
+                color=discord.Color.red(),
+            ),
+            view=None,
+        )
+
+    @commands.command(
+        name="mccstatus",
+        aliases=["mccinfo"],
+        description="Show the configured member count channel and current count.",
+        help="Show the configured member count channel and current count.",
+    )
+    @commands.guild_only()
+    async def mcc_status(self, ctx: Context):
+        channel_id, template = await self._get_settings(ctx.guild)
+        if not channel_id:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="📊 Member Count Status",
+                    description=(
+                        "No member count channel is configured.\n\n"
+                        f"Use `{await self.bot.get_prefix(ctx.message)}mcc` to create one."
+                    ),
+                    color=discord.Color.blue(),
+                ),
+                delete_after=15,
+            )
+
         vc = ctx.guild.get_channel(channel_id)
         if vc:
-            await vc.delete(reason="Member count channel removed")
-        await self.bot.database.set_member_count_channel(ctx.guild.id, None)
-        await ctx.reply(
-            embed=discord.Embed(
-                title="🗑️ Deleted",
-                description="Member count channel removed.",
-                color=discord.Color.red(),
+            description = (
+                f"**Channel:** {vc.mention}\n"
+                f"**Name:** `{vc.name}`\n"
+                f"**ID:** `{vc.id}`\n"
+                f"**Current member count:** {ctx.guild.member_count:,}"
             )
+            color = discord.Color.green()
+        else:
+            description = (
+                f"**Configured channel ID:** `{channel_id}`\n"
+                f"⚠️ That channel no longer exists. Use `{await self.bot.get_prefix(ctx.message)}delmcc` to clear it."
+            )
+            color = discord.Color.orange()
+
+        await ctx.reply(
+            embed=self._get_mcc_embed(
+                title="📊 Member Count Status",
+                description=description,
+                color=color,
+            ),
+            delete_after=20,
         )
 
     @commands.command(name="setreportchannel", aliases=["src"])
