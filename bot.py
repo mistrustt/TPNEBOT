@@ -645,53 +645,80 @@ class DiscordBot(commands.Bot):
             detailed_error = "".join(
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
+
+            prefix = await self.database.get_prefix(ctx.guild.id) if ctx.guild else "!"
+            invoked_with = ctx.invoked_with or ctx.command.name
+            command_display = f"`{prefix}{invoked_with}`"
+            error_type = type(error).__name__
+            error_message = str(error) or "No message provided."
+
             if dev_channel:
-                if len(detailed_error) <= 4000:
-                    dev_embed = discord.Embed(
-                        title="Unhandled Error",
-                        description=f"Error in command `{ctx.command.qualified_name}`:\n```{detailed_error}```",
-                        color=discord.Color.dark_red(),
+                base_embed = discord.Embed(
+                    title="⚠️ Unhandled Exception",
+                    color=discord.Color.from_rgb(237, 66, 69),
+                    timestamp=discord.utils.utcnow(),
+                )
+                base_embed.set_thumbnail(url=ctx.author.display_avatar.url)
+                base_embed.add_field(
+                    name="🛠️ Command",
+                    value=command_display,
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="❌ Error Type",
+                    value=f"`{error_type}`",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="👤 User",
+                    value=f"{ctx.author.mention}\n`{ctx.author.id}`",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="📍 Channel",
+                    value=f"{ctx.channel.mention}\n`{ctx.channel.id}`",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="🏠 Guild",
+                    value=f"{ctx.guild.name}\n`{ctx.guild.id}`"
+                    if ctx.guild
+                    else "Direct Message",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="📝 Reason",
+                    value=f"```{error_message[:1000]}```"
+                    if len(error_message) <= 1000
+                    else f"```{error_message[:997]}...```",
+                    inline=False,
+                )
+                if ctx.args or ctx.kwargs:
+                    args_str = " ".join(repr(a) for a in ctx.args[2:])  # skip self, ctx
+                    kwargs_str = " ".join(f"{k}={v!r}" for k, v in ctx.kwargs.items())
+                    invocation = " ".join(filter(None, [args_str, kwargs_str]))
+                    base_embed.add_field(
+                        name="📨 Arguments",
+                        value=f"```{invocation[:1000]}```" or "```None```",
+                        inline=False,
                     )
-                    dev_embed.add_field(
-                        name="Command", value=f"`{ctx.command.qualified_name}`"
+                base_embed.set_footer(
+                    text=f"v{self.version} • {ctx.command.qualified_name}",
+                    icon_url=self.user.display_avatar.url if self.user else None,
+                )
+
+                traceback_prefix = f"```py\n{error_type}: {error_message}\n"
+                if len(detailed_error) <= (4000 - len(traceback_prefix) - 3):
+                    base_embed.description = (
+                        f"**Full traceback for** {command_display}:\n"
+                        f"{traceback_prefix}{detailed_error}```"
                     )
-                    dev_embed.add_field(
-                        name="User", value=f"{ctx.author} (ID: {ctx.author.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Guild",
-                        value=f"{ctx.guild.name} (ID: {ctx.guild.id})"
-                        if ctx.guild
-                        else "DM",
-                    )
-                    # dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
-                    await dev_channel.send(embed=dev_embed)
+                    await dev_channel.send(embed=base_embed)
                 else:
-                    dev_embed = discord.Embed(
-                        title="Unhandled Error",
-                        description=f"Error in command `{ctx.command.qualified_name}`:\n",
-                        color=discord.Color.dark_red(),
+                    base_embed.description = (
+                        f"**Traceback exceeds Discord limits.** Summary above; full traceback follows in separate messages."
                     )
-                    dev_embed.add_field(
-                        name="Command", value=f"`{ctx.command.qualified_name}`"
-                    )
-                    dev_embed.add_field(
-                        name="User", value=f"{ctx.author} (ID: {ctx.author.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Guild",
-                        value=f"{ctx.guild.name} (ID: {ctx.guild.id})"
-                        if ctx.guild
-                        else "DM",
-                    )
-                    # dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
-                    await dev_channel.send(embed=dev_embed)
+                    await dev_channel.send(embed=base_embed)
 
                     chunks = [
                         detailed_error[i : i + 3900]
@@ -699,9 +726,13 @@ class DiscordBot(commands.Bot):
                     ]
                     for i, chunk in enumerate(chunks):
                         part_embed = discord.Embed(
-                            title=f"Error Details (Part {i+1}/{len(chunks)})",
-                            description=f"```{chunk}```",
-                            color=discord.Color.dark_red(),
+                            title=f"📄 Traceback ({i + 1}/{len(chunks)})",
+                            description=f"```py\n{chunk}```",
+                            color=discord.Color.from_rgb(237, 66, 69),
+                            timestamp=discord.utils.utcnow(),
+                        )
+                        part_embed.set_footer(
+                            text=f"{ctx.command.qualified_name} • {error_type}"
                         )
                         await dev_channel.send(embed=part_embed)
             else:
@@ -716,10 +747,19 @@ class DiscordBot(commands.Bot):
                     error = error.original
 
                     embed = discord.Embed(
-                        title="An error occurred while executing the command!",
-                        description=f"`File \"{file_name}\":{line_num}\n{last_line}\n{type(error).__name__}: {error}`",
+                        title="💥 Command Error",
+                        description=(
+                            f"```py\n"
+                            f"File: {file_name}\n"
+                            f"Line: {line_num}\n"
+                            f"{last_line}\n"
+                            f"{type(error).__name__}: {error}"
+                            f"```"
+                        ),
                         color=discord.Color.red(),
+                        timestamp=discord.utils.utcnow(),
                     )
+                    embed.set_footer(text=f"v{self.version}")
                     await ctx.reply(embed=embed, delete_after=10)
 
                 self.logger.error(
