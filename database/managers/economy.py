@@ -143,6 +143,7 @@ class EconomyMixin(BaseManager):
         """
         if caller_id not in ADMIN_IDS:
             raise PermissionError("You do not have permission to wipe the economy.")
+        caller_id = self.hash_user_id(caller_id)
 
         if not confirm:
             raise ValueError("`confirm=True` is required as a safety flag.")
@@ -231,6 +232,8 @@ class EconomyMixin(BaseManager):
         supply = await self.get_supply_record()
         return supply.treasury
     async def create_wallet(self, user_id: int) -> None:
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -255,6 +258,8 @@ class EconomyMixin(BaseManager):
         """
         Return the Wallet row for the given user_id, creating one if needed.
         """
+        raw_user_id = user_id
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(Wallet).where(Wallet.user_id == user_id)
@@ -262,7 +267,7 @@ class EconomyMixin(BaseManager):
             wallet = result.scalar_one_or_none()
 
             if not wallet:
-                await self.create_wallet(user_id)
+                await self.create_wallet(raw_user_id)
 
                 result = await session.execute(
                     select(Wallet).where(Wallet.user_id == user_id)
@@ -275,7 +280,9 @@ class EconomyMixin(BaseManager):
         Return just the wallet_id (the UUID primary key) for the given user_id,
         creating a wallet if needed.
         """
-        wallet = await self.get_wallet_by_user_id(user_id)
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
+        wallet = await self.get_wallet_by_user_id(raw_user_id)
         return f"{wallet.wallet_id}"
     async def freeze_wallet(self, wallet_id: str):
         """Freeze a wallet to block outgoing transactions."""
@@ -301,7 +308,9 @@ class EconomyMixin(BaseManager):
         """
         Return the wallet balance for a given user, creating wallet if it doesn't exist.
         """
-        wallet = await self.get_wallet_by_user_id(user_id)
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
+        wallet = await self.get_wallet_by_user_id(raw_user_id)
         return wallet.balance
     async def get_bank_balance(self, wallet_id: str) -> Decimal:
         async with self.async_sessionmaker() as session:
@@ -427,8 +436,12 @@ class EconomyMixin(BaseManager):
                 if receiver.wallet_frozen:
                     raise ValueError("Receiver's wallet is frozen.")
 
+                # Resolve raw IDs for internal anti-cheat calls
+                raw_sender_id = await self.resolve_user_hash(sender.user_id)
+                raw_receiver_id = await self.resolve_user_hash(receiver.user_id)
+
                 # Apply wealth-adjusted fee based on sender's tier
-                adjusted_fee = await self.calculate_wealth_adjusted_fee(sender.user_id, base_fee)
+                adjusted_fee = await self.calculate_wealth_adjusted_fee(raw_sender_id, base_fee)
                 net_amt = AmountUtils.round_currency(amount)
 
                 if fee_from_amount:
@@ -499,27 +512,27 @@ class EconomyMixin(BaseManager):
             # Log the transfer
             await self.log_transfer(
                 transaction_id=txid_main,
-                sender_id=sender.user_id,
-                receiver_id=receiver.user_id,
+                sender_id=raw_sender_id,
+                receiver_id=raw_receiver_id,
                 amount=net_amt,
                 guild_id=guild_id,
             )
 
             # Check for alt transfer
             is_alt_transfer = await self.check_alt_transfer(
-                sender.user_id, receiver.user_id, guild_id
+                raw_sender_id, raw_receiver_id, guild_id
             )
             if is_alt_transfer:
                 await self.log_suspicious_activity(
                     activity_type=SuspiciousActivityType.ALT_TRANSFER,
-                    user_id=sender.user_id,
+                    user_id=raw_sender_id,
                     guild_id=guild_id,
-                    related_user_ids=[receiver.user_id],
+                    related_user_ids=[raw_receiver_id],
                     amount=net_amt,
                     details={
                         "transaction_id": txid_main,
-                        "sender_id": sender.user_id,
-                        "receiver_id": receiver.user_id,
+                        "sender_id": raw_sender_id,
+                        "receiver_id": raw_receiver_id,
                         "description": description,
                     },
                 )
@@ -529,7 +542,7 @@ class EconomyMixin(BaseManager):
             if net_amt >= Decimal("5000"):
                 try:
                     cycles = await self.detect_circular_transfers(
-                        user_id=sender.user_id,
+                        user_id=raw_sender_id,
                         depth=2,
                         hours=2,
                         min_amount=Decimal("5000"),
@@ -540,7 +553,7 @@ class EconomyMixin(BaseManager):
                         for cycle in cycles:
                             await self.log_suspicious_activity(
                                 activity_type=SuspiciousActivityType.CIRCULAR_TRANSFER,
-                                user_id=sender.user_id,
+                                user_id=raw_sender_id,
                                 guild_id=guild_id,
                                 related_user_ids=cycle["path"],
                                 amount=cycle["amount_returned"],
@@ -572,11 +585,12 @@ class EconomyMixin(BaseManager):
             if not wallet:
                 raise ValueError("Wallet missing.")
             user_id = wallet.user_id
+            raw_user_id = await self.resolve_user_hash(user_id)
 
         # Calculate base fee rate and apply wealth adjustment
         base_fee_rate = await self.get_enhanced_fee_rate(transaction_type)
         base_fee = AmountUtils.round_currency(abs(amount) * base_fee_rate)
-        adjusted_fee = await self.calculate_wealth_adjusted_fee(user_id, base_fee)
+        adjusted_fee = await self.calculate_wealth_adjusted_fee(raw_user_id, base_fee)
 
         amount = AmountUtils.round_currency(amount)
         if amount == 0:
@@ -630,6 +644,7 @@ class EconomyMixin(BaseManager):
                         session, "supply", "id", 1, +fee, balance_col="treasury"
                     )
                     from_uid, to_uid = 0, wallet.user_id
+                    raw_from_uid, raw_to_uid = 0, raw_user_id
                 else:  # deposit: wallet → treasury
                     await self._atomic_balance_change(
                         session,
@@ -643,6 +658,7 @@ class EconomyMixin(BaseManager):
                         session, "supply", "id", 1, +net + fee, balance_col="treasury"
                     )
                     from_uid, to_uid = wallet.user_id, 0
+                    raw_from_uid, raw_to_uid = raw_user_id, 0
 
                 # DB tx rows
                 tid_main = str(uuid.uuid4())
@@ -675,8 +691,8 @@ class EconomyMixin(BaseManager):
             # Log the treasury transaction
             await self.log_transfer(
                 transaction_id=tid_main,
-                sender_id=from_uid,
-                receiver_id=to_uid,
+                sender_id=raw_from_uid,
+                receiver_id=raw_to_uid,
                 amount=net,
                 guild_id=guild_id,
             )
@@ -686,7 +702,7 @@ class EconomyMixin(BaseManager):
             if amount > 0 and net >= Decimal("5000"):
                 # Check if receiver has suspicious activity patterns
                 # This helps detect potential exploits or abuse of treasury systems
-                user_id = to_uid
+                user_id = raw_to_uid
 
                 # Check for rapid successive large treasury receipts
                 recent_large_receipts = await self.get_recent_large_treasury_receipts(
@@ -733,8 +749,10 @@ class EconomyMixin(BaseManager):
                 if tx.amount == 0:
                     raise ValueError("Cannot refund zero-amount transaction.")
 
-                from_wallet_id = await self.get_wallet_id_for_user(tx.from_user_id)
-                to_wallet_id = await self.get_wallet_id_for_user(tx.to_user_id)
+                raw_from_id = await self.resolve_user_hash(tx.from_user_id)
+                raw_to_id = await self.resolve_user_hash(tx.to_user_id)
+                from_wallet_id = await self.get_wallet_id_for_user(raw_from_id)
+                to_wallet_id = await self.get_wallet_id_for_user(raw_to_id)
 
                 # Always give money back to the original sender
                 await self._atomic_balance_change(
@@ -817,6 +835,7 @@ class EconomyMixin(BaseManager):
         :param limit: How many of the most recent transactions to retrieve (default=10).
         :return: A list of Transaction objects sorted by timestamp descending.
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             try:
                 stmt = (
@@ -933,7 +952,9 @@ class EconomyMixin(BaseManager):
                     .limit(limit)
                 )
                 result = await session.execute(stmt)
-                return result.all()
+                rows = result.all()
+                mapping = await self.resolve_user_hashes([h for h, _ in rows])
+                return [(mapping.get(h), bal) for h, bal in rows]
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving top balance users: {str(e)}")
                 return []
@@ -945,6 +966,7 @@ class EconomyMixin(BaseManager):
         Returns:
             The rank of the user (1-based), or None if the user has no wallet.
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             try:
                 subquery = (
@@ -993,7 +1015,9 @@ class EconomyMixin(BaseManager):
                     .limit(limit)
                 )
                 result = await session.execute(stmt)
-                return result.all()
+                rows = result.all()
+                mapping = await self.resolve_user_hashes([h for h, _ in rows])
+                return [(mapping.get(h), bal) for h, bal in rows]
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving top wallet users: {str(e)}")
                 return []
@@ -1015,7 +1039,9 @@ class EconomyMixin(BaseManager):
                     .limit(limit)
                 )
                 result = await session.execute(stmt)
-                return result.all()
+                rows = result.all()
+                mapping = await self.resolve_user_hashes([h for h, _ in rows])
+                return [(mapping.get(h), bal) for h, bal in rows]
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving top bank users: {str(e)}")
                 return []
@@ -1399,12 +1425,13 @@ class EconomyMixin(BaseManager):
     async def get_user_wealth_tier(self, user_id: int) -> int:
         """
         Calculate the user's wealth tier based on their percentage of total supply.
-        
+
         Wealth is calculated on-demand as: wallet + bank + crypto at current prices.
-        
+
         Returns:
             int: Tier 0-4 (0 = no penalty, 1-4 = escalating penalties)
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             # Get user's wallet and bank
             result = await session.execute(select(Wallet).where(Wallet.user_id == user_id))
@@ -1467,13 +1494,15 @@ class EconomyMixin(BaseManager):
     async def get_wealth_tier_info(self, user_id: int) -> dict:
         """
         Get comprehensive wealth tier information for a user.
-        
+
         Args:
             user_id: The user's ID
-            
+
         Returns:
             dict: Contains tier, wealth, percentage, thresholds, and multipliers
         """
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
         async with self.async_sessionmaker() as session:
             # Get user's wallet and bank
             wallet = await session.get(Wallet, user_id)
@@ -1523,7 +1552,7 @@ class EconomyMixin(BaseManager):
             user_ratio = user_wealth / total_supply
             
             # Determine tier
-            tier = await self.get_user_wealth_tier(user_id)
+            tier = await self.get_user_wealth_tier(raw_user_id)
             
             # Determine next tier threshold
             next_tier_threshold = None
@@ -1547,15 +1576,17 @@ class EconomyMixin(BaseManager):
     async def calculate_wealth_adjusted_fee(self, user_id: int, base_fee: Decimal) -> Decimal:
         """
         Calculate a wealth-adjusted fee for high-wealth users.
-        
+
         Args:
             user_id: The user's ID
             base_fee: The base fee amount
-            
+
         Returns:
             Decimal: Adjusted fee based on user's wealth tier
         """
-        user_tier = await self.get_user_wealth_tier(user_id)
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
+        user_tier = await self.get_user_wealth_tier(raw_user_id)
         if user_tier == 0:
             return base_fee
         
@@ -1584,16 +1615,18 @@ class EconomyMixin(BaseManager):
             raise_if_limited: If True, raises ValueError when user exceeds limit
             max_payout_multiplier: Maximum payout multiplier for the game (e.g., 50.0 for crash)
         """
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
 
         # ---- constants -------------------------------------------------------
         MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2% of treasury
         MIN_ABSOLUTE_FLOOR = Decimal("100.00")   # Floor value for small players
 
         # ---- fetch user data -------------------------------------------------
-        wallet = await self.get_wallet_by_user_id(user_id)
+        wallet = await self.get_wallet_by_user_id(raw_user_id)
         wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
         bank_bal = await self.get_bank_balance(wallet.wallet_id)
-        crypto_assets = await self.get_crypto_assets(user_id)
+        crypto_assets = await self.get_crypto_assets(raw_user_id)
         
         # Calculate crypto value from assets
         crypto_bal = Decimal("0.00")
@@ -1645,7 +1678,7 @@ class EconomyMixin(BaseManager):
             base_coeff = Decimal("0.00125")  # 0.125%
 
         # ---- apply wealth tier penalty --------------------------------------
-        user_tier = await self.get_user_wealth_tier(user_id)
+        user_tier = await self.get_user_wealth_tier(raw_user_id)
         if user_tier > 0:
             multipliers = self.get_wealth_penalty_multipliers(user_tier)
             base_coeff *= multipliers["bet"]  # Apply tier-based bet multiplier
@@ -1693,7 +1726,9 @@ class EconomyMixin(BaseManager):
         Calculate the maximum safe loan amount a user can take based on their balance and economic factors.
         Uses a similar risk model to gambling limits but with more leniency.
         """
-        wallet = await self.get_wallet_by_user_id(user_id)
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
+        wallet = await self.get_wallet_by_user_id(raw_user_id)
         wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
         bank_bal = await self.get_bank_balance(wallet.wallet_id)
         user_total = wallet_bal + bank_bal
@@ -1716,7 +1751,7 @@ class EconomyMixin(BaseManager):
             base_coeff = Decimal("0.002")  # 0.2% of treasury
 
         # ---- apply wealth tier penalty --------------------------------------
-        user_tier = await self.get_user_wealth_tier(user_id)
+        user_tier = await self.get_user_wealth_tier(raw_user_id)
         if user_tier > 0:
             multipliers = self.get_wealth_penalty_multipliers(user_tier)
             base_coeff *= multipliers["loan"]  # Apply tier-based loan multiplier
@@ -1727,19 +1762,21 @@ class EconomyMixin(BaseManager):
         """
         Calculate the maximum amount a user can transfer in a single transaction.
         Uses wealth tier penalties to limit high-wealth users' transfer capabilities.
-        
+
         Args:
             user_id: The user's ID
-            
+
         Returns:
             Decimal: Maximum transfer amount
         """
-        wallet = await self.get_wallet_by_user_id(user_id)
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
+        wallet = await self.get_wallet_by_user_id(raw_user_id)
         wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
         bank_bal = await self.get_bank_balance(wallet.wallet_id)
-        
+
         # Get user's crypto holdings at current prices
-        crypto_assets = await self.get_crypto_assets(user_id)
+        crypto_assets = await self.get_crypto_assets(raw_user_id)
         crypto_bal = Decimal("0.00")
         if crypto_assets:
             symbols = [asset.symbol for asset in crypto_assets]
@@ -1778,7 +1815,7 @@ class EconomyMixin(BaseManager):
             base_coeff = Decimal("0.20")  # 20% of user's wealth
 
         # Apply wealth tier penalty
-        user_tier = await self.get_user_wealth_tier(user_id)
+        user_tier = await self.get_user_wealth_tier(raw_user_id)
         if user_tier > 0:
             multipliers = self.get_wealth_penalty_multipliers(user_tier)
             base_coeff *= multipliers["transfer"]  # Apply tier-based transfer multiplier
@@ -1980,6 +2017,8 @@ class EconomyMixin(BaseManager):
         Returns:
             UserEconomicPreferences object
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             # Try to get existing preferences
             stmt = select(UserEconomicPreferences).where(UserEconomicPreferences.user_id == user_id)
@@ -2001,6 +2040,8 @@ class EconomyMixin(BaseManager):
             user_id: Discord user ID
             **kwargs: Preference fields to update
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 stmt = select(UserEconomicPreferences).where(UserEconomicPreferences.user_id == user_id)
@@ -2029,7 +2070,9 @@ class EconomyMixin(BaseManager):
                 UserEconomicPreferences.economic_alerts_enabled == True
             )
             result = await session.execute(stmt)
-            return [row[0] for row in result.fetchall()]
+            hashes = [row[0] for row in result.fetchall()]
+            mapping = await self.resolve_user_hashes(hashes)
+            return [mapping.get(h) for h in hashes]
     async def check_and_send_economic_alerts(self) -> dict:
         """
         Check economic conditions and send alerts to users who have them enabled.
@@ -2067,8 +2110,10 @@ class EconomyMixin(BaseManager):
         Returns:
             Dictionary with recommendations
         """
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
         # Get user preferences
-        preferences = await self.get_or_create_user_economic_preferences(user_id)
+        preferences = await self.get_or_create_user_economic_preferences(raw_user_id)
 
         # Get current economic factors
         factors = await self.get_economic_factors()
@@ -2369,6 +2414,8 @@ class EconomyMixin(BaseManager):
         """
         Add a new loan record to the database for a user. Ensure one loan per user for simplicity.
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 existing_loan = await session.execute(
@@ -2388,12 +2435,14 @@ class EconomyMixin(BaseManager):
                 session.add(new_loan)
             await session.commit()
     async def get_active_loans_for_user(self, user_id: int) -> list[Loan]:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue", "defaulted"]))
             )
             return result.scalars().all()
     async def update_loan_for_user(self, user_id: int, new_status: str, new_principal: Decimal = None, new_interest_rate: Decimal = None, new_total_repay: Decimal = None, new_due_date: datetime = None):
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -2433,9 +2482,12 @@ class EconomyMixin(BaseManager):
         Raises:
             ValueError: If no active loan exists or payment amount is invalid
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
+
         if payment_amount <= 0:
             raise ValueError("Payment amount must be greater than 0.")
-        
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -2479,13 +2531,14 @@ class EconomyMixin(BaseManager):
     async def get_loan_payment_history(self, user_id: int) -> list[LoanPayment]:
         """
         Retrieve all payment records for a user's loans.
-        
+
         Args:
             user_id: Discord user ID
-            
+
         Returns:
             List of LoanPayment records ordered by payment_date descending
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(LoanPayment)
@@ -2497,16 +2550,17 @@ class EconomyMixin(BaseManager):
     async def get_loan_remaining_balance(self, user_id: int) -> Decimal:
         """
         Calculate the remaining balance on a user's active loan.
-        
+
         Args:
             user_id: Discord user ID
-            
+
         Returns:
             Decimal representing remaining balance (total_repay - amount_paid)
-            
+
         Raises:
             ValueError: If no active loan exists
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue"]))
@@ -2541,7 +2595,8 @@ class EconomyMixin(BaseManager):
                     if days_overdue >= 7:
                         loan.status = "defaulted"
                         loan.defaulted_date = now
-                        wallet = await self.get_wallet_by_user_id(loan.user_id)
+                        raw_uid = await self.resolve_user_hash(loan.user_id)
+                        wallet = await self.get_wallet_by_user_id(raw_uid)
                         if wallet and not wallet.wallet_frozen:
                             await self.freeze_wallet(wallet.wallet_id)
                 
@@ -2557,7 +2612,8 @@ class EconomyMixin(BaseManager):
                 for loan in defaulted_loans:
                     days_defaulted = (now - loan.defaulted_date).days
                     if days_defaulted >= 7:
-                        wallet = await self.get_wallet_by_user_id(loan.user_id)
+                        raw_uid = await self.resolve_user_hash(loan.user_id)
+                        wallet = await self.get_wallet_by_user_id(raw_uid)
                         if wallet and wallet.wallet_frozen:
                             await self.unfreeze_wallet(wallet.wallet_id)
     async def get_dynamic_reward_multiplier(self) -> Decimal:
@@ -2684,6 +2740,12 @@ class EconomyMixin(BaseManager):
         guild_id: int,
     ) -> None:
         """Log a P2P transfer in the transfer history table."""
+        if sender_id not in (0, None):
+            await self.ensure_user_identity(sender_id)
+            sender_id = self.hash_user_id(sender_id)
+        if receiver_id not in (0, None):
+            await self.ensure_user_identity(receiver_id)
+            receiver_id = self.hash_user_id(receiver_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 session.add(
@@ -2702,8 +2764,12 @@ class EconomyMixin(BaseManager):
         Check if a transfer is between linked alternate accounts.
         Returns True if the users are linked alts, False otherwise.
         """
-        linked_ids = await self.get_all_linked_user_ids(sender_id, guild_id)
-        return receiver_id in linked_ids
+        raw_sender_id = sender_id
+        raw_receiver_id = receiver_id
+        sender_id = self.hash_user_id(raw_sender_id)
+        receiver_id = self.hash_user_id(raw_receiver_id)
+        linked_raw_ids = await self.get_all_linked_user_ids(raw_sender_id, guild_id)
+        return raw_receiver_id in linked_raw_ids
     async def log_suspicious_activity(
         self,
         activity_type: SuspiciousActivityType,
@@ -2717,6 +2783,17 @@ class EconomyMixin(BaseManager):
         Log a suspicious activity for owner review.
         Returns the ID of the created log entry.
         """
+        if user_id not in (0, None):
+            await self.ensure_user_identity(user_id)
+            user_id = self.hash_user_id(user_id)
+        if related_user_ids:
+            hashed_related = []
+            for uid in related_user_ids:
+                if uid in (0, None):
+                    continue
+                await self.ensure_user_identity(uid)
+                hashed_related.append(self.hash_user_id(uid))
+            related_user_ids = hashed_related
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 log = SuspiciousActivityLog(
@@ -2739,6 +2816,8 @@ class EconomyMixin(BaseManager):
         limit: int = 50,
     ) -> List[SuspiciousActivityLog]:
         """Query suspicious activity logs with filters."""
+        if user_id is not None:
+            user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             stmt = select(SuspiciousActivityLog).order_by(
                 SuspiciousActivityLog.created_at.desc()
@@ -2759,6 +2838,7 @@ class EconomyMixin(BaseManager):
         self, log_id: int, reviewed_by: int, notes: str = None
     ) -> bool:
         """Mark a suspicious activity log as reviewed."""
+        reviewed_by = self.hash_user_id(reviewed_by)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 log = await session.get(SuspiciousActivityLog, log_id)
@@ -2775,6 +2855,7 @@ class EconomyMixin(BaseManager):
         Get recent large treasury receipts for a user.
         Used for detecting potential treasury exploitation patterns.
         """
+        user_id = self.hash_user_id(user_id)
         if min_amount is None:
             min_amount = Decimal("5000")  # Default threshold
 
@@ -2808,8 +2889,11 @@ class EconomyMixin(BaseManager):
         - total_crypto: sum of crypto values only
         - account_count: number of accounts in network
         """
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
         # Get all linked users
-        linked_ids = await self.get_all_linked_user_ids(user_id, guild_id) if guild_id else []
+        linked_raw_ids = await self.get_all_linked_user_ids(raw_user_id, guild_id) if guild_id else []
+        linked_ids = [self.hash_user_id(uid) for uid in linked_raw_ids]
         all_user_ids = [user_id] + linked_ids
 
         async with self.async_sessionmaker() as session:
@@ -2888,10 +2972,11 @@ class EconomyMixin(BaseManager):
         total_crypto = sum(b["crypto"] for b in individual_balances.values())
         total_balance = total_wallet + total_bank + total_crypto
 
+        mapping = await self.resolve_user_hashes(all_user_ids)
         return {
-            "main_user_id": user_id,
-            "linked_user_ids": linked_ids,
-            "individual_balances": individual_balances,
+            "main_user_id": mapping.get(user_id),
+            "linked_user_ids": [mapping.get(h) for h in linked_ids],
+            "individual_balances": {mapping.get(h): bal for h, bal in individual_balances.items()},
             "total_balance": total_balance,
             "total_wallet": total_wallet,
             "total_bank": total_bank,
@@ -2912,6 +2997,7 @@ class EconomyMixin(BaseManager):
         - transaction_count_out: number of outgoing transactions
         - ratio: received/sent ratio (None if no sends)
         """
+        user_id = self.hash_user_id(user_id)
         cutoff = discord.utils.utcnow() - timedelta(days=days)
 
         async with self.async_sessionmaker() as session:
@@ -2954,7 +3040,7 @@ class EconomyMixin(BaseManager):
         ratio = float(total_received / total_sent) if total_sent > 0 else None
 
         return {
-            "user_id": user_id,
+            "user_id": await self.resolve_user_hash(user_id),
             "days": days,
             "total_received": total_received,
             "total_sent": total_sent,
@@ -2982,17 +3068,20 @@ class EconomyMixin(BaseManager):
         - risk_level: "low", "medium", "high", "critical"
         - details: supporting data
         """
+        user_id = self.hash_user_id(user_id)
+        raw_user_id = await self.resolve_user_hash(user_id)
+
         # Get aggregated balance (wallet + bank + crypto)
-        balance_data = await self.get_aggregated_balance(user_id, guild_id)
+        balance_data = await self.get_aggregated_balance(raw_user_id, guild_id)
 
         # Get net flow
-        flow_data = await self.get_net_flow(user_id, days, guild_id)
+        flow_data = await self.get_net_flow(raw_user_id, days, guild_id)
 
         # Get main user's total balance (wallet + bank + crypto)
-        main_balance = balance_data["individual_balances"].get(user_id, {}).get("total", Decimal("0"))
-        main_wallet = balance_data["individual_balances"].get(user_id, {}).get("wallet", Decimal("0"))
-        main_bank = balance_data["individual_balances"].get(user_id, {}).get("bank", Decimal("0"))
-        main_crypto = balance_data["individual_balances"].get(user_id, {}).get("crypto", Decimal("0"))
+        main_balance = balance_data["individual_balances"].get(raw_user_id, {}).get("total", Decimal("0"))
+        main_wallet = balance_data["individual_balances"].get(raw_user_id, {}).get("wallet", Decimal("0"))
+        main_bank = balance_data["individual_balances"].get(raw_user_id, {}).get("bank", Decimal("0"))
+        main_crypto = balance_data["individual_balances"].get(raw_user_id, {}).get("crypto", Decimal("0"))
 
         factors = {}
         details = {
@@ -3092,7 +3181,7 @@ class EconomyMixin(BaseManager):
             risk_level = "low"
 
         return {
-            "user_id": user_id,
+            "user_id": raw_user_id,
             "score": total_score,
             "factors": factors,
             "risk_level": risk_level,
@@ -3128,14 +3217,15 @@ class EconomyMixin(BaseManager):
 
         hoarding_candidates = []
 
-        for user_id, balance in candidates:
+        for user_hash, balance in candidates:
+            raw_user_id = await self.resolve_user_hash(user_hash)
             score_data = await self.calculate_hoarding_score(
-                user_id, guild_id, days=30
+                raw_user_id, guild_id, days=30
             )
 
             if score_data["score"] >= min_score:
                 hoarding_candidates.append({
-                    "user_id": user_id,
+                    "user_id": raw_user_id,
                     "score": score_data["score"],
                     "risk_level": score_data["risk_level"],
                     "total_balance": score_data["details"]["aggregated_balance"]["total_balance"],
@@ -3157,6 +3247,7 @@ class EconomyMixin(BaseManager):
         limit: int = 100,
     ) -> List[TransferHistory]:
         """Get recent transfers for a user."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             cutoff = discord.utils.utcnow() - timedelta(hours=hours)
             stmt = (
@@ -3202,6 +3293,7 @@ class EconomyMixin(BaseManager):
         - similarity: ratio of returned/sent (higher = more suspicious)
         - total_sent: total amount sent by originator
         """
+        user_id = self.hash_user_id(user_id)
         cutoff = discord.utils.utcnow() - timedelta(hours=hours)
 
         async with self.async_sessionmaker() as session:
@@ -3288,9 +3380,16 @@ class EconomyMixin(BaseManager):
                 # Only trace this specific amount pattern
                 find_cycles_dfs(user_id, first_hop, [user_id, first_hop], [amt_sent], {user_id, first_hop})
 
+        if suspicious_cycles:
+            all_hashes = {h for cycle in suspicious_cycles for h in cycle["path"]}
+            mapping = await self.resolve_user_hashes(list(all_hashes))
+            for cycle in suspicious_cycles:
+                cycle["path"] = [mapping.get(h) for h in cycle["path"]]
+
         return suspicious_cycles
     async def get_job(self, user_id: int) -> Optional[Job]:
         """Get a user's current job, if any."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(Job).where(Job.user_id == user_id)
@@ -3300,6 +3399,8 @@ class EconomyMixin(BaseManager):
         self, user_id: int, job_title: str, base_salary: Decimal
     ) -> Job:
         """Apply for a job. Creates a new job record for the user."""
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 # Check if user already has a job
@@ -3322,6 +3423,7 @@ class EconomyMixin(BaseManager):
             return job
     async def quit_job(self, user_id: int) -> bool:
         """Remove a user's job record."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -3339,6 +3441,7 @@ class EconomyMixin(BaseManager):
         Returns the updated job and the calculated salary.
         Raises ValueError if cooldown hasn't expired, no job found, or user was fired for absence.
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -3406,6 +3509,7 @@ class EconomyMixin(BaseManager):
             return result.scalars().all()
     async def fire_employee(self, user_id: int) -> bool:
         """Remove a job record for an inactive employee."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(

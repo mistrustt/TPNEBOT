@@ -31,6 +31,14 @@ import enum
 Base = declarative_base()
 
 
+class UserIdentity(Base):
+    __tablename__ = "user_identities"
+
+    user_hash = Column(String(64), primary_key=True)
+    user_id = Column(BigInteger, nullable=False, unique=True)
+
+
+
 class CaseStatus(enum.Enum):
     OPEN = "open"
     CLOSED = "closed"
@@ -98,9 +106,9 @@ class Punishment(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     case_id = Column(Integer, nullable=False)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     guild_id = Column(BigInteger, nullable=False)
-    moderator_id = Column(BigInteger, nullable=True)
+    moderator_id = Column(String(64), nullable=True)
     type = Column(Enum(PunishmentType), nullable=False)
     reason = Column(String, nullable=False)
     duration = Column(Integer, nullable=True)
@@ -114,7 +122,7 @@ class CaseNote(Base):
 
     id = Column(Integer, primary_key=True)
     case_id = Column(Integer, ForeignKey("punishments.id"), nullable=False)
-    moderator_id = Column(BigInteger, nullable=False)
+    moderator_id = Column(String(64), nullable=False)
     note = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
@@ -138,7 +146,7 @@ class WatchdogLog(Base):
     __tablename__ = "watchdog_log"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    moderator_id = Column(BigInteger, nullable=False)
+    moderator_id = Column(String(64), nullable=False)
     guild_id = Column(BigInteger, nullable=False)
     punishment_type = Column(Enum(PunishmentType), nullable=False)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
@@ -157,7 +165,7 @@ class JailedUser(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     guild_id = Column(BigInteger, nullable=False)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     jailed_until = Column(TIMESTAMP(timezone=True), nullable=True)
     roles = Column(ARRAY(BigInteger), nullable=True)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
@@ -173,7 +181,7 @@ class ImageMuteSetting(Base):
     __tablename__ = "image_mute_settings"
 
     guild_id = Column(BigInteger, primary_key=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     role_id = Column(BigInteger, nullable=False)
 
 
@@ -190,7 +198,7 @@ class CommandCooldown(Base):
     __tablename__ = "command_cooldowns"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     command_name = Column(String, nullable=False)
     cooldown_expiry = Column(DateTime(timezone=True), nullable=False)
 
@@ -291,7 +299,7 @@ class DailyUserExposure(Base):
 class LastFMusers(Base):
     __tablename__ = "lastfm_users"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     lastfm_username = Column(String, nullable=True)
     embed_color = Column(String, default="#1DB954")
 
@@ -299,7 +307,7 @@ class LastFMusers(Base):
 class LastFMvotes(Base):
     __tablename__ = "lastfm_votes"
 
-    discord_id = Column(BigInteger, primary_key=True, nullable=False)
+    discord_id = Column(String(64), primary_key=True, nullable=False)
     command = Column(String, primary_key=True, nullable=False)
     upvotes = Column(Integer, default=0)
     downvotes = Column(Integer, default=0)
@@ -309,7 +317,7 @@ class BoosterRole(Base):
     __tablename__ = "booster_roles"
 
     guild_id = Column(BigInteger, primary_key=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     role_id = Column(BigInteger, nullable=False)
 
 
@@ -317,7 +325,7 @@ class Wallet(Base):
     __tablename__ = "wallets"
 
     wallet_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(BigInteger, nullable=False, unique=True)
+    user_id = Column(String(64), nullable=False, unique=True)
     balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
     bank_balance = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"))
     wallet_frozen = Column(Boolean, default=False, server_default="false")
@@ -336,8 +344,8 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    from_user_id = Column(BigInteger, nullable=True)
-    to_user_id = Column(BigInteger, nullable=True)
+    from_user_id = Column(String(64), nullable=True)
+    to_user_id = Column(String(64), nullable=True)
     amount = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
@@ -368,7 +376,7 @@ class Item(Base):
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("wallets.user_id"))
+    user_id = Column(String(64), ForeignKey("wallets.user_id"))
     name = Column(String, nullable=False)
     serial_number = Column(String, unique=True, nullable=False)
     description = Column(String, nullable=True)
@@ -410,7 +418,7 @@ class ItemCooldown(Base):
     __tablename__ = "item_cooldowns"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
     item_name = Column(String, nullable=False)
     cooldown_expiry = Column(DateTime(timezone=True), nullable=False)
 
@@ -427,7 +435,7 @@ class ActiveEffect(Base):
     __tablename__ = "active_effects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
     effect_type = Column(String, nullable=False)
     effect_value = Column(Numeric(10, 4), nullable=False)
     source_item_name = Column(String, nullable=False)
@@ -447,8 +455,8 @@ class TradeLog(Base):
     __tablename__ = "trade_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    from_user_id = Column(BigInteger, nullable=False, index=True)
-    to_user_id = Column(BigInteger, nullable=False, index=True)
+    from_user_id = Column(String(64), nullable=False, index=True)
+    to_user_id = Column(String(64), nullable=False, index=True)
     item_id = Column(Integer, nullable=False)
     item_name = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
@@ -464,9 +472,9 @@ class Bounty(Base):
     __tablename__ = "bounties"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    target_id = Column(BigInteger, nullable=False)
-    issuer_id = Column(BigInteger, nullable=False)
-    claimer_id = Column(BigInteger, nullable=True)
+    target_id = Column(String(64), nullable=False)
+    issuer_id = Column(String(64), nullable=False)
+    claimer_id = Column(String(64), nullable=True)
     reward = Column(
         Numeric(precision=38, scale=8), nullable=False, default=Decimal("0.00")
     )
@@ -483,7 +491,7 @@ class Loan(Base):
     __tablename__ = "loans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     principal = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
@@ -511,7 +519,7 @@ class LoanPayment(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     loan_id = Column(Integer, ForeignKey("loans.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     payment_amount = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
@@ -528,7 +536,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, unique=True)
+    user_id = Column(String(64), nullable=False, unique=True)
     title = Column(String, nullable=False)
     base_salary = Column(Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00"))
     days_employed = Column(Integer, default=1, nullable=False)
@@ -543,7 +551,7 @@ class UserRoleHistory(Base):
     __tablename__ = "user_role_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     roles = Column(ARRAY(BigInteger), nullable=False)
     timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
 
@@ -553,41 +561,41 @@ class UserRoleHistory(Base):
 class Reputation(Base):
     __tablename__ = "reputation"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     reputation = Column(Integer, default=0, nullable=False)
 
 class Sobs(Base):
     __tablename__ = "sobs"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     sobs_tx = Column(Integer, default=0, nullable=False)
     sobs_rx = Column(Integer, default=0, nullable=False)
 
 class Skulls(Base):
     __tablename__ = "skulls"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     skulls_tx = Column(Integer, default=0, nullable=False)
     skulls_rx = Column(Integer, default=0, nullable=False)
 
 class Flames(Base):
     __tablename__ = "flames"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     flames_tx = Column(Integer, default=0, nullable=False)
     flames_rx = Column(Integer, default=0, nullable=False)
 
 class Hearts(Base):
     __tablename__ = "hearts"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     hearts_tx = Column(Integer, default=0, nullable=False)
     hearts_rx = Column(Integer, default=0, nullable=False)
 
 class Clowns(Base):
     __tablename__ = "clowns"
 
-    discord_id = Column(BigInteger, primary_key=True)
+    discord_id = Column(String(64), primary_key=True)
     clowns_tx = Column(Integer, default=0, nullable=False)
     clowns_rx = Column(Integer, default=0, nullable=False)
 
@@ -601,8 +609,8 @@ class Blacklist(Base):
     __tablename__ = "blacklist"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, unique=True)
-    admin_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False, unique=True)
+    admin_id = Column(String(64), nullable=False)
     reason = Column(String, nullable=False, default="No reason provided")
     added_at = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
 
@@ -610,20 +618,20 @@ class FavoriteSongs(Base):
     __tablename__ = "favorite_songs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     song_title = Column(String, nullable=False)
 
 class UserTimezone(Base):
     __tablename__ = "user_timezones"
 
-    user_id = Column(BigInteger, primary_key=True)
+    user_id = Column(String(64), primary_key=True)
     timezone = Column(String, nullable=True)
 
 
 class UserLocation(Base):
     __tablename__ = "user_locations"
 
-    user_id = Column(BigInteger, primary_key=True)
+    user_id = Column(String(64), primary_key=True)
     location = Column(String, nullable=True)
     lat = Column(Numeric(precision=10, scale=6), nullable=True)
     lon = Column(Numeric(precision=10, scale=6), nullable=True)
@@ -642,7 +650,7 @@ class Block(Base):
     transactions = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    validator_id = Column(BigInteger, nullable=True)
+    validator_id = Column(String(64), nullable=True)
     validator_signature = Column(String, nullable=True)
 
     def compute_hash(self):
@@ -713,7 +721,7 @@ class EconomicMetricsHistory(Base):
 class UserEconomicPreferences(Base):
     __tablename__ = "user_economic_preferences"
 
-    user_id = Column(BigInteger, primary_key=True)
+    user_id = Column(String(64), primary_key=True)
     # Notification preferences
     economic_alerts_enabled = Column(Boolean, default=True)
     velocity_alerts_enabled = Column(Boolean, default=True)
@@ -747,7 +755,7 @@ class MinesSettings(Base):
 class HeardleGameStats(Base):
     __tablename__ = "heardle_game_stats"
 
-    user_id = Column(BigInteger, primary_key=True)
+    user_id = Column(String(64), primary_key=True)
     wins = Column(Integer, default=0)
     losses = Column(Integer, default=0)
     streak = Column(Integer, default=0)
@@ -757,7 +765,7 @@ class GameHistory(Base):
     __tablename__ = "game_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
     game_name = Column(String, nullable=False)
     outcome = Column(String, nullable=False)  # 'win', 'loss', 'tie', etc.
     wagered = Column(Numeric(precision=38, scale=2), nullable=False)
@@ -786,8 +794,8 @@ class GameSession(Base):
     guild_id = Column(BigInteger, nullable=True)
     channel_id = Column(BigInteger, nullable=True)
     message_id = Column(BigInteger, nullable=True)
-    owner_id = Column(BigInteger, nullable=True)
-    participants = Column(ARRAY(BigInteger), nullable=True)
+    owner_id = Column(String(64), nullable=True)
+    participants = Column(ARRAY(String(64)), nullable=True)
     wager_total = Column(Numeric(precision=38, scale=2), nullable=True)
     state = Column(JSON, nullable=True)
     rng = Column(JSON, nullable=True)
@@ -820,7 +828,7 @@ class ReportSetting(Base):
 class Task(Base):
     __tablename__ = "tasks"
     task_id = Column(Integer, primary_key=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     task = Column(String, nullable=False)
     completed = Column(Boolean, default=False)
     order_index = Column(Integer, nullable=False)
@@ -840,7 +848,7 @@ class TempVoiceChannel(Base):
 
     channel_id = Column(BigInteger, primary_key=True)
     guild_id = Column(BigInteger, nullable=False)
-    owner_id = Column(BigInteger, nullable=False)
+    owner_id = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
 
@@ -848,7 +856,7 @@ class UserNameHistory(Base):
     __tablename__ = "user_name_history"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
     old_name = Column(String, nullable=False)
     new_name = Column(String, nullable=False)
     change_type = Column(String, nullable=False)
@@ -866,7 +874,7 @@ class CryptoAsset(Base):
     __tablename__ = "crypto_assets"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("wallets.user_id"), nullable=False)
+    user_id = Column(String(64), ForeignKey("wallets.user_id"), nullable=False)
     symbol = Column(String, nullable=False)
     amount = Column(Numeric(precision=38, scale=8), default=Decimal("0.00000000"))
     purchase_price = Column(Numeric(precision=38, scale=8), default=Decimal("0.00"))
@@ -901,7 +909,7 @@ class Juul(Base):
     __tablename__ = "juuls"
 
     guild_id = Column(BigInteger, primary_key=True)
-    holder_id = Column(BigInteger, nullable=True)
+    holder_id = Column(String(64), nullable=True)
     hits = Column(Integer, default=0)
     passes = Column(Integer, default=0)
     steals = Column(Integer, default=0)
@@ -913,9 +921,9 @@ class UserAlt(Base):
     __tablename__ = "user_alts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    main_user_id = Column(BigInteger, nullable=False, index=True)
+    main_user_id = Column(String(64), nullable=False, index=True)
     guild_id = Column(BigInteger, nullable=False, index=True)
-    alt_user_id = Column(BigInteger, nullable=False, index=True)
+    alt_user_id = Column(String(64), nullable=False, index=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -936,13 +944,13 @@ class SuspiciousActivityLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     activity_type = Column(Enum(SuspiciousActivityType), nullable=False)
-    user_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
     guild_id = Column(BigInteger, nullable=False, index=True)
-    related_user_ids = Column(ARRAY(BigInteger), nullable=True)
+    related_user_ids = Column(ARRAY(String(64)), nullable=True)
     amount = Column(Numeric(precision=38, scale=2), nullable=True)
     details = Column(JSON, nullable=True)
     reviewed = Column(Boolean, default=False, nullable=False)
-    reviewed_by = Column(BigInteger, nullable=True)
+    reviewed_by = Column(String(64), nullable=True)
     review_notes = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
@@ -957,8 +965,8 @@ class TransferHistory(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     transaction_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    sender_id = Column(BigInteger, nullable=False, index=True)
-    receiver_id = Column(BigInteger, nullable=False, index=True)
+    sender_id = Column(String(64), nullable=False, index=True)
+    receiver_id = Column(String(64), nullable=False, index=True)
     amount = Column(Numeric(precision=38, scale=2), nullable=False)
     guild_id = Column(BigInteger, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
@@ -992,7 +1000,7 @@ class ForceRole(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     guild_id = Column(BigInteger, nullable=False)
     role_id = Column(BigInteger, nullable=False)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(String(64), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("guild_id", "role_id", name="unique_guild_role"),
@@ -1020,7 +1028,7 @@ class UserVIP(Base):
     """Track user VIP status. Total wagered is computed from GameHistory."""
     __tablename__ = "user_vip"
 
-    user_id = Column(BigInteger, primary_key=True)
+    user_id = Column(String(64), primary_key=True)
     tier_id = Column(Integer, ForeignKey("vip_tiers.id"), default=1)
     total_rakeback_earned = Column(Numeric(38, 2), default=Decimal("0.00"))
 
@@ -1034,7 +1042,7 @@ class RakebackBalance(Base):
     """Track accumulated unclaimed rakeback."""
     __tablename__ = "rakeback_balances"
 
-    user_id = Column(BigInteger, primary_key=True)
+    user_id = Column(String(64), primary_key=True)
     accumulated = Column(Numeric(38, 2), default=Decimal("0.00"))
     last_claim = Column(DateTime(timezone=True), nullable=True)
     total_claimed = Column(Numeric(38, 2), default=Decimal("0.00"))
@@ -1048,7 +1056,7 @@ class RakebackTransaction(Base):
     __tablename__ = "rakeback_transactions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
     game_name = Column(String, nullable=False)
     wagered_amount = Column(Numeric(38, 2), nullable=False)
     rakeback_rate = Column(Numeric(5, 4), nullable=False)

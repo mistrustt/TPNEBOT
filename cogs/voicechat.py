@@ -228,6 +228,26 @@ class Voicechat(commands.Cog):
         self.queues = {}
         self.check_empty_vc.start()
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
@@ -325,6 +345,7 @@ class Voicechat(commands.Cog):
             temp_owner_id = await self.bot.database.get_temp_channel_owner(
                 before.channel.id
             )
+            temp_owner_id = await self._resolve_id(temp_owner_id)
 
             if temp_owner_id is None:
                 return
@@ -346,6 +367,7 @@ class Voicechat(commands.Cog):
             return None
 
         owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
+        owner_id = await self._resolve_id(owner_id)
         return vc if owner_id == member.id else None
 
     @commands.group(
@@ -731,6 +753,7 @@ class Voicechat(commands.Cog):
                 return
 
             owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
+            owner_id = await self._resolve_id(owner_id)
             owner = discord.utils.get(vc.members, id=owner_id)
 
             if (

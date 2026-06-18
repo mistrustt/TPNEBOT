@@ -28,6 +28,7 @@ class ModerationMixin(BaseManager):
         days: int = 0,
     ) -> int:
         """Count punishments for a user. If punishment_type is None, counts all types."""
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(func.count(Punishment.id)).where(
@@ -45,6 +46,7 @@ class ModerationMixin(BaseManager):
                 f"Error counting punishments for user {user_id} in guild {guild_id}: {e}"
             )
             return 0
+
     async def get_punishment_history(
         self,
         user_id: int,
@@ -54,6 +56,7 @@ class ModerationMixin(BaseManager):
         punishment_type: Optional[PunishmentType] = None,
     ) -> List[Punishment]:
         """Get punishment history for a user with optional filtering and pagination."""
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(Punishment).where(
@@ -73,6 +76,7 @@ class ModerationMixin(BaseManager):
                 f"Error getting punishment history for user {user_id} in guild {guild_id}: {e}"
             )
             return []
+
     async def get_punishment(self, case_id: int, guild_id: int) -> Optional[Punishment]:
         """Retrieve a specific punishment by case ID in a guild."""
         try:
@@ -88,6 +92,7 @@ class ModerationMixin(BaseManager):
                 f"Error retrieving punishment case {case_id} in guild {guild_id}: {e}"
             )
             return None
+
     async def get_punishment_by_id(self, punishment_id: int) -> Optional[Punishment]:
         """Retrieve a punishment by its database ID (not case_id)."""
         try:
@@ -99,6 +104,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error retrieving punishment by id {punishment_id}: {e}")
             return None
+
     async def get_next_case_id(self, guild_id: int) -> int:
         """Get the next available case ID for a guild."""
         try:
@@ -113,6 +119,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error getting next case ID for guild {guild_id}: {e}")
             return 1
+
     async def count_punishment_usage(
         self,
         moderator_id: int,
@@ -121,6 +128,7 @@ class ModerationMixin(BaseManager):
         days: int = 0,
     ) -> int:
         """Count how many times a moderator used punishment commands."""
+        moderator_id = self.hash_user_id(moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(func.count(Punishment.id)).where(
@@ -139,6 +147,7 @@ class ModerationMixin(BaseManager):
                 f"Error counting punishment usage for moderator {moderator_id}: {e}"
             )
             return 0
+
     async def add_punishment(
         self,
         user_id: int,
@@ -149,6 +158,10 @@ class ModerationMixin(BaseManager):
         duration: Optional[int] = None,
     ) -> Optional[int]:
         """Add a punishment record and return the case_id."""
+        await self.ensure_user_identity(user_id)
+        await self.ensure_user_identity(moderator_id)
+        user_id = self.hash_user_id(user_id)
+        moderator_id = self.hash_user_id(moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 case_id = await self.get_next_case_id(guild_id)
@@ -171,6 +184,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error adding punishment for user {user_id}: {e}")
             return None
+
     async def remove_punishment(self, case_id: int, guild_id: int) -> bool:
         """Remove a punishment by case_id. Returns True if successful."""
         try:
@@ -189,10 +203,12 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error removing punishment case {case_id}: {e}")
             return False
+
     async def update_punishment_moderator(
         self, case_id: int, guild_id: int, new_moderator_id: int
     ) -> bool:
         """Update the moderator for a punishment case. Returns True if successful."""
+        new_moderator_id = self.hash_user_id(new_moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 stmt = (
@@ -213,9 +229,12 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error updating moderator for case {case_id}: {e}")
             return False
+
     async def log_punishment_command(
         self, moderator_id: int, guild_id: int, punishment_type: PunishmentType
     ):
+        await self.ensure_user_identity(moderator_id)
+        moderator_id = self.hash_user_id(moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 log_entry = WatchdogLog(
@@ -227,6 +246,7 @@ class ModerationMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error logging moderation command: {str(e)}")
+
     async def update_punishment_reason(
         self, case_id: int, guild_id: int, new_reason: str
     ) -> bool:
@@ -249,10 +269,13 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error updating reason for case {case_id}: {e}")
             return False
+
     async def add_case_note(
         self, case_id: int, guild_id: int, moderator_id: int, note: str
     ) -> bool:
         """Add a note to a punishment case. Returns True if successful."""
+        await self.ensure_user_identity(moderator_id)
+        moderator_id = self.hash_user_id(moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -285,6 +308,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error adding note to case {case_id}: {e}")
             return False
+
     async def get_case_notes(self, case_id: int, guild_id: int) -> List[CaseNote]:
         """Get all notes for a punishment case."""
         try:
@@ -311,6 +335,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error retrieving notes for case {case_id}: {e}")
             return []
+
     async def get_active_punishments(
         self, guild_id: int, punishment_type: Optional[PunishmentType] = None
     ) -> List[Punishment]:
@@ -326,10 +351,12 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error getting active punishments for guild {guild_id}: {e}")
             return []
+
     async def get_moderator_stats(
         self, moderator_id: int, guild_id: int, days: int = 0
     ) -> dict:
         """Get statistics about a moderator's punishment actions."""
+        moderator_id = self.hash_user_id(moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(
@@ -350,6 +377,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error getting moderator stats for {moderator_id}: {e}")
             return {"total": 0}
+
     async def get_guild_punishment_stats(self, guild_id: int, days: int = 0) -> dict:
         """Get overall punishment statistics for a guild."""
         try:
@@ -369,12 +397,20 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error getting guild punishment stats for {guild_id}: {e}")
             return {"total": 0}
+
     async def bulk_add_punishments(self, punishments: List[dict]) -> int:
         """
         Bulk add multiple punishments at once.
         Each dict should contain: user_id, guild_id, moderator_id, punishment_type, reason, duration (optional)
         Returns the number of punishments successfully added.
         """
+        for p in punishments:
+            raw_user_id = p["user_id"]
+            raw_moderator_id = p["moderator_id"]
+            await self.ensure_user_identity(raw_user_id)
+            await self.ensure_user_identity(raw_moderator_id)
+            p["user_id"] = self.hash_user_id(raw_user_id)
+            p["moderator_id"] = self.hash_user_id(raw_moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 added = 0
@@ -398,6 +434,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error bulk adding punishments: {e}")
             return 0
+
     async def search_punishments(
         self,
         guild_id: int,
@@ -410,6 +447,10 @@ class ModerationMixin(BaseManager):
         limit: int = 50,
     ) -> List[Punishment]:
         """Advanced search for punishments with multiple filters."""
+        if user_id is not None:
+            user_id = self.hash_user_id(user_id)
+        if moderator_id is not None:
+            moderator_id = self.hash_user_id(moderator_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(Punishment).where(Punishment.guild_id == guild_id)
@@ -433,6 +474,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error searching punishments: {e}")
             return []
+
     async def update_punishment_duration(
         self, case_id: int, guild_id: int, new_duration: int
     ) -> bool:
@@ -457,6 +499,7 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error updating duration for case {case_id}: {e}")
             return False
+
     async def get_user_latest_punishment(
         self,
         user_id: int,
@@ -464,6 +507,7 @@ class ModerationMixin(BaseManager):
         punishment_type: Optional[PunishmentType] = None,
     ) -> Optional[Punishment]:
         """Get the most recent punishment for a user."""
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(Punishment).where(
@@ -477,9 +521,11 @@ class ModerationMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error getting latest punishment for user {user_id}: {e}")
             return None
+
     async def get_punishment_caseid(self, guild_id: int) -> int:
         """Deprecated: Use get_next_case_id instead."""
         return await self.get_next_case_id(guild_id)
+
     async def change_punishment_moderator(
         self, case_id: int, new_moderator_id: int, guild_id: int = None
     ) -> bool:
@@ -496,6 +542,7 @@ class ModerationMixin(BaseManager):
         return await self.update_punishment_moderator(
             case_id, guild_id, new_moderator_id
         )
+
     async def add_jailed_user(
         self,
         guild_id: int,
@@ -508,6 +555,8 @@ class ModerationMixin(BaseManager):
         If there *is* at least one, TAKE the most‐recent (by created_at), UPDATE its fields,
         and DELETE any other duplicates.
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             stmt = (
                 select(JailedUser)
@@ -537,11 +586,13 @@ class ModerationMixin(BaseManager):
             session.add(new_entry)
             await session.commit()
             return new_entry
+
     async def remove_jailed_user(self, guild_id: int, user_id: int):
         """
         Delete _every_ row for (guild_id, user_id).
         If there were duplicates, they all get removed in one go.
         """
+        user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             await session.execute(
                 delete(JailedUser).where(
@@ -549,11 +600,13 @@ class ModerationMixin(BaseManager):
                 )
             )
             await session.commit()
+
     async def get_jailed_user(self, guild_id: int, user_id: int) -> JailedUser | None:
         """
         Return the single “most recent” JailedUser row for (guild_id, user_id).
         If more than one exists, delete all but the newest, then return the newest.
         """
+        user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             stmt = (
                 select(JailedUser)

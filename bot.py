@@ -437,6 +437,11 @@ class DiscordBot(commands.Bot):
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
             interaction._stats_started_at = time.perf_counter()
+            # Ensure the mapping table has this user so hashes can be resolved later.
+            try:
+                await self.database.ensure_user_identity(interaction.user.id)
+            except Exception:
+                pass
 
         base = super()
         if hasattr(base, "on_interaction"):
@@ -462,6 +467,15 @@ class DiscordBot(commands.Bot):
                 if inspect.isawaitable(result):
                     await result
                 return
+
+    async def process_commands(self, message: discord.Message) -> None:
+        """Ensure the user identity is recorded before running prefix commands."""
+        if not message.author.bot:
+            try:
+                await self.database.ensure_user_identity(message.author.id)
+            except Exception:
+                pass
+        await super().process_commands(message)
 
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name

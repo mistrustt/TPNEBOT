@@ -1,4 +1,5 @@
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.exc import (
     SQLAlchemyError,
@@ -7,13 +8,22 @@ from sqlalchemy.exc import (
     DisconnectionError,
     TimeoutError as SATimeoutError,
 )
+from sqlalchemy.future import select
 from sqlalchemy.orm import sessionmaker
 import asyncio
 from contextlib import asynccontextmanager
 import functools
 from typing import Optional
-from ..models import Base
+from ..models import Base, UserIdentity
 import logging
+
+
+def _hash_user_id(user_id) -> str:
+    """Centralized user ID hashing used by all managers."""
+    from utils.security import hash_user_id
+
+    return hash_user_id(user_id)
+
 
 try:
     import asyncpg.exceptions as _apg_exc
@@ -61,6 +71,48 @@ def retry_db(max_retries: int = None, base_delay: float = None):
 
 
 class BaseManager:
+    """Base manager with connection resilience and user ID hashing helpers."""
+
+    @staticmethod
+    def hash_user_id(user_id) -> str:
+        """Hash a raw Discord user ID for storage or lookup."""
+        return _hash_user_id(user_id)
+
+    async def resolve_user_hash(self, user_hash: str) -> int | None:
+        """Look up the raw Discord ID for a stored hash, if it exists."""
+        if user_hash is None:
+            return None
+        async with self.async_sessionmaker() as session:
+            row = await session.get(UserIdentity, user_hash)
+            return row.user_id if row else None
+
+    async def resolve_user_hashes(self, user_hashes: list[str]) -> dict[str, int | None]:
+        """Batch-resolve hashes to raw Discord IDs."""
+        if not user_hashes:
+            return {}
+        async with self.async_sessionmaker() as session:
+            rows = await session.execute(
+                select(UserIdentity).where(UserIdentity.user_hash.in_(user_hashes))
+            )
+            mapping = {r.user_hash: r.user_id for r in rows.scalars().all()}
+        return {h: mapping.get(h) for h in user_hashes}
+
+    async def ensure_user_identity(self, user_id: int) -> str:
+        """Hash a user and make sure the raw ID is recorded in user_identities.
+
+        Call this whenever the bot sees a Discord user for the first time in a
+        session, so later resolve_user_hash() calls can recover the raw ID.
+        """
+        user_hash = _hash_user_id(user_id)
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                await session.execute(
+                    pg_insert(UserIdentity)
+                    .values(user_hash=user_hash, user_id=user_id)
+                    .on_conflict_do_nothing(index_elements=["user_hash"])
+                )
+        return user_hash
+
     def __init__(self, database_url: str):
         # pool_pre_ping validates connections before checkout, which eliminates
         # most "connection closed unexpectedly" errors. pool_recycle forces old

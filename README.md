@@ -54,6 +54,7 @@ Recommended Python 3.11 or newer. Ensure compatibility with pinned dependency ve
 - `TOKEN`: Discord bot token (required)
 - `DB_PW`: Password for Postgres user postgres (required)
 - `DEVELOPER_CHANNEL_ID`: Channel ID for internal error reporting (required)
+- `USER_ID_HASH_KEY`: HMAC-SHA256 key used to hash Discord user IDs before storing them in the database. Must match the key used when running `migrations/secure_user_ids.sql` (required for hashed storage; falls back to `STATS_SALT`)
 
 ## Architecture Overview
 High level module structure:
@@ -107,7 +108,7 @@ inside the container. The bot itself never opens a host port — it connects out
 Discord.
 
 ## Security
-Follow least privilege for Postgres credentials and secure storage of seeds and private keys. See [SECURITY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/SECURITY.md).
+Operational database tables store Discord user IDs as deterministic HMAC-SHA256 hashes rather than raw values. A single `user_identities` mapping table records `user_hash -> user_id` so the bot can resolve hashes back to raw IDs when required by Discord API calls. Run `migrations/secure_user_ids.sql` to migrate an existing database, and keep `USER_ID_HASH_KEY` secret and backed up — losing it prevents resolving stored hashes. See [SECURITY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/SECURITY.md).
 
 ## Disclaimer
 This documentation was generated automatically based on the current repository structure.

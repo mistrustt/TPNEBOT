@@ -32,6 +32,7 @@ class GuildMixin(BaseManager):
                     )
                     session.add(setting)
                 await session.commit()
+
     async def set_spam_channel(self, guild_id: int, channel_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -44,12 +45,14 @@ class GuildMixin(BaseManager):
                     )
                     session.add(setting)
                 await session.commit()
+
     async def get_spam_channel(self, guild_id: int):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(ServerSettings.spam_channel_id).filter_by(guild_id=guild_id)
             )
             return result.scalar_one_or_none()
+
     async def set_watchdog_enabled(self, guild_id: int, bool: str):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -60,6 +63,7 @@ class GuildMixin(BaseManager):
                     settings = ServerSettings(guild_id=guild_id, watchdog_enabled=bool)
                     session.add(settings)
                 await session.commit()
+
     async def set_watchdog_feature(self, guild_id: int, feature: str, enabled: bool):
         """Set individual watchdog feature toggle"""
         async with self.async_sessionmaker() as session:
@@ -72,9 +76,11 @@ class GuildMixin(BaseManager):
                     setattr(settings, f"watchdog_{feature}", enabled)
                     session.add(settings)
                 await session.commit()
+
     async def get_server_settings(self, guild_id: int) -> ServerSettings:
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)
+
     async def clear_auto_roles(self, guild_id: int) -> None:
         """Clears autorole configuration for a guild."""
         async with self.async_sessionmaker() as session:
@@ -83,6 +89,7 @@ class GuildMixin(BaseManager):
                 if setting:
                     setting.auto_role_ids = []
                 await session.commit()
+
     async def set_report_channel(self, guild_id: int, channel_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -100,6 +107,7 @@ class GuildMixin(BaseManager):
                     session.add(settings)
 
             await session.commit()
+
     async def set_member_count_channel(self, guild_id: int, channel_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -117,6 +125,7 @@ class GuildMixin(BaseManager):
                     session.add(settings)
 
             await session.commit()
+
     async def get_member_count_channel(self, guild_id: int):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -125,6 +134,7 @@ class GuildMixin(BaseManager):
             settings = result.scalar_one_or_none()
 
             return settings.member_count_channel_id if settings else None
+
     async def get_report_channel(self, guild_id: int):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -133,6 +143,7 @@ class GuildMixin(BaseManager):
             report_setting = result.scalar_one_or_none()
 
             return report_setting.report_channel_id if report_setting else None
+
     async def set_jail_settings(
         self, guild_id: int, role_id: int, channel_id: int
     ) -> None:
@@ -150,9 +161,11 @@ class GuildMixin(BaseManager):
                     )
                     session.add(jail_setting)
                 await session.commit()
+
     async def get_jail_settings(self, guild_id: int) -> ServerSettings:
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)
+
     async def toggle_antimp3(self, guild_id: int, enabled: bool):
         async with self.get_session() as session:
             async with session.begin():
@@ -165,10 +178,12 @@ class GuildMixin(BaseManager):
                     )
                     session.add(settings)
                 await session.commit()
+
     async def get_antimp3_status(self, guild_id: int) -> bool:
         async with self.get_session() as session:
             settings = await session.get(ServerSettings, guild_id)
             return settings.antimp3_enabled if settings else False
+
     async def set_mute_settings(
         self, guild_id: int, mute_role_id: int, imute_role_id: int, rmute_role_id: int
     ) -> None:
@@ -188,9 +203,11 @@ class GuildMixin(BaseManager):
                     )
                     session.add(mute_setting)
                 await session.commit()
+
     async def get_mute_settings(self, guild_id: int) -> ServerSettings:
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)
+
     async def set_command_status(
         self, command_name: str, enabled: bool, channel_id: int = None
     ) -> None:
@@ -212,6 +229,7 @@ class GuildMixin(BaseManager):
                         channel_id=channel_id,
                     )
                     session.add(new_status)
+
     async def get_command_status(
         self, command_name: str, channel_id: int = None
     ) -> bool:
@@ -230,6 +248,7 @@ class GuildMixin(BaseManager):
             status = result.scalars().first()
 
             return status.enabled if status else True
+
     async def clear_expired_cooldowns(self):
         """Clears expired cooldowns from the database."""
         async with self.async_sessionmaker() as session:
@@ -239,15 +258,19 @@ class GuildMixin(BaseManager):
                 )
             )
             await session.commit()
+
     async def clear_all_cooldowns(self):
         """Wipes all cooldowns from the database."""
         async with self.async_sessionmaker() as session:
             await session.execute(delete(CommandCooldown))
             await session.commit()
+
     async def set_cooldown(
         self, user_id: int, command_name: str, cooldown_seconds: int
     ) -> None:
         """Sets a cooldown for both prefix and slash commands for a user."""
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         expiry_time = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
 
         async with self.async_sessionmaker() as session:
@@ -272,8 +295,10 @@ class GuildMixin(BaseManager):
                 session.add(cooldown)
 
             await session.commit()
+
     async def get_cooldown(self, user_id: int, command_name: str) -> float:
         """Returns the remaining cooldown time in seconds. Returns 0 if expired or not found."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(CommandCooldown).filter_by(
@@ -295,6 +320,7 @@ class GuildMixin(BaseManager):
 
             remaining_time = (cooldown.cooldown_expiry - now).total_seconds()
             return max(0, remaining_time)
+
     async def add_command_role_restriction(
         self, guild_id: int, command_name: str, role_id: int
     ):
@@ -317,6 +343,7 @@ class GuildMixin(BaseManager):
                         guild_id=guild_id, command_name=command_name, role_id=role_id
                     )
                     session.add(restriction)
+
     async def remove_command_role_restriction(
         self, guild_id: int, command_name: str, role_id: int
     ) -> bool:
@@ -333,6 +360,7 @@ class GuildMixin(BaseManager):
                     )
                 )
                 return result.rowcount > 0
+
     async def get_command_restrictions(self, guild_id: int):
         """Get all command restrictions for a guild."""
         from ..models import CommandRoleRestriction
@@ -344,6 +372,7 @@ class GuildMixin(BaseManager):
                 )
             )
             return result.scalars().all()
+
     async def clear_all_command_restrictions(self, guild_id: int) -> int:
         """Clear all command restrictions for a guild."""
         from ..models import CommandRoleRestriction
@@ -356,6 +385,7 @@ class GuildMixin(BaseManager):
                     )
                 )
                 return result.rowcount
+
     async def check_command_role_restriction(
         self, guild_id: int, command_name: str, user_roles: list
     ) -> bool:
@@ -388,6 +418,7 @@ class GuildMixin(BaseManager):
             )
 
             return has_permission
+
     async def add_jtc_setup(self, guild_id: int, jtc_channel_id: int):
         """Save JTC setup for a server. Prevent duplicate setups."""
         async with self.async_sessionmaker() as session:
@@ -401,6 +432,7 @@ class GuildMixin(BaseManager):
             session.add(setting)
             await session.commit()
             return True
+
     async def get_jtc_channels(self, guild_id: int):
         """Retrieve the JTC channel IDs for a guild."""
         async with self.async_sessionmaker() as session:
@@ -408,14 +440,18 @@ class GuildMixin(BaseManager):
                 select(JTCSettings).where(JTCSettings.guild_id == guild_id)
             )
             return result.scalar_one_or_none()
+
     async def add_temp_channel(self, guild_id: int, user_id: int, channel_id: int):
         """Log a temporary voice channel."""
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             temp_channel = TempVoiceChannel(
                 guild_id=guild_id, owner_id=user_id, channel_id=channel_id
             )
             session.add(temp_channel)
             await session.commit()
+
     async def remove_temp_channel(self, channel_id: int):
         """Removes a temporary voice channel entry from the database."""
         async with self.async_sessionmaker() as session:
@@ -426,6 +462,7 @@ class GuildMixin(BaseManager):
                     )
                 )
                 await session.commit()
+
     async def get_temp_channel_owner(self, channel_id: int):
         """Retrieve the owner of a temporary voice channel."""
         async with self.async_sessionmaker() as session:
@@ -435,9 +472,14 @@ class GuildMixin(BaseManager):
                 )
             )
             channel = result.scalar_one_or_none()
-            return channel.owner_id if channel else None
+            if channel is None:
+                return None
+            return await self.resolve_user_hash(channel.owner_id)
+
     async def set_temp_channel_owner(self, channel_id: int, user_id: int):
         """Set the owner of a temporary voice channel."""
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 await session.execute(
@@ -446,6 +488,7 @@ class GuildMixin(BaseManager):
                     .values(owner_id=user_id)
                 )
                 await session.commit()
+
     async def store_control_panel_message(self, guild_id: int, message_id: int):
         """Stores the control panel message ID so it's not sent twice."""
         async with self.async_sessionmaker() as session:
@@ -456,6 +499,7 @@ class GuildMixin(BaseManager):
             if setting:
                 setting.control_panel_message_id = message_id
                 await session.commit()
+
     async def get_control_panel_message(self, guild_id: int):
         """Retrieves the stored control panel message ID."""
         async with self.async_sessionmaker() as session:
@@ -465,6 +509,7 @@ class GuildMixin(BaseManager):
                 )
             )
             return result.scalar_one_or_none()
+
     async def is_lockdown_channel(self, guild_id: int, channel_id: int) -> bool:
         """
         Checks if a channel is in the lockdown list.
@@ -489,6 +534,7 @@ class GuildMixin(BaseManager):
                     f"in guild {guild_id}: {e}"
                 )
                 return False
+
     async def add_lockdown_channel(
         self, guild_id: int, channel_id: int
     ) -> Optional[LockdownChannel]:
@@ -522,6 +568,7 @@ class GuildMixin(BaseManager):
                     f"for guild {guild_id}: {e}"
                 )
                 return None
+
     async def remove_lockdown_channel(self, guild_id: int, channel_id: int) -> bool:
         """
         Removes a channel from the lockdown list.
@@ -552,6 +599,7 @@ class GuildMixin(BaseManager):
                     f"for guild {guild_id}: {e}"
                 )
                 return False
+
     async def get_lockdown_channels(self, guild_id: int) -> List[int]:
         """
         Retrieves all channel IDs in the lockdown list for a guild.
@@ -571,6 +619,7 @@ class GuildMixin(BaseManager):
             except Exception as e:
                 print(f"Error retrieving lockdown channels for guild {guild_id}: {e}")
                 return []
+
     async def get_juul(self, guild_id: int) -> Optional[Juul]:
         """
         Read-only helper. Returns a Juul (or None) by opening its own session.
@@ -580,10 +629,13 @@ class GuildMixin(BaseManager):
                 select(Juul).where(Juul.guild_id == guild_id)
             )
             return result.scalar_one_or_none()
+
     async def set_juul_holder(self, guild_id: int, user_id: int):
         """
         Pass or Steal: update holder_id (and always reset locked=False) in a single session.
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -597,6 +649,7 @@ class GuildMixin(BaseManager):
                 else:
                     juul = Juul(guild_id=guild_id, holder_id=user_id)
                     session.add(juul)
+
     async def set_juul_lock(self, guild_id: int, locked: bool):
         """
         Lock or Unlock: simply flip the locked flag in one transaction.
@@ -613,6 +666,7 @@ class GuildMixin(BaseManager):
                 else:
                     juul = Juul(guild_id=guild_id, locked=locked)
                     session.add(juul)
+
     async def get_juul_lock(self, guild_id: int) -> bool:
         """
         Read-only helper. Returns the locked status of the Juul for a guild.
@@ -622,6 +676,7 @@ class GuildMixin(BaseManager):
                 select(Juul.locked).where(Juul.guild_id == guild_id)
             )
             return result.scalar_one_or_none() or False
+
     async def increment_juul_hits(self, guild_id: int):
         """
         (You can leave these “increment” helpers as they are,
@@ -637,6 +692,7 @@ class GuildMixin(BaseManager):
                 result = await session.execute(stmt)
                 if result.rowcount == 0:
                     session.add(Juul(guild_id=guild_id, hits=1))
+
     async def increment_juul_passes(self, guild_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -648,6 +704,7 @@ class GuildMixin(BaseManager):
                 result = await session.execute(stmt)
                 if result.rowcount == 0:
                     session.add(Juul(guild_id=guild_id, passes=1))
+
     async def increment_juul_steals(self, guild_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -659,6 +716,7 @@ class GuildMixin(BaseManager):
                 result = await session.execute(stmt)
                 if result.rowcount == 0:
                     session.add(Juul(guild_id=guild_id, steals=1))
+
     async def set_juul_flavor(self, guild_id: int, flavor: str):
         """
         Set the flavor of the Juul for a guild.
@@ -675,6 +733,7 @@ class GuildMixin(BaseManager):
                 else:
                     juul = Juul(guild_id=guild_id, flavor=flavor)
                     session.add(juul)
+
     async def get_juul_flavor(self, guild_id: int) -> str:
         """
         Read-only helper. Returns the flavor of the Juul for a guild.
@@ -684,6 +743,7 @@ class GuildMixin(BaseManager):
                 select(Juul.flavor).where(Juul.guild_id == guild_id)
             )
             return result.scalar_one_or_none() or "classic"
+
     async def get_auto_roles(self, guild_id: int) -> list[int]:
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -692,6 +752,7 @@ class GuildMixin(BaseManager):
                 )
             )
             return result.scalar_one_or_none() or []
+
     async def add_auto_role(self, guild_id: int, role_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -701,6 +762,7 @@ class GuildMixin(BaseManager):
                         settings.auto_role_ids = []
                     if role_id not in settings.auto_role_ids:
                         settings.auto_role_ids.append(role_id)
+
     async def remove_auto_role(self, guild_id: int, role_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -709,6 +771,7 @@ class GuildMixin(BaseManager):
                     settings.auto_role_ids = [
                         r for r in settings.auto_role_ids if r != role_id
                     ]
+
     async def set_nuke_msg(self, guild_id: int, new_message: str):
         """Change the nuke confirmation message for a guild."""
         async with self.async_sessionmaker() as session:
@@ -722,6 +785,7 @@ class GuildMixin(BaseManager):
                 else:
                     settings = ServerSettings(guild_id=guild_id, nuke_msg=new_message)
                     session.add(settings)
+
     async def get_nuke_msg(self, guild_id: int) -> str:
         """Retrieve the nuke confirmation message for a guild."""
         async with self.async_sessionmaker() as session:

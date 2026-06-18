@@ -20,6 +20,7 @@ class MusicMixin(BaseManager):
             result = await session.execute(select(LastFMusers.lastfm_username))
             return result.scalars().all()
     async def get_lastfm_username(self, discord_id: str) -> str:
+        discord_id = self.hash_user_id(discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(
@@ -36,6 +37,8 @@ class MusicMixin(BaseManager):
             logging.error(f"Error fetching LastFM username for {discord_id}: {e}")
             raise
     async def set_lastfm_username(self, discord_id: str, username: str) -> None:
+        await self.ensure_user_identity(discord_id)
+        discord_id = self.hash_user_id(discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -51,6 +54,7 @@ class MusicMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error setting LastFM username: {str(e)}")
     async def get_lastfm_embed_color(self, discord_id: str) -> discord.Color:
+        discord_id = self.hash_user_id(discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(
@@ -67,6 +71,7 @@ class MusicMixin(BaseManager):
             logging.error(f"Error retrieving color: {str(e)}")
             return discord.Color.green()
     async def set_lastfm_embed_color(self, discord_id: str, color: str) -> None:
+        discord_id = self.hash_user_id(discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(
@@ -88,6 +93,8 @@ class MusicMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error setting LastFM embed color: {str(e)}")
     async def log_vote(self, user_id: str, command: str, vote: str):
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -124,6 +131,7 @@ class MusicMixin(BaseManager):
         except SQLAlchemyError as e:
             return 0
     async def get_vote_stats(self, user_id: str, command: str):
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(
@@ -136,6 +144,7 @@ class MusicMixin(BaseManager):
         except SQLAlchemyError as e:
             return 0
     async def get_heardle_stats(self, discord_id: int) -> int:
+        discord_id = self.hash_user_id(discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 result = await session.execute(
@@ -146,6 +155,9 @@ class MusicMixin(BaseManager):
         except SQLAlchemyError as e:
             return HeardleGameStats()
     async def add_heardle_win(self, discord_id: int, amount: int = 1) -> int:
+        raw_discord_id = discord_id
+        await self.ensure_user_identity(raw_discord_id)
+        discord_id = self.hash_user_id(raw_discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -166,11 +178,14 @@ class MusicMixin(BaseManager):
                         session.add(new_user)
 
                     await session.commit()
-                    return await self.get_heardle_stats(discord_id)
+                    return await self.get_heardle_stats(raw_discord_id)
         except SQLAlchemyError as e:
             logging.error(f"Error incrementing reputation: {str(e)}")
             return 0
     async def add_heardle_loss(self, discord_id: int, amount: int = 1) -> int:
+        raw_discord_id = discord_id
+        await self.ensure_user_identity(raw_discord_id)
+        discord_id = self.hash_user_id(raw_discord_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -188,7 +203,7 @@ class MusicMixin(BaseManager):
                         session.add(new_user)
 
                     await session.commit()
-                    return await self.get_heardle_stats(discord_id)
+                    return await self.get_heardle_stats(raw_discord_id)
         except SQLAlchemyError as e:
             logging.error(f"Error incrementing reputation: {str(e)}")
             return 0

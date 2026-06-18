@@ -36,6 +36,10 @@ logger = logging.getLogger("discord_bot")
 
 class UserMixin(BaseManager):
     async def add_to_blacklist(self, user_id: str, admin_id: str, reason: str) -> None:
+        await self.ensure_user_identity(user_id)
+        await self.ensure_user_identity(admin_id)
+        user_id = self.hash_user_id(user_id)
+        admin_id = self.hash_user_id(admin_id)
         try:
             async with self.async_sessionmaker() as session:
                 await session.execute(
@@ -46,26 +50,35 @@ class UserMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error adding to blacklist: {str(e)}")
+
     async def remove_from_blacklist(self, user_id: str) -> None:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             await session.execute(delete(Blacklist).where(Blacklist.user_id == user_id))
             await session.commit()
+
     async def clear_blacklist(self) -> None:
         """Clear the entire blacklist."""
         async with self.async_sessionmaker() as session:
             for entry in await session.execute(select(Blacklist)):
                 await session.delete(entry)
             await session.commit()
+
     async def is_user_blacklisted(self, user_id: str) -> bool:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(Blacklist).filter_by(user_id=user_id))
             return result.scalar_one_or_none() is not None
+
     async def get_blacklisted_users(self) -> list:
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(Blacklist))
             return result.scalars().all()
+
     async def add_favorite_song(self, user_id: int, song_title: str):
         """Add a favorite song for the user."""
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -76,8 +89,10 @@ class UserMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.info(f"Error adding favorite song: {str(e)}")
+
     async def get_favorite_songs(self, user_id: int) -> list:
         """Retrieve all favorite songs for a specific user."""
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 query = select(FavoriteSongs).filter_by(user_id=user_id)
@@ -86,8 +101,10 @@ class UserMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error retrieving favorite songs: {str(e)}")
             return []
+
     async def remove_favorite_song(self, user_id: int, song_title: str):
         """Remove a favorite song for a user."""
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -100,8 +117,10 @@ class UserMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error removing favorite song: {str(e)}")
+
     async def clear_favorite_songs(self, user_id: int):
         """Clear all favorite songs for a user."""
+        user_id = self.hash_user_id(user_id)
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
@@ -111,7 +130,10 @@ class UserMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error clearing favorite songs: {str(e)}")
+
     async def set_user_timezone(self, user_id: int, timezone: str):
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 await session.execute(
@@ -121,14 +143,19 @@ class UserMixin(BaseManager):
                 user_timezone = UserTimezone(user_id=user_id, timezone=timezone)
                 session.add(user_timezone)
             await session.commit()
+
     async def get_user_timezone(self, user_id: int):
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(UserTimezone.timezone).filter_by(user_id=user_id)
             )
             timezone = result.scalar_one_or_none()
             return timezone
+
     async def set_user_location(self, user_id: int, location: str):
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 await session.execute(
@@ -138,13 +165,16 @@ class UserMixin(BaseManager):
                 user_location = UserLocation(user_id=user_id, location=location)
                 session.add(user_location)
             await session.commit()
+
     async def get_user_location(self, user_id: int):
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(UserLocation.location).filter_by(user_id=user_id)
             )
             location = result.scalar_one_or_none()
             return location
+
     async def log_name_change(
         self, user_id: int, old_name: str, new_name: str, change_type: str
     ):
@@ -156,6 +186,8 @@ class UserMixin(BaseManager):
         :param new_name: The new username or nickname
         :param change_type: Type of change - "username" or "nickname"
         """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         timestamp = discord.utils.utcnow()
         async with self.async_sessionmaker() as session:
             try:
@@ -173,6 +205,7 @@ class UserMixin(BaseManager):
                 )
             except Exception as e:
                 print(f"Error logging name change: {e}")
+
     async def get_name_history(self, user_id: int) -> List[dict]:
         """
         Retrieves the username and nickname history for a specified user.
@@ -180,6 +213,7 @@ class UserMixin(BaseManager):
         Uses a column-only query + .mappings() to avoid creating full ORM objects,
         which reduces memory overhead and improves performance for large histories.
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             try:
                 stmt = (
@@ -199,6 +233,7 @@ class UserMixin(BaseManager):
             except SQLAlchemyError as e:
                 logger.error(f"Error retrieving name history for {user_id}: {e}")
                 return []
+
     async def has_name_history(self, user_id: int) -> bool:
         """
         Checks if a user has any name change history.
@@ -206,17 +241,20 @@ class UserMixin(BaseManager):
         :param user_id: Discord user ID
         :return: True if history exists, False otherwise
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(UserNameHistory).where(UserNameHistory.user_id == user_id)
             )
             return result.scalars().first() is not None
+
     async def clear_name_history(self, user_id: int):
         """
         Clears the name change history for a specified user.
 
         :param user_id: Discord user ID
         """
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             try:
                 await session.execute(
@@ -226,16 +264,21 @@ class UserMixin(BaseManager):
                 print(f"Name history cleared for user {user_id}")
             except Exception as e:
                 print(f"Error clearing name history: {e}")
+
     async def log_user_roles(self, user_id: int, roles: List[int]):
         """Logs the user's roles to the database."""
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             user_role_history = UserRoleHistory(
                 user_id=user_id, roles=roles, timestamp=discord.utils.utcnow()
             )
             session.add(user_role_history)
             await session.commit()
+
     async def get_user_roles(self, user_id: int) -> List[int]:
         """Retrieves the user's roles from the database."""
+        user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             result = await session.execute(
                 select(UserRoleHistory).where(UserRoleHistory.user_id == user_id)
@@ -245,17 +288,24 @@ class UserMixin(BaseManager):
                 return record.roles
             else:
                 return []
+
     async def remove_user_roles(self, user_id: int):
         """Removes the user's role records from the database."""
+        user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             await session.execute(
                 delete(UserRoleHistory).where(UserRoleHistory.user_id == user_id)
             )
             await session.commit()
+
     async def add_user_alt(self, main_id: int, guild_id: int, alt_id: int) -> None:
         """
         Add a new alt-user mapping. Does nothing if the mapping already exists.
         """
+        await self.ensure_user_identity(main_id)
+        await self.ensure_user_identity(alt_id)
+        main_id = self.hash_user_id(main_id)
+        alt_id = self.hash_user_id(alt_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 exists = await session.execute(
@@ -270,10 +320,13 @@ class UserMixin(BaseManager):
                 session.add(
                     UserAlt(main_user_id=main_id, guild_id=guild_id, alt_user_id=alt_id)
                 )
+
     async def remove_user_alt(self, main_id: int, guild_id: int, alt_id: int) -> None:
         """
         Remove a specific alt-user mapping.
         """
+        main_id = self.hash_user_id(main_id)
+        alt_id = self.hash_user_id(alt_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 await session.execute(
@@ -283,10 +336,12 @@ class UserMixin(BaseManager):
                         UserAlt.alt_user_id == alt_id,
                     )
                 )
+
     async def clear_user_alts(self, main_id: int, guild_id: int) -> None:
         """
         Remove all alt-user mappings for a given main user in a guild.
         """
+        main_id = self.hash_user_id(main_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 await session.execute(
@@ -294,51 +349,63 @@ class UserMixin(BaseManager):
                         UserAlt.main_user_id == main_id, UserAlt.guild_id == guild_id
                     )
                 )
+
     async def get_user_alts(self, main_id: int, guild_id: int) -> List[int]:
         """
         Get a list of alt user IDs for a given main user in a guild.
         """
+        main_id = self.hash_user_id(main_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(UserAlt.alt_user_id).where(
                     UserAlt.main_user_id == main_id, UserAlt.guild_id == guild_id
                 )
             )
-            return [row[0] for row in result.all()]
+            hashes = result.scalars().all()
+        mapping = await self.resolve_user_hashes(hashes)
+        return [mapping[h] for h in hashes if mapping.get(h) is not None]
+
     async def get_all_linked_user_ids(self, user_id: int, guild_id: int) -> List[int]:
         """
         Get all user IDs linked to the given user (both mains and alts) within the same guild.
         Traverses relationships iteratively in Python to avoid recursion errors in SQL.
         """
-        seen = {user_id}
-        queue = [user_id]
+        user_hash = self.hash_user_id(user_id)
+        hash_seen = {user_hash}
+        raw_seen = {user_id}
+        queue = [user_hash]
         async with self.async_sessionmaker() as session:
             while queue:
-                current = queue.pop(0)
+                current_hash = queue.pop(0)
                 # Find direct alts where current is main
                 result_alt = await session.execute(
                     select(UserAlt.alt_user_id).where(
-                        UserAlt.main_user_id == current, UserAlt.guild_id == guild_id
+                        UserAlt.main_user_id == current_hash, UserAlt.guild_id == guild_id
                     )
                 )
-                alt_ids = [row[0] for row in result_alt]
+                alt_hashes = [row[0] for row in result_alt]
                 # Find mains where current is an alt
                 result_main = await session.execute(
                     select(UserAlt.main_user_id).where(
-                        UserAlt.alt_user_id == current, UserAlt.guild_id == guild_id
+                        UserAlt.alt_user_id == current_hash, UserAlt.guild_id == guild_id
                     )
                 )
-                main_ids = [row[0] for row in result_main]
-                for uid in alt_ids + main_ids:
-                    if uid not in seen:
-                        seen.add(uid)
-                        queue.append(uid)
+                main_hashes = [row[0] for row in result_main]
+                for linked_hash in alt_hashes + main_hashes:
+                    if linked_hash not in hash_seen:
+                        hash_seen.add(linked_hash)
+                        queue.append(linked_hash)
+                        raw_id = await self.resolve_user_hash(linked_hash)
+                        if raw_id is not None:
+                            raw_seen.add(raw_id)
         # Remove the original user
-        linked = list(seen)
+        linked = list(raw_seen)
         linked.remove(user_id)
         return linked
+
     async def delete_all_data_for_user(self, user_id: int):
         """Deletes all data in the database for a specific user."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 await session.execute(

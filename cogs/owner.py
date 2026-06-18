@@ -485,6 +485,46 @@ class Owner(commands.Cog, name="Owner"):
         }
         self.shh_emoji = "🤫"
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _resolve_ids(self, values):
+        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+        if not values:
+            return {}
+        unique = list(dict.fromkeys(v for v in values if v is not None))
+        hashes = [v for v in unique if self._is_hash(v)]
+        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
+        mapping = {}
+        for v in unique:
+            if isinstance(v, int):
+                mapping[v] = v
+            elif self._is_hash(v):
+                mapping[v] = resolved.get(v)
+            else:
+                try:
+                    mapping[v] = int(v)
+                except (TypeError, ValueError):
+                    mapping[v] = None
+        return mapping
+
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
         list_string = json.dumps(sorted(self.whitelist_clubhouse), separators=(',', ':'))
@@ -1625,11 +1665,16 @@ class Owner(commands.Cog, name="Owner"):
         if not sessions:
             return await ctx.send("No active game sessions.")
 
+        session_owner_ids = [getattr(s, "owner_id", None) for s in sessions]
+        resolved_owners = await self._resolve_ids(session_owner_ids)
+
         lines = []
         for s in sessions:
             created = s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"
+            raw_owner = resolved_owners.get(getattr(s, "owner_id", None))
+            owner_str = f"<@{raw_owner}>" if raw_owner else "Unknown"
             lines.append(
-                f"{s.id} • {s.game_name} • owner {s.owner_id} • {created}"
+                f"{s.id} • {s.game_name} • owner {owner_str} • {created}"
             )
         embed = discord.Embed(
             title="Active Game Sessions",
@@ -1650,16 +1695,23 @@ class Owner(commands.Cog, name="Owner"):
         if not gs:
             return await ctx.send("Session not found.")
 
+        participant_ids = list(gs.participants or [])
+        resolved_participants = await self._resolve_ids(participant_ids)
+        raw_owner = await self._resolve_id(getattr(gs, "owner_id", None))
+
         embed = discord.Embed(
             title=f"Session {gs.id}", color=discord.Color.blurple()
         )
         embed.add_field(name="Game", value=gs.game_name, inline=True)
-        embed.add_field(name="Owner", value=str(gs.owner_id), inline=True)
+        embed.add_field(name="Owner", value=f"<@{raw_owner}>" if raw_owner else "Unknown", inline=True)
         embed.add_field(name="Channel", value=str(gs.channel_id), inline=True)
         embed.add_field(name="Wager", value=str(gs.wager_total), inline=True)
         embed.add_field(
             name="Participants",
-            value=", ".join(str(p) for p in (gs.participants or [])) or "—",
+            value=", ".join(
+                f"<@{resolved_participants.get(p, p)}>" if resolved_participants.get(p) else f"Unknown ({p})"
+                for p in participant_ids
+            ) or "—",
             inline=False,
         )
         embed.add_field(
@@ -1937,21 +1989,26 @@ class Owner(commands.Cog, name="Owner"):
 
         # Prepare entries
         entries = []
+        user_ids = [getattr(r, "user_id", None) for r in rows]
+        admin_ids = [getattr(r, "admin_id", None) for r in rows if getattr(r, "admin_id", None)]
+        resolved_ids = await self._resolve_ids(user_ids + admin_ids)
+
         for r in rows:
-            uid = int(r.user_id)
+            uid = resolved_ids.get(getattr(r, "user_id", None))
             user = None
-            try:
-                user = await self.bot.fetch_user(uid)
-            except Exception:
-                pass
+            if uid:
+                try:
+                    user = await self.bot.fetch_user(uid)
+                except Exception:
+                    pass
 
             display_name = str(user) if user else "Unknown User"
             reason = getattr(r, "reason", None) or "No reason provided"
-            admin_id = getattr(r, "admin_id", None)
+            admin_id = resolved_ids.get(getattr(r, "admin_id", None))
             if admin_id:
                 admin_user = None
                 try:
-                    admin_user = await self.bot.fetch_user(int(admin_id))
+                    admin_user = await self.bot.fetch_user(admin_id)
                 except Exception:
                     pass
                 if admin_user:
@@ -3933,17 +3990,28 @@ class Owner(commands.Cog, name="Owner"):
             )
             return await ctx.send(embed=embed)
 
+        flag_user_ids = [getattr(f, "user_id", None) for f in flags]
+        flag_related_ids = []
+        for f in flags:
+            flag_related_ids.extend(getattr(f, "related_user_ids", []) or [])
+        resolved_flag_ids = await self._resolve_ids(flag_user_ids + flag_related_ids)
+
         lines = []
         for f in flags:
             act_emoji = "🔄" if f.activity_type == SuspiciousActivityType.CIRCULAR_TRANSFER else "👤"
             reviewed_str = "✅" if f.reviewed else "⏳"
             amount_str = f"{await self.short_formatter(Decimal(f.amount))}" if f.amount else "N/A"
-            user_str = f"<@{f.user_id}>"
+            raw_user_id = resolved_flag_ids.get(getattr(f, "user_id", None))
+            user_str = f"<@{raw_user_id}>" if raw_user_id else "Unknown user"
             related_str = ""
-            if f.related_user_ids:
-                related_mentions = ", ".join(f"<@{uid}>" for uid in f.related_user_ids[:3])
-                if len(f.related_user_ids) > 3:
-                    related_mentions += f" +{len(f.related_user_ids) - 3} more"
+            related_ids = getattr(f, "related_user_ids", []) or []
+            if related_ids:
+                related_mentions = ", ".join(
+                    f"<@{resolved_flag_ids.get(uid, uid)}>" if resolved_flag_ids.get(uid) else "Unknown user"
+                    for uid in related_ids[:3]
+                )
+                if len(related_ids) > 3:
+                    related_mentions += f" +{len(related_ids) - 3} more"
                 related_str = f"\n  Related: {related_mentions}"
             lines.append(
                 f"{act_emoji} **ID {f.id}** | {user_str} | {f.activity_type.value}\n"

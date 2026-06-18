@@ -85,6 +85,46 @@ class Moderation(commands.Cog, name="Moderation"):
     def cog_unload(self):
         self.sync_counts.cancel()
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _resolve_ids(self, values):
+        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+        if not values:
+            return {}
+        unique = list(dict.fromkeys(v for v in values if v is not None))
+        hashes = [v for v in unique if self._is_hash(v)]
+        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
+        mapping = {}
+        for v in unique:
+            if isinstance(v, int):
+                mapping[v] = v
+            elif self._is_hash(v):
+                mapping[v] = resolved.get(v)
+            else:
+                try:
+                    mapping[v] = int(v)
+                except (TypeError, ValueError):
+                    mapping[v] = None
+        return mapping
+
     async def _get_settings(self, guild: discord.Guild):
         """Fetch channel_id and name template from DB (fallbacks included)."""
         channel_id = await self.bot.database.get_member_count_channel(guild.id)
@@ -1509,8 +1549,12 @@ class Moderation(commands.Cog, name="Moderation"):
             for i in range(0, len(history), entries_per_page)
         ]
 
+        moderator_ids = [getattr(p, "moderator_id", None) for p in history]
+        resolved_moderators = await self._resolve_ids(moderator_ids)
+
         def generate_entry(punishment):
-            moderator = ctx.guild.get_member(punishment.moderator_id)
+            raw_moderator_id = resolved_moderators.get(getattr(punishment, "moderator_id", None))
+            moderator = ctx.guild.get_member(raw_moderator_id) if raw_moderator_id else None
             formatted_date = punishment.created_at.strftime("%Y-%m-%d %I:%M %p")
 
             lines = [
@@ -3418,12 +3462,14 @@ class Moderation(commands.Cog, name="Moderation"):
         )
 
         for punishment in punishments:
+            raw_moderator_id = await self._resolve_id(punishment.moderator_id)
+            raw_user_id = await self._resolve_id(punishment.user_id)
             moderator = ctx.guild.get_member(
-                punishment.moderator_id
-            ) or await self.bot.fetch_user(punishment.moderator_id)
+                raw_moderator_id
+            ) or await self.bot.fetch_user(raw_moderator_id) if raw_moderator_id else None
             user = ctx.guild.get_member(
-                punishment.user_id
-            ) or await self.bot.fetch_user(punishment.user_id)
+                raw_user_id
+            ) or await self.bot.fetch_user(raw_user_id) if raw_user_id else None
             formatted_duration = (
                 humanfriendly.format_timespan(punishment.duration)
                 if punishment.duration
@@ -3442,12 +3488,17 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         notes = await self.bot.database.get_case_notes(case_id, ctx.guild.id)
-        notes_str = "\n".join(
-            [
-                f"Note by {ctx.guild.get_member(note.moderator_id).mention if ctx.guild.get_member(note.moderator_id) else 'Unknown'} at {note.created_at.strftime('%Y-%m-%d %I:%M %p UTC')}: {note.note}"
-                for note in notes
-            ]
-        )
+        note_moderator_ids = [getattr(n, "moderator_id", None) for n in notes]
+        resolved_note_moderators = await self._resolve_ids(note_moderator_ids)
+        notes_lines = []
+        for note in notes:
+            raw_mod_id = resolved_note_moderators.get(getattr(note, "moderator_id", None))
+            mod_member = ctx.guild.get_member(raw_mod_id) if raw_mod_id else None
+            mod_mention = mod_member.mention if mod_member else "Unknown"
+            notes_lines.append(
+                f"Note by {mod_mention} at {note.created_at.strftime('%Y-%m-%d %I:%M %p UTC')}: {note.note}"
+            )
+        notes_str = "\n".join(notes_lines)
 
         if notes_str:
             embed.add_field(name="Notes", value=notes_str, inline=False)
@@ -3487,7 +3538,8 @@ class Moderation(commands.Cog, name="Moderation"):
                 await ctx.send(f"Case {case_id} not found.")
                 return
 
-            if punishment.moderator_id != ctx.author.id:
+            raw_moderator_id = await self._resolve_id(punishment.moderator_id)
+            if raw_moderator_id != ctx.author.id:
                 await ctx.send(
                     "You are not authorized to update this case as you were not the original moderator."
                 )
@@ -4198,11 +4250,14 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             return await ctx.send(embed=embed)
 
+        resolved_linked = await self._resolve_ids(linked_ids)
         linked_members = []
         for uid in linked_ids:
-            user = ctx.guild.get_member(uid) or await self.bot.fetch_user(uid)
-            if user:
-                linked_members.append(user)
+            raw_id = resolved_linked.get(uid)
+            if raw_id:
+                user = ctx.guild.get_member(raw_id) or await self.bot.fetch_user(raw_id)
+                if user:
+                    linked_members.append(user)
 
         embed = discord.Embed(
             title=f"Linked Accounts of {member.display_name}",
@@ -4212,7 +4267,7 @@ class Moderation(commands.Cog, name="Moderation"):
             name="Accounts",
             value="\n".join(
                 f"{u.display_name or u.name} (`{u.id}`)" for u in linked_members
-            ),
+            ) or "Unknown users",
             inline=False,
         )
         await ctx.send(embed=embed)

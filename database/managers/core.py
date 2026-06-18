@@ -328,6 +328,7 @@ class CoreMixin(BaseManager):
         self, user_id: int, command_name: str, channel_id: int = None
     ):
         """Fetch the user blacklist status, command cooldown, and command enabled status in a single query."""
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             blacklist_subquery = (
                 select(Blacklist.user_id).where(Blacklist.user_id == user_id).exists()
@@ -377,6 +378,8 @@ class CoreMixin(BaseManager):
                 "is_command_enabled_channel": row.is_command_enabled_channel,
             }
     async def add_task(self, user_id: int, task: str) -> Task:
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(func.count()).select_from(Task).where(Task.user_id == user_id)
@@ -391,12 +394,14 @@ class CoreMixin(BaseManager):
             await session.commit()
             return new_task
     async def get_tasks(self, user_id: int) -> list[Task]:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(Task).where(Task.user_id == user_id).order_by(Task.order_index)
             )
             return result.scalars().all()
     async def complete_task(self, user_id: int, task_order: int) -> bool:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             stmt = (
                 update(Task)
@@ -407,6 +412,7 @@ class CoreMixin(BaseManager):
             await session.commit()
             return result.rowcount > 0
     async def delete_task(self, user_id: int, task_order: int) -> bool:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(Task).where(
@@ -429,6 +435,7 @@ class CoreMixin(BaseManager):
             await session.commit()
             return True
     async def edit_task(self, user_id: int, task_order: int, new_task: str) -> bool:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             stmt = (
                 update(Task)
@@ -439,6 +446,7 @@ class CoreMixin(BaseManager):
             await session.commit()
             return result.rowcount > 0
     async def clear_tasks(self, user_id: int) -> int:
+        user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(delete(Task).where(Task.user_id == user_id))
             await session.commit()
