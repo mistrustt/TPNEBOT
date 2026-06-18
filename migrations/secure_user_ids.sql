@@ -123,7 +123,7 @@ ON CONFLICT (user_hash) DO NOTHING;
 
 
 -- Helper: drop any index that includes a specific column.
-CREATE OR REPLACE FUNCTION drop_indexes_for_column(tablename TEXT, colname TEXT)
+CREATE OR REPLACE FUNCTION drop_indexes_for_column(p_tablename TEXT, p_colname TEXT)
 RETURNS void AS $$
 DECLARE
     idx RECORD;
@@ -132,8 +132,8 @@ BEGIN
         SELECT indexname
         FROM pg_indexes
         WHERE schemaname = 'public'
-          AND tablename = drop_indexes_for_column.tablename
-          AND indexdef LIKE '%(' || colname || '%'
+          AND tablename = p_tablename
+          AND indexdef LIKE '%(' || p_colname || '%'
     LOOP
         EXECUTE format('DROP INDEX IF EXISTS %I', idx.indexname);
     END LOOP;
@@ -380,5 +380,10 @@ CREATE INDEX ix_rakeback_user_created ON rakeback_transactions(user_id, created_
 -- ========================================================================
 
 DROP FUNCTION IF EXISTS drop_indexes_for_column(TEXT, TEXT);
+
+-- Verify user_identities was populated and operational tables have hashes.
+-- A quick sanity check: the mapping table count should match distinct hashes in wallets.
+-- SELECT COUNT(*) FROM user_identities;
+-- SELECT COUNT(DISTINCT user_id) FROM wallets;
 
 COMMIT;
