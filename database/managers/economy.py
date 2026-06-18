@@ -32,6 +32,15 @@ logger = logging.getLogger("discord_bot")
 
 ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owner IDs
 
+# Sentinel hash representing the treasury/system account. The raw value 0 is
+# used historically; after hashing user IDs we store its hash instead so the
+# column stays uniformly VARCHAR(64).
+TREASURY_USER_ID = 0
+
+def _treasury_hash() -> str:
+    from utils.security import hash_user_id
+    return hash_user_id(TREASURY_USER_ID)
+
 _LAST_REBALANCE_AT: Optional[datetime] = None  # module-level memo
 _DAILY_MINT_TOTAL: Decimal = Decimal("0")
 _MINT_DAY: Optional[datetime] = None  # resets when date changes
@@ -497,7 +506,7 @@ class EconomyMixin(BaseManager):
                         Transaction(
                             id=txid_fee,
                             from_user_id=sender.user_id,
-                            to_user_id=0,  # Treasury
+                            to_user_id=_treasury_hash(),  # Treasury
                             amount=adjusted_fee,
                             description=f"P2P transfer fee (base: {base_fee_rate:.2%}, wealth-adjusted)",
                             timestamp=discord.utils.utcnow(),
@@ -643,7 +652,7 @@ class EconomyMixin(BaseManager):
                     await self._atomic_balance_change(
                         session, "supply", "id", 1, +fee, balance_col="treasury"
                     )
-                    from_uid, to_uid = 0, wallet.user_id
+                    from_uid, to_uid = _treasury_hash(), wallet.user_id
                     raw_from_uid, raw_to_uid = 0, raw_user_id
                 else:  # deposit: wallet → treasury
                     await self._atomic_balance_change(
@@ -657,7 +666,7 @@ class EconomyMixin(BaseManager):
                     await self._atomic_balance_change(
                         session, "supply", "id", 1, +net + fee, balance_col="treasury"
                     )
-                    from_uid, to_uid = wallet.user_id, 0
+                    from_uid, to_uid = wallet.user_id, _treasury_hash()
                     raw_from_uid, raw_to_uid = raw_user_id, 0
 
                 # DB tx rows
@@ -676,7 +685,7 @@ class EconomyMixin(BaseManager):
                         Transaction(
                             id=tid_fee,
                             from_user_id=from_uid,
-                            to_user_id=0,  # Fee always goes to treasury
+                            to_user_id=_treasury_hash(),  # Fee always goes to treasury
                             amount=fee,
                             description=f"{description} (fee @ {fee_rate:.2%})",
                             timestamp=discord.utils.utcnow(),
@@ -1062,7 +1071,7 @@ class EconomyMixin(BaseManager):
                 transaction_db = Transaction(
                     id=txid,
                     from_user_id=None,
-                    to_user_id=0,
+                    to_user_id=_treasury_hash(),
                     amount=amount,
                     description=description,
                     timestamp=discord.utils.utcnow(),
@@ -1100,7 +1109,7 @@ class EconomyMixin(BaseManager):
                 txid = str(uuid.uuid4())
                 transaction_db = Transaction(
                     id=txid,
-                    from_user_id=0,
+                    from_user_id=_treasury_hash(),
                     to_user_id=None,
                     amount=amount,
                     description=description,
@@ -1878,8 +1887,8 @@ class EconomyMixin(BaseManager):
 
             # Volatility estimate using Gini coefficient (bounded 0-1)
             # Gini = 0 means perfect equality, Gini = 1 means maximum inequality
-            # Exclude treasury wallet (user_id=0) from wealth distribution check
-            balances_stmt = select(Wallet.balance).where(Wallet.user_id != 0)
+            # Exclude treasury wallet (user_id=0 sentinel) from wealth distribution check
+            balances_stmt = select(Wallet.balance).where(Wallet.user_id != _treasury_hash())
             balances_result = await session.execute(balances_stmt)
             balances = [float(r[0]) for r in balances_result.fetchall()]
 
