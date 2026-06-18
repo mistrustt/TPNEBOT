@@ -16,7 +16,7 @@
 --   1. Set USER_ID_HASH_KEY in your environment to the same key.
 --   2. Restart the bot so the new models and hashing logic take effect.
 
-\set key '__CHANGE_THIS_TO_A_LONG_RANDOM_SECRET__'
+\set key 'supersecretpasswordnigga'
 
 BEGIN;
 
@@ -310,6 +310,8 @@ ALTER TABLE heardle_game_stats ADD PRIMARY KEY (user_id);
 SELECT drop_indexes_for_column('game_history', 'user_id');
 ALTER TABLE game_history
     ALTER COLUMN user_id TYPE VARCHAR(64) USING hash_user_id(user_id, :'key');
+DROP INDEX IF EXISTS ix_game_history_user_created;
+DROP INDEX IF EXISTS ix_game_history_hash;
 CREATE INDEX ix_game_history_user_created ON game_history(user_id, created_at);
 CREATE INDEX ix_game_history_hash ON game_history(hash);
 
