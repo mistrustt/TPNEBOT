@@ -4,6 +4,7 @@ FROM python:3.12-slim AS base
 
 # System deps:
 #   - build-essential / gcc / libffi-dev: build cryptography, asyncpg, greenlet wheels for some arches
+#   - cmake / libssl-dev: build dave.py (Discord DAVE E2EE voice bindings)
 #   - libpq-dev: asyncpg + psycopg-style libs prefer building against libpq headers
 #   - libxml2-dev / libxslt1-dev / libjpeg-dev / libpng-dev / libfreetype6-dev:
 #       matplotlib / Pillow / moviepy transitive deps
@@ -18,10 +19,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
+        cmake \
         gcc \
         git \
         libffi-dev \
         libpq-dev \
+        libssl-dev \
         libxml2-dev \
         libxslt1-dev \
         libjpeg-dev \
