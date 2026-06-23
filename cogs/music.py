@@ -1729,31 +1729,70 @@ class Music(commands.Cog, name="Music"):
 
         return song_list
 
-    async def fetch_snippet(self, name: str):
+    async def fetch_session_files(self, song: dict) -> tuple[list[str], list[str]]:
+        """Browse for a song's session archives and session edits in one request.
+
+        Returns ``(session_downloads, session_edits)`` where ``session_downloads``
+        are the ``Studio Sessions/{Era}/{Song}.zip`` archives and ``session_edits``
+        are the ``Session Edits/{Song}.mp3`` files.
+        """
+        name = song.get("name") or ""
+        if not name:
+            return [], []
+
         async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/files/browse/", params={"path": f'Snippets/{name}'}
+            JUICEWRLD_API + "/juicewrld/files/browse/", params={"search": name}
         ) as response:
             if response.status != 200:
-                return None
+                return [], []
 
             data = await response.json()
 
+        files = [
+            item.get("path", "")
+            for item in data.get("items", [])
+            if item.get("type") == "file"
+        ]
+
+        session_paths = [p for p in files if p.startswith("Studio Sessions/")]
+        session_edits = [p for p in files if p.startswith("Session Edits/")]
+
+        era_name = song.get("era", {}).get("name", "")
+        album = self.ALBUMS.get(era_name)
+        era_match = (album["name"] if album else era_name).lower()
+        if era_match:
+            scoped = [p for p in session_paths if era_match in p.lower()]
+            if scoped:
+                session_paths = scoped
+
+        return session_paths, session_edits
+
+    async def fetch_snippet(self, name: str):
         valid_snippets = []
 
-        for item in data.get("items", []):
-            if item.get("type") != "file":
-                continue
+        for folder in (f'Snippets/{name}', f'Snippets-Old/{name}'):
+            async with self.session.get(
+                JUICEWRLD_API + "/juicewrld/files/browse/", params={"path": folder}
+            ) as response:
+                if response.status != 200:
+                    continue
 
-            mime = item.get("mime_type", "")
+                data = await response.json()
 
-            if mime and mime.startswith("video/"):
-                path = item.get("path")
-                
-                fixed_path = quote(path, safe="/") # lowkey wanted to use envys special_url_encode
-                valid_snippets.append(
-                    "https://juicewrldapi.com/juicewrld/files/download/?path="
-                    + fixed_path
-                )
+            for item in data.get("items", []):
+                if item.get("type") != "file":
+                    continue
+
+                mime = item.get("mime_type", "")
+
+                if mime and mime.startswith("video/"):
+                    path = item.get("path")
+
+                    fixed_path = quote(path, safe="/") # lowkey wanted to use envys special_url_encode
+                    valid_snippets.append(
+                        "https://juicewrldapi.com/juicewrld/files/download/?path="
+                        + fixed_path
+                    )
 
         return valid_snippets
 
@@ -1822,7 +1861,13 @@ class Music(commands.Cog, name="Music"):
         except ValueError:
             return None
 
-    async def create_song_view(self, song_data: dict, random_leak: bool = False):
+    async def create_song_view(
+        self,
+        song_data: dict,
+        random_leak: bool = False,
+        session_downloads: list[str] | None = None,
+        session_edits: list[str] | None = None,
+    ):
         class SongContainer(discord.ui.Container):
             ALBUMS = {
                 'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
@@ -1874,10 +1919,12 @@ class Music(commands.Cog, name="Music"):
             }
 
             def __init__(
-                self, 
-                song: dict, 
-                downloads = None, 
-                random_leak: bool = False, 
+                self,
+                song: dict,
+                downloads = None,
+                random_leak: bool = False,
+                session_downloads = None,
+                session_edits = None,
             ):
                 name = song.get('name')
                 track_titles = [t for t in song.get('track_titles', []) if t != name]
@@ -1893,14 +1940,15 @@ class Music(commands.Cog, name="Music"):
                 super().__init__(accent_color=accent_color)
 
                 self._build_container(
-                    song, downloads, random_leak, 
-                    name, track_titles, producers, engineers, 
-                    era_name, album, image_url
+                    song, downloads, random_leak,
+                    name, track_titles, producers, engineers,
+                    era_name, album, image_url, session_downloads, session_edits
                 )
 
             def _build_container(
                 self, song, downloads, random_leak, name, track_titles,
-                producers, engineers, era_name, album, image_url
+                producers, engineers, era_name, album, image_url,
+                session_downloads=None, session_edits=None
             ):
                 thumbnail = discord.ui.Section(
                     accessory=discord.ui.Thumbnail(media=image_url)
@@ -1933,7 +1981,9 @@ class Music(commands.Cog, name="Music"):
                     url='https://juicewrldapi.com/'
                 )
 
-                rows = self._create_download_rows(downloads, song, MAIN_URL)
+                rows = self._create_download_rows(
+                    downloads, song, MAIN_URL, session_downloads, session_edits
+                )
                 
                 rows.append(discord.ui.Separator())
                 rows.append(discord.ui.ActionRow())
@@ -1959,26 +2009,58 @@ class Music(commands.Cog, name="Music"):
 
                         self.add_item(discord.ui.TextDisplay(f'{field_label}\n{value}'))
 
-            def _create_download_rows(self, downloads, song, main_url):
+            def _create_download_rows(self, downloads, song, main_url, session_downloads=None, session_edits=None):
                 rows = []
 
-                download = song.get('path')
-                if download != '':
+                if session_downloads:
+                    # Link straight to the Studio Sessions archives
+                    # (Studio Sessions/{Era}/{Song}.zip) for the session command.
                     rows.append(discord.ui.Separator())
-                    
-                    ext = download.rsplit('.', 1)[-1].upper()
-                    if ext.lower() in ['zip', 'rar', '7z']:
-                        rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
-                    else:
-                        rows.append(discord.ui.TextDisplay('**Tagged File(s)**'))
-                    main_row = discord.ui.ActionRow()
-                    main_row.add_item(
-                        discord.ui.Button(
-                            label=ext,
-                            url=main_url + quote(download)
+                    rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
+                    for i in range(0, len(session_downloads), 5):
+                        row = discord.ui.ActionRow()
+                        for path in session_downloads[i:i + 5]:
+                            ext = path.rsplit('.', 1)[-1].upper()
+                            row.add_item(
+                                discord.ui.Button(
+                                    label=ext,
+                                    url=main_url + quote(path)
+                                )
+                            )
+                        rows.append(row)
+                else:
+                    download = song.get('path')
+                    if download != '':
+                        rows.append(discord.ui.Separator())
+
+                        ext = download.rsplit('.', 1)[-1].upper()
+                        if ext.lower() in ['zip', 'rar', '7z']:
+                            rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
+                        else:
+                            rows.append(discord.ui.TextDisplay('**Tagged File(s)**'))
+                        main_row = discord.ui.ActionRow()
+                        main_row.add_item(
+                            discord.ui.Button(
+                                label=ext,
+                                url=main_url + quote(download)
+                            )
                         )
-                    )
-                    rows.append(main_row)
+                        rows.append(main_row)
+
+                if session_edits:
+                    # Link to the session edit mp3s (Session Edits/{Song}.mp3).
+                    rows.append(discord.ui.TextDisplay('**Session Edit(s)**'))
+                    for i in range(0, len(session_edits), 5):
+                        row = discord.ui.ActionRow()
+                        for path in session_edits[i:i + 5]:
+                            ext = path.rsplit('.', 1)[-1].upper()
+                            row.add_item(
+                                discord.ui.Button(
+                                    label=ext,
+                                    url=main_url + quote(path)
+                                )
+                            )
+                        rows.append(row)
 
                 if downloads:
                     rows.append(discord.ui.TextDisplay('**Original File(s)**'))
@@ -2001,7 +2083,11 @@ class Music(commands.Cog, name="Music"):
         downloads = await self.get_downloads(file_names, song_data.get('length', ''))
 
         layout_view = discord.ui.LayoutView(timeout=None)
-        layout_view.add_item(SongContainer(song_data, downloads, random_leak))
+        layout_view.add_item(
+            SongContainer(
+                song_data, downloads, random_leak, session_downloads, session_edits
+            )
+        )
 
         return layout_view
 
@@ -2163,7 +2249,14 @@ class Music(commands.Cog, name="Music"):
             return
 
         if len(song_list) == 1:
-            layout_view = await self.create_song_view(song_list[0])
+            session_downloads, session_edits = await self.fetch_session_files(
+                song_list[0]
+            )
+            layout_view = await self.create_song_view(
+                song_list[0],
+                session_downloads=session_downloads,
+                session_edits=session_edits,
+            )
             await ctx.reply(view=layout_view)
 
         elif len(song_list) > 1:
@@ -2196,7 +2289,14 @@ class Music(commands.Cog, name="Music"):
                     song_id = self.values[0]
                     song = self.song_map[song_id]
 
-                    view = await self.cog.create_song_view(song)
+                    session_downloads, session_edits = (
+                        await self.cog.fetch_session_files(song)
+                    )
+                    view = await self.cog.create_song_view(
+                        song,
+                        session_downloads=session_downloads,
+                        session_edits=session_edits,
+                    )
 
                     if self.author != itn.user:
                         return await itn.response.send_message(
