@@ -32,8 +32,7 @@ COINMARKETCAP_API_URL = (
 )
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-llmmodel = "arcee-ai/trinity-large-preview:free"
-
+llmmodel = "nvidia/nemotron-3-ultra-550b-a55b:free"
 NASA_API_KEY = os.getenv("NASA_API_KEY")
 
 HIDDEN_COGS = {"Owner", "Jishaku", "Hidden"}
