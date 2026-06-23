@@ -1746,6 +1746,7 @@ class General(commands.Cog, name="General"):
 
     @commands.command(
         name="quickpoll",
+        aliases=["qp"],
         description="Creates a poll by reacting to the user's message.",
     )
     async def quickpoll(self, ctx: Context, *, question: str):
