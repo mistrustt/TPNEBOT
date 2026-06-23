@@ -3371,6 +3371,46 @@ class Casino(commands.Cog):
         self.SLOTS_PAYLINES = SLOTS_PAYLINES
         self.SLOTS_REEL_WEIGHTS = SLOTS_REEL_WEIGHTS
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _resolve_ids(self, values):
+        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+        if not values:
+            return {}
+        unique = list(dict.fromkeys(v for v in values if v is not None))
+        hashes = [v for v in unique if self._is_hash(v)]
+        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
+        mapping = {}
+        for v in unique:
+            if isinstance(v, int):
+                mapping[v] = v
+            elif self._is_hash(v):
+                mapping[v] = resolved.get(v)
+            else:
+                try:
+                    mapping[v] = int(v)
+                except (TypeError, ValueError):
+                    mapping[v] = None
+        return mapping
+
     def _json_safe(self, value: Any) -> Any:
         if isinstance(value, Decimal):
             return str(value)
@@ -3930,13 +3970,18 @@ class Casino(commands.Cog):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_winners = await self._resolve_ids([uid for uid, _ in top_winners])
             for idx, (user_id, wins) in enumerate(top_winners):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_winners.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                 top_list.append(f"{emoji} **{display_name}** (`{wins:,} wins`)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -6671,7 +6716,7 @@ class Casino(commands.Cog):
             title=f"💣 Mines Admin — #{channel.name}",
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Player", value=f"<@{view.user_id}>", inline=True)
+        embed.add_field(name="Player", value=f"<@{await self._resolve_id(view.user_id)}>", inline=True)
         embed.add_field(
             name="Bet",
             value=f"{self.currency_name} **{await self.formatter(view.bet_amount)}**",

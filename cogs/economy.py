@@ -1028,6 +1028,11 @@ class TransactionPaginator(discord.ui.View):
             title=f"{self.member.display_name}'s Transactions", color=color
         )
 
+        tx_ids = []
+        for tx in page_transactions:
+            tx_ids.extend([getattr(tx, "from_user_id", None), getattr(tx, "to_user_id", None)])
+        resolved_tx_ids = await self.cog._resolve_ids(tx_ids)
+
         for tx in page_transactions:
             amount = Decimal(tx.amount) if tx.amount else Decimal("0")
             formatted_amount = await self.cog.formatter(amount)
@@ -1039,9 +1044,12 @@ class TransactionPaginator(discord.ui.View):
                 else "Unknown time"
             )
 
-            if tx.from_user_id == self.member.id and tx.to_user_id != self.member.id:
+            raw_from = resolved_tx_ids.get(getattr(tx, "from_user_id", None))
+            raw_to = resolved_tx_ids.get(getattr(tx, "to_user_id", None))
+
+            if raw_from == self.member.id and raw_to != self.member.id:
                 direction = "📤 Sent"
-            elif tx.from_user_id != self.member.id and tx.to_user_id == self.member.id:
+            elif raw_from != self.member.id and raw_to == self.member.id:
                 direction = "📥 Received"
             else:
                 direction = "🔄 Internal"
@@ -1329,6 +1337,46 @@ class Economy(commands.Cog):
         num = self._fmt_no_sci(value, max_frac=2)
         return f"-{num}" if negative else num
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _resolve_ids(self, values):
+        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+        if not values:
+            return {}
+        unique = list(dict.fromkeys(v for v in values if v is not None))
+        hashes = [v for v in unique if self._is_hash(v)]
+        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
+        mapping = {}
+        for v in unique:
+            if isinstance(v, int):
+                mapping[v] = v
+            elif self._is_hash(v):
+                mapping[v] = resolved.get(v)
+            else:
+                try:
+                    mapping[v] = int(v)
+                except (TypeError, ValueError):
+                    mapping[v] = None
+        return mapping
+
     async def amount_handler(self, amount_input: str, user_balance: Decimal) -> Decimal:
         """
         Process the bet input and return the corresponding bet amount.
@@ -1426,8 +1474,10 @@ class Economy(commands.Cog):
         try:
             employees_to_fire = await self.bot.database.get_employees_for_firing()
             for job in employees_to_fire:
-                await self.bot.database.fire_employee(job.user_id)
-                logger.info(f"Fired employee {job.user_id} from {job.title} for inactivity")
+                raw_user_id = await self._resolve_id(job.user_id)
+                if raw_user_id:
+                    await self.bot.database.fire_employee(raw_user_id)
+                    logger.info(f"Fired employee {raw_user_id} from {job.title} for inactivity")
         except Exception as e:
             logger.error(f"Error firing inactive employees: {e}")
 
@@ -1517,14 +1567,21 @@ class Economy(commands.Cog):
 
             if user_transactions:
                 transactions_text = []
+                tx_ids = []
+                for tx in user_transactions:
+                    tx_ids.extend([getattr(tx, "from_user_id", None), getattr(tx, "to_user_id", None)])
+                resolved_tx_ids = await self._resolve_ids(tx_ids)
+
                 for tx in user_transactions:
                     amount = Decimal(tx.amount) if tx.amount else Decimal("0")
                     formatted_amount = await self.short_formatter(amount)
                     description = tx.description if tx.description else "No description"
-                    
-                    if tx.from_user_id == member.id and tx.to_user_id != member.id:
+                    raw_from = resolved_tx_ids.get(getattr(tx, "from_user_id", None))
+                    raw_to = resolved_tx_ids.get(getattr(tx, "to_user_id", None))
+
+                    if raw_from == member.id and raw_to != member.id:
                         direction = "📤"
-                    elif tx.from_user_id != member.id and tx.to_user_id == member.id:
+                    elif raw_from != member.id and raw_to == member.id:
                         direction = "📥"
                     else:
                         direction = "🔄"
@@ -1579,20 +1636,25 @@ class Economy(commands.Cog):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_users = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, total_balance) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_users.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
 
 
                 lb_str = f"{emoji} **{display_name}** (`{await self.short_formatter(total_balance)}`)"
 
                 top_list.append(lb_str)
-                
+
             embed.add_field(
                 name="Top 10 Users by Net Balance",
                 value="\n".join(top_list),
@@ -2637,11 +2699,12 @@ class Economy(commands.Cog):
         guild_member_ids = {m.id for m in ctx.guild.members}
 
         top_users = await self.bot.database.get_top_wallet_users(limit=50)
+        resolved_users = await self._resolve_ids([uid for uid, _ in top_users])
 
         eligible = [
             (uid, bal)
             for uid, bal in top_users
-            if bal >= Decimal("10000") and uid in guild_member_ids
+            if bal >= Decimal("10000") and resolved_users.get(uid) in guild_member_ids
         ]
 
         if not eligible:
@@ -2653,11 +2716,12 @@ class Economy(commands.Cog):
             return await ctx.reply(embed=embed, delete_after=5)
 
         user_id, balance = random.choice(eligible)
+        raw_id = resolved_users.get(user_id)
 
-        member = ctx.guild.get_member(user_id)
+        member = ctx.guild.get_member(raw_id) if raw_id else None
         if not member:
             try:
-                member = await ctx.guild.fetch_member(user_id)
+                member = await ctx.guild.fetch_member(raw_id) if raw_id else None
             except discord.NotFound:
                 member = None
 
@@ -2665,7 +2729,7 @@ class Economy(commands.Cog):
             name = member.mention
             avatar = member.avatar.url if member.avatar else ctx.guild.icon.url
         else:
-            name = f"`{user_id}`"
+            name = f"`{raw_id}`" if raw_id else "Unknown user"
             avatar = None
 
         embed = discord.Embed(title="Scout Report", color=discord.Color.blurple())
@@ -3812,6 +3876,9 @@ class Economy(commands.Cog):
                 await ctx.reply("🔍 No transaction found with that ID.", delete_after=5)
                 return
 
+            raw_from_id = await self._resolve_id(getattr(transaction, "from_user_id", None))
+            raw_to_id = await self._resolve_id(getattr(transaction, "to_user_id", None))
+
             async def resolve_user(uid):
                 if not uid:
                     return None
@@ -3826,8 +3893,8 @@ class Economy(commands.Cog):
                 except Exception:
                     return None
 
-            from_user = await resolve_user(getattr(transaction, "from_user_id", None))
-            to_user = await resolve_user(getattr(transaction, "to_user_id", None))
+            from_user = await resolve_user(raw_from_id)
+            to_user = await resolve_user(raw_to_id)
 
             amt = getattr(transaction, "amount", None)
             try:
@@ -3862,8 +3929,8 @@ class Economy(commands.Cog):
             else:
                 from_display = (
                     "System"
-                    if not getattr(transaction, "from_user_id", None)
-                    else f"User ID: `{transaction.from_user_id}`"
+                    if not raw_from_id
+                    else f"User ID: `{raw_from_id}`"
                 )
 
             if to_user:
@@ -3871,8 +3938,8 @@ class Economy(commands.Cog):
             else:
                 to_display = (
                     "System"
-                    if not getattr(transaction, "to_user_id", None)
-                    else f"User ID: `{transaction.to_user_id}`"
+                    if not raw_to_id
+                    else f"User ID: `{raw_to_id}`"
                 )
 
             embed.add_field(name="From", value=from_display, inline=True)
@@ -4023,16 +4090,18 @@ class Economy(commands.Cog):
             )
 
         embed = discord.Embed(title="🎯 Top Bounties", color=discord.Color.blurple())
+        resolved_bounties = await self._resolve_ids([uid for uid, _ in top_bounties])
         for user_id, total in top_bounties:
-            member = ctx.guild.get_member(user_id)
+            raw_id = resolved_bounties.get(user_id)
+            member = ctx.guild.get_member(raw_id) if raw_id else None
             if member:
                 name = member.display_name
             else:
                 try:
-                    user_obj = await self.bot.fetch_user(user_id)
-                    name = user_obj.name
+                    user_obj = await self.bot.fetch_user(raw_id) if raw_id else None
+                    name = user_obj.name if user_obj else "Unknown user"
                 except:
-                    name = f"User ID {user_id}"
+                    name = "Unknown user"
             embed.add_field(
                 name=name,
                 value=f"{self.currency_name} **{await self.short_formatter(total)}**",
@@ -4288,12 +4357,17 @@ class Economy(commands.Cog):
             color=discord.Color.blurple(),
         )
 
-        incoming = [t for t in trades if t.to_user_id == interaction.user.id]
-        outgoing = [t for t in trades if t.from_user_id == interaction.user.id]
+        trade_user_ids = []
+        for t in trades:
+            trade_user_ids.extend([getattr(t, "from_user_id", None), getattr(t, "to_user_id", None)])
+        resolved_trade_ids = await self._resolve_ids(trade_user_ids)
+
+        incoming = [t for t in trades if resolved_trade_ids.get(getattr(t, "to_user_id", None)) == interaction.user.id]
+        outgoing = [t for t in trades if resolved_trade_ids.get(getattr(t, "from_user_id", None)) == interaction.user.id]
 
         if incoming:
             incoming_str = "\n".join([
-                f"**ID {t.id}:** {t.item_name} x{t.quantity} from <@{t.from_user_id}>"
+                f"**ID {t.id}:** {t.item_name} x{t.quantity} from <@{resolved_trade_ids.get(getattr(t, 'from_user_id', None)) or 'Unknown user'}>"
                 for t in incoming[:5]
             ])
             if len(incoming) > 5:
@@ -4302,7 +4376,7 @@ class Economy(commands.Cog):
 
         if outgoing:
             outgoing_str = "\n".join([
-                f"**ID {t.id}:** {t.item_name} x{t.quantity} to <@{t.to_user_id}>"
+                f"**ID {t.id}:** {t.item_name} x{t.quantity} to <@{resolved_trade_ids.get(getattr(t, 'to_user_id', None)) or 'Unknown user'}>"
                 for t in outgoing[:5]
             ])
             if len(outgoing) > 5:
@@ -4530,8 +4604,10 @@ class Economy(commands.Cog):
             )
 
             description_lines = []
+            user_ids = [entry.get("user_id") for entry in leaderboard]
+            resolved_vip_ids = await self._resolve_ids(user_ids)
             for i, entry in enumerate(leaderboard, 1):
-                user_id = entry["user_id"]
+                user_id = entry.get("user_id")
                 total_wagered = entry["total_wagered"]
                 tier = entry.get("tier")
 
@@ -4541,7 +4617,9 @@ class Economy(commands.Cog):
                 medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"#{i}"
 
                 formatted_wagered = await self.formatter(total_wagered)
-                description_lines.append(f"{medal} <@{user_id}> - {emoji} {tier_name} - **{formatted_wagered}** wagered")
+                raw_id = resolved_vip_ids.get(user_id)
+                mention = f"<@{raw_id}>" if raw_id else "Unknown user"
+                description_lines.append(f"{medal} {mention} - {emoji} {tier_name} - **{formatted_wagered}** wagered")
 
             embed.description = "\n".join(description_lines)
 

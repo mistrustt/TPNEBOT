@@ -27,10 +27,7 @@ services:
     # Postgres only listens inside the compose network by default; no host port published.
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: tpnebot:latest
+    image: git.silverside-grouse.ts.net/dirtymonkeysquad/tpnebot:latest
     restart: unless-stopped
     env_file:
       - .env
@@ -52,13 +49,9 @@ services:
       # Expose the admin API (aiohttp) on the host. Override with ADMIN_API_PORT in .env.
       - "${ADMIN_API_PORT:-8080}:8080"
     volumes:
-      # Persist discord.log + any runtime artifacts outside the container.
-      # Mounted on /app (not /app/data) so the RotatingFileHandler in bot.py,
-      # which writes to ./discord.log at CWD, also survives `compose down`.
-      - appdata:/app
+      - appdata:/app/data
     # Run as the unprivileged `tpnebot` user defined in the Dockerfile
     user: "1000:1000"
-
 volumes:
   pgdata:
     name: tpnebot_pgdata

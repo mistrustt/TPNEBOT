@@ -17,8 +17,29 @@ from utils.cooldown import CooldownUtils
 from utils.admin_api import AdminAPIServer
 from database.manager import DatabaseManager
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from utils.cache import Cache
 from utils.stats import hash_user_id
+
+_DB_ERROR_TYPES: tuple[type[Exception], ...] = (SQLAlchemyError,)
+try:
+    import asyncpg.exceptions as _apg_exc
+
+    _DB_ERROR_TYPES += (_apg_exc.PostgresError,)
+except Exception:
+    pass
+
+
+def _root_cause_is_db_error(error) -> bool:
+    """Return True if *error* or its wrapped original is a DB connection failure."""
+    if isinstance(error, _DB_ERROR_TYPES):
+        return True
+    original = getattr(error, "original", None)
+    if isinstance(original, _DB_ERROR_TYPES):
+        return True
+    if original is not None and DatabaseManager._is_retryable_db_error(original):
+        return True
+    return False
 
 class LoggingFormatter(logging.Formatter):
     COLORS = {
@@ -55,7 +76,7 @@ def setup_logging():
     console_handler.setFormatter(console_formatter)
 
     file_handler = logging.handlers.RotatingFileHandler(
-        "discord.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8", mode="a"
+        "data/discord.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8", mode="a"
     )
     file_handler.setFormatter(file_formatter)
 
@@ -191,6 +212,15 @@ class DiscordBot(commands.Bot):
 
     def is_coolguy(self, user_id: int):
         return user_id in self.cool_guys
+
+    @staticmethod
+    def _is_transient_discord_api_error(error: Exception) -> bool:
+        """Return True if *error* is a Discord server-side API failure (5xx)."""
+        if isinstance(error, discord.errors.DiscordServerError):
+            return True
+        if isinstance(error, discord.HTTPException) and getattr(error, "status", 0) >= 500:
+            return True
+        return False
 
     async def setup_hook(self) -> None:
         try:
@@ -366,14 +396,52 @@ class DiscordBot(commands.Bot):
 
             ctx._stats_started_at = time.perf_counter()
             await super().invoke(ctx)
-        except discord.errors.DiscordServerError:
-            return
-        except discord.HTTPException:
+        except commands.CommandInvokeError as exc:
+            if _root_cause_is_db_error(exc):
+                self.logger.warning(
+                    f"Database error while invoking {ctx.command.qualified_name}: "
+                    f"{type(exc.original).__name__}: {exc.original}"
+                )
+                embed = discord.Embed(
+                    title="⚠️ Database Temporarily Unavailable",
+                    description=(
+                        "The database connection dropped. Your command was not processed. "
+                        "Please try again in a moment."
+                    ),
+                    color=discord.Color.orange(),
+                )
+                return await ctx.reply(embed=embed, delete_after=10)
+            if self._is_transient_discord_api_error(exc.original):
+                self.logger.warning(
+                    f"Discord API error while invoking {ctx.command.qualified_name}: "
+                    f"{type(exc.original).__name__}: {exc.original}"
+                )
+                return
+            raise
+        except SQLAlchemyError as exc:
+            self.logger.warning(
+                f"Database error during command pre-checks: {type(exc).__name__}: {exc}"
+            )
+            embed = discord.Embed(
+                title="⚠️ Database Temporarily Unavailable",
+                description=(
+                    "The database connection dropped. Your command was not processed. "
+                    "Please try again in a moment."
+                ),
+                color=discord.Color.orange(),
+            )
+            return await ctx.reply(embed=embed, delete_after=10)
+        except (discord.errors.DiscordServerError, discord.HTTPException):
             return
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
             interaction._stats_started_at = time.perf_counter()
+            # Ensure the mapping table has this user so hashes can be resolved later.
+            try:
+                await self.database.ensure_user_identity(interaction.user.id)
+            except Exception:
+                pass
 
         base = super()
         if hasattr(base, "on_interaction"):
@@ -399,6 +467,15 @@ class DiscordBot(commands.Bot):
                 if inspect.isawaitable(result):
                     await result
                 return
+
+    async def process_commands(self, message: discord.Message) -> None:
+        """Ensure the user identity is recorded before running prefix commands."""
+        if not message.author.bot:
+            try:
+                await self.database.ensure_user_identity(message.author.id)
+            except Exception:
+                pass
+        await super().process_commands(message)
 
     async def on_command_completion(self, ctx: Context) -> None:
         command_name = ctx.command.qualified_name
@@ -520,6 +597,41 @@ class DiscordBot(commands.Bot):
         except Exception as e:
             self.logger.warning(f"Stats tracking failed: {e}")
 
+        command = getattr(interaction, "command", None)
+        command_name = getattr(command, "qualified_name", "unknown")
+
+        if _root_cause_is_db_error(error):
+            original = getattr(error, "original", error)
+            self.logger.warning(
+                f"Database error in slash /{command_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            message = (
+                "⚠️ Database Temporarily Unavailable\n\n"
+                "The database connection dropped. Your command was not processed. Please try again in a moment."
+            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(message, ephemeral=True)
+            else:
+                await interaction.followup.send(message, ephemeral=True)
+            return
+        if self._is_transient_discord_api_error(error):
+            self.logger.warning(
+                f"Discord API error in slash /{command_name}: "
+                f"{type(error).__name__}: {error}"
+            )
+            return
+        if (
+            isinstance(error, app_commands.CommandInvokeError)
+            and self._is_transient_discord_api_error(error.original)
+        ):
+            original = error.original
+            self.logger.warning(
+                f"Discord API error in slash /{command_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            return
+
         if isinstance(error, app_commands.CommandOnCooldown):
             retry = error.retry_after
             if not interaction.response.is_done():
@@ -639,59 +751,117 @@ class DiscordBot(commands.Bot):
             pass
         elif isinstance(error, commands.CheckAnyFailure):
             pass
+        elif _root_cause_is_db_error(error):
+            original = getattr(error, "original", error)
+            self.logger.warning(
+                f"Database error in command {ctx.command.qualified_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            embed = discord.Embed(
+                title="⚠️ Database Temporarily Unavailable",
+                description=(
+                    "The database connection dropped. Your command was not processed. "
+                    "Please try again in a moment."
+                ),
+                color=discord.Color.orange(),
+            )
+            return await ctx.reply(embed=embed, delete_after=10)
+        elif self._is_transient_discord_api_error(error):
+            self.logger.warning(
+                f"Discord API error in command {ctx.command.qualified_name}: "
+                f"{type(error).__name__}: {error}"
+            )
+            return
+        elif (
+            isinstance(error, commands.CommandInvokeError)
+            and self._is_transient_discord_api_error(error.original)
+        ):
+            original = error.original
+            self.logger.warning(
+                f"Discord API error in command {ctx.command.qualified_name}: "
+                f"{type(original).__name__}: {original}"
+            )
+            return
         elif isinstance(error, Exception):
             dev_channel_id = int(os.getenv("DEVELOPER_CHANNEL_ID"))
             dev_channel = self.get_channel(dev_channel_id)
             detailed_error = "".join(
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
+
+            prefix = await self.database.get_prefix(ctx.guild.id) if ctx.guild else "!"
+            invoked_with = ctx.invoked_with or ctx.command.name
+            command_display = f"`{prefix}{invoked_with}`"
+            error_type = type(error).__name__
+            error_message = str(error) or "No message provided."
+
             if dev_channel:
-                if len(detailed_error) <= 4000:
-                    dev_embed = discord.Embed(
-                        title="Unhandled Error",
-                        description=f"Error in command `{ctx.command.qualified_name}`:\n```{detailed_error}```",
-                        color=discord.Color.dark_red(),
+                base_embed = discord.Embed(
+                    title="⚠️ Unhandled Exception",
+                    color=discord.Color.from_rgb(237, 66, 69),
+                    timestamp=discord.utils.utcnow(),
+                )
+                base_embed.set_thumbnail(url=ctx.author.display_avatar.url)
+                base_embed.add_field(
+                    name="🛠️ Command",
+                    value=command_display,
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="❌ Error Type",
+                    value=f"`{error_type}`",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="👤 User",
+                    value=f"{ctx.author.mention}\n`{ctx.author.id}`",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="📍 Channel",
+                    value=f"{ctx.channel.mention}\n`{ctx.channel.id}`",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="🏠 Guild",
+                    value=f"{ctx.guild.name}\n`{ctx.guild.id}`"
+                    if ctx.guild
+                    else "Direct Message",
+                    inline=True,
+                )
+                base_embed.add_field(
+                    name="📝 Reason",
+                    value=f"```{error_message[:1000]}```"
+                    if len(error_message) <= 1000
+                    else f"```{error_message[:997]}...```",
+                    inline=False,
+                )
+                if ctx.args or ctx.kwargs:
+                    args_str = " ".join(repr(a) for a in ctx.args[2:])  # skip self, ctx
+                    kwargs_str = " ".join(f"{k}={v!r}" for k, v in ctx.kwargs.items())
+                    invocation = " ".join(filter(None, [args_str, kwargs_str]))
+                    base_embed.add_field(
+                        name="📨 Arguments",
+                        value=f"```{invocation[:1000]}```" or "```None```",
+                        inline=False,
                     )
-                    dev_embed.add_field(
-                        name="Command", value=f"`{ctx.command.qualified_name}`"
+                base_embed.set_footer(
+                    text=f"v{self.version} • {ctx.command.qualified_name}",
+                    icon_url=self.user.display_avatar.url if self.user else None,
+                )
+
+                traceback_prefix = f"```py\n{error_type}: {error_message}\n"
+                if len(detailed_error) <= (4000 - len(traceback_prefix) - 3):
+                    base_embed.description = (
+                        f"**Full traceback for** {command_display}:\n"
+                        f"{traceback_prefix}{detailed_error}```"
                     )
-                    dev_embed.add_field(
-                        name="User", value=f"{ctx.author} (ID: {ctx.author.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Guild",
-                        value=f"{ctx.guild.name} (ID: {ctx.guild.id})"
-                        if ctx.guild
-                        else "DM",
-                    )
-                    # dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
-                    await dev_channel.send(embed=dev_embed)
+                    await dev_channel.send(embed=base_embed)
                 else:
-                    dev_embed = discord.Embed(
-                        title="Unhandled Error",
-                        description=f"Error in command `{ctx.command.qualified_name}`:\n",
-                        color=discord.Color.dark_red(),
+                    base_embed.description = (
+                        f"**Traceback exceeds Discord limits.** Summary above; full traceback follows in separate messages."
                     )
-                    dev_embed.add_field(
-                        name="Command", value=f"`{ctx.command.qualified_name}`"
-                    )
-                    dev_embed.add_field(
-                        name="User", value=f"{ctx.author} (ID: {ctx.author.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Channel", value=f"{ctx.channel} (ID: {ctx.channel.id})"
-                    )
-                    dev_embed.add_field(
-                        name="Guild",
-                        value=f"{ctx.guild.name} (ID: {ctx.guild.id})"
-                        if ctx.guild
-                        else "DM",
-                    )
-                    # dev_embed.set_footer(text=f"Arguments: {ctx.args} | Keyword Arguments: {ctx.kwargs}")
-                    await dev_channel.send(embed=dev_embed)
+                    await dev_channel.send(embed=base_embed)
 
                     chunks = [
                         detailed_error[i : i + 3900]
@@ -699,9 +869,13 @@ class DiscordBot(commands.Bot):
                     ]
                     for i, chunk in enumerate(chunks):
                         part_embed = discord.Embed(
-                            title=f"Error Details (Part {i+1}/{len(chunks)})",
-                            description=f"```{chunk}```",
-                            color=discord.Color.dark_red(),
+                            title=f"📄 Traceback ({i + 1}/{len(chunks)})",
+                            description=f"```py\n{chunk}```",
+                            color=discord.Color.from_rgb(237, 66, 69),
+                            timestamp=discord.utils.utcnow(),
+                        )
+                        part_embed.set_footer(
+                            text=f"{ctx.command.qualified_name} • {error_type}"
                         )
                         await dev_channel.send(embed=part_embed)
             else:
@@ -716,10 +890,19 @@ class DiscordBot(commands.Bot):
                     error = error.original
 
                     embed = discord.Embed(
-                        title="An error occurred while executing the command!",
-                        description=f"`File \"{file_name}\":{line_num}\n{last_line}\n{type(error).__name__}: {error}`",
+                        title="💥 Command Error",
+                        description=(
+                            f"```py\n"
+                            f"File: {file_name}\n"
+                            f"Line: {line_num}\n"
+                            f"{last_line}\n"
+                            f"{type(error).__name__}: {error}"
+                            f"```"
+                        ),
                         color=discord.Color.red(),
+                        timestamp=discord.utils.utcnow(),
                     )
+                    embed.set_footer(text=f"v{self.version}")
                     await ctx.reply(embed=embed, delete_after=10)
 
                 self.logger.error(

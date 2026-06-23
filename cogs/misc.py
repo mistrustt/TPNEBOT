@@ -48,6 +48,46 @@ class Misc(commands.Cog, name="Misc"):
             "dessert": "You enjoy a hit of dessert flavors. 🍰😮‍💨"
         }
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _resolve_ids(self, values):
+        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+        if not values:
+            return {}
+        unique = list(dict.fromkeys(v for v in values if v is not None))
+        hashes = [v for v in unique if self._is_hash(v)]
+        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
+        mapping = {}
+        for v in unique:
+            if isinstance(v, int):
+                mapping[v] = v
+            elif self._is_hash(v):
+                mapping[v] = resolved.get(v)
+            else:
+                try:
+                    mapping[v] = int(v)
+                except (TypeError, ValueError):
+                    mapping[v] = None
+        return mapping
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
@@ -216,13 +256,18 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, sobs) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                 top_list.append(f"{emoji} **{display_name}** (`{sobs:,} sobs`)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -232,14 +277,20 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
             for idx, (user_id, sobs) in enumerate(bottom_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** (`{sobs:,} sobs`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -296,13 +347,18 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, skulls) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                 top_list.append(f"{emoji} **{display_name}** (`{skulls:,} skulls`)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -312,14 +368,20 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
             for idx, (user_id, skulls) in enumerate(bottom_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** (`{skulls:,} skulls`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -375,13 +437,18 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, flames) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                 top_list.append(f"{emoji} **{display_name}** (`{flames:,} flames`)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -391,14 +458,20 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
             for idx, (user_id, flames) in enumerate(bottom_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** (`{flames:,} flames`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -455,13 +528,18 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, hearts) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                 top_list.append(f"{emoji} **{display_name}** (`{hearts:,} hearts`)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -471,14 +549,20 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
             for idx, (user_id, hearts) in enumerate(bottom_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** (`{hearts:,} hearts`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -533,13 +617,18 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, clowns) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                 top_list.append(f"{emoji} **{display_name}** (`{clowns:,} clowns`)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -549,14 +638,20 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
             for idx, (user_id, clowns) in enumerate(bottom_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** (`{clowns:,} clowns`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -704,13 +799,18 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
+            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
             for idx, (user_id, rep) in enumerate(top_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
                 emoji = rank_emojis[idx] if idx <= 10 else f"{idx}."
                 top_list.append(f"{emoji} **{display_name}** ({rep:,} rep)")
             embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
@@ -720,14 +820,20 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
             for idx, (user_id, rep) in enumerate(bottom_users):
-                user = (
-                    ctx.guild.get_member(user_id)
-                    or self.bot.get_user(user_id)
-                    or await self.bot.fetch_user(user_id)
-                )
-                emoji = rank_emojis[idx] if idx <= 10 else f"{idx}."
-                display_name = user.display_name if user else f"Unknown {user_id}"
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx <= 10 else f"{idx}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx <= 10 else f"{idx}."
+                    display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** ({rep:,} rep)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
@@ -807,10 +913,11 @@ class Misc(commands.Cog, name="Misc"):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if juul and juul.holder_id:
-            user = ctx.guild.get_member(juul.holder_id) or await self.bot.fetch_user(
-                juul.holder_id
+            raw_holder_id = await self._resolve_id(juul.holder_id)
+            user = ctx.guild.get_member(raw_holder_id) or await self.bot.fetch_user(
+                raw_holder_id
             )
-            holder = user.display_name if user else f"User {juul.holder_id}"
+            holder = user.display_name if user else f"User {raw_holder_id}"
         else:
             holder = "Nobody"
 
@@ -836,7 +943,7 @@ class Misc(commands.Cog, name="Misc"):
     async def juul_hit(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
-        if not juul or juul.holder_id != ctx.author.id:
+        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to take a hit.",
@@ -868,7 +975,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
             )
 
-        if not juul or juul.holder_id != ctx.author.id:
+        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="You don't have the juul to pass.",
@@ -893,7 +1000,7 @@ class Misc(commands.Cog, name="Misc"):
     async def juul_steal(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
-        if juul and juul.holder_id == ctx.author.id:
+        if juul and await self._resolve_id(juul.holder_id) == ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You already have the juul.",
@@ -918,7 +1025,7 @@ class Misc(commands.Cog, name="Misc"):
         
         await ctx.send(
             embed=discord.Embed(
-                description=f"{ctx.author.mention} has stolen the {flavor} juul {flavor_emoji} from {ctx.guild.get_member(juul.holder_id).mention if juul and juul.holder_id else 'nobody'}!",
+                description=f"{ctx.author.mention} has stolen the {flavor} juul {flavor_emoji} from {ctx.guild.get_member(await self._resolve_id(juul.holder_id)).mention if juul and juul.holder_id else 'nobody'}!",
                 color=discord.Color.green(),
             )
         )
@@ -928,7 +1035,7 @@ class Misc(commands.Cog, name="Misc"):
     async def juul_lock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
-        if not juul or juul.holder_id != ctx.author.id:
+        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to lock it.",
@@ -952,7 +1059,7 @@ class Misc(commands.Cog, name="Misc"):
     @commands.has_permissions(manage_messages=True)
     async def juul_unlock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
-        if not juul or juul.holder_id != ctx.author.id:
+        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to unlock it.",
@@ -993,7 +1100,7 @@ class Misc(commands.Cog, name="Misc"):
 
         # Check if user is holding the juul
         juul = await self.bot.database.get_juul(ctx.guild.id)
-        if not juul or juul.holder_id != ctx.author.id:
+        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to change its flavor.",

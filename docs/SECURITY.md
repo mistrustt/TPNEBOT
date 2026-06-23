@@ -28,6 +28,14 @@ The repository tracks a single active development branch (main). Version tags sh
 - Enforce password complexity and restrict network exposure (localhost or VPN).
 - Consider TLS for remote connections.
 
+### User ID hashing
+Discord user IDs are stored as deterministic HMAC-SHA256 hex hashes (64 characters) in all operational tables. The single `user_identities` table maps each hash back to the raw Discord ID. This means a database dump no longer exposes raw user IDs everywhere, but the mapping table is a high-value target and should be protected with the same care as credential secrets.
+
+- Run `migrations/secure_user_ids.sql` once to convert an existing database.
+- Set `USER_ID_HASH_KEY` in `.env` to the same key used in the migration.
+- Back up `USER_ID_HASH_KEY` securely. If it is lost, stored hashes cannot be resolved back to Discord IDs, which breaks leaderboard display, punishment lookups, and any other feature that needs to show or mention users from stored records.
+- The analytics tables `command_usage_daily` and `daily_user_exposure` continue to use their existing `user_hash` column; do not reuse their migration for operational tables unless the salt/key is identical.
+
 ## Fairness and Cryptography
 - HMAC based RNG should use unpredictable server seeds. Periodically rotate server seed, archiving previous seeds only for post game verification window.
 - Never share private keys created for wallet operations.

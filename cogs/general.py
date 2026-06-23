@@ -304,7 +304,7 @@ class General(commands.Cog, name="General"):
         self.start_time = discord.utils.utcnow()
 
         try:
-            font_path = "DejaVuSans-ExtraLight.ttf"
+            font_path = "DejaVuSans.ttf"
             self.font_quote = ImageFont.truetype(font_path, 32)
             self.font_author = ImageFont.truetype(font_path, 18)
             self.font_handle = ImageFont.truetype(font_path, 14)

@@ -85,6 +85,46 @@ class Moderation(commands.Cog, name="Moderation"):
     def cog_unload(self):
         self.sync_counts.cancel()
 
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    async def _resolve_ids(self, values):
+        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+        if not values:
+            return {}
+        unique = list(dict.fromkeys(v for v in values if v is not None))
+        hashes = [v for v in unique if self._is_hash(v)]
+        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
+        mapping = {}
+        for v in unique:
+            if isinstance(v, int):
+                mapping[v] = v
+            elif self._is_hash(v):
+                mapping[v] = resolved.get(v)
+            else:
+                try:
+                    mapping[v] = int(v)
+                except (TypeError, ValueError):
+                    mapping[v] = None
+        return mapping
+
     async def _get_settings(self, guild: discord.Guild):
         """Fetch channel_id and name template from DB (fallbacks included)."""
         channel_id = await self.bot.database.get_member_count_channel(guild.id)
@@ -102,7 +142,7 @@ class Moderation(commands.Cog, name="Moderation"):
         name = template.format(count=guild.member_count)
         overwrites = {guild.default_role: discord.PermissionOverwrite(connect=False)}
         vc = await guild.create_voice_channel(name=name, overwrites=overwrites)
-        await self.bot.database.set_member_count_channel(guild.id, vc.id, template)
+        await self.bot.database.set_member_count_channel(guild.id, vc.id)
         return vc
 
     async def _update_channel(self, guild: discord.Guild):
@@ -115,6 +155,18 @@ class Moderation(commands.Cog, name="Moderation"):
         new_name = template.format(count=guild.member_count)
         if vc.name != new_name:
             await vc.edit(name=new_name, reason="Member count auto-sync")
+
+    def _get_mcc_embed(
+        self,
+        title: str,
+        description: str,
+        color: discord.Color = discord.Color.blue(),
+    ) -> discord.Embed:
+        return discord.Embed(title=title, description=description, color=color)
+
+    def _bot_can_manage(self, channel: discord.VoiceChannel) -> bool:
+        me = channel.guild.me
+        return channel.permissions_for(me).manage_channels
 
     @tasks.loop(minutes=10)
     async def sync_counts(self):
@@ -243,70 +295,289 @@ class Moderation(commands.Cog, name="Moderation"):
 
         return await ctx.reply("🚫 You may only target members or channels within this server.", mention_author=False)
 
-    @commands.command(name="mcc", description="Create a member count channel")
+    class _MCCDeleteConfirm(discord.ui.View):
+        def __init__(self, timeout: float = 30.0) -> None:
+            super().__init__(timeout=timeout)
+            self.confirmed = None
+
+        @discord.ui.button(label="Delete", style=discord.ButtonStyle.red, emoji="🗑️")
+        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.confirmed = True
+            for child in self.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=self)
+            self.stop()
+
+        @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey, emoji="❌")
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.confirmed = False
+            for child in self.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=self)
+            self.stop()
+
+    @commands.command(
+        name="mcc",
+        aliases=["membercountchannel"],
+        description="Create a locked voice channel that displays the server's member count.",
+        help="Create a locked voice channel that displays the server's member count.",
+    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def member_count_vc(self, ctx):
-        mcc = await self.bot.database.get_member_count_channel(ctx.guild.id)
-
-        if mcc:
-            return await ctx.reply(
-                embed=discord.Embed(
-                    title="🚫 Already Exists",
-                    description=f"Member count channel already exists: {mcc.mention}",
-                    color=discord.Color.red(),
+    @commands.bot_has_permissions(manage_channels=True)
+    async def member_count_vc(self, ctx: Context):
+        existing_id = await self.bot.database.get_member_count_channel(ctx.guild.id)
+        if existing_id:
+            existing = ctx.guild.get_channel(existing_id)
+            if existing:
+                prefix = await self.bot.get_prefix(ctx.message)
+                return await ctx.reply(
+                    embed=self._get_mcc_embed(
+                        title="🚫 Already Exists",
+                        description=(
+                            f"A member count channel is already configured: {existing.mention}.\n\n"
+                            f"• Use `{prefix}setmcc <voice channel>` to switch channels.\n"
+                            f"• Use `{prefix}delmcc` to remove it."
+                        ),
+                        color=discord.Color.red(),
+                    ),
+                    delete_after=15,
                 )
-            )
+            # stale entry; clear it and continue
+            await self.bot.database.set_member_count_channel(ctx.guild.id, None)
 
-        vc = await self._ensure_channel(ctx.guild, "Members: {count:,}")
+        try:
+            vc = await self._ensure_channel(ctx.guild, "Members: {count:,}")
+        except discord.Forbidden:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description="I need the **Manage Channels** permission to create a member count channel.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
 
         await self.bot.database.set_member_count_channel(ctx.guild.id, vc.id)
-
         await ctx.reply(
-            embed=discord.Embed(
+            embed=self._get_mcc_embed(
                 title="✅ Member Count Channel Created",
-                description=f"{vc.mention} now shows your member count.",
+                description=(
+                    f"Created {vc.mention}. It will automatically update as members join and leave.\n\n"
+                    f"Current count: **{ctx.guild.member_count:,}**"
+                ),
                 color=discord.Color.green(),
-            )
+            ),
+            delete_after=15,
         )
 
-    @commands.command(name="setmcc", help="Set the member count channel")
+    @commands.command(
+        name="setmcc",
+        aliases=["setmembercountchannel"],
+        description="Set an existing voice channel as the member count channel.",
+        help="Set an existing voice channel as the member count channel. Accepts a mention, ID, or name.",
+    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def set_member_count_channel(self, ctx, channel: int):
-        await self.bot.database.set_member_count_channel(ctx.guild.id, channel)
-        await ctx.guild.get_channel(channel).edit(
-            name=f"Members: {ctx.guild.member_count:,}"
-        )
+    @commands.bot_has_permissions(manage_channels=True)
+    async def set_member_count_channel(self, ctx: Context, channel: discord.VoiceChannel):
+        if channel.guild.id != ctx.guild.id:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Invalid Channel",
+                    description="The channel must be in this server.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
+        if not self._bot_can_manage(channel):
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I need **Manage Channels** permission in {channel.mention} to update its name.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
+        await self.bot.database.set_member_count_channel(ctx.guild.id, channel.id)
+        try:
+            await channel.edit(
+                name=f"Members: {ctx.guild.member_count:,}",
+                reason=f"Set as member count channel by {ctx.author}",
+            )
+        except discord.Forbidden:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I couldn't rename {channel.mention}. Please check my channel permissions.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
         await ctx.reply(
-            embed=discord.Embed(
+            embed=self._get_mcc_embed(
                 title="✅ Member Count Channel Set",
-                description=f"Now using {channel} as the member count channel.",
+                description=(
+                    f"Now using {channel.mention} as the member count channel.\n\n"
+                    f"Current count: **{ctx.guild.member_count:,}**"
+                ),
                 color=discord.Color.green(),
-            )
+            ),
+            delete_after=15,
         )
-        await self._update_channel(ctx.guild)
 
-    @commands.command(name="delmcc", help="Delete the member count channel")
+    @commands.command(
+        name="delmcc",
+        aliases=["deletemembercountchannel"],
+        description="Delete the configured member count channel.",
+        help="Delete the configured member count channel after confirmation.",
+    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def delete_member_count_vc(self, ctx):
+    @commands.bot_has_permissions(manage_channels=True)
+    async def delete_member_count_vc(self, ctx: Context):
         channel_id, _ = await self._get_settings(ctx.guild)
         if not channel_id:
             return await ctx.reply(
-                embed=discord.Embed(
+                embed=self._get_mcc_embed(
                     title="🚫 None Found",
-                    description="No member count channel is configured.",
+                    description="No member count channel is configured for this server.",
                     color=discord.Color.red(),
-                )
+                ),
+                delete_after=10,
             )
+
+        vc = ctx.guild.get_channel(channel_id)
+        if not vc:
+            await self.bot.database.set_member_count_channel(ctx.guild.id, None)
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🧹 Cleared",
+                    description="The configured channel no longer exists, so I removed it from the settings.",
+                    color=discord.Color.orange(),
+                ),
+                delete_after=10,
+            )
+
+        if not self._bot_can_manage(vc):
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I need **Manage Channels** permission in {vc.mention} to delete it.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
+
+        view = self._MCCDeleteConfirm(timeout=30.0)
+        prompt = await ctx.reply(
+            embed=self._get_mcc_embed(
+                title="🗑️ Confirm Deletion",
+                description=(
+                    f"Are you sure you want to delete {vc.mention}?\n\n"
+                    f"This will **permanently delete the channel** and clear the member count setting.\n"
+                    f"Click **Delete** to confirm or **Cancel** to keep it."
+                ),
+                color=discord.Color.orange(),
+            ),
+            view=view,
+        )
+
+        await view.wait()
+        if view.confirmed is None:
+            for child in view.children:
+                child.disabled = True
+            await prompt.edit(
+                embed=self._get_mcc_embed(
+                    title="⏰ Timed Out",
+                    description="Deletion confirmation timed out. The member count channel was not changed.",
+                    color=discord.Color.red(),
+                ),
+                view=view,
+            )
+            return
+
+        if view.confirmed is False:
+            await prompt.edit(
+                embed=self._get_mcc_embed(
+                    title="❌ Cancelled",
+                    description="Member count channel deletion cancelled.",
+                    color=discord.Color.green(),
+                ),
+                view=view,
+            )
+            return
+
+        try:
+            await vc.delete(reason=f"Member count channel removed by {ctx.author}")
+        except discord.Forbidden:
+            return await prompt.edit(
+                embed=self._get_mcc_embed(
+                    title="🚫 Missing Permission",
+                    description=f"I couldn't delete {vc.mention}. Please check my channel permissions.",
+                    color=discord.Color.red(),
+                ),
+                view=None,
+            )
+
+        await self.bot.database.set_member_count_channel(ctx.guild.id, None)
+        await prompt.edit(
+            embed=self._get_mcc_embed(
+                title="🗑️ Deleted",
+                description="The member count channel has been deleted and the setting has been cleared.",
+                color=discord.Color.red(),
+            ),
+            view=None,
+        )
+
+    @commands.command(
+        name="mccstatus",
+        aliases=["mccinfo"],
+        description="Show the configured member count channel and current count.",
+        help="Show the configured member count channel and current count.",
+    )
+    @commands.guild_only()
+    async def mcc_status(self, ctx: Context):
+        channel_id, template = await self._get_settings(ctx.guild)
+        if not channel_id:
+            return await ctx.reply(
+                embed=self._get_mcc_embed(
+                    title="📊 Member Count Status",
+                    description=(
+                        "No member count channel is configured.\n\n"
+                        f"Use `{await self.bot.get_prefix(ctx.message)}mcc` to create one."
+                    ),
+                    color=discord.Color.blue(),
+                ),
+                delete_after=15,
+            )
+
         vc = ctx.guild.get_channel(channel_id)
         if vc:
-            await vc.delete(reason="Member count channel removed")
-        await self.bot.database.set_member_count_channel(ctx.guild.id, None)
-        await ctx.reply(
-            embed=discord.Embed(
-                title="🗑️ Deleted",
-                description="Member count channel removed.",
-                color=discord.Color.red(),
+            description = (
+                f"**Channel:** {vc.mention}\n"
+                f"**Name:** `{vc.name}`\n"
+                f"**ID:** `{vc.id}`\n"
+                f"**Current member count:** {ctx.guild.member_count:,}"
             )
+            color = discord.Color.green()
+        else:
+            description = (
+                f"**Configured channel ID:** `{channel_id}`\n"
+                f"⚠️ That channel no longer exists. Use `{await self.bot.get_prefix(ctx.message)}delmcc` to clear it."
+            )
+            color = discord.Color.orange()
+
+        await ctx.reply(
+            embed=self._get_mcc_embed(
+                title="📊 Member Count Status",
+                description=description,
+                color=color,
+            ),
+            delete_after=20,
         )
 
     @commands.command(name="setreportchannel", aliases=["src"])
@@ -868,49 +1139,137 @@ class Moderation(commands.Cog, name="Moderation"):
         except Exception:
             pass
 
-        await self.bot.database.log_punishment_command(
-            moderator_id=ctx.author.id,
-            guild_id=ctx.guild.id,
-            punishment_type=PunishmentType.BAN,
+        async def _do_ban() -> int:
+            await self.bot.database.log_punishment_command(
+                moderator_id=ctx.author.id,
+                guild_id=ctx.guild.id,
+                punishment_type=PunishmentType.BAN,
+            )
+            case_id = await self.bot.database.add_punishment(
+                user_id=member.id,
+                guild_id=ctx.guild.id,
+                moderator_id=ctx.author.id,
+                punishment_type=PunishmentType.BAN,
+                reason=reason,
+                duration=None,
+            )
+            embed = discord.Embed(
+                description=f"**{member}** was banned for `{reason}`.",
+                color=discord.Color.blurple(),
+            )
+            embed.set_author(
+                name=f"Moderator: {ctx.author}",
+                icon_url=self.utils.get_avatar_url(ctx.author),
+            )
+            embed.set_footer(text=f"Case ID: {case_id}")
+            await ctx.send(embed=embed, delete_after=10)
+            try:
+                dm_embed = discord.Embed(
+                    description=f"You have been **banned** from **{ctx.guild.name}**.",
+                    color=discord.Color.greyple(),
+                )
+                dm_embed.set_author(
+                    name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
+                )
+                dm_embed.add_field(name="Reason:", value=reason)
+                dm_embed.set_footer(
+                    text=f"Action by: {ctx.author} Case ID: {case_id}"
+                )
+                await member.send(embed=dm_embed)
+            except:
+                embed = discord.Embed(
+                    description=f"Could not send user a DM message!", color=0x36393E
+                )
+                await ctx.reply(embed=embed)
+
+            await ctx.guild.ban(member, reason=reason, delete_message_seconds=0)
+            return case_id
+
+        is_booster = (
+            isinstance(member, discord.Member)
+            and (
+                member.premium_since is not None
+                or any(role.is_premium_subscriber() for role in member.roles if role)
+            )
         )
-        case_id = await self.bot.database.add_punishment(
-            user_id=member.id,
-            guild_id=ctx.guild.id,
-            moderator_id=ctx.author.id,
-            punishment_type=PunishmentType.BAN,
-            reason=reason,
-            duration=None,
+
+        if not is_booster:
+            await _do_ban()
+            return
+
+        class BanConfirmView(discord.ui.View):
+            def __init__(self, *, timeout=60):
+                super().__init__(timeout=timeout)
+                self.value = None
+
+            async def interaction_check(
+                self, interaction: discord.Interaction
+            ) -> bool:
+                if interaction.user.id != ctx.author.id:
+                    await interaction.response.send_message(
+                        "Only the command invoker can use these buttons.",
+                        ephemeral=True,
+                    )
+                    return False
+                return True
+
+            @discord.ui.button(label="Ban", style=discord.ButtonStyle.danger)
+            async def ban_button(
+                self, interaction: discord.Interaction, button: discord.ui.Button
+            ):
+                self.value = "confirm"
+                for child in self.children:
+                    child.disabled = True
+                await interaction.response.edit_message(
+                    embed=discord.Embed(
+                        description=f"Confirmed by {interaction.user.mention}. Proceeding with ban...",
+                        color=discord.Color.red(),
+                    ),
+                    view=self,
+                )
+                self.stop()
+
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+            async def cancel_button(
+                self, interaction: discord.Interaction, button: discord.ui.Button
+            ):
+                self.value = "cancel"
+                for child in self.children:
+                    child.disabled = True
+                await interaction.response.edit_message(
+                    embed=discord.Embed(
+                        description="Ban cancelled.",
+                        color=discord.Color.green(),
+                    ),
+                    view=self,
+                )
+                self.stop()
+
+        view = BanConfirmView()
+        confirm_embed = discord.Embed(
+            title="⚠️ Booster Detected",
+            description=f"**{member}** is a server booster. Are you sure you want to ban them?\n\nReason: `{reason}`",
+            color=discord.Color.orange(),
         )
-        embed = discord.Embed(
-            description=f"**{member}** was banned for `{reason}`.",
-            color=discord.Color.blurple(),
-        )
-        embed.set_author(
+        confirm_embed.set_author(
             name=f"Moderator: {ctx.author}",
             icon_url=self.utils.get_avatar_url(ctx.author),
         )
-        embed.set_footer(text=f"Case ID: {case_id}")
-        await ctx.send(embed=embed, delete_after=10)
-        try:
-            dm_embed = discord.Embed(
-                description=f"You have been **banned** from **{ctx.guild.name}**.",
-                color=discord.Color.greyple(),
-            )
-            dm_embed.set_author(
-                name=f"Guild: {ctx.guild.name}", icon_url=ctx.guild.icon.url
-            )
-            dm_embed.add_field(name="Reason:", value=reason)
-            dm_embed.set_footer(
-                text=f"Action by: {ctx.author} Case ID: {case_id}"
-            )
-            await member.send(embed=dm_embed)
-        except:
-            embed = discord.Embed(
-                description=f"Could not send user a DM message!", color=0x36393E
-            )
-            await ctx.reply(embed=embed)
+        confirm_message = await ctx.send(embed=confirm_embed, view=view)
+        await view.wait()
 
-        await ctx.guild.ban(member, reason=reason)
+        if view.value == "confirm":
+            await _do_ban()
+        elif view.value is None:
+            for child in view.children:
+                child.disabled = True
+            await confirm_message.edit(
+                embed=discord.Embed(
+                    description="Ban confirmation timed out.",
+                    color=discord.Color.red(),
+                ),
+                view=view,
+            )
         #except Exception as e:
         #    embed = discord.Embed(
         #        title="Ban Error",
@@ -1190,8 +1549,12 @@ class Moderation(commands.Cog, name="Moderation"):
             for i in range(0, len(history), entries_per_page)
         ]
 
+        moderator_ids = [getattr(p, "moderator_id", None) for p in history]
+        resolved_moderators = await self._resolve_ids(moderator_ids)
+
         def generate_entry(punishment):
-            moderator = ctx.guild.get_member(punishment.moderator_id)
+            raw_moderator_id = resolved_moderators.get(getattr(punishment, "moderator_id", None))
+            moderator = ctx.guild.get_member(raw_moderator_id) if raw_moderator_id else None
             formatted_date = punishment.created_at.strftime("%Y-%m-%d %I:%M %p")
 
             lines = [
@@ -3099,12 +3462,14 @@ class Moderation(commands.Cog, name="Moderation"):
         )
 
         for punishment in punishments:
+            raw_moderator_id = await self._resolve_id(punishment.moderator_id)
+            raw_user_id = await self._resolve_id(punishment.user_id)
             moderator = ctx.guild.get_member(
-                punishment.moderator_id
-            ) or await self.bot.fetch_user(punishment.moderator_id)
+                raw_moderator_id
+            ) or await self.bot.fetch_user(raw_moderator_id) if raw_moderator_id else None
             user = ctx.guild.get_member(
-                punishment.user_id
-            ) or await self.bot.fetch_user(punishment.user_id)
+                raw_user_id
+            ) or await self.bot.fetch_user(raw_user_id) if raw_user_id else None
             formatted_duration = (
                 humanfriendly.format_timespan(punishment.duration)
                 if punishment.duration
@@ -3123,12 +3488,17 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         notes = await self.bot.database.get_case_notes(case_id, ctx.guild.id)
-        notes_str = "\n".join(
-            [
-                f"Note by {ctx.guild.get_member(note.moderator_id).mention if ctx.guild.get_member(note.moderator_id) else 'Unknown'} at {note.created_at.strftime('%Y-%m-%d %I:%M %p UTC')}: {note.note}"
-                for note in notes
-            ]
-        )
+        note_moderator_ids = [getattr(n, "moderator_id", None) for n in notes]
+        resolved_note_moderators = await self._resolve_ids(note_moderator_ids)
+        notes_lines = []
+        for note in notes:
+            raw_mod_id = resolved_note_moderators.get(getattr(note, "moderator_id", None))
+            mod_member = ctx.guild.get_member(raw_mod_id) if raw_mod_id else None
+            mod_mention = mod_member.mention if mod_member else "Unknown"
+            notes_lines.append(
+                f"Note by {mod_mention} at {note.created_at.strftime('%Y-%m-%d %I:%M %p UTC')}: {note.note}"
+            )
+        notes_str = "\n".join(notes_lines)
 
         if notes_str:
             embed.add_field(name="Notes", value=notes_str, inline=False)
@@ -3168,7 +3538,8 @@ class Moderation(commands.Cog, name="Moderation"):
                 await ctx.send(f"Case {case_id} not found.")
                 return
 
-            if punishment.moderator_id != ctx.author.id:
+            raw_moderator_id = await self._resolve_id(punishment.moderator_id)
+            if raw_moderator_id != ctx.author.id:
                 await ctx.send(
                     "You are not authorized to update this case as you were not the original moderator."
                 )
@@ -3879,11 +4250,14 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             return await ctx.send(embed=embed)
 
+        resolved_linked = await self._resolve_ids(linked_ids)
         linked_members = []
         for uid in linked_ids:
-            user = ctx.guild.get_member(uid) or await self.bot.fetch_user(uid)
-            if user:
-                linked_members.append(user)
+            raw_id = resolved_linked.get(uid)
+            if raw_id:
+                user = ctx.guild.get_member(raw_id) or await self.bot.fetch_user(raw_id)
+                if user:
+                    linked_members.append(user)
 
         embed = discord.Embed(
             title=f"Linked Accounts of {member.display_name}",
@@ -3893,7 +4267,7 @@ class Moderation(commands.Cog, name="Moderation"):
             name="Accounts",
             value="\n".join(
                 f"{u.display_name or u.name} (`{u.id}`)" for u in linked_members
-            ),
+            ) or "Unknown users",
             inline=False,
         )
         await ctx.send(embed=embed)

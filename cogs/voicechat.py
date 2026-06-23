@@ -1,8 +1,12 @@
+import aiohttp
+import asyncio
 import discord
 import logging
 import os
+import re
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
+from urllib.parse import urlparse
 from utils.misc import MiscUtils
 
 
@@ -217,6 +221,10 @@ class VoiceControlView(discord.ui.View):
 
 logger = logging.getLogger("discord_bot")
 
+ALLOWED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".wav")
+MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
+DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
+
 
 class Voicechat(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -226,7 +234,197 @@ class Voicechat(commands.Cog):
         self.current_files = {}
         self.current_volume = {}
         self.queues = {}
+        self.session = aiohttp.ClientSession()
         self.check_empty_vc.start()
+
+    async def cog_unload(self):
+        await self.session.close()
+
+    @staticmethod
+    def _is_hash(value) -> bool:
+        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdefABCDEF" for c in value)
+        )
+
+    async def _resolve_id(self, value):
+        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+        if value is None or isinstance(value, int):
+            return value
+        if self._is_hash(value):
+            return await self.bot.database.resolve_user_hash(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _is_valid_audio_url(url: str) -> bool:
+        """Return True if the URL is an HTTP(S) link to an allowed audio extension."""
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        path = parsed.path.lower()
+        return any(path.endswith(ext) for ext in ALLOWED_AUDIO_EXTENSIONS)
+
+    @staticmethod
+    def _sanitize_filename(name: str) -> str:
+        """Return a filesystem-safe filename for a downloaded audio file."""
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "", name)
+        if not safe or safe.startswith("."):
+            safe = "audio.mp3"
+        return safe[:128]
+
+    async def _download_audio_url(
+        self, ctx: Context, url: str
+    ) -> tuple[str, str] | None:
+        """Download a direct audio URL after validation.
+
+        Returns (file_path, display_name) on success, or None if validation or
+        the download fails. Cleans up any partial file on error.
+        """
+        if not self._is_valid_audio_url(url):
+            await ctx.send(
+                "Only direct links to `.mp3`, `.m4a`, or `.wav` files over HTTP/HTTPS are supported.",
+                delete_after=10,
+            )
+            return None
+
+        parsed = urlparse(url)
+        raw_name = os.path.basename(parsed.path) or "audio.mp3"
+        display_name = self._sanitize_filename(raw_name)
+        os.makedirs("music_uploads", exist_ok=True)
+        file_path = os.path.join("music_uploads", f"{ctx.guild.id}_{display_name}")
+
+        headers = {"User-Agent": "TPNEBOT/1.0 (Discord voice music player)"}
+        try:
+            async with self.session.get(
+                url, headers=headers, timeout=DOWNLOAD_TIMEOUT, allow_redirects=True
+            ) as resp:
+                if resp.status != 200:
+                    await ctx.send(
+                        f"Could not download audio: server returned `{resp.status}`.",
+                        delete_after=10,
+                    )
+                    return None
+
+                content_type = resp.headers.get("content-type", "").lower()
+                if not content_type.startswith("audio/"):
+                    await ctx.send(
+                        "The URL did not return an audio file.", delete_after=10
+                    )
+                    return None
+
+                content_length = resp.headers.get("content-length")
+                if content_length:
+                    try:
+                        size = int(content_length)
+                    except ValueError:
+                        size = 0
+                    if size > MAX_DOWNLOAD_SIZE:
+                        await ctx.send(
+                            f"File too large. Maximum size is `{MAX_DOWNLOAD_SIZE // (1024 * 1024)}MB`.",
+                            delete_after=10,
+                        )
+                        return None
+
+                downloaded = 0
+                with open(file_path, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(8192):
+                        downloaded += len(chunk)
+                        if downloaded > MAX_DOWNLOAD_SIZE:
+                            raise ValueError("Download exceeded maximum allowed size")
+                        f.write(chunk)
+
+        except asyncio.TimeoutError:
+            await ctx.send(
+                "Download timed out. The file may be too large or the server too slow.",
+                delete_after=10,
+            )
+            return None
+        except aiohttp.ClientError as e:
+            logger.warning("Audio download failed for %s: %s", url, e)
+            await ctx.send(
+                "Failed to download the audio file. Please check the URL and try again.",
+                delete_after=10,
+            )
+            return None
+        except ValueError as e:
+            logger.warning("Audio download rejected for %s: %s", url, e)
+            await ctx.send(
+                f"File too large. Maximum size is `{MAX_DOWNLOAD_SIZE // (1024 * 1024)}MB`.",
+                delete_after=10,
+            )
+            return None
+        except Exception:
+            logger.exception("Unexpected error downloading audio from %s", url)
+            await ctx.send(
+                "An unexpected error occurred while downloading the audio file.",
+                delete_after=10,
+            )
+            return None
+        finally:
+            # If we failed after partially writing the file, remove it so we don't leak disk.
+            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except Exception:
+                    pass
+
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            await ctx.send(
+                "The downloaded file was empty. Please check the URL and try again.",
+                delete_after=10,
+            )
+            return None
+
+        return file_path, display_name
+
+    async def _enqueue_audio_file(
+        self, ctx: Context, file_path: str, display_name: str
+    ) -> None:
+        """Add a local audio file to the guild queue and start playback if idle."""
+        vc = await self.ensure_voice(ctx)
+        if not vc:
+            # couldn't join; delete the file we just saved so we don't leak disk space
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                logging.exception("failed to remove orphaned upload %s", file_path)
+            return
+
+        if ctx.guild.id not in self.queues:
+            self.queues[ctx.guild.id] = []
+
+        self.queues[ctx.guild.id].append(file_path)
+
+        if not vc.is_playing():
+            await self.play_next(ctx)
+            embed = discord.Embed(
+                description=f"🎵 - `{display_name}`",
+                color=discord.Color.blurple(),
+            )
+            embed.set_author(
+                name="Now Playing", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
+            embed.set_footer(text="Action requested by: " + ctx.author.name)
+        else:
+            embed = discord.Embed(
+                description=f"🎵 - `{display_name}`", color=discord.Color.green()
+            )
+            embed.set_author(
+                name="Added to Queue", icon_url=self.utils.get_avatar_url(ctx.author)
+            )
+            embed.set_footer(text="Action requested by: " + ctx.author.name)
+
+        embed.set_footer(
+            text=f"Queued by {ctx.author.name} in {vc.channel.name} - {vc.channel.bitrate / 1000}Kbps"
+        )
+        await ctx.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -325,6 +523,7 @@ class Voicechat(commands.Cog):
             temp_owner_id = await self.bot.database.get_temp_channel_owner(
                 before.channel.id
             )
+            temp_owner_id = await self._resolve_id(temp_owner_id)
 
             if temp_owner_id is None:
                 return
@@ -346,6 +545,7 @@ class Voicechat(commands.Cog):
             return None
 
         owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
+        owner_id = await self._resolve_id(owner_id)
         return vc if owner_id == member.id else None
 
     @commands.group(
@@ -731,6 +931,7 @@ class Voicechat(commands.Cog):
                 return
 
             owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
+            owner_id = await self._resolve_id(owner_id)
             owner = discord.utils.get(vc.members, id=owner_id)
 
             if (
@@ -945,71 +1146,44 @@ class Voicechat(commands.Cog):
     @commands.command(
         name="play",
         aliases=["p"],
-        help="Plays an attached audio file in the voice channel",
+        help="Plays an attached audio file or a direct audio URL in the voice channel",
     )
-    async def play(self, ctx):
-        """Plays an attached audio file and queues it if another song is playing"""
-        if not ctx.message.attachments:
+    async def play(self, ctx, *, query: str = None):
+        """Plays an attached audio file or direct audio URL and queues it if another song is playing."""
+        # Attachment path: preserve existing behavior.
+        if ctx.message.attachments:
+            attachment = ctx.message.attachments[0]
+            if not any(
+                attachment.filename.endswith(ext) for ext in ALLOWED_AUDIO_EXTENSIONS
+            ):
+                await ctx.send(
+                    "Only `.mp3`, `.m4a`, and `.wav` files are supported.", delete_after=5
+                )
+                return
+
+            os.makedirs("music_uploads", exist_ok=True)
+            file_path = os.path.join(
+                "music_uploads", f"{ctx.guild.id}_{attachment.filename}"
+            )
+            await attachment.save(file_path)
+            await self._enqueue_audio_file(ctx, file_path, attachment.filename)
+            return
+
+        # URL path: allow direct links to audio files.
+        if not query:
             await ctx.send(
-                "Please attach an audio file (.mp3, .m4a, .wav) when using this command.",
+                "Please attach an audio file (.mp3, .m4a, .wav) or provide a direct audio URL.",
                 delete_after=5,
             )
             return
 
-        attachment = ctx.message.attachments[0]
-        if not any(
-            attachment.filename.endswith(ext) for ext in [".mp3", ".m4a", ".wav"]
-        ):
-            await ctx.send(
-                "Only `.mp3`, `.m4a`, and `.wav` files are supported.", delete_after=5
-            )
+        url = query.strip().split()[0]
+        result = await self._download_audio_url(ctx, url)
+        if not result:
             return
 
-        os.makedirs("music_uploads", exist_ok=True)
-
-        file_path = os.path.join(
-            "music_uploads", f"{ctx.guild.id}_{attachment.filename}"
-        )
-        await attachment.save(file_path)
-
-        vc = await self.ensure_voice(ctx)
-        if not vc:
-            # couldn't join; delete the file we just saved so we don't leak disk space
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception:
-                logging.exception("failed to remove orphaned upload %s", file_path)
-            return
-
-        if ctx.guild.id not in self.queues:
-            self.queues[ctx.guild.id] = []
-
-        self.queues[ctx.guild.id].append(file_path)
-
-        if not vc.is_playing():
-            await self.play_next(ctx)
-            embed = discord.Embed(
-                description=f"🎵 - `{attachment.filename}`",
-                color=discord.Color.blurple(),
-            )
-            embed.set_author(
-                name="Now Playing", icon_url=self.utils.get_avatar_url(ctx.author)
-            )
-            embed.set_footer(text="Action requested by: " + ctx.author.name)
-        else:
-            embed = discord.Embed(
-                description=f"🎵 - `{attachment.filename}`", color=discord.Color.green()
-            )
-            embed.set_author(
-                name="Added to Queue", icon_url=self.utils.get_avatar_url(ctx.author)
-            )
-            embed.set_footer(text="Action requested by: " + ctx.author.name)
-
-        embed.set_footer(
-            text=f"Queued by {ctx.author.name} in {vc.channel.name} - {vc.channel.bitrate / 1000}Kbps"
-        )
-        await ctx.send(embed=embed)
+        file_path, display_name = result
+        await self._enqueue_audio_file(ctx, file_path, display_name)
 
     @commands.command()
     async def skip(self, ctx):
