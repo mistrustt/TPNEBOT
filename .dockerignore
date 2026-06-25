@@ -35,7 +35,7 @@ htmlcov
 Thumbs.db
 
 # Project-local state that should not be baked into the image
-.claude
+.claude/
 discord.log
 discord.log.*
 data/
