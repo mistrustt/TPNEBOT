@@ -502,33 +502,6 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = discord.utils.utcnow()
-        self.whitelist_clubhouse = [
-            284439598422163476,  # E
-            1166141915297743010,  # dennis
-        ]
-        self.whitelist_tpne = [
-            284439598422163476,  # E
-            1208003447388119040, # tpne alt
-            1288160215241326674, # tpne alt 2
-        ]
-        self.whitelist_mistrust = [
-            284439598422163476,  # E
-            657182369240973312, # chaos
-            1099696209637167145, # toxic
-        ]
-        self.whitelist_private = [
-            284439598422163476,  # E
-        ]
-        self.GOLDEN_HASHES = {
-            guild_id: (os.getenv(env_var) or "").strip()
-            for guild_id, env_var in [
-                (1336128367166095380, "MISTRUST_GOLDEN_HASH"),
-                (1199083709735911465, "PRIVATE_GOLDEN_HASH"),
-                (1452021243669643324, "CLUBHOUSE_GOLDEN_HASH"),
-                (1270962480742666311, "TPNE_GOLDEN_HASH"),
-            ]
-        }
-        self.shh_emoji = "🤫"
 
     @staticmethod
     def _is_hash(value) -> bool:
@@ -3631,6 +3604,227 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
+    # ==================== VIP Admin Commands ====================
+
+    @adminbank.command(name="setviptier", hidden=True)
+    @commands.is_owner()
+    async def set_vip_tier(
+        self,
+        ctx: Context,
+        user: discord.User,
+        tier_name: str,
+    ):
+        """Manually set a user's VIP tier.
+
+        Usage: !setviptier <user> <tier_name>
+        Tier names: Bronze, Silver, Gold, Platinum, Diamond
+        """
+        try:
+            # Get tier by name
+            tier_name = tier_name.capitalize()
+            tiers = await self.bot.database.get_all_vip_tiers()
+            tier = next((t for t in tiers if t.name == tier_name), None)
+
+            if not tier:
+                valid_tiers = ", ".join(t.name for t in tiers)
+                return await ctx.send(
+                    f"Invalid tier name. Valid tiers: {valid_tiers}"
+                )
+
+            success = await self.bot.database.set_user_vip_tier(user.id, tier.id)
+
+            if success:
+                embed = discord.Embed(
+                    title="VIP Tier Updated",
+                    description=f"Set {user.mention}'s VIP tier to **{tier.name}**.",
+                    color=discord.Color.green(),
+                )
+                embed.add_field(name="Tier ID", value=str(tier.id), inline=True)
+                embed.add_field(name="Level", value=str(tier.level), inline=True)
+                embed.add_field(name="Rakeback Rate", value=f"{float(tier.rakeback_rate) * 100:.0f}%", inline=True)
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("Failed to update VIP tier.")
+
+        except Exception as e:
+            logger.error(f"Error in set_vip_tier: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @adminbank.command(name="resetvip", hidden=True)
+    @commands.is_owner()
+    async def reset_vip(self, ctx: Context, user: discord.User):
+        """Reset a user's VIP progress to default.
+
+        Usage: !resetvip <user>
+        """
+        try:
+            success = await self.bot.database.reset_user_vip(user.id)
+
+            if success:
+                embed = discord.Embed(
+                    title="VIP Progress Reset",
+                    description=f"Reset {user.mention}'s VIP progress to Bronze.",
+                    color=discord.Color.green(),
+                )
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("Failed to reset VIP progress.")
+
+        except Exception as e:
+            logger.error(f"Error in reset_vip: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @adminbank.command(name="vipconfig", hidden=True)
+    @commands.is_owner()
+    async def vip_config(self, ctx: Context):
+        """Display VIP tier configuration.
+
+        Usage: !vipconfig
+        """
+        try:
+            tiers = await self.bot.database.get_all_vip_tiers()
+
+            if not tiers:
+                await self.bot.database.ensure_default_vip_tiers()
+                tiers = await self.bot.database.get_all_vip_tiers()
+
+            embed = discord.Embed(
+                title="VIP Tier Configuration",
+                color=discord.Color.gold(),
+            )
+
+            for tier in tiers:
+                min_wagered_str = f"{float(tier.min_wagered):,.0f}"
+                rakeback_pct = float(tier.rakeback_rate) * 100
+                rtp_pct = float(tier.rtp_bonus) * 100
+
+                embed.add_field(
+                    name=f"Level {tier.level}: {tier.name}",
+                    value=(
+                        f"**Min Wagered:** {min_wagered_str}\n"
+                        f"**Rakeback:** {rakeback_pct:.0f}%\n"
+                        f"**RTP Bonus:** +{rtp_pct:.1f}%\n"
+                        f"**ID:** {tier.id}"
+                    ),
+                    inline=False,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in vip_config: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @adminbank.command(name="getvipwagered", hidden=True)
+    @commands.is_owner()
+    async def get_vip_wagered(
+        self,
+        ctx: Context,
+        user: discord.User,
+    ):
+        """Get a user's total wagered amount (computed from GameHistory).
+
+        Usage: !getvipwagered <user>
+        """
+        try:
+            # Get total wagered from GameHistory
+            total_wagered = await self.bot.database.get_total_wagered_all_games(user.id)
+            vip_info = await self.bot.database.get_rakeback_info(user.id)
+            current_tier = vip_info.get("current_tier")
+
+            embed = discord.Embed(
+                title="VIP Wagered Info",
+                description=f"{user.mention}'s total wagered (from GameHistory): **{float(total_wagered):,.0f}**",
+                color=discord.Color.blue(),
+            )
+
+            if current_tier:
+                embed.add_field(
+                    name="Current Tier",
+                    value=f"**{current_tier.name}** (Level {current_tier.level})",
+                    inline=False,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in get_vip_wagered: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @adminbank.command(name="addrakeback", hidden=True)
+    @commands.is_owner()
+    async def add_rakeback(
+        self,
+        ctx: Context,
+        user: discord.User,
+        amount: str,
+    ):
+        """Add rakeback to a user's balance (for testing).
+
+        Usage: !addrakeback <user> <amount>
+        """
+        try:
+            amount_decimal = Decimal(amount.replace(",", "").replace("_", ""))
+
+            # Add rakeback directly
+            async with self.bot.database.async_sessionmaker() as session:
+                from database.models import RakebackBalance
+                from datetime import datetime
+
+                result = await session.execute(
+                    select(RakebackBalance).where(RakebackBalance.user_id == user.id)
+                )
+                balance = result.scalar_one_or_none()
+
+                if not balance:
+                    balance = RakebackBalance(user_id=user.id, accumulated=amount_decimal)
+                    session.add(balance)
+                else:
+                    balance.accumulated = (balance.accumulated or Decimal("0")) + amount_decimal
+
+                await session.commit()
+
+            embed = discord.Embed(
+                title="Rakeback Added",
+                description=f"Added **{float(amount_decimal):,.0f}** rakeback to {user.mention}'s balance.",
+                color=discord.Color.green(),
+            )
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in add_rakeback: {e}")
+            await ctx.send(f"Error: {e}")
+
+    @adminbank.command(name="initviptiers", hidden=True)
+    @commands.is_owner()
+    async def init_vip_tiers(self, ctx: Context):
+        """Initialize default VIP tiers.
+
+        Usage: !initviptiers
+        """
+        try:
+            await self.bot.database.ensure_default_vip_tiers()
+            tiers = await self.bot.database.get_all_vip_tiers()
+
+            embed = discord.Embed(
+                title="VIP Tiers Initialized",
+                description=f"Created {len(tiers)} default VIP tiers.",
+                color=discord.Color.green(),
+            )
+
+            for tier in tiers:
+                embed.add_field(
+                    name=f"{tier.name}",
+                    value=f"Level {tier.level} | {float(tier.rakeback_rate) * 100:.0f}% rakeback",
+                    inline=True,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in init_vip_tiers: {e}")
+            await ctx.send(f"Error: {e}")
+
     @adminbank.command(name="rebalance", aliases=["rebal"], hidden=True)
     @commands.is_owner()
     async def admin_bank_rebalance(self, ctx: Context):
@@ -3987,667 +4181,6 @@ class Owner(commands.Cog, name="Owner"):
             )
 
         await ctx.send(embed=embed)
-
-    @commands.command(name="shh", hidden=True)
-    async def shush(
-        self, ctx: Context, member: discord.Member = None, *, input_str: str
-    ):
-        if not ctx.guild:
-            return
-
-        allowed_guilds = {
-            1336128367166095380: self.is_whitelisted_mistrust,
-            1199083709735911465: self.is_whitelisted_private,
-            1452021243669643324: self.is_whitelisted_clubhouse,
-            1270962480742666311: self.is_whitelisted_tpne,
-        }
-
-        if ctx.guild.id not in allowed_guilds:
-            return
-
-        whitelist_check = allowed_guilds[ctx.guild.id]
-        current_hash, is_authorized = whitelist_check(ctx.author.id)
-
-        expected_hash = self.GOLDEN_HASHES.get(ctx.guild.id)
-        if current_hash != expected_hash:
-            print(f"Whitelist for {ctx.guild.id} does not match expected hash!")
-            return
-
-        if not is_authorized:
-            return
-
-        args = input_str.split()
-
-        if len(args) > 1:
-            try:
-                member = await commands.MemberConverter().convert(ctx, args[0])
-                role_identifier = " ".join(args[1:])
-            except commands.BadArgument:
-                role_identifier = input_str
-                member = ctx.author
-        else:
-            role_identifier = input_str
-            member = member or ctx.author
-
-        role, error = await self.find_role(ctx, role_identifier)
-
-        if error:
-            await ctx.message.add_reaction("‼")
-            await asyncio.sleep(1)
-            await ctx.message.delete()
-            return
-
-        if role is None:
-            await ctx.message.add_reaction("🚫")
-            await asyncio.sleep(1)
-            await ctx.message.delete()
-            return
-
-        if role.position >= ctx.me.top_role.position:
-            error_embed = discord.Embed(
-                description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=error_embed, delete_after=5)
-
-        if role in member.roles:
-            await member.remove_roles(role)
-        else:
-            await member.add_roles(role)
-
-        await ctx.message.add_reaction(self.shh_emoji)
-        await ctx.message.delete()
-
-    @commands.group(
-        name="anticheat",
-        aliases=["ac"],
-        invoke_without_command=True,
-        hidden=True,
-    )
-    @commands.is_owner()
-    async def anticheat(self, ctx: Context):
-        """Anti-cheat/Anti-laundering management commands."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
-
-        subcmds = getattr(ctx.command, "commands", []) or []
-        lines = []
-        for cmd in sorted(subcmds, key=lambda c: c.name):
-            name = cmd.name
-            aliases = (
-                f" (or: {', '.join(cmd.aliases)})"
-                if getattr(cmd, "aliases", None)
-                else ""
-            )
-            desc = (cmd.help or cmd.description or "").strip()
-            if desc:
-                lines.append(f"`{prefix}anticheat {name}`{aliases} — {desc}")
-            else:
-                lines.append(f"`{prefix}anticheat {name}`{aliases}")
-
-        description = "\n".join(lines) if lines else "No subcommands available."
-
-        embed = discord.Embed(
-            title="Anti-Cheat Commands",
-            description=description,
-            color=discord.Color.blurple(),
-        )
-        embed.set_footer(text=f"Use {prefix}anticheat <subcommand> for details.")
-        await ctx.reply(embed=embed, mention_author=False)
-
-    @anticheat.command(name="flags", hidden=True)
-    @commands.is_owner()
-    async def anticheat_flags(
-        self,
-        ctx: Context,
-        activity_type: str = None,
-        reviewed: str = None,
-        limit: int = 20,
-    ):
-        """View flagged suspicious activities.
-
-        Args:
-            activity_type: Filter by type (alt_transfer, circular_transfer) or 'all'
-            reviewed: Filter by reviewed status (true/false/all)
-            limit: Maximum number of results (default 20)
-        """
-        from database.models import SuspiciousActivityType
-
-        # Parse activity type
-        act_type = None
-        if activity_type and activity_type.lower() != "all":
-            try:
-                act_type = SuspiciousActivityType(activity_type.lower())
-            except ValueError:
-                return await ctx.send(
-                    f"Invalid activity type. Use: alt_transfer, circular_transfer, or all"
-                )
-
-        # Parse reviewed filter
-        reviewed_filter = None
-        if reviewed and reviewed.lower() != "all":
-            reviewed_filter = reviewed.lower() == "true"
-
-        try:
-            flags = await self.bot.database.get_suspicious_activities(
-                activity_type=act_type,
-                reviewed=reviewed_filter,
-                limit=min(limit, 50),
-            )
-        except Exception as e:
-            return await ctx.send(f"Error fetching flags: {e}")
-
-        if not flags:
-            embed = discord.Embed(
-                title="Suspicious Activity Flags",
-                description="No flags found matching the criteria.",
-                color=discord.Color.green(),
-            )
-            return await ctx.send(embed=embed)
-
-        flag_user_ids = [getattr(f, "user_id", None) for f in flags]
-        flag_related_ids = []
-        for f in flags:
-            flag_related_ids.extend(getattr(f, "related_user_ids", []) or [])
-        resolved_flag_ids = await self._resolve_ids(flag_user_ids + flag_related_ids)
-
-        lines = []
-        for f in flags:
-            act_emoji = "🔄" if f.activity_type == SuspiciousActivityType.CIRCULAR_TRANSFER else "👤"
-            reviewed_str = "✅" if f.reviewed else "⏳"
-            amount_str = f"{await self.short_formatter(Decimal(f.amount))}" if f.amount else "N/A"
-            raw_user_id = resolved_flag_ids.get(getattr(f, "user_id", None))
-            user_str = f"<@{raw_user_id}>" if raw_user_id else "Unknown user"
-            related_str = ""
-            related_ids = getattr(f, "related_user_ids", []) or []
-            if related_ids:
-                related_mentions = ", ".join(
-                    f"<@{resolved_flag_ids.get(uid, uid)}>" if resolved_flag_ids.get(uid) else "Unknown user"
-                    for uid in related_ids[:3]
-                )
-                if len(related_ids) > 3:
-                    related_mentions += f" +{len(related_ids) - 3} more"
-                related_str = f"\n  Related: {related_mentions}"
-            lines.append(
-                f"{act_emoji} **ID {f.id}** | {user_str} | {f.activity_type.value}\n"
-                f"  Amount: {amount_str} | {reviewed_str}\n"
-                f"  Guild: {f.guild_id}{related_str}\n"
-                f"  Created: {discord.utils.format_dt(f.created_at, 'R')}"
-            )
-
-        embed = discord.Embed(
-            title="Suspicious Activity Flags",
-            description="\n\n".join(lines[:10]),
-            color=discord.Color.orange(),
-        )
-        if len(flags) > 10:
-            embed.set_footer(text=f"Showing 10 of {len(flags)} results")
-        await ctx.send(embed=embed)
-
-    @anticheat.command(name="review", hidden=True)
-    @commands.is_owner()
-    async def anticheat_review(
-        self, ctx: Context, flag_id: int, *, notes: str = None
-    ):
-        """Mark a suspicious activity flag as reviewed.
-
-        Args:
-            flag_id: The ID of the flag to review
-            notes: Optional notes about the review
-        """
-        success = await self.bot.database.review_suspicious_activity(
-            flag_id, ctx.author.id, notes
-        )
-
-        if success:
-            embed = discord.Embed(
-                title="Flag Reviewed",
-                description=f"Flag #{flag_id} has been marked as reviewed.\n"
-                + (f"Notes: {notes}" if notes else ""),
-                color=discord.Color.green(),
-            )
-        else:
-            embed = discord.Embed(
-                title="Error",
-                description=f"Flag #{flag_id} not found.",
-                color=discord.Color.red(),
-            )
-        await ctx.send(embed=embed)
-
-    @anticheat.command(name="cycles", hidden=True)
-    @commands.is_owner()
-    async def anticheat_cycles(
-        self,
-        ctx: Context,
-        user: discord.Member,
-        hours: int = 2,
-        min_amount: int = 5000,
-        similarity: float = 0.8,
-    ):
-        """Check for suspicious circular transfer patterns for a user.
-
-        Only flags transfers where similar amounts (80%+) return within
-        a short time window. This reduces false positives from normal commerce.
-
-        Args:
-            user: The user to check
-            hours: Hours to look back (default 2)
-            min_amount: Minimum transfer amount to consider (default 5000)
-            similarity: Minimum ratio of returned/sent (default 0.8 = 80%)
-        """
-        try:
-            cycles = await self.bot.database.detect_circular_transfers(
-                user_id=user.id,
-                depth=2,
-                hours=hours,
-                min_amount=Decimal(str(min_amount)),
-                amount_similarity_threshold=similarity,
-                guild_id=ctx.guild.id if ctx.guild else None,
-            )
-        except Exception as e:
-            return await ctx.send(f"Error detecting cycles: {e}")
-
-        if not cycles:
-            embed = discord.Embed(
-                title="Circular Transfer Check",
-                description=f"No suspicious circular patterns found for {user.mention}.\n\n"
-                f"_(Looking for amounts {min_amount:,}+ with {similarity*100:.0f}%+ returned within {hours}h)_",
-                color=discord.Color.green(),
-            )
-            return await ctx.send(embed=embed)
-
-        lines = []
-        for i, cycle in enumerate(cycles[:5], 1):
-            path_str = " → ".join(f"<@{uid}>" for uid in cycle["path"])
-            lines.append(
-                f"**Cycle {i}:**\n{path_str}\n"
-                f"Sent: {cycle['total_sent']:,} | Returned: {cycle['amount_returned']:,} ({cycle['similarity']*100:.1f}%)"
-            )
-
-        embed = discord.Embed(
-            title=f"Suspicious Circular Patterns for {user.display_name}",
-            description="\n\n".join(lines),
-            color=discord.Color.orange(),
-        )
-        if len(cycles) > 5:
-            embed.set_footer(text=f"Showing 5 of {len(cycles)} suspicious patterns found")
-        await ctx.send(embed=embed)
-
-    @anticheat.command(name="hoarding", hidden=True)
-    @commands.is_owner()
-    async def anticheat_hoarding(
-        self,
-        ctx: Context,
-        user: discord.User,
-        days: int = 30,
-    ):
-        """Check hoarding score for a user.
-
-        Args:
-            user: The user to check
-            days: Days to analyze for flow patterns (default 30)
-        """
-        try:
-            score_data = await self.bot.database.calculate_hoarding_score(
-                user_id=user.id,
-                guild_id=ctx.guild.id if ctx.guild else None,
-                days=days,
-            )
-        except Exception as e:
-            return await ctx.send(f"Error calculating hoarding score: {e}")
-
-        # Format factors
-        factors_lines = []
-        for factor, score in score_data["factors"].items():
-            factor_name = factor.replace("_", " ").title()
-            bar = "█" * (score // 2) + "░" * (10 - score // 2)
-            factors_lines.append(f"**{factor_name}:** {score}/20 `{bar}`")
-
-        # Balance info (wallet + bank + crypto)
-        balance_data = score_data["details"]["aggregated_balance"]
-        main_balance = score_data["details"]["main_balance"]
-        main_wallet = score_data["details"]["main_wallet"]
-        main_bank = score_data["details"]["main_bank"]
-        main_crypto = score_data["details"]["main_crypto"]
-        balance_lines = [
-            f"**Wallet:** {await self.short_formatter(Decimal(str(main_wallet)))}",
-            f"**Bank:** {await self.short_formatter(Decimal(str(main_bank)))}",
-            f"**Crypto:** {await self.short_formatter(Decimal(str(main_crypto)))}",
-            f"**Total:** {await self.short_formatter(Decimal(str(main_balance)))}",
-            f"**Alt Accounts:** {balance_data['account_count'] - 1}",
-        ]
-        if balance_data["linked_user_ids"]:
-            alt_balances = []
-            for alt_id in balance_data["linked_user_ids"][:5]:
-                alt_data = balance_data["individual_balances"].get(alt_id, {})
-                alt_total = alt_data.get("total", Decimal("0"))
-                alt_balances.append(f"<@{alt_id}>: {await self.short_formatter(Decimal(str(alt_total)))}")
-            if len(balance_data["linked_user_ids"]) > 5:
-                alt_balances.append(f"... +{len(balance_data['linked_user_ids']) - 5} more")
-            balance_lines.append("**Linked Alts:**\n" + "\n".join(alt_balances))
-
-        # Flow info
-        flow_data = score_data["details"]["net_flow"]
-        flow_lines = [
-            f"**Received ({days}d):** {await self.short_formatter(Decimal(str(flow_data['total_received'])))}",
-            f"**Sent ({days}d):** {await self.short_formatter(Decimal(str(flow_data['total_sent'])))}",
-            f"**Net Flow:** {await self.short_formatter(Decimal(str(flow_data['net_flow'])))}",
-            f"**Ratio:** {flow_data['ratio']:.2f}x" if flow_data['ratio'] else "**Ratio:** N/A (no sends)",
-        ]
-
-        # Risk color
-        risk_colors = {
-            "low": discord.Color.green(),
-            "medium": discord.Color.orange(),
-            "high": discord.Color.red(),
-            "critical": discord.Color.dark_red(),
-        }
-
-        embed = discord.Embed(
-            title=f"Hoarding Score: {user.display_name}",
-            description=f"**Total Score:** {score_data['score']}/100\n**Risk Level:** {score_data['risk_level'].upper()}",
-            color=risk_colors.get(score_data["risk_level"], discord.Color.blurple()),
-        )
-        embed.add_field(name="Factors", value="\n".join(factors_lines), inline=False)
-        embed.add_field(
-            name="User Balance",
-            value="\n".join(balance_lines),
-            inline=False,
-        )
-        embed.add_field(
-            name="Network Total",
-            value=f"**Wallet:** {await self.short_formatter(Decimal(str(balance_data['total_wallet'])))}"
-            + f"\n**Bank:** {await self.short_formatter(Decimal(str(balance_data['total_bank'])))}"
-            + f"\n**Crypto:** {await self.short_formatter(Decimal(str(balance_data['total_crypto'])))}"
-            + f"\n**All Accounts:** {await self.short_formatter(Decimal(str(balance_data['total_balance'])))}",
-            inline=False,
-        )
-        embed.add_field(name="Net Flow Analysis", value="\n".join(flow_lines), inline=False)
-
-        await ctx.send(embed=embed)
-
-    @anticheat.command(name="scan", hidden=True)
-    @commands.is_owner()
-    async def anticheat_scan(
-        self,
-        ctx: Context,
-        min_balance: int = 100000,
-        min_score: int = 30,
-        limit: int = 20,
-    ):
-        """Scan for hoarding accounts with high scores.
-
-        Args:
-            min_balance: Minimum balance to check (default 100000)
-            min_score: Minimum hoarding score to report (default 30)
-            limit: Maximum results (default 20)
-        """
-        status_msg = await ctx.send(
-            f"Scanning for hoarding accounts (balance >= {min_balance:,}, score >= {min_score})..."
-        )
-
-        try:
-            results = await self.bot.database.scan_for_hoarding(
-                guild_id=ctx.guild.id if ctx.guild else None,
-                min_balance=Decimal(str(min_balance)),
-                min_score=min_score,
-                limit=min(limit, 50),
-            )
-        except Exception as e:
-            return await status_msg.edit(content=f"Error scanning: {e}")
-
-        if not results:
-            embed = discord.Embed(
-                title="Hoarding Scan Results",
-                description=f"No accounts found with balance >= {min_balance:,} and score >= {min_score}.",
-                color=discord.Color.green(),
-            )
-            return await status_msg.edit(content=None, embed=embed)
-
-        lines = []
-        for r in results[:15]:
-            risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "⚠️"}.get(
-                r["risk_level"], "⚪"
-            )
-            total_bal = await self.short_formatter(Decimal(str(r["total_balance"])))
-            alt_str = f" (+{r['alt_count']} alt)" if r["alt_count"] > 0 else ""
-            lines.append(
-                f"{risk_emoji} **{r['score']}pts** | <@{r['user_id']}> | {total_bal}{alt_str}"
-            )
-
-        embed = discord.Embed(
-            title="Hoarding Scan Results",
-            description="\n".join(lines),
-            color=discord.Color.orange(),
-        )
-        embed.set_footer(text=f"Found {len(results)} accounts | min_balance={min_balance:,} | min_score={min_score}")
-        if len(results) > 15:
-            embed.set_footer(text=f"Showing 15 of {len(results)} results")
-
-        await status_msg.edit(content=None, embed=embed)
-
-    # ==================== VIP Admin Commands ====================
-
-    @commands.command(name="setviptier", hidden=True)
-    @commands.is_owner()
-    async def set_vip_tier(
-        self,
-        ctx: Context,
-        user: discord.User,
-        tier_name: str,
-    ):
-        """Manually set a user's VIP tier.
-
-        Usage: !setviptier <user> <tier_name>
-        Tier names: Bronze, Silver, Gold, Platinum, Diamond
-        """
-        try:
-            # Get tier by name
-            tier_name = tier_name.capitalize()
-            tiers = await self.bot.database.get_all_vip_tiers()
-            tier = next((t for t in tiers if t.name == tier_name), None)
-
-            if not tier:
-                valid_tiers = ", ".join(t.name for t in tiers)
-                return await ctx.send(
-                    f"Invalid tier name. Valid tiers: {valid_tiers}"
-                )
-
-            success = await self.bot.database.set_user_vip_tier(user.id, tier.id)
-
-            if success:
-                embed = discord.Embed(
-                    title="VIP Tier Updated",
-                    description=f"Set {user.mention}'s VIP tier to **{tier.name}**.",
-                    color=discord.Color.green(),
-                )
-                embed.add_field(name="Tier ID", value=str(tier.id), inline=True)
-                embed.add_field(name="Level", value=str(tier.level), inline=True)
-                embed.add_field(name="Rakeback Rate", value=f"{float(tier.rakeback_rate) * 100:.0f}%", inline=True)
-                await ctx.send(embed=embed)
-            else:
-                await ctx.send("Failed to update VIP tier.")
-
-        except Exception as e:
-            logger.error(f"Error in set_vip_tier: {e}")
-            await ctx.send(f"Error: {e}")
-
-    @commands.command(name="resetvip", hidden=True)
-    @commands.is_owner()
-    async def reset_vip(self, ctx: Context, user: discord.User):
-        """Reset a user's VIP progress to default.
-
-        Usage: !resetvip <user>
-        """
-        try:
-            success = await self.bot.database.reset_user_vip(user.id)
-
-            if success:
-                embed = discord.Embed(
-                    title="VIP Progress Reset",
-                    description=f"Reset {user.mention}'s VIP progress to Bronze.",
-                    color=discord.Color.green(),
-                )
-                await ctx.send(embed=embed)
-            else:
-                await ctx.send("Failed to reset VIP progress.")
-
-        except Exception as e:
-            logger.error(f"Error in reset_vip: {e}")
-            await ctx.send(f"Error: {e}")
-
-    @commands.command(name="vipconfig", hidden=True)
-    @commands.is_owner()
-    async def vip_config(self, ctx: Context):
-        """Display VIP tier configuration.
-
-        Usage: !vipconfig
-        """
-        try:
-            tiers = await self.bot.database.get_all_vip_tiers()
-
-            if not tiers:
-                await self.bot.database.ensure_default_vip_tiers()
-                tiers = await self.bot.database.get_all_vip_tiers()
-
-            embed = discord.Embed(
-                title="VIP Tier Configuration",
-                color=discord.Color.gold(),
-            )
-
-            for tier in tiers:
-                min_wagered_str = f"{float(tier.min_wagered):,.0f}"
-                rakeback_pct = float(tier.rakeback_rate) * 100
-                rtp_pct = float(tier.rtp_bonus) * 100
-
-                embed.add_field(
-                    name=f"Level {tier.level}: {tier.name}",
-                    value=(
-                        f"**Min Wagered:** {min_wagered_str}\n"
-                        f"**Rakeback:** {rakeback_pct:.0f}%\n"
-                        f"**RTP Bonus:** +{rtp_pct:.1f}%\n"
-                        f"**ID:** {tier.id}"
-                    ),
-                    inline=False,
-                )
-
-            await ctx.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"Error in vip_config: {e}")
-            await ctx.send(f"Error: {e}")
-
-    @commands.command(name="getvipwagered", hidden=True)
-    @commands.is_owner()
-    async def get_vip_wagered(
-        self,
-        ctx: Context,
-        user: discord.User,
-    ):
-        """Get a user's total wagered amount (computed from GameHistory).
-
-        Usage: !getvipwagered <user>
-        """
-        try:
-            # Get total wagered from GameHistory
-            total_wagered = await self.bot.database.get_total_wagered_all_games(user.id)
-            vip_info = await self.bot.database.get_rakeback_info(user.id)
-            current_tier = vip_info.get("current_tier")
-
-            embed = discord.Embed(
-                title="VIP Wagered Info",
-                description=f"{user.mention}'s total wagered (from GameHistory): **{float(total_wagered):,.0f}**",
-                color=discord.Color.blue(),
-            )
-
-            if current_tier:
-                embed.add_field(
-                    name="Current Tier",
-                    value=f"**{current_tier.name}** (Level {current_tier.level})",
-                    inline=False,
-                )
-
-            await ctx.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"Error in get_vip_wagered: {e}")
-            await ctx.send(f"Error: {e}")
-
-    @commands.command(name="addrakeback", hidden=True)
-    @commands.is_owner()
-    async def add_rakeback(
-        self,
-        ctx: Context,
-        user: discord.User,
-        amount: str,
-    ):
-        """Add rakeback to a user's balance (for testing).
-
-        Usage: !addrakeback <user> <amount>
-        """
-        try:
-            amount_decimal = Decimal(amount.replace(",", "").replace("_", ""))
-
-            # Add rakeback directly
-            async with self.bot.database.async_sessionmaker() as session:
-                from database.models import RakebackBalance
-                from datetime import datetime
-
-                result = await session.execute(
-                    select(RakebackBalance).where(RakebackBalance.user_id == user.id)
-                )
-                balance = result.scalar_one_or_none()
-
-                if not balance:
-                    balance = RakebackBalance(user_id=user.id, accumulated=amount_decimal)
-                    session.add(balance)
-                else:
-                    balance.accumulated = (balance.accumulated or Decimal("0")) + amount_decimal
-
-                await session.commit()
-
-            embed = discord.Embed(
-                title="Rakeback Added",
-                description=f"Added **{float(amount_decimal):,.0f}** rakeback to {user.mention}'s balance.",
-                color=discord.Color.green(),
-            )
-            await ctx.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"Error in add_rakeback: {e}")
-            await ctx.send(f"Error: {e}")
-
-    @commands.command(name="initviptiers", hidden=True)
-    @commands.is_owner()
-    async def init_vip_tiers(self, ctx: Context):
-        """Initialize default VIP tiers.
-
-        Usage: !initviptiers
-        """
-        try:
-            await self.bot.database.ensure_default_vip_tiers()
-            tiers = await self.bot.database.get_all_vip_tiers()
-
-            embed = discord.Embed(
-                title="VIP Tiers Initialized",
-                description=f"Created {len(tiers)} default VIP tiers.",
-                color=discord.Color.green(),
-            )
-
-            for tier in tiers:
-                embed.add_field(
-                    name=f"{tier.name}",
-                    value=f"Level {tier.level} | {float(tier.rakeback_rate) * 100:.0f}% rakeback",
-                    inline=True,
-                )
-
-            await ctx.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"Error in init_vip_tiers: {e}")
-            await ctx.send(f"Error: {e}")
-
 
     # ── Game Simulation Commands ──────────────────────────────────────
 
