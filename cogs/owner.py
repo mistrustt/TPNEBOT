@@ -55,6 +55,23 @@ MAX_EMBED_DESCRIPTION = 4096  # Discord's max embed description length
 ITEMS_PER_PAGE = 15
 
 
+def _bar_visual(value: int | float, max_value: int | float, width: int = 12) -> str:
+    """Return a small ASCII bar for embed visualisation."""
+    if not max_value or max_value <= 0:
+        return "░" * width
+    ratio = min(1.0, max(0.0, float(value) / float(max_value)))
+    filled = int(ratio * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def _human_number(value: int | float) -> str:
+    """Format a number with commas, trimming decimals when whole."""
+    value = float(value)
+    if value == int(value):
+        return f"{int(value):,}"
+    return f"{value:,.2f}"
+
+
 class MetricsPaginator(discord.ui.View):
     """Paginator for displaying metrics data with navigation buttons."""
 
@@ -66,6 +83,7 @@ class MetricsPaginator(discord.ui.View):
         format_func: callable = None,
         footer_text: str = None,
         color: discord.Color = discord.Color.blurple(),
+        summary: dict[str, str] = None,
         chart_view: discord.ui.View = None,
     ):
         super().__init__(timeout=180)
@@ -75,6 +93,7 @@ class MetricsPaginator(discord.ui.View):
         self.format_func = format_func or (lambda x: str(x))
         self.footer_text = footer_text
         self.color = color
+        self.summary = summary or {}
         self.chart_view = chart_view
         self.current_page = 0
         self.per_page = ITEMS_PER_PAGE
@@ -88,9 +107,15 @@ class MetricsPaginator(discord.ui.View):
     def get_page_embed(self) -> discord.Embed:
         """Generate embed for current page."""
         embed = discord.Embed(title=self.title, color=self.color)
-        
+
+        if self.summary:
+            embed.description = "\n".join(
+                f"{emoji} **{label}:** {value}" for emoji, label, value in self._summary_rows()
+            )
+
         if not self.data:
-            embed.description = "No data available."
+            if not embed.description:
+                embed.description = "No data available."
             return embed
 
         start = self.current_page * self.per_page
@@ -98,12 +123,17 @@ class MetricsPaginator(discord.ui.View):
         page_data = self.data[start:end]
 
         lines = []
-        for item in page_data:
-            formatted = self.format_func(item)
+        rank_offset = start
+        for idx, item in enumerate(page_data, start=1):
+            formatted = self.format_func(item, rank=rank_offset + idx)
             lines.append(formatted)
 
-        embed.description = "\n".join(lines)
-        
+        body = "\n".join(lines)
+        if embed.description:
+            embed.add_field(name="Entries", value=body, inline=False)
+        else:
+            embed.description = body
+
         total_pages = self.get_total_pages()
         footer = f"Page {self.current_page + 1}/{total_pages}"
         if self.footer_text:
@@ -112,9 +142,29 @@ class MetricsPaginator(discord.ui.View):
 
         return embed
 
+    def _summary_rows(self):
+        """Yield (emoji, label, value) tuples for the embed summary."""
+        emoji_map = {
+            "total": "📊",
+            "count": "🔢",
+            "average": "📈",
+            "peak": "🚀",
+            "unique": "👤",
+            "range": "📅",
+            "guild": "🏰",
+        }
+        for label, value in self.summary.items():
+            emoji = emoji_map.get(label.lower(), "•")
+            yield emoji, label, value
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Only allow the original author to interact."""
-        return interaction.user.id == self.author_id
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "This metrics view isn't for you.", ephemeral=True
+            )
+            return False
+        return True
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️")
     async def previous(
@@ -143,10 +193,18 @@ class MetricsPaginator(discord.ui.View):
     async def show_graph(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        if self.chart_view:
-            await interaction.response.edit_message(view=self.chart_view)
-        else:
-            await interaction.response.defer()
+        if not self.chart_view:
+            return await interaction.response.defer()
+
+        await interaction.response.defer()
+        try:
+            buffer = self.chart_view._render_chart()
+            file = discord.File(buffer, filename="metrics.png")
+            await interaction.followup.send(file=file)
+        except Exception as e:
+            await interaction.followup.send(
+                f"Failed to render chart: {e}", ephemeral=True
+            )
 
 
 MAX_FIELDS = 25
@@ -187,7 +245,7 @@ class TodoPaginator(discord.ui.View):
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
     async def previous(
-        self, button: discord.ui.Button, interaction: discord.Interaction
+        self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         if self.current_page > 0:
             self.current_page -= 1
@@ -198,7 +256,7 @@ class TodoPaginator(discord.ui.View):
             await interaction.response.defer()
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
-    async def next(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = (len(self.tasks) - 1) // self.per_page + 1
         if self.current_page < total_pages - 1:
             self.current_page += 1
@@ -382,24 +440,6 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
                     description=f"Added **{name}** to the shop for {price} coins.",
                     color=discord.Color.green(),
                 )
-                await self.bot.database.add_shop_item(
-                    name=name,
-                    description=description,
-                    price=price,
-                    quantity=quantity,
-                    item_type=ItemType.COLLECTIBLE,  # Default type
-                    unlimited=unlimited,
-                    effect=effect,
-                    effect_value=effect_value,
-                    effect_duration=effect_duration,
-                    cooldown_seconds=cooldown_seconds,
-                )
-
-                embed = discord.Embed(
-                    title="Shop Item Created",
-                    description=f"Added **{name}** to the shop for {price} coins.",
-                    color=discord.Color.green(),
-                )
 
             if effect:
                 embed.add_field(name="Effect", value=f"{effect}: {effect_value or 'N/A'}", inline=True)
@@ -448,6 +488,11 @@ def _importable_cog(path: str) -> bool:
 
 def _fmt_list(items: Iterable[str]) -> str:
     return ", ".join(items) if items else "—"
+
+
+async def _owner_check(interaction: discord.Interaction) -> bool:
+    """App-command check used for owner-only slash commands."""
+    return await interaction.client.is_owner(interaction.user)
 
 class Owner(commands.Cog, name="Owner"):
     def __init__(self, bot) -> None:
@@ -609,7 +654,6 @@ class Owner(commands.Cog, name="Owner"):
             days: Number of days to look back (1-365, default 7)
             guild_id: Optional guild ID to filter by
         """
-        # Validate days parameter
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
@@ -639,12 +683,36 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No command usage data found for the last {days} day(s).")
 
+        grand_total = sum(int(r[2]) for r in rows)
+        max_total = max(int(r[2]) for r in rows)
+        slash_total = sum(int(r[2]) for r in rows if r[1])
+        prefix_total = grand_total - slash_total
+
+        def format_row(row, rank):
+            name, is_slash, total = row
+            total = int(total)
+            pct = (total / grand_total * 100) if grand_total else 0
+            bar = _bar_visual(total, max_total)
+            icon = "⚡" if is_slash else "⌨️"
+            return (
+                f"`{rank:>2}.` {icon} `{name[:24]:<24}` "
+                f"{bar} `{_human_number(total):>10}` ({pct:.1f}%)"
+            )
+
+        summary = {
+            "Total": _human_number(grand_total),
+            "Slash": f"{_human_number(slash_total)} ({slash_total / grand_total * 100:.1f}%)",
+            "Prefix": f"{_human_number(prefix_total)} ({prefix_total / grand_total * 100:.1f}%)",
+            "Commands": str(len(rows)),
+        }
+
         paginator = MetricsPaginator(
             data=rows,
-            title="Command Usage",
+            title="📊 Command Usage",
             author_id=ctx.author.id,
-            format_func=lambda x: f"{x[0]} ({'slash' if x[1] else 'prefix'}) - {x[2]}",
+            format_func=format_row,
             footer_text=f"Days: {days}",
+            summary=summary,
             chart_view=MetricsChartView(
                 self.bot,
                 ctx.author.id,
@@ -653,6 +721,7 @@ class Owner(commands.Cog, name="Owner"):
                 labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _ in rows],
                 values=[int(total) for _, _, total in rows],
                 ylabel="Calls",
+                limit=15,
             ),
         )
         await ctx.send(embed=paginator.get_page_embed(), view=paginator)
@@ -672,7 +741,6 @@ class Owner(commands.Cog, name="Owner"):
             days: Number of days to look back (1-365, default 7)
             guild_id: Optional guild ID to filter by
         """
-        # Validate days parameter
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
@@ -703,20 +771,47 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No command latency data found for the last {days} day(s).")
 
+        processed = []
+        for name, is_slash, sum_ms, count in rows:
+            avg = int(sum_ms / count) if count else 0
+            processed.append((name, is_slash, avg, int(count)))
+
+        max_avg = max(r[2] for r in processed)
+        grand_calls = sum(r[3] for r in processed)
+        overall_avg = sum(r[2] * r[3] for r in processed) // grand_calls if grand_calls else 0
+
+        def format_row(row, rank):
+            name, is_slash, avg, count = row
+            icon = "⚡" if is_slash else "⌨️"
+            bar = _bar_visual(avg, max_avg)
+            color = "🟢" if avg <= overall_avg * 1.2 else ("🟡" if avg <= overall_avg * 2 else "🔴")
+            return (
+                f"`{rank:>2}.` {icon} `{name[:24]:<24}` "
+                f"{bar} `{avg:>6} ms` {color} ({_human_number(count)} calls)"
+            )
+
+        summary = {
+            "Avg": f"{overall_avg} ms",
+            "Calls": _human_number(grand_calls),
+            "Entries": str(len(processed)),
+        }
+
         paginator = MetricsPaginator(
-            data=rows,
-            title="Command Latency",
+            data=processed,
+            title="⏱️ Command Latency",
             author_id=ctx.author.id,
-            format_func=lambda x: f"{x[0]} ({'slash' if x[1] else 'prefix'}) - avg {int(x[2] / x[3]) if x[3] else 0} ms ({x[3]} calls)",
+            format_func=format_row,
             footer_text=f"Days: {days}",
+            summary=summary,
             chart_view=MetricsChartView(
                 self.bot,
                 ctx.author.id,
                 chart_type="bar",
                 title="Command Latency (Avg)",
                 labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _, _ in rows],
-                values=[int(sum_ms / count) if count else 0 for _, _, sum_ms, count in rows],
+                values=[avg for _, _, avg, _ in processed],
                 ylabel="Avg ms",
+                limit=15,
             ),
         )
         await ctx.send(embed=paginator.get_page_embed(), view=paginator)
@@ -736,7 +831,6 @@ class Owner(commands.Cog, name="Owner"):
             days: Number of days to look back (1-365, default 7)
             guild_id: Optional guild ID to filter by
         """
-        # Validate days parameter
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
@@ -771,20 +865,49 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No command error data found for the last {days} day(s).")
 
+        grand_total = sum(int(r[3]) for r in rows)
+        max_total = max(int(r[3]) for r in rows)
+
+        def format_row(row, rank):
+            name, error_type, is_slash, total = row
+            total = int(total)
+            pct = (total / grand_total * 100) if grand_total else 0
+            bar = _bar_visual(total, max_total)
+            icon = "⚡" if is_slash else "⌨️"
+            short_type = error_type.split(".")[-1][:18]
+            return (
+                f"`{rank:>2}.` {icon} `{name[:20]:<20}` · `{short_type:<18}` "
+                f"{bar} `{_human_number(total):>8}` ({pct:.1f}%)"
+            )
+
+        # Aggregate errors per command for the chart
+        command_totals = {}
+        for name, _, _, total in rows:
+            command_totals[name] = command_totals.get(name, 0) + int(total)
+        chart_labels, chart_values = zip(*sorted(command_totals.items(), key=lambda x: x[1], reverse=True)) if command_totals else ([], [])
+
+        summary = {
+            "Total": _human_number(grand_total),
+            "Commands Affected": str(len(command_totals)),
+            "Error Types": str(len(rows)),
+        }
+
         paginator = MetricsPaginator(
             data=rows,
-            title="Command Errors",
+            title="⚠️ Command Errors",
             author_id=ctx.author.id,
-            format_func=lambda x: f"{x[0]} ({'slash' if x[2] else 'prefix'}) - {x[1]}: {x[3]}",
+            format_func=format_row,
             footer_text=f"Days: {days}",
+            summary=summary,
             chart_view=MetricsChartView(
                 self.bot,
                 ctx.author.id,
                 chart_type="bar",
                 title="Command Errors",
-                labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, _, is_slash, _ in rows],
-                values=[int(total) for _, _, _, total in rows],
+                labels=list(chart_labels),
+                values=list(chart_values),
                 ylabel="Errors",
+                limit=15,
             ),
         )
         await ctx.send(embed=paginator.get_page_embed(), view=paginator)
@@ -804,7 +927,6 @@ class Owner(commands.Cog, name="Owner"):
             days: Number of days to look back (1-365, default 7)
             guild_id: Optional guild ID to filter by
         """
-        # Validate days parameter
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
@@ -830,13 +952,14 @@ class Owner(commands.Cog, name="Owner"):
         unique_users = row.unique if row else 0
 
         embed = discord.Embed(
-            title="User Exposure",
-            description=(
-                f"Unique users: {unique_users}\nExposure rows: {total_rows}"
-            ),
+            title="👤 User Exposure",
             color=discord.Color.blurple(),
         )
+        embed.add_field(name="Unique Users", value=_human_number(unique_users), inline=True)
+        embed.add_field(name="Exposure Rows", value=_human_number(total_rows), inline=True)
+        embed.add_field(name="Daily Average", value=_human_number(total_rows // days), inline=True)
         embed.set_footer(text=f"Days: {days}")
+
         view = MetricsChartView(
             self.bot,
             ctx.author.id,
@@ -852,10 +975,9 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def metrics_topguilds(
         self,
-        ctx: Context, 
+        ctx: Context,
+        command_name: str,
         days: int = 7,
-        *,
-        command_name: str, 
     ) -> None:
         """Display top guilds by usage for a specific command.
 
@@ -863,11 +985,9 @@ class Owner(commands.Cog, name="Owner"):
             command_name: Name of the command to analyze
             days: Number of days to look back (1-365, default 7)
         """
-        # Validate days parameter
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
-        # Validate command_name
         if not command_name or not command_name.strip():
             return await ctx.send("❌ Command name cannot be empty.")
 
@@ -896,12 +1016,34 @@ class Owner(commands.Cog, name="Owner"):
         if not rows:
             return await ctx.send(f"No guild usage data found for command `{command_name}` in the last {days} day(s).")
 
+        grand_total = sum(int(r[1]) for r in rows)
+        max_total = max(int(r[1]) for r in rows)
+        guild_count = len(rows)
+
+        def format_row(row, rank):
+            guild_id, total = row
+            total = int(total)
+            pct = (total / grand_total * 100) if grand_total else 0
+            bar = _bar_visual(total, max_total)
+            label = f"DM" if guild_id is None else f"G:{guild_id}"
+            return (
+                f"`{rank:>2}.` 🏰 `{label:<18}` "
+                f"{bar} `{_human_number(total):>10}` ({pct:.1f}%)"
+            )
+
+        summary = {
+            "Command": f"`{command_name}`",
+            "Total Uses": _human_number(grand_total),
+            "Guilds": str(guild_count),
+        }
+
         paginator = MetricsPaginator(
             data=rows,
-            title=f"Top Guilds for {command_name}",
+            title=f"🏰 Top Guilds for `{command_name}`",
             author_id=ctx.author.id,
-            format_func=lambda x: f"{x[0] or 'DM'} - {x[1]}",
+            format_func=format_row,
             footer_text=f"Days: {days}",
+            summary=summary,
             chart_view=MetricsChartView(
                 self.bot,
                 ctx.author.id,
@@ -910,6 +1052,7 @@ class Owner(commands.Cog, name="Owner"):
                 labels=[str(gid or "DM") for gid, _ in rows],
                 values=[int(total) for _, total in rows],
                 ylabel="Calls",
+                limit=15,
             ),
         )
         await ctx.send(embed=paginator.get_page_embed(), view=paginator)
@@ -921,9 +1064,9 @@ class Owner(commands.Cog, name="Owner"):
         ctx: Context,
         metric: str = "usage",
         days: int = 7,
+        guild_id: Optional[int] = None,
         *,
         command_name: Optional[str] = None,
-        guild_id: Optional[int] = None,
     ) -> None:
         """Display per-day metrics for a specific metric type.
 
@@ -933,17 +1076,14 @@ class Owner(commands.Cog, name="Owner"):
             days: Number of days to look back (1-365, default 7)
             guild_id: Optional guild ID to filter by
         """
-        # Validate metric parameter
         valid_metrics = {"usage", "errors", "latency", "exposure"}
         metric = metric.lower()
         if metric not in valid_metrics:
             return await ctx.send(f"❌ Invalid metric `{metric}`. Valid options: {', '.join(sorted(valid_metrics))}")
 
-        # Validate days parameter
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
-        # Validate command_name if provided
         if command_name is not None:
             command_name = command_name.strip().lower()
             if not command_name:
@@ -969,6 +1109,7 @@ class Owner(commands.Cog, name="Owner"):
                         stmt = stmt.where(CommandErrorDaily.guild_id == guild_id)
                     ylabel = "Errors"
                     title = "Errors per Day"
+                    value_label = "errors"
                 elif metric == "latency":
                     stmt = (
                         select(
@@ -986,6 +1127,7 @@ class Owner(commands.Cog, name="Owner"):
                         stmt = stmt.where(CommandLatencyDaily.guild_id == guild_id)
                     ylabel = "Avg ms"
                     title = "Latency per Day"
+                    value_label = "avg ms"
                 elif metric == "exposure":
                     stmt = (
                         select(
@@ -1002,6 +1144,7 @@ class Owner(commands.Cog, name="Owner"):
                         stmt = stmt.where(DailyUserExposure.guild_id == guild_id)
                     ylabel = "Unique users"
                     title = "Exposure per Day"
+                    value_label = "users"
                 else:  # usage
                     stmt = (
                         select(
@@ -1018,6 +1161,7 @@ class Owner(commands.Cog, name="Owner"):
                         stmt = stmt.where(CommandUsageDaily.guild_id == guild_id)
                     ylabel = "Calls"
                     title = "Usage per Day"
+                    value_label = "calls"
 
                 result = await session.execute(stmt)
                 rows = result.all()
@@ -1031,34 +1175,44 @@ class Owner(commands.Cog, name="Owner"):
         # Build labels and values for chart
         labels = []
         values = []
+        max_value = 0
+        total_value = 0
         for row in rows:
             bucket = row[0]
             labels.append(bucket.strftime("%Y-%m-%d"))
             if metric == "latency":
-                sum_ms = row[1]
-                count = row[2]
-                values.append(int(sum_ms / count) if count else 0)
+                value = int(row[1] / row[2]) if row[2] else 0
             else:
-                values.append(int(row[1]))
+                value = int(row[1])
+            values.append(value)
+            max_value = max(max_value, value)
+            total_value += value
 
-        # Format function for paginator
-        def format_perday(row):
+        def format_perday(row, rank=None):
             bucket = row[0]
-            date_str = bucket.strftime("%Y-%m-%d")
+            date_str = bucket.strftime("%a %b %d")
             if metric == "latency":
-                sum_ms = row[1]
-                count = row[2]
-                value = int(sum_ms / count) if count else 0
-                return f"{date_str}: {value} ms"
+                value = int(row[1] / row[2]) if row[2] else 0
             else:
-                return f"{date_str}: {int(row[1])}"
+                value = int(row[1])
+            bar = _bar_visual(value, max_value)
+            return f"`{date_str}` {bar} `{_human_number(value):>10}` {value_label}"
+
+        summary = {
+            "Total": _human_number(total_value),
+            "Average": _human_number(total_value // days),
+            "Peak": _human_number(max_value),
+        }
+        if command_name:
+            summary["Command"] = f"`{command_name}`"
 
         paginator = MetricsPaginator(
             data=rows,
-            title=title,
+            title=f"📅 {title}",
             author_id=ctx.author.id,
             format_func=format_perday,
             footer_text=f"Days: {days} | Metric: {metric}",
+            summary=summary,
             chart_view=MetricsChartView(
                 self.bot,
                 ctx.author.id,
@@ -1073,6 +1227,9 @@ class Owner(commands.Cog, name="Owner"):
 
     async def find_role(self, ctx: Context, role_name: str):
         """Helper method to find a role by partial name, ID, or mention."""
+        if not ctx.guild:
+            return None, "This command must be used in a server."
+
         matching_roles = [
             role
             for role in ctx.guild.roles
@@ -2065,8 +2222,9 @@ class Owner(commands.Cog, name="Owner"):
             return await ctx.send("No blacklisted users found.")
 
         class BlacklistPaginator(discord.ui.View):
-            def __init__(self, author_id: int):
+            def __init__(self, bot, author_id: int):
                 super().__init__(timeout=180.0)
+                self.bot = bot
                 self.author_id = author_id
                 self.idx = 0
                 self.msg = None
@@ -2120,7 +2278,7 @@ class Owner(commands.Cog, name="Owner"):
                 user_id = item["user_id"]
 
                 # Remove from DB
-                await self.bot.database.remove_blacklisted_user(user_id)
+                await self.bot.database.remove_from_blacklist(user_id)
 
                 # Also remove from local entries
                 entries.pop(self.idx)
@@ -2142,7 +2300,7 @@ class Owner(commands.Cog, name="Owner"):
                 except Exception:
                     pass
 
-        view = BlacklistPaginator(ctx.author.id)
+        view = BlacklistPaginator(self.bot, ctx.author.id)
         sent = await ctx.send(embed=make_embed(0), view=view)
         view.msg = sent
 
@@ -2154,6 +2312,9 @@ class Owner(commands.Cog, name="Owner"):
         """
         Add a user to the blacklist. Usage: blacklist add <identifier> [reason...]
         """
+        if not ctx.guild:
+            return await ctx.send("⚠️ Blacklist commands must be used in a server.")
+
         # Split identifier and reason
         parts = args.strip().split(maxsplit=1)
         if not parts:
@@ -2232,6 +2393,9 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def blacklist_remove(self, ctx: Context, *, identifier: str):
         """Removes a user from the blacklist."""
+        if not ctx.guild:
+            return await ctx.send("⚠️ Blacklist commands must be used in a server.")
+
         try:
             if re.match(r"^\d+$", identifier):
                 try:
@@ -2336,16 +2500,12 @@ class Owner(commands.Cog, name="Owner"):
         for guild in servers:
             owner = guild.owner if guild.owner else "Unknown"
             created = guild.created_at.strftime("%b %d, %Y")
-            region = (
-                str(guild.region).title() if hasattr(guild, "region") else "Unknown"
-            )
             details = (
                 f"**ID:** {guild.id}\n"
                 f"**Owner:** {owner}\n"
                 f"**Members:** {guild.member_count}\n"
                 f"**Channels:** {len(guild.channels)}\n"
-                f"**Created:** {created}\n"
-                f"**Region:** {region}"
+                f"**Created:** {created}"
             )
             server_details.append((guild.name, details, guild))
 
@@ -2505,7 +2665,8 @@ class Owner(commands.Cog, name="Owner"):
         embed = discord.Embed(
             title=f"Server Information: {guild.name}", color=discord.Color.blurple()
         )
-        embed.set_thumbnail(url=guild.icon.url)
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
         embed.add_field(name="ID", value=guild.id)
         embed.add_field(name="Owner", value=guild.owner)
         embed.add_field(
@@ -2577,9 +2738,10 @@ class Owner(commands.Cog, name="Owner"):
         self,
         ctx: Context,
         who: Union[discord.Member, discord.User],
+        channel: Optional[discord.TextChannel] = None,
         *,
-        command: str, channel: Optional[discord.TextChannel] = None,
-        ):
+        command: str,
+    ):
         """Run a command as another user optionally in another channel.
 
         Use this command with caution. It allows the bot owner to impersonate another user
@@ -2760,7 +2922,7 @@ class Owner(commands.Cog, name="Owner"):
                         )
                         embed.set_author(
                             name=str(ctx.author),
-                            icon_url=getattr(ctx.author, "avatar.url", None),
+                            icon_url=ctx.author.display_avatar.url,
                         )
                         embed.timestamp = discord.utils.utcnow()
 
@@ -2807,9 +2969,7 @@ class Owner(commands.Cog, name="Owner"):
                                     )
                                     embed.set_author(
                                         name=str(ctx.author),
-                                        icon_url=getattr(
-                                            ctx.author, "avatar.url", None
-                                        ),
+                                        icon_url=ctx.author.display_avatar.url,
                                     )
                                     embed.timestamp = discord.utils.utcnow()
                                     current_embed_chars = 0
@@ -2819,8 +2979,11 @@ class Owner(commands.Cog, name="Owner"):
                                 )
                                 current_embed_chars += addition_length
 
-                        embed.set_footer(text=f"Page {len(embeds)+1} / {total_pages}")
                         embeds.append(embed)
+
+                    # Ensure footers reflect the actual number of pages
+                    for i, embed in enumerate(embeds, start=1):
+                        embed.set_footer(text=f"Page {i} / {len(embeds)}")
 
                     # Pagination view with Next/Previous buttons and user lock
                     class PaginationView(discord.ui.View):
@@ -2987,8 +3150,8 @@ class Owner(commands.Cog, name="Owner"):
         await view.wait()  # Wait until the view stops (button press or timeout)
 
         if view.value is None:
-            # No response was given within the timeout period.
-            await ctx.send("Shutdown cancelled due to no response.")
+            # on_timeout already informed the user; nothing more to do.
+            return
         elif view.value:
             # Confirmation received to shutdown.
             await asyncio.sleep(1)
@@ -3268,7 +3431,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"Gave {self.currency_name} **{await self.formatter(amount)}** to {member.display_name}",
                 color=discord.Color.green(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3316,7 +3479,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"Took {self.currency_name} **{await self.formatter(amount)}** from {member.display_name}",
                 color=discord.Color.red(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3337,7 +3500,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"Froze {member.display_name}'s bank account.",
                 color=discord.Color.red(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3358,7 +3521,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"Unfroze {member.display_name}'s bank account.",
                 color=discord.Color.green(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3396,7 +3559,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"✅ Successfully reset **{member.display_name}** to {self.currency_name} **0**.",
                 color=discord.Color.orange(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
 
         except Exception as e:
@@ -3415,7 +3578,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"✅ Successfully refunded transaction **{txid}** for user **{member.display_name}**.",
                 color=discord.Color.green(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3438,7 +3601,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"Minted {self.currency_name} **{await self.formatter(amount)}**.",
                 color=discord.Color.green(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3461,7 +3624,7 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"Burned {self.currency_name} **{await self.formatter(amount)}**.",
                 color=discord.Color.green(),
             )
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
             await ctx.send(
@@ -3505,7 +3668,7 @@ class Owner(commands.Cog, name="Owner"):
                 if "target" in result:
                     embed.add_field(name="Target", value=f"{result['target']:.2%}", inline=True)
 
-            embed.set_author(name="Admin Audit", icon_url=ctx.author.avatar.url)
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except Exception as e:
             await ctx.send(
@@ -3645,16 +3808,17 @@ class Owner(commands.Cog, name="Owner"):
             )
         await ctx.send(embed=embed)
 
-    @commands.command(name="shopmodal", hidden=True)
-    @commands.is_owner()
-    async def shop_item_modal(self, ctx: commands.Context):
+    @app_commands.command(name="shopmodal", description="Open a modal to create a new shop item with effect configuration.")
+    @app_commands.check(_owner_check)
+    async def shop_item_modal(self, interaction: discord.Interaction):
         """Open a modal to create a new shop item with effect configuration."""
         modal = ShopItemModal(self.bot)
-        await ctx.interaction.response.send_modal(modal)
+        await interaction.response.send_modal(modal)
 
-    @commands.command(name="editshopitem", hidden=True)
-    @commands.is_owner()
-    async def edit_shop_item(self, ctx: commands.Context, item_id: int):
+    @app_commands.command(name="editshopitem", description="Edit an existing shop item using a modal.")
+    @app_commands.check(_owner_check)
+    @app_commands.describe(item_id="The ID of the shop item to edit")
+    async def edit_shop_item(self, interaction: discord.Interaction, item_id: int):
         """Edit an existing shop item using a modal."""
         item = await self.bot.database.get_shop_item_by_id(item_id)
         if not item:
@@ -3663,22 +3827,11 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"No item found with ID {item_id}.",
                 color=discord.Color.red(),
             )
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         modal = ShopItemModal(self.bot, edit_item=item)
-        # For command-based invocation, we need to use an interaction
-        # So we'll send the modal as a follow-up from an interaction
-        await ctx.send(
-            "Click the button below to edit the item.",
-            view=discord.ui.View().add_item(
-                discord.ui.Button(
-                    label=f"Edit {item.name}",
-                    style=discord.ButtonStyle.primary,
-                    custom_id=f"edit_item_{item_id}",
-                )
-            ),
-        )
+        await interaction.response.send_modal(modal)
 
     @commands.command(name="listitems", hidden=True)
     @commands.is_owner()
@@ -3839,6 +3992,9 @@ class Owner(commands.Cog, name="Owner"):
     async def shush(
         self, ctx: Context, member: discord.Member = None, *, input_str: str
     ):
+        if not ctx.guild:
+            return
+
         allowed_guilds = {
             1336128367166095380: self.is_whitelisted_mistrust,
             1199083709735911465: self.is_whitelisted_private,
@@ -5094,16 +5250,18 @@ class Owner(commands.Cog, name="Owner"):
                     fs_count = free_spins_table.get(scatter_count, 15)
                     total_free_spins += fs_count
                     retriggers = 0
-                    for _ in range(fs_count):
+                    fs_spins_remaining = fs_count
+                    while fs_spins_remaining > 0:
                         fs_grid = _generate_grid()
                         fs_payout, fs_scatter = _evaluate_grid(fs_grid)
                         spin_payout += fs_payout * house_edge_factor
                         # Max 1 retrigger per base spin (matches actual game)
                         if fs_scatter >= 3 and retriggers < 1:
                             extra = free_spins_table.get(fs_scatter, 15)
-                            fs_count += extra
+                            fs_spins_remaining += extra
                             total_free_spins += extra
                             retriggers += 1
+                        fs_spins_remaining -= 1
 
                 if spin_payout > 0:
                     hit_count += 1
