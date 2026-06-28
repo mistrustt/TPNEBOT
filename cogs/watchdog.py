@@ -81,8 +81,6 @@ class Watchdog(commands.Cog, name="Watchdog"):
             "InterPayment Card": re.compile(r"\b636[0-9]{13,16}\b"),
             # --- JCB ---
             "JCB Card": re.compile(r"\b35(2[8-9]|[3-8][0-9])[0-9]{12,15}\b"),
-            # --- Laser (Inactive) ---
-            "Laser Card": re.compile(r"\b(6304|6706|6709|6771)[0-9]{12,15}\b"),
             # --- Maestro ---
             "Maestro UK": re.compile(r"\b(6759|676770|676774)[0-9]{6,13}\b"),
             "Maestro": re.compile(
@@ -90,8 +88,8 @@ class Watchdog(commands.Cog, name="Watchdog"):
             ),
             # --- Dankort ---
             "Dankort Card": re.compile(r"\b5019[0-9]{12}\b"),
-            # --- Visa/Dankort co-branded ---
-            "Dankort (Visa co-branded) Card": re.compile(r"\b4571[0-9]{12}\b"),
+            # --- Visa/Dankort ---
+            "Dankort (Visa) Card": re.compile(r"\b4571[0-9]{12}\b"),
             # --- Mir ---
             "Mir Card": re.compile(r"\b220[0-4][0-9]{12,15}\b"),
             # --- Mastercard ---
