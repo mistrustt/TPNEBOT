@@ -5448,5 +5448,4 @@ class Owner(commands.Cog, name="Owner"):
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
-    logger.debug("Owner cog initialized successfully")
-# 6 7 
+    logger.debug("Owner cog initialized successfully") 

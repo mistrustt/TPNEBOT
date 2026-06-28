@@ -9,11 +9,7 @@ import asyncio
 from io import BytesIO
 import os
 import aiofiles
-import gc
-import tempfile
-import shutil
 import time
-import html
 from typing import Optional
 
 
