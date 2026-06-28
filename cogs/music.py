@@ -122,7 +122,6 @@ class Music(commands.Cog, name="Music"):
         }
 
         punctuation_rules = [
-            # (detection regex, [(search regex, replacement), ...])
             (r"\(.*?\)", [(r"\(.*?\)", "")]),
             (r"\[.*?\]", [(r"\[.*?\]", "")]),
             (r"\{.*?\}", [(r"\{.*?\}", "")]),
@@ -3408,150 +3407,164 @@ class Music(commands.Cog, name="Music"):
                 "Please wait a bit before making another snippet.",
             )
             return
+
         self.snippet_debounce[ctx.author.id] = True
+        snippet_file_name = f"{ctx.author.id}_snippet"
+        image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_snippet.png"
 
-        normalized_query = query.replace("’", "'")
-        async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/songs/", params={"search": normalized_query}
-        ) as response:
+        async def handle_request_failed(ctx, code=None):
+            embed = discord.Embed(
+                description="Request failed. Please try again later.",
+                color=discord.Color.red(),
+            )
+            if code:
+                embed.set_image(url=f"https://http.cat/{code}")
+            await ctx.reply(embed=embed, delete_after=5)
 
-            async def handle_request_failed(ctx, code=None):
-                embed = discord.Embed(
-                    description="Request failed. Please try again later.",
-                    color=discord.Color.red(),
-                )
-                if code:
-                    embed.set_image(url=f"https://http.cat/{code}")
-                await ctx.reply(embed=embed, delete_after=5)
-
-            content_type = response.headers.get("Content-Type", "")
-            if response.status != 200 or "application/json" not in content_type:
-                await handle_request_failed(
-                    ctx, response.status if response.status != 200 else 500
-                )
-                self.handle_user_done_snippet(ctx.author.id)
-                return
-
-            data = await response.json()
-
-            matches = [
-                song for song in data.get("results", [])
-                if song.get("leak_type") and "session" not in song["leak_type"].lower()
-                and song.get("category", "").lower() != "unsurfaced"
-            ]
-
-            safe_items: dict[str, dict] = {}
-            for song in matches:
-                name = song.get("name", "Unknown Title")
-                best_name = self.get_most_acceptable_track_name(name)
-                if best_name in safe_items:
-                    continue
-                safe_items[best_name] = song
-
-            count = len(safe_items)
-            safe_items_list = list(safe_items.values())
-
-            song = None
-            if count == 0:
-                await Embeds.send_error_embed(
-                    ctx.channel,
-                    ctx.author,
-                    f"I couldnt find a song with the name: `{query}`",
-                )
-                self.handle_user_done_snippet(ctx.author.id)
-                return
-            if count > 1:
-
-                class SongSelect(discord.ui.Select):
-                    def __init__(self, view, author, songs):
-                        options = []
-                        self.real_view = view
-                        self.author = author
-                        self.chosen_song = None
-                        self.avail_options_map = {}
-                        for name, song in songs.items():
-                            self.avail_options_map[name] = song
-                            options.append(discord.SelectOption(label=name))
-                        super().__init__(
-                            placeholder="Select a song...",
-                            min_values=1,
-                            max_values=1,
-                            options=options,
+        try:
+            async with ctx.typing():
+                normalized_query = query.replace("’", "'")
+                async with self.session.get(
+                    JUICEWRLD_API + "/juicewrld/songs/", params={"search": normalized_query}
+                ) as response:
+                    content_type = response.headers.get("Content-Type", "")
+                    if response.status != 200 or "application/json" not in content_type:
+                        await handle_request_failed(
+                            ctx, response.status if response.status != 200 else 500
                         )
-                        self.songs = songs
+                        return
 
-                    async def callback(self, interaction: discord.Interaction):
-                        if interaction.user.id != self.author:
-                            return await interaction.response.send_message(
-                                "You cannot use this select menu.", ephemeral=True
-                            )
+                    data = await response.json()
 
-                        self.chosen_song = self.avail_options_map.get(
-                            self.values[0], None
-                        )
-                        self.real_view.stop()
+                matches = [
+                    song
+                    for song in data.get("results", [])
+                    if (song.get("leak_type") or "")
+                    and "session" not in song.get("leak_type", "").lower()
+                    and song.get("category", "").lower() != "unsurfaced"
+                ]
 
-                class SongView(discord.ui.View):
-                    def __init__(self, author, songs):
-                        super().__init__(timeout=30)
-                        self.add_item(SongSelect(self, author, songs))
+                safe_items: dict[str, dict] = {}
+                for song in matches:
+                    name = song.get("name", "Unknown Title")
+                    best_name = self.get_most_acceptable_track_name(name)
+                    if best_name in safe_items:
+                        continue
+                    safe_items[best_name] = song
 
-                embed = discord.Embed(
-                    description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
-                )
-                view = SongView(ctx.author.id, safe_items)
-                message = await ctx.reply(embed=embed, view=view)
-                await view.wait()
-                try:
-                    await message.delete()
-                except:
-                    pass
+                count = len(safe_items)
+                safe_items_list = list(safe_items.values())
 
-                select = view.children[0]
-                if not select or not select.chosen_song:
-                    self.handle_user_done_snippet(ctx.author.id)
+                song = None
+                if count == 0:
+                    await Embeds.send_error_embed(
+                        ctx.channel,
+                        ctx.author,
+                        f"I couldn't find a song with the name: `{query}`",
+                    )
                     return
-                song = select.chosen_song
-                try:
-                    await message.delete()
-                except:
-                    pass
-            else:
-                song = safe_items_list[0]
+                if count > 1:
 
-            path = song.get("path", "")
-            download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/"
+                    class SongSelect(discord.ui.Select):
+                        def __init__(self, view, author, songs):
+                            options = []
+                            self.real_view = view
+                            self.author = author
+                            self.chosen_song = None
+                            self.avail_options_map = {}
+                            for name, song in songs.items():
+                                self.avail_options_map[name] = song
+                                options.append(discord.SelectOption(label=name))
+                            super().__init__(
+                                placeholder="Select a song...",
+                                min_values=1,
+                                max_values=1,
+                                options=options,
+                            )
+                            self.songs = songs
 
-            best_track_title = self.get_most_acceptable_track_name(
-                song.get("name", "Unknown Title").replace(".mp3", "")
-            )
-            image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
+                        async def callback(self, interaction: discord.Interaction):
+                            if interaction.user.id != self.author:
+                                return await interaction.response.send_message(
+                                    "You cannot use this select menu.", ephemeral=True
+                                )
 
-            cover_slug = best_track_title.lower().replace(" ", "")
-            await self._fetch_best_cover(
-                cover_url=f"{JUICEWRLD_API}/juicewrld/cover/{cover_slug}.png",
-                album_art_url=f"{JUICEWRLD_API}/juicewrld/files/cover-art/",
-                album_art_params={"path": path},
-                avatar_url=str(ctx.author.display_avatar.url),
-                target_path=image_file_name,
-            )
+                            self.chosen_song = self.avail_options_map.get(
+                                self.values[0], None
+                            )
+                            self.real_view.stop()
 
-            result, payload = await self.make_snippet(
-                image_file_name, download_url, f"{ctx.author.id}_snippet", path=path
-            )
-            if result == False:
-                await handle_request_failed(ctx, payload)
-                self.handle_user_done_snippet(ctx.author.id)
-                return
+                    class SongView(discord.ui.View):
+                        def __init__(self, author, songs):
+                            super().__init__(timeout=30)
+                            self.add_item(SongSelect(self, author, songs))
 
-            message = await ctx.channel.send(file=discord.File(payload))
-            self.remove_file(payload)
+                    embed = discord.Embed(
+                        description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
+                    )
+                    view = SongView(ctx.author.id, safe_items)
+                    message = await ctx.reply(embed=embed, view=view)
+                    await view.wait()
+                    await self._safe_delete(message)
 
+                    select = view.children[0]
+                    if not select or not select.chosen_song:
+                        return
+                    song = select.chosen_song
+                    await self._safe_delete(message)
+                else:
+                    song = safe_items_list[0]
+
+                path = song.get("path", "")
+                download_url = f"{JUICEWRLD_API}/juicewrld/files/download-compressed/"
+
+                best_track_title = self.get_most_acceptable_track_name(
+                    song.get("name", "Unknown Title").replace(".mp3", "")
+                )
+
+                cover_slug = best_track_title.lower().replace(" ", "")
+                await self._fetch_best_cover(
+                    cover_url=f"{JUICEWRLD_API}/juicewrld/cover/{cover_slug}.png",
+                    album_art_url=f"{JUICEWRLD_API}/juicewrld/files/cover-art/",
+                    album_art_params={"path": path},
+                    avatar_url=str(ctx.author.display_avatar.url),
+                    target_path=image_file_name,
+                )
+
+                result, payload = await self.make_snippet(
+                    image_file_name,
+                    download_url,
+                    snippet_file_name,
+                    DEFAULT_SNIPPET_DURATION,
+                    path=path,
+                )
+                if result == False:
+                    await handle_request_failed(ctx, payload)
+                    return
+
+                message = await ctx.channel.send(file=discord.File(payload))
+                self.remove_file(payload)
+
+            # Clean up the cached cover image if it was saved to disk.
+            if image_file_name.startswith(DOWNLOAD_CACHE_FOLDER_NAME):
+                self.remove_file(image_file_name)
+
+            # Re-arm the snippet cooldown once the user has actually received the file.
             async def debounce_delay(author_id: int):
-                await asyncio.sleep(15)  
+                await asyncio.sleep(15)
                 self.handle_user_done_snippet(author_id)
 
             asyncio.create_task(debounce_delay(ctx.author.id))
+
+        except Exception as e:
+            logger.exception(f"makesnippet failed for {ctx.author.id}: {e}")
+            await Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                "Something went wrong while making the snippet. Please try again.",
+            )
+        finally:
+            self.handle_user_done_snippet(ctx.author.id)
 
     def find_pledges_channel(self, guild: discord.Guild):
         channels = []
