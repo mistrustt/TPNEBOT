@@ -2430,6 +2430,164 @@ class Music(commands.Cog, name="Music"):
                 f"I couldnt find a song with the name: `{query}`",
             )
 
+    def build_lyrics_embeds(self, song: dict) -> list[discord.Embed] | None:
+        """build one embed per <=4000 character chunk of a song's lyrics
+
+        returns ``None`` when the song has no lyrics
+        """
+        lyrics = (song.get("lyrics") or "").strip()
+        if not lyrics:
+            return None
+
+        name = song.get("name") or "Unknown"
+        image_url = song.get("image_url") or ""
+        thumbnail = JUICEWRLD_API + image_url if image_url else None
+
+        chunks: list[str] = []
+        current = ""
+        for line in lyrics.split("\n"):
+            if current and len(current) + len(line) + 1 > 4000:
+                chunks.append(current.rstrip("\n"))
+                current = ""
+            current += line + "\n"
+        if current.strip():
+            chunks.append(current.rstrip("\n"))
+
+        embeds = []
+        total = len(chunks)
+        for i, chunk in enumerate(chunks):
+            embed = discord.Embed(
+                title=f"{name} — Lyrics" if i == 0 else None,
+                description=chunk[:4096],
+                color=discord.Color.blurple(),
+            )
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail)
+            if total > 1:
+                embed.set_footer(text=f"Part {i + 1}/{total}")
+            embeds.append(embed)
+
+        return embeds
+
+    @commands.command(
+        name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song"
+    )
+    async def lyrics(self, ctx: commands.Context, *, query: str):
+        try:
+            song_list = await self.fetch_song(ctx, query)
+            if song_list is None:
+                return
+
+            if len(song_list) == 1:
+                song = song_list[0]
+                embeds = self.build_lyrics_embeds(song)
+                if embeds is None:
+                    return await Embeds.send_warning_embed(
+                        ctx.channel,
+                        ctx.author,
+                        f"**{song.get('name', 'That song')}** has no **lyrics** available",
+                    )
+
+                await ctx.reply(embed=embeds[0])
+                for embed in embeds[1:]:
+                    await ctx.send(embed=embed)
+                return
+
+            if len(song_list) > 1:
+                results = sorted(
+                    song_list,
+                    key=lambda s: (s.get("track_titles") or [""])[0].lower(),
+                )[:25]
+                song_map = {str(song["id"]): song for song in results}
+
+                def _label(song: dict) -> str:
+                    titles = song.get("track_titles") or []
+                    if not titles:
+                        return (song.get("name") or "Unknown")[:100]
+                    if len(titles) == 1:
+                        return titles[0][:100]
+                    return f"{titles[0]} ({', '.join(titles[1:])})"[:100]
+
+                options = [
+                    discord.SelectOption(
+                        label=_label(song),
+                        value=str(song["id"]),
+                    )
+                    for song in results
+                ]
+
+                class SongSelect(discord.ui.Select):
+                    def __init__(self, options, song_map, author, cog):
+                        self.song_map = song_map
+                        self.author = author
+                        self.cog = cog
+                        super().__init__(
+                            placeholder="Select a song...",
+                            min_values=1,
+                            max_values=1,
+                            options=options,
+                        )
+
+                    async def callback(self, itn: discord.Interaction):
+                        try:
+                            song_id = self.values[0]
+                            song = self.song_map[song_id]
+
+                            embeds = self.cog.build_lyrics_embeds(song)
+                            if embeds is None:
+                                return await itn.response.send_message(
+                                    embed=discord.Embed(
+                                        description=f"**{song.get('name', 'That song')}** has no **lyrics** available",
+                                        color=discord.Color.yellow(),
+                                    ),
+                                    ephemeral=True,
+                                )
+
+                            ephemeral = self.author != itn.user
+                            if ephemeral:
+                                await itn.response.send_message(
+                                    embed=embeds[0], ephemeral=True
+                                )
+                            else:
+                                await itn.response.edit_message(embed=embeds[0], view=None)
+
+                            for embed in embeds[1:]:
+                                await itn.followup.send(embed=embed, ephemeral=ephemeral)
+                        except Exception as e:
+                            if not itn.response.is_done():
+                                await itn.response.send_message(
+                                    f"Something broke while sending lyrics: `{e}`",
+                                    ephemeral=True,
+                                )
+                            else:
+                                await itn.followup.send(
+                                    f"Something broke while sending lyrics: `{e}`",
+                                    ephemeral=True,
+                                )
+
+                view = discord.ui.View(timeout=None)
+                view.add_item(SongSelect(options, song_map, ctx.author, self))
+
+                embed = discord.Embed(
+                    title="Multiple songs found",
+                    description=f"{ctx.author.mention}: I found **{len(results)}** songs matching `{query}`. Pick one below.",
+                    color=discord.Color.blurple(),
+                )
+                await ctx.reply(embed=embed, view=view)
+                return
+
+            return await Embeds.send_warning_embed(
+                ctx.channel,
+                ctx.author,
+                f"I couldn't find a song with the name: `{query}`",
+            )
+        except Exception as e:
+            await Embeds.send_error_embed(
+                ctx.channel,
+                ctx.author,
+                f"The lyrics command crashed: `{type(e).__name__}: {e}`",
+            )
+            raise
     @tasks.loop(hours=1)
     async def cache_songs(self):
         songs = Cache.get_songs()
@@ -4298,162 +4456,3 @@ class GroupbuyContainer(discord.ui.Container):
 
         self.add_item(discord.ui.Separator())
         self.add_item(action_row)
-
-    def build_lyrics_embeds(self, song: dict) -> list[discord.Embed] | None:
-        """build one embed per <=4000 character chunk of a song's lyrics
-
-        returns ``None`` when the song has no lyrics
-        """
-        lyrics = (song.get("lyrics") or "").strip()
-        if not lyrics:
-            return None
-
-        name = song.get("name") or "Unknown"
-        image_url = song.get("image_url") or ""
-        thumbnail = JUICEWRLD_API + image_url if image_url else None
-
-        chunks: list[str] = []
-        current = ""
-        for line in lyrics.split("\n"):
-            if current and len(current) + len(line) + 1 > 4000:
-                chunks.append(current.rstrip("\n"))
-                current = ""
-            current += line + "\n"
-        if current.strip():
-            chunks.append(current.rstrip("\n"))
-
-        embeds = []
-        total = len(chunks)
-        for i, chunk in enumerate(chunks):
-            embed = discord.Embed(
-                title=f"{name} — Lyrics" if i == 0 else None,
-                description=chunk[:4096],
-                color=discord.Color.blurple(),
-            )
-            if thumbnail:
-                embed.set_thumbnail(url=thumbnail)
-            if total > 1:
-                embed.set_footer(text=f"Part {i + 1}/{total}")
-            embeds.append(embed)
-
-        return embeds
-
-    @commands.command(
-        name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song"
-    )
-    async def lyrics(self, ctx: commands.Context, *, query: str):
-        try:
-            song_list = await self.fetch_song(ctx, query)
-            if song_list is None:
-                return
-
-            if len(song_list) == 1:
-                song = song_list[0]
-                embeds = self.build_lyrics_embeds(song)
-                if embeds is None:
-                    return await Embeds.send_warning_embed(
-                        ctx.channel,
-                        ctx.author,
-                        f"**{song.get('name', 'That song')}** has no **lyrics** available",
-                    )
-
-                await ctx.reply(embed=embeds[0])
-                for embed in embeds[1:]:
-                    await ctx.send(embed=embed)
-                return
-
-            if len(song_list) > 1:
-                results = sorted(
-                    song_list,
-                    key=lambda s: (s.get("track_titles") or [""])[0].lower(),
-                )[:25]
-                song_map = {str(song["id"]): song for song in results}
-
-                def _label(song: dict) -> str:
-                    titles = song.get("track_titles") or []
-                    if not titles:
-                        return (song.get("name") or "Unknown")[:100]
-                    if len(titles) == 1:
-                        return titles[0][:100]
-                    return f"{titles[0]} ({', '.join(titles[1:])})"[:100]
-
-                options = [
-                    discord.SelectOption(
-                        label=_label(song),
-                        value=str(song["id"]),
-                    )
-                    for song in results
-                ]
-
-                class SongSelect(discord.ui.Select):
-                    def __init__(self, options, song_map, author, cog):
-                        self.song_map = song_map
-                        self.author = author
-                        self.cog = cog
-                        super().__init__(
-                            placeholder="Select a song...",
-                            min_values=1,
-                            max_values=1,
-                            options=options,
-                        )
-
-                    async def callback(self, itn: discord.Interaction):
-                        try:
-                            song_id = self.values[0]
-                            song = self.song_map[song_id]
-
-                            embeds = self.cog.build_lyrics_embeds(song)
-                            if embeds is None:
-                                return await itn.response.send_message(
-                                    embed=discord.Embed(
-                                        description=f"**{song.get('name', 'That song')}** has no **lyrics** available",
-                                        color=discord.Color.yellow(),
-                                    ),
-                                    ephemeral=True,
-                                )
-
-                            ephemeral = self.author != itn.user
-                            if ephemeral:
-                                await itn.response.send_message(
-                                    embed=embeds[0], ephemeral=True
-                                )
-                            else:
-                                await itn.response.edit_message(embed=embeds[0], view=None)
-
-                            for embed in embeds[1:]:
-                                await itn.followup.send(embed=embed, ephemeral=ephemeral)
-                        except Exception as e:
-                            if not itn.response.is_done():
-                                await itn.response.send_message(
-                                    f"Something broke while sending lyrics: `{e}`",
-                                    ephemeral=True,
-                                )
-                            else:
-                                await itn.followup.send(
-                                    f"Something broke while sending lyrics: `{e}`",
-                                    ephemeral=True,
-                                )
-
-                view = discord.ui.View(timeout=None)
-                view.add_item(SongSelect(options, song_map, ctx.author, self))
-
-                embed = discord.Embed(
-                    title="Multiple songs found",
-                    description=f"{ctx.author.mention}: I found **{len(results)}** songs matching `{query}`. Pick one below.",
-                    color=discord.Color.blurple(),
-                )
-                await ctx.reply(embed=embed, view=view)
-                return
-
-            return await Embeds.send_warning_embed(
-                ctx.channel,
-                ctx.author,
-                f"I couldn't find a song with the name: `{query}`",
-            )
-        except Exception as e:
-            await Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                f"The lyrics command crashed: `{type(e).__name__}: {e}`",
-            )
-            raise
