@@ -120,76 +120,27 @@ class Music(commands.Cog, name="Music"):
             "TPNE": {"name": "The Party Never Ends", "color": "#CC00FF"},
         }
 
-        def check_question_marks(s):
-            return "?" in s
+        punctuation_rules = [
+            # (detection regex, [(search regex, replacement), ...])
+            (r"\(.*?\)", [(r"\(.*?\)", "")]),
+            (r"\[.*?\]", [(r"\[.*?\]", "")]),
+            (r"\{.*?\}", [(r"\{.*?\}", "")]),
+            (r"'", [(r"'", "")]),
+            (r"\.", [(r"\.", ""), (r"\.", " ")]),
+            (r",", [(r",", ""), (r",", " ")]),
+            (r"\?", [(r"\?", ""), (r"\?", " ")]),
+            (r"-", [(r"-", ""), (r"-", " ")]),
+        ]
 
-        def remove_question_marks(s):
-            return s.replace("?", "")
-
-        def question_mark_to_spaces(s):
-            return s.replace("?", " ")
-
-        def check_parantheses(s):
-            return "(" in s and ")" in s
-
-        def remove_parentheses(s):
-            return re.sub(r"\(.*?\)", "", s).strip()
-
-        def check_brackets(s):
-            return "[" in s and "]" in s
-
-        def remove_brackets(s):
-            return re.sub(r"\[.*?\]", "", s).strip()
-
-        def check_semi_brackets(s):
-            return "{" in s and "}" in s
-
-        def remove_semi_brackets(s):
-            return re.sub(r"\{.*?\}", "", s).strip()
-
-        def check_apostrophes(s):
-            return "'" in s
-
-        def remove_apostrophes(s):
-            return s.replace("'", "")
-
-        def check_periods(s):
-            return "." in s
-
-        def remove_periods(s):
-            return s.replace(".", "")
-
-        def period_to_spaces(s):
-            return s.replace(".", " ")
-
-        def check_commas(s):
-            return "," in s
-
-        def remove_commas(s):
-            return s.replace(",", "")
-
-        def comma_to_spaces(s):
-            return s.replace(",", " ")
-
-        def check_hyphens(s):
-            return "-" in s
-
-        def remove_hyphens(s):
-            return s.replace("-", "")
-
-        def hyphen_to_spaces(s):
-            return s.replace("-", " ")
-
-        self.track_name_transformations = {
-            check_parantheses: [remove_parentheses],
-            check_brackets: [remove_brackets],
-            check_semi_brackets: [remove_semi_brackets],
-            check_apostrophes: [remove_apostrophes],
-            check_periods: [remove_periods, period_to_spaces],
-            check_commas: [remove_commas, comma_to_spaces],
-            check_question_marks: [remove_question_marks, question_mark_to_spaces],
-            check_hyphens: [remove_hyphens, hyphen_to_spaces],
-        }
+        self.track_name_transformations = {}
+        for detect, subs in punctuation_rules:
+            detect_re = re.compile(detect)
+            self.track_name_transformations[
+                lambda s, dr=detect_re: bool(dr.search(s))
+            ] = [
+                lambda s, sr=re.compile(search), repl=repl: sr.sub(repl, s).strip()
+                for search, repl in subs
+            ]
 
     @staticmethod
     def _resolve_font_path(filename: str) -> str:
