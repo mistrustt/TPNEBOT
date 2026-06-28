@@ -17,11 +17,11 @@ def _get_hash_key() -> bytes:
     strongly recommended.
     """
     global _warned_missing_key
-    key = os.getenv("USER_ID_HASH_KEY") or os.getenv("STATS_SALT", "")
+    key = os.getenv("USER_ID_HASH_KEY")
     if not key:
         if not _warned_missing_key:
             logger.error(
-                "USER_ID_HASH_KEY (or STATS_SALT fallback) is not set; "
+                "USER_ID_HASH_KEY is not set; "
                 "user ID hashing is insecure. Set USER_ID_HASH_KEY before "
                 "running in production."
             )

@@ -143,6 +143,80 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         return t % 10 == 0  # https://github.com/mmcloughlin/luhn/blob/master/luhn.py
 
+    def _get_log_style(self, event_type: str) -> dict:
+        """Return visual styling metadata for a log event type."""
+        styles = {
+            "member_ban": {
+                "color": discord.Color.red(),
+                "emoji": "🚫",
+                "label": "Member Banned",
+                "severity": 4,
+            },
+            "member_unban": {
+                "color": discord.Color.green(),
+                "emoji": "🔓",
+                "label": "Member Unbanned",
+                "severity": 1,
+            },
+            "member_join": {
+                "color": discord.Color.green(),
+                "emoji": "👤",
+                "label": "Member Joined",
+                "severity": 1,
+            },
+            "member_update": {
+                "color": discord.Color.blue(),
+                "emoji": "🏷️",
+                "label": "Member Updated",
+                "severity": 1,
+            },
+            "username_change": {
+                "color": discord.Color.blue(),
+                "emoji": "🏷️",
+                "label": "Username Changed",
+                "severity": 1,
+            },
+            "voice_state": {
+                "color": discord.Color.purple(),
+                "emoji": "🔊",
+                "label": "Voice State Changed",
+                "severity": 2,
+            },
+            "message_delete": {
+                "color": discord.Color.greyple(),
+                "emoji": "📝",
+                "label": "Message Deleted",
+                "severity": 1,
+            },
+            "pii_detected": {
+                "color": discord.Color.orange(),
+                "emoji": "⚠️",
+                "label": "PII Detected",
+                "severity": 3,
+            },
+            "card_detected": {
+                "color": discord.Color.red(),
+                "emoji": "💳",
+                "label": "Credit Card Detected",
+                "severity": 4,
+            },
+            "discord_token": {
+                "color": discord.Color.red(),
+                "emoji": "🔑",
+                "label": "Discord Token Detected",
+                "severity": 4,
+            },
+        }
+        return styles.get(
+            event_type,
+            {
+                "color": discord.Color.blurple(),
+                "emoji": "🔎",
+                "label": "Watchdog Log",
+                "severity": 0,
+            },
+        )
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
@@ -190,11 +264,23 @@ class Watchdog(commands.Cog, name="Watchdog"):
         settings = await self.get_guild_settings(guild_id)
         return settings and settings.get("enabled", False)
 
-    async def add_log_entry(self, guild_id: int, description: str):
+    async def add_log_entry(
+        self,
+        guild_id: int,
+        description: str,
+        *,
+        event_type: str = "log",
+        avatar_url: Optional[str] = None,
+    ):
         """Add a log entry to the queue if logging is enabled."""
         if await self.is_logging_enabled(guild_id):
             self.log_queue[guild_id].append(
-                {"description": description, "timestamp": discord.utils.utcnow()}
+                {
+                    "description": description,
+                    "timestamp": discord.utils.utcnow(),
+                    "event_type": event_type,
+                    "avatar_url": avatar_url,
+                }
             )
 
             if len(self.log_queue[guild_id]) >= self.max_queue_size:
@@ -233,14 +319,22 @@ class Watchdog(commands.Cog, name="Watchdog"):
         logs = self.log_queue[guild_id][:25]
         self.log_queue[guild_id] = self.log_queue[guild_id][25:]
 
+        guild_icon = channel.guild.icon.url if channel.guild.icon else self.bot.user.display_avatar.url
+
         if len(logs) == 1:
             log = logs[0]
+            style = self._get_log_style(log.get("event_type", "log"))
             embed = discord.Embed(
                 description=log["description"][:4096],
-                color=discord.Color.blurple(),
+                color=style["color"],
                 timestamp=log["timestamp"],
             )
-            embed.set_author(name="Watchdog Log")
+            embed.set_author(
+                name=f"{style['emoji']} {style['label']}",
+                icon_url=guild_icon,
+            )
+            if log.get("avatar_url"):
+                embed.set_thumbnail(url=log["avatar_url"])
 
             try:
                 await channel.send(embed=embed)
@@ -250,19 +344,28 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 )
 
         elif logs:
+            styles = [
+                self._get_log_style(log.get("event_type", "log")) for log in logs
+            ]
+            batch_style = max(styles, key=lambda s: (s["severity"], s["label"]))
+            total_pages = (len(logs) - 1) // 10 + 1
+
             combined_embed = discord.Embed(
-                title="Watchdog Logs",
-                color=discord.Color.blurple(),
+                title=f"🔎 Watchdog Logs ({len(logs)} events)",
+                color=batch_style["color"],
                 timestamp=discord.utils.utcnow(),
             )
+            combined_embed.set_author(name="Watchdog", icon_url=guild_icon)
+            combined_embed.set_footer(text=f"Page 1/{total_pages} • {len(logs)} events")
 
             for i, log in enumerate(logs[:10]):
+                style = styles[i]
                 desc = log["description"]
                 if len(desc) > 1024:
                     desc = desc[:1021] + "..."
 
                 combined_embed.add_field(
-                    name=f"Log Entry {i+1} - {log['timestamp'].strftime('%H:%M:%S')}",
+                    name=f"{style['emoji']} {style['label']} — {log['timestamp'].strftime('%H:%M:%S')}",
                     value=desc,
                     inline=False,
                 )
@@ -271,22 +374,27 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 await channel.send(embed=combined_embed)
 
                 if len(logs) > 10:
-                    for i in range(1, (len(logs) - 1) // 10 + 1):
+                    for page_idx in range(1, total_pages):
                         next_embed = discord.Embed(
-                            title=f"Watchdog Logs (Continued {i})",
-                            color=discord.Color.blurple(),
+                            title=f"🔎 Watchdog Logs (Continued)",
+                            color=batch_style["color"],
                             timestamp=discord.utils.utcnow(),
                         )
+                        next_embed.set_author(name="Watchdog", icon_url=guild_icon)
+                        next_embed.set_footer(
+                            text=f"Page {page_idx + 1}/{total_pages} • {len(logs)} events"
+                        )
 
-                        for j, log in enumerate(
-                            logs[i * 10 : min((i + 1) * 10, len(logs))]
-                        ):
+                        start = page_idx * 10
+                        end = min((page_idx + 1) * 10, len(logs))
+                        for j, log in enumerate(logs[start:end]):
+                            style = styles[start + j]
                             desc = log["description"]
                             if len(desc) > 1024:
                                 desc = desc[:1021] + "..."
 
                             next_embed.add_field(
-                                name=f"Log Entry {i*10+j+1} - {log['timestamp'].strftime('%H:%M:%S')}",
+                                name=f"{style['emoji']} {style['label']} — {log['timestamp'].strftime('%H:%M:%S')}",
                                 value=desc,
                                 inline=False,
                             )
@@ -335,10 +443,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
             description = "\n".join(lines)
 
         embed = discord.Embed(
-            title="Watchdog — Available Commands",
+            title="🔎 Watchdog — Available Commands",
             description=description,
             color=discord.Color.blurple(),
         )
+        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         embed.set_footer(text=f"Use {prefix}watchdog <subcommand> for details.")
 
         await ctx.reply(embed=embed, mention_author=False)
@@ -427,25 +536,37 @@ class Watchdog(commands.Cog, name="Watchdog"):
             else "Not set"
         )
 
-        embed = discord.Embed(title="Watchdog Status", color=discord.Color.blurple())
-        embed.add_field(name="Overall Status", value=status_text, inline=False)
-        embed.add_field(name="Log Channel", value=channel_text, inline=False)
-        
+        color = (
+            discord.Color.green()
+            if settings.watchdog_enabled
+            else discord.Color.red()
+        )
+
+        embed = discord.Embed(
+            title="🔎 Watchdog Status",
+            color=color,
+            timestamp=discord.utils.utcnow(),
+        )
+        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+        embed.add_field(name="Overall Status", value=status_text, inline=True)
+        embed.add_field(name="Log Channel", value=channel_text, inline=True)
+
         # Add individual feature statuses
         features = [
-            ("PII Filter", "pii_filter", settings.watchdog_pii_filter),
-            ("Card Filter", "card_filter", settings.watchdog_card_filter),
-            ("Member Tracking", "member_tracking", settings.watchdog_member_tracking),
-            ("Message Tracking", "message_tracking", settings.watchdog_message_tracking),
-            ("Voice Tracking", "voice_tracking", settings.watchdog_voice_tracking),
+            ("PII Filter", settings.watchdog_pii_filter),
+            ("Card Filter", settings.watchdog_card_filter),
+            ("Member Tracking", settings.watchdog_member_tracking),
+            ("Message Tracking", settings.watchdog_message_tracking),
+            ("Voice Tracking", settings.watchdog_voice_tracking),
         ]
-        
+
         feature_status = "\n".join(
-            f"**{name}**: {'✅ Enabled' if enabled else '❌ Disabled'}"
-            for name, _, enabled in features
+            f"{'✅' if enabled else '❌'} {name}"
+            for name, enabled in features
         )
-        
-        embed.add_field(name="Features", value=feature_status, inline=False)
+
+        embed.add_field(name="Features", value=feature_status, inline=True)
+        embed.set_footer(text=f"Guild ID: {guild_id}")
 
         await ctx.send(embed=embed)
 
@@ -487,13 +608,23 @@ class Watchdog(commands.Cog, name="Watchdog"):
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         settings = await self.get_guild_settings(guild.id)
         if settings and settings.get("member_tracking", True):
-            await self.add_log_entry(guild.id, f"{user} was banned from the server.")
+            await self.add_log_entry(
+                guild.id,
+                f"{user} was banned from the server.",
+                event_type="member_ban",
+                avatar_url=user.display_avatar.url,
+            )
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
         settings = await self.get_guild_settings(guild.id)
         if settings and settings.get("member_tracking", True):
-            await self.add_log_entry(guild.id, f"{user} was unbanned from the server.")
+            await self.add_log_entry(
+                guild.id,
+                f"{user} was unbanned from the server.",
+                event_type="member_unban",
+                avatar_url=user.display_avatar.url,
+            )
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):
@@ -515,6 +646,8 @@ class Watchdog(commands.Cog, name="Watchdog"):
                         await self.add_log_entry(
                             guild.id,
                             f"User {after.name} (ID: {after.id}) changed username from '{before.name}' to '{after.name}'.",
+                            event_type="username_change",
+                            avatar_url=member.display_avatar.url,
                         )
 
     @commands.Cog.listener()
@@ -561,7 +694,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 f"{after.display_name} (`{after.id}`) profile updated.\n"
                 + "\n".join(changes)
             )
-            await self.add_log_entry(guild_id, description)
+            await self.add_log_entry(
+                guild_id,
+                description,
+                event_type="member_update",
+                avatar_url=after.display_avatar.url,
+            )
 
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -634,7 +772,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 f"{member.display_name} (`{member.id}`) voice state changed.\n"
                 + "\n".join(changes)
             )
-            await self.add_log_entry(member.guild.id, description)
+            await self.add_log_entry(
+                member.guild.id,
+                description,
+                event_type="voice_state",
+                avatar_url=member.display_avatar.url,
+            )
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -653,9 +796,15 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 m = pattern.search(content)
                 if m:
                     snippet = m.group(0)
+                    event_type = (
+                        "discord_token"
+                        if pattern_name == "Discord Token"
+                        else "pii_detected"
+                    )
                     desc = (
-                        f"⚠️ {pattern_name} detected in {message.channel.mention} sent by "
-                        f"{message.author} (`{message.author.id}`): `{snippet}`"
+                        f"{pattern_name} detected in {message.channel.mention} sent by "
+                        f"{message.author} (`{message.author.id}`).\n"
+                        f"**Matched snippet**:\n```\n{snippet}\n```"
                     )
 
                     if pattern_name == "Discord Token":
@@ -674,7 +823,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     except discord.Forbidden:
                         desc += "\n*Failed to delete the message due to insufficient permissions.*"
 
-                    await self.add_log_entry(message.guild.id, desc)
+                    await self.add_log_entry(
+                        message.guild.id,
+                        desc,
+                        event_type=event_type,
+                        avatar_url=message.author.display_avatar.url,
+                    )
                     return
 
         # Check card filter
@@ -689,7 +843,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                         continue
 
                     desc = (
-                        f"⚠️ Genuine Credit Card detected in {message.channel.mention} sent by "
+                        f"Genuine {pattern_name} detected in {message.channel.mention} sent by "
                         f"{message.author} (`{message.author.id}`)"
                     )
                     try:
@@ -697,7 +851,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     except discord.Forbidden:
                         desc += "\n*Failed to delete the message due to insufficient permissions.*"
 
-                    await self.add_log_entry(message.guild.id, desc)
+                    await self.add_log_entry(
+                        message.guild.id,
+                        desc,
+                        event_type="card_detected",
+                        avatar_url=message.author.display_avatar.url,
+                    )
                     return
 
     @commands.Cog.listener()
@@ -724,7 +883,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
             else:
                 description += f"\n**{attachment_count} Attachments deleted**"
 
-        await self.add_log_entry(message.guild.id, description)
+        await self.add_log_entry(
+            message.guild.id,
+            description,
+            event_type="message_delete",
+            avatar_url=message.author.display_avatar.url,
+        )
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -749,7 +913,12 @@ class Watchdog(commands.Cog, name="Watchdog"):
             f"\n**Creation**: {member.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
         )
 
-        await self.add_log_entry(member.guild.id, description)
+        await self.add_log_entry(
+            member.guild.id,
+            description,
+            event_type="member_join",
+            avatar_url=member.display_avatar.url,
+        )
 
 
 async def setup(bot: commands.Bot):
