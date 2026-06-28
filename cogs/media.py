@@ -745,17 +745,12 @@ class Media(commands.Cog, name="media"):
                                                             
                 variants.append({**base, "downloadMode": "audio", "audioFormat": afmt, "audioBitrate": "320"})
                                                               
-                variants.append({**base, "downloadMode": "audio", "audioFormat": afmt})
-                                                                                               
-                variants.append({**base, "downloadMode": "auto", "audioFormat": afmt})
-                                                                
+                variants.append({**base, "downloadMode": "audio", "audioFormat": afmt})                                                                      
+                variants.append({**base, "downloadMode": "auto", "audioFormat": afmt})                                  
                 variants.append({**base, "downloadMode": "audio", "fileType": afmt})
-                                        
                 variants.append({**base, "downloadMode": "auto", "fileType": afmt})
                 return variants
-
-                        
-                                
+ 
             q_num = None
             if q_norm:
                                                                   
