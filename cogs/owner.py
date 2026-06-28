@@ -3722,10 +3722,7 @@ class Owner(commands.Cog, name="Owner"):
         ctx: Context,
         user: discord.User,
     ):
-        """Get a user's total wagered amount (computed from GameHistory).
-
-        Usage: !getvipwagered <user>
-        """
+        """Get a user's total wagered amount."""
         try:
             # Get total wagered from GameHistory
             total_wagered = await self.bot.database.get_total_wagered_all_games(user.id)
@@ -3759,10 +3756,7 @@ class Owner(commands.Cog, name="Owner"):
         user: discord.User,
         amount: str,
     ):
-        """Add rakeback to a user's balance (for testing).
-
-        Usage: !addrakeback <user> <amount>
-        """
+        """Add rakeback to a user's balance."""
         try:
             amount_decimal = Decimal(amount.replace(",", "").replace("_", ""))
 
@@ -3799,8 +3793,6 @@ class Owner(commands.Cog, name="Owner"):
     @commands.is_owner()
     async def init_vip_tiers(self, ctx: Context):
         """Initialize default VIP tiers.
-
-        Usage: !initviptiers
         """
         try:
             await self.bot.database.ensure_default_vip_tiers()
