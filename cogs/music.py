@@ -53,6 +53,7 @@ class Music(commands.Cog, name="Music"):
         self.ongoing_heardle = []
         self.heardle_answers = {}
         self.snippet_debounce = {}
+        self._auto_cache_clean.start()
         self.standard_colors = {
             "black": "#000000",
             "white": "#FFFFFF",
@@ -178,6 +179,7 @@ class Music(commands.Cog, name="Music"):
         return ImageFont.truetype(font_path, 8)
 
     async def cog_unload(self):
+        self._auto_cache_clean.cancel()
         await self.session.close()
 
     def can_test(ctx: commands.Context, cog=None):
@@ -189,6 +191,32 @@ class Music(commands.Cog, name="Music"):
     def assert_download_cache(self):
         if not os.path.exists(DOWNLOAD_CACHE_FOLDER_NAME):
             os.makedirs(DOWNLOAD_CACHE_FOLDER_NAME)
+
+    @tasks.loop(hours=6)
+    async def _auto_cache_clean(self):
+        """Purge old __download_cache files automatically every 6 hours."""
+        await asyncio.to_thread(self._clean_download_cache)
+
+    def _clean_download_cache(self, max_age_hours: float = 1.0):
+        """Delete files in the download cache older than `max_age_hours`.
+
+        Defaults to 1 hour so temp mp3/mp4/png files don't accumulate.
+        """
+        self.assert_download_cache()
+        now = datetime.now()
+        cutoff = timedelta(hours=max_age_hours)
+        removed = 0
+        for file in os.listdir(DOWNLOAD_CACHE_FOLDER_NAME):
+            file_path = os.path.join(DOWNLOAD_CACHE_FOLDER_NAME, file)
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+                if now - mtime > cutoff:
+                    os.remove(file_path)
+                    removed += 1
+            except Exception as e:
+                logger.error(f"Error cleaning cache file {file_path}: {e}")
+        if removed:
+            logger.info(f"Auto-cleaned {removed} stale file(s) from {DOWNLOAD_CACHE_FOLDER_NAME}")
 
     @staticmethod
     def _blur_to_file(image: Image.Image, target_path: str, radius: int) -> bool:
@@ -2646,6 +2674,15 @@ class Music(commands.Cog, name="Music"):
         except Exception as e:
             logger.error(f"Error deleting file {file_path}: {e}")
 
+    @staticmethod
+    async def _safe_delete(message: discord.Message | None):
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
     @commands.command(name="cdc")
     @commands.check_any(commands.is_owner(), commands.check(can_test))
     async def cleardownloadcache(self, ctx: commands.Context):
@@ -2795,44 +2832,59 @@ class Music(commands.Cog, name="Music"):
         start_point: int = None,
         path: str = None,
     ):
+        """Create a short mp4 snippet from a static image and a downloaded audio file.
+
+        Downloads the audio once, picks a random start point if none is provided,
+        and does the heavy moviepy work in a thread so the bot stays responsive.
+        """
         temp_file_path = None
         output_path = None
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url, params={"path": path} if path else None) as download_response:
-                if download_response.status != 200:
-                    return False, download_response.status
 
-                self.assert_download_cache()
-                song_bytes = await download_response.read()
-                temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{file_name}.mp3"
-                with open(temp_file_path, "wb") as f:
-                    f.write(song_bytes)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(download_url, params={"path": path} if path else None) as download_response:
+                    if download_response.status != 200:
+                        return False, download_response.status
 
+                    self.assert_download_cache()
+                    song_bytes = await download_response.read()
+                    temp_file_path = DOWNLOAD_CACHE_FOLDER_NAME + f"/{file_name}.mp3"
+                    with open(temp_file_path, "wb") as f:
+                        f.write(song_bytes)
+
+            def _build():
                 orig_clip = AudioFileClip(temp_file_path)
-                if start_point == None:
-                    start_point = random.randint(
-                        0, int(orig_clip.duration) - duration * 2
-                    )
+                actual_start = start_point
+                if actual_start is None:
+                    max_start = max(0, int(orig_clip.duration) - duration * 2)
+                    actual_start = random.randint(0, max_start)
 
-                orig_clip = AudioFileClip(temp_file_path)
-                sub_clip = orig_clip.subclipped(start_point, start_point + duration)
+                sub_clip = orig_clip.subclipped(actual_start, actual_start + duration)
+                out = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{file_name}.mp4"
                 final_clip = ImageClip(image_path).with_audio(sub_clip)
-
-                output_path = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{file_name}.mp4"
                 final_clip.duration = duration
                 final_clip.fps = 1
                 final_clip.write_videofile(
-                    output_path, codec="libx264", audio_codec="aac", logger=None
+                    out,
+                    codec="libx264",
+                    audio_codec="aac",
+                    logger=None,
+                    threads=2,
+                    preset="ultrafast",
+                    ffmpeg_params=["-tune", "stillimage", "-pix_fmt", "yuv420p"],
                 )
-
                 final_clip.close()
                 sub_clip.close()
                 orig_clip.close()
+                return out
 
-        if temp_file_path:
-            self.remove_file(temp_file_path)
-        if image_path and image_path.startswith(DOWNLOAD_CACHE_FOLDER_NAME):
-            self.remove_file(image_path)
+            output_path = await asyncio.to_thread(_build)
+
+        finally:
+            if temp_file_path:
+                self.remove_file(temp_file_path)
+            if image_path and image_path.startswith(DOWNLOAD_CACHE_FOLDER_NAME):
+                self.remove_file(image_path)
 
         return True, output_path
 
@@ -3297,15 +3349,18 @@ class Music(commands.Cog, name="Music"):
             return
 
         self.ongoing_heardle.append(ctx.author.id)
-        track_tiles = song_data.get("track_titles", [])
+        track_titles = song_data.get("track_titles", []) or []
         path = data.get("path", "")
+        raw_track_title = song_data.get("name", "Unknown Title")
+        best_track_title = self.get_most_acceptable_track_name(raw_track_title)
+
+        # Pre-compute all acceptable answers so the game loop is O(1) lookup.
+        acceptable_answers = set(self.get_acceptable_track_names(raw_track_title))
+        for title in track_titles:
+            acceptable_answers.update(self.get_acceptable_track_names(title))
+        self.heardle_answers[ctx.author.id] = best_track_title
 
         async with ctx.typing():
-            raw_track_title = song_data.get("name", "Unknown Title")
-            best_track_title = self.get_most_acceptable_track_name(
-                song_data.get("name", "Unknown Title")
-            )
-
             image_file_name = f"{DOWNLOAD_CACHE_FOLDER_NAME}/{ctx.author.id}_temp_image_heardle.png"
             cover_slug = best_track_title.lower().replace(" ", "")
             await self._fetch_best_cover(
@@ -3329,35 +3384,17 @@ class Music(commands.Cog, name="Music"):
                 self.handle_user_done_heardle(ctx.author.id)
                 return
 
-            class HeardleContainer(discord.ui.Container):
-                def __init__(self, thumbnail_url, snippet):
-                    super().__init__()
-
-                    header = discord.ui.Section(
-                        accessory=discord.ui.Thumbnail(media=thumbnail_url)
-                    )
-                    header.add_item(
-                        discord.ui.TextDisplay(f"# Heardle\nPlease send a message of a song title to guess the song\n-# Type `exit` to quit the game.\n-# Duration: {HEARDLE_CLIP_DURATION} seconds")
-                    )
-                    self.add_item(header)
-                    self.add_item(discord.ui.Separator())
-
-                    media_gallery = discord.ui.MediaGallery()
-                    media_gallery.add_item(media=snippet)
-                    self.add_item(media_gallery)
-
             message = await ctx.send(file=discord.File(payload))
             self.remove_file(payload)
 
+        # Clean up the cover image if it was saved to the cache.
+        if image_file_name.startswith(DOWNLOAD_CACHE_FOLDER_NAME):
+            self.remove_file(image_file_name)
+
         has_guessed = False
         attempt = 1
-        acceptable_answers = []
-        self.heardle_answers[ctx.author.id] = best_track_title
-        for title in track_tiles:
-            acceptable_alt_name_list = self.get_acceptable_track_names(title)
-            acceptable_answers.extend(acceptable_alt_name_list)
-
         last_hint = None
+        start_time = asyncio.get_event_loop().time()
 
         async def update_timer_message(
             message: discord.Message, full_name, start_time, author
@@ -3366,37 +3403,40 @@ class Music(commands.Cog, name="Music"):
             try:
                 while True:
                     elapsed = asyncio.get_event_loop().time() - start_time
-                    hint_chars = int(
-                        elapsed // 3
-                    )  
-
+                    hint_chars = int(elapsed // 3)
                     if hint_chars > 3:
-                        raise asyncio.CancelledError
+                        return
 
-                    hint = full_name[:hint_chars]
-                    for i in range(len(full_name) - hint_chars):
-                        if full_name[i + hint_chars] == " ":
+                    hint_chars = min(hint_chars, len(full_name))
+                    hint = ""
+                    for i, ch in enumerate(full_name):
+                        if i < hint_chars:
+                            hint += ch
+                        elif ch == " ":
                             hint += " "
                         else:
                             hint += "?"
                     if hint != last_hint:
                         last_hint = hint
                         await message.edit(
-                            embed=discord.Embed(title="Heardle", description=f"{author.mention} Hint ({round(hint_chars)}/3): {hint}", color=author.color)
+                            embed=discord.Embed(
+                                title="Heardle",
+                                description=f"{author.mention} Hint ({hint_chars}/3): {hint}",
+                                color=author.color,
+                            )
                         )
                     await asyncio.sleep(1)
             except asyncio.CancelledError:
                 return
 
-        start_time = asyncio.get_event_loop().time()
         update_task = asyncio.create_task(
             update_timer_message(message, best_track_title, start_time, ctx.author)
         )
 
-        while has_guessed == False:
-            def check_guess(m):
-                return m.author == ctx.author and m.channel == ctx.channel
+        def check_guess(m):
+            return m.author == ctx.author and m.channel == ctx.channel
 
+        while not has_guessed:
             try:
                 elapsed = asyncio.get_event_loop().time() - start_time
                 remaining_time = HEARDLE_GAME_DURATION - elapsed
@@ -3407,35 +3447,36 @@ class Music(commands.Cog, name="Music"):
                     "message", check=check_guess, timeout=remaining_time
                 )
             except TimeoutError:
+                await update_task
                 await Embeds.send_warning_embed(
                     ctx.channel,
                     ctx.author,
                     f"Time's up! You didn't guess the song ({best_track_title} [{raw_track_title}]) in time.",
                 )
-                try:
-                    await message.delete()
-                except:
-                    pass
+                await self._safe_delete(message)
                 self.handle_user_done_heardle(ctx.author.id)
-                update_task.cancel()
                 await self.bot.database.add_heardle_loss(ctx.author.id)
                 return
 
             guess = guess_msg.content.strip().lower()
             if guess == "exit":
                 await guess_msg.add_reaction("👋")
-                try:
-                    await message.delete()
-                except:
-                    pass
+                await update_task
+                await self._safe_delete(message)
                 await self.bot.database.add_heardle_loss(ctx.author.id)
                 self.handle_user_done_heardle(ctx.author.id)
-                update_task.cancel()
                 return
             elif guess in acceptable_answers:
                 has_guessed = True
             else:
                 attempt += 1
+
+        update_task.cancel()
+        try:
+            await update_task
+        except asyncio.CancelledError:
+            pass
+
         elapsed = asyncio.get_event_loop().time() - start_time
         await Embeds.send_success_embed(
             ctx.channel,
@@ -3443,12 +3484,8 @@ class Music(commands.Cog, name="Music"):
             f"Congratulations! You guessed the song correctly: **{best_track_title}** in {round(elapsed)} seconds ({attempt} attempts)!",
         )
         await self.bot.database.add_heardle_win(ctx.author.id)
-        try:
-            await message.delete()
-        except:
-            pass
+        await self._safe_delete(message)
         self.handle_user_done_heardle(ctx.author.id)
-        update_task.cancel()
 
     @commands.command(aliases=["makesnip"])
     async def makesnippet(self, ctx: commands.Context, *, query: str):
