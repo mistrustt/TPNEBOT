@@ -14,6 +14,8 @@ from contextlib import redirect_stdout
 import textwrap
 import logging
 import asyncio
+import time
+import statistics
 import psutil
 from utils.misc import MiscUtils
 from utils.admin_api import AdminAPIServer
@@ -1701,6 +1703,39 @@ class Owner(commands.Cog, name="Owner"):
         except Exception as e:
             await ctx.send(f"An error occurred: {e}")
             return
+
+    @commands.command(name="rtt", aliases=["latency"], hidden=True)
+    @commands.is_owner()
+    async def rtt(self, ctx: Context, readings: int = 5):
+        """Measure Discord HTTP round-trip latency over several readings.
+
+        Args:
+            readings: Number of readings to take (1-20, default 5)
+        """
+        if readings < 1 or readings > 20:
+            return await ctx.send("❌ Readings must be between 1 and 20.")
+
+        msg = await ctx.send("Calculating round-trip time...")
+        times = []
+
+        for i in range(1, readings + 1):
+            start = time.perf_counter()
+            await msg.edit(content=f"Reading {i}: measuring...")
+            elapsed = (time.perf_counter() - start) * 1000
+            times.append(elapsed)
+            await msg.edit(content=f"Reading {i}: {elapsed:.2f}ms")
+
+        avg = statistics.mean(times)
+        stdev = statistics.stdev(times) if len(times) > 1 else 0.0
+        ws_latency = self.bot.latency * 1000
+
+        lines = ["Calculating round-trip time...\n"]
+        for i, value in enumerate(times, start=1):
+            lines.append(f"Reading {i}: {value:.2f}ms")
+        lines.append(f"\nAverage: {avg:.2f} ± {stdev:.2f}ms")
+        lines.append(f"Websocket latency: {ws_latency:.2f}ms")
+
+        await msg.edit(content="\n".join(lines))
 
     # ---------- LOAD ----------
     @commands.command(name="load", hidden=True)
