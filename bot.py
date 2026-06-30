@@ -935,31 +935,43 @@ class DiscordBot(commands.Bot):
 
 
 async def main() -> None:
-    """Load secrets from Infisical (if configured) and start the bot."""
+    """Load non-sensitive config from .env and all secrets from Infisical."""
     load_dotenv()
 
     infisical = InfisicalSecretsManager.from_env()
-    if infisical.is_configured:
-        logger.info("Infisical is configured; fetching secrets from Infisical")
-        await infisical.authenticate()
-        await infisical.load_secrets_into_environ(
-            {
-                "TOKEN": "TOKEN",
-                "DB_PW": "DB_PW",
-                "USER_ID_HASH_KEY": "USER_ID_HASH_KEY",
-                "STATS_SALT": "STATS_SALT",
-                "ADMIN_API_SECRET": "ADMIN_API_SECRET",
-            }
-        )
-        asyncio.create_task(infisical.refresh_loop())
-    else:
-        logger.info(
-            "Infisical is not configured (INFISICAL_CLIENT_ID/SECRET missing); "
-            "using secrets from environment/.env directly"
+    if not infisical.is_configured:
+        raise RuntimeError(
+            "Infisical is not configured. Set INFISICAL_CLIENT_ID and "
+            "INFISICAL_CLIENT_SECRET in .env. All secrets must be retrieved from Infisical."
         )
 
+    logger.info("Infisical is configured; fetching secrets from Infisical")
+    await infisical.authenticate()
+    await infisical.load_secrets_into_environ(
+        {
+            # Core bot / database
+            "TOKEN": "TOKEN",
+            "DB_PW": "DB_PW",
+            # Security / hashing
+            "USER_ID_HASH_KEY": "USER_ID_HASH_KEY",
+            "STATS_SALT": "STATS_SALT",
+            # Admin API
+            "ADMIN_API_SECRET": "ADMIN_API_SECRET",
+            # Third-party API keys
+            "OPENROUTER_API_KEY": "OPENROUTER_API_KEY",
+            "API_NINJAS_KEY": "API_NINJAS_KEY",
+            "COINMARKETCAP_API_KEY": "COINMARKETCAP_API_KEY",
+            "NASA_API_KEY": "NASA_API_KEY",
+            "WEATHER_API_KEY": "WEATHER_API_KEY",
+            "LASTFM_API_KEY": "LASTFM_API_KEY",
+            "GENIUS_API_KEY": "GENIUS_API_KEY",
+            "FREECRYPTOAPI_API_KEY": "FREECRYPTOAPI_API_KEY",
+        }
+    )
+    asyncio.create_task(infisical.refresh_loop())
+
     bot = DiscordBot()
-    await bot.start(os.environ.get("TOKEN", os.getenv("TOKEN")))
+    await bot.start(os.environ["TOKEN"])
 
 
 if __name__ == "__main__":

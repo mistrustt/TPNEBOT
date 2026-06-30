@@ -57,10 +57,12 @@ If `ADMIN_API_SECRET` is not configured, the API is **disabled** and a warning i
 
 ### Example `.env` snippet
 
+Only non-sensitive Admin API configuration belongs in `.env`. The actual
+`ADMIN_API_SECRET` must be stored in Infisical and is fetched at runtime.
+
 ```bash
 ADMIN_API_HOST=127.0.0.1
 ADMIN_API_PORT=8080
-ADMIN_API_SECRET=change-me-to-a-long-random-value
 ADMIN_API_ALLOWLIST=127.0.0.1/32,10.0.0.0/24
 ADMIN_API_BIND_EXTERNAL=false
 ```

@@ -19,7 +19,7 @@ The repository tracks a single active development branch (main). Version tags sh
 - Coordinate release and publish advisory in CHANGELOG or separate SECURITY_NOTICE.md.
 
 ## Secrets Management
-- Store `TOKEN`, `DB_PW`, and other credentials only in `.env` (never commit).
+- Store `TOKEN`, `DB_PW`, API keys, encryption keys, and all other credentials in Infisical. `.env` must only contain non-sensitive configuration and the Infisical machine-identity credentials.
 - Rotate tokens after suspected compromise or at regular intervals.
 - Avoid printing sensitive values in logs.
 
@@ -32,7 +32,7 @@ The repository tracks a single active development branch (main). Version tags sh
 Discord user IDs are stored as deterministic HMAC-SHA256 hex hashes (64 characters) in all operational tables. The single `user_identities` table maps each hash back to the raw Discord ID. This means a database dump no longer exposes raw user IDs everywhere, but the mapping table is a high-value target and should be protected with the same care as credential secrets.
 
 - Run `migrations/secure_user_ids.sql` once to convert an existing database.
-- Set `USER_ID_HASH_KEY` in `.env` to the same key used in the migration.
+- Store `USER_ID_HASH_KEY` in Infisical and use the same key when running the migration.
 - Back up `USER_ID_HASH_KEY` securely. If it is lost, stored hashes cannot be resolved back to Discord IDs, which breaks leaderboard display, punishment lookups, and any other feature that needs to show or mention users from stored records.
 - The analytics tables `command_usage_daily` and `daily_user_exposure` continue to use their existing `user_hash` column; do not reuse their migration for operational tables unless the salt/key is identical.
 

@@ -93,7 +93,7 @@ Production deployment guidance (containers, systemd, Docker) is documented in [D
 ### Docker (quick start)
 
 ```bash
-cp .env.example .env       # fill in TOKEN, POSTGRES_PASSWORD, ADMIN_API_SECRET
+cp .env.example .env       # fill in Infisical credentials and non-sensitive config
 docker compose build
 docker compose up -d
 docker compose logs -f app

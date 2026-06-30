@@ -2,8 +2,12 @@
 # - `app` runs the Discord bot (and the in-process admin API on :8080)
 # - `db`  runs PostgreSQL 17 with a named volume for persistence
 #
+# All secrets (TOKEN, DB_PW, API keys, encryption keys) are fetched from
+# Infisical at runtime. .env must only contain non-sensitive configuration
+# and the Infisical machine-identity credentials.
+#
 # Usage:
-#   1. Copy .env.example to .env and fill in TOKEN, DB_PW, etc.
+#   1. Copy .env.example to .env and fill in the Infisical credentials.
 #   2. docker compose build
 #   3. docker compose up -d
 #   4. docker compose logs -f app
@@ -32,23 +36,22 @@ services:
     env_file:
       - .env
     environment:
-      # Override the hardcoded localhost in bot.py so it can reach the `db` service.
+      # Non-sensitive database connection details. The password (DB_PW) is
+      # fetched from Infisical at runtime and must NOT be in .env.
       DB_HOST: db
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${POSTGRES_USER}
       DB_NAME: ${POSTGRES_DB}
-      # DB_PW is intentionally omitted here when Infisical is configured.
-      # The bot will read it from Infisical at startup. Keep it in .env for local runs.
-      DB_PW: ${DB_PW:-${POSTGRES_PASSWORD}}
       ADMIN_API_PORT: 8080
       # Allow the in-container admin API to bind 0.0.0.0 (still behind your network).
       # utils/admin_api.py also accepts the older ADMIN_API_ALLOW_EXTERNAL_BIND alias.
       ADMIN_API_BIND_EXTERNAL: "true"
-      # Infisical configuration (only needed if you are using Infisical secrets).
-      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
-      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
+      # Infisical machine-identity credentials. All secrets are fetched from
+      # Infisical at startup; Infisical is mandatory.
+      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:?INFISICAL_CLIENT_ID must be set}
+      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:?INFISICAL_CLIENT_SECRET must be set}
       INFISICAL_SITE_URL: ${INFISICAL_SITE_URL:-https://us.infisical.com}
-      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:?INFISICAL_PROJECT_ID must be set}
       INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     depends_on:
       db:
