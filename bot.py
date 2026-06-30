@@ -4,6 +4,7 @@ import time
 import discord
 import logging
 import platform
+import asyncio
 import inspect
 import traceback
 import urllib.parse
