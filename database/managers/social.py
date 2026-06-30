@@ -38,10 +38,11 @@ class SocialMixin(BaseManager):
         try:
             async with self.async_sessionmaker() as session:
                 async with session.begin():
+                    # Legacy rows may have NULL in the reputation column.
                     stmt = (
                         update(Reputation)
                         .where(Reputation.discord_id == discord_id)
-                        .values(reputation=Reputation.reputation + amount)
+                        .values(reputation=func.coalesce(Reputation.reputation, 0) + amount)
                     )
                     result = await session.execute(stmt)
 
@@ -174,6 +175,10 @@ class SocialMixin(BaseManager):
                         rep = Reputation(discord_id=discord_id)
                         session.add(rep)
 
+                    # Legacy rows may have NULL in these columns after migrations.
+                    rep.reputation = rep.reputation or 0
+                    rep.rep_earned_today = rep.rep_earned_today or 0
+
                     if rep.last_rep_earned_date != today:
                         rep.rep_earned_today = 0
                         rep.last_rep_earned_date = today
@@ -240,6 +245,9 @@ class SocialMixin(BaseManager):
                         from_rep.last_rep_targets = []
                         from_rep.last_rep_date = today
 
+                    # Legacy rows may have NULL in these columns after migrations.
+                    from_rep.reps_given_today = from_rep.reps_given_today or 0
+
                     if from_rep.reps_given_today >= self.DAILY_REPS_GIVEN_CAP:
                         return {
                             "ok": False,
@@ -260,11 +268,11 @@ class SocialMixin(BaseManager):
                         to_rep = Reputation(discord_id=to_hash)
                         session.add(to_rep)
 
-                    to_rep.reputation += amount
+                    to_rep.reputation = (to_rep.reputation or 0) + amount
                     if amount > 0:
-                        to_rep.good_reps_received += 1
+                        to_rep.good_reps_received = (to_rep.good_reps_received or 0) + 1
                     else:
-                        to_rep.bad_reps_received += 1
+                        to_rep.bad_reps_received = (to_rep.bad_reps_received or 0) + 1
 
                     from_rep.reps_given_today += 1
                     targets = list(from_rep.last_rep_targets or [])
