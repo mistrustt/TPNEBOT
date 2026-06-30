@@ -1121,39 +1121,80 @@ class EconomyMixin(BaseManager):
     async def validate_economy(self):
         """
         Cross-check that:
-        - sum of all wallets & banks == supply.circulating
+        - sum of all wallets & banks & crypto == supply.circulating
         - supply.circulating + supply.treasury == supply.total_supply
         Returns True if all checks out, False otherwise.
         """
-
-        await self.update_supply()
+        # Use a small tolerance for Decimal comparisons; strict equality is
+        # too sensitive to minute rounding differences and concurrent transactions.
+        TOLERANCE = Decimal("0.01")
 
         async with self.async_sessionmaker() as session:
-            result_wallet = await session.execute(select(func.sum(Wallet.balance)))
-            total_wallet = result_wallet.scalar() or Decimal("0.00")
+            async with session.begin():
+                # Refresh supply from within the same transaction as the sums
+                # so we get a consistent snapshot.
+                supply = await session.get(Supply, 1)
+                if not supply:
+                    return False
 
-            result_bank = await session.execute(select(func.sum(Wallet.bank_balance)))
-            total_bank = result_bank.scalar() or Decimal("0.00")
+                if supply.treasury is None:
+                    supply.treasury = Decimal("0.00")
+                if supply.circulating is None:
+                    supply.circulating = Decimal("0.00")
+                if supply.total_supply is None:
+                    supply.total_supply = Decimal("0.00")
 
-            cryptocurrency_total_result = await session.execute(
-                select(func.sum(CryptoAsset.amount * CryptoPrice.price))
-                .join(CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol)
-            )
-            cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal("0.00")
+                result_wallet = await session.execute(select(func.sum(Wallet.balance)))
+                total_wallet = result_wallet.scalar() or Decimal("0.00")
 
-            supply = await session.get(Supply, 1)
-            if not supply:
-                return False
+                result_bank = await session.execute(select(func.sum(Wallet.bank_balance)))
+                total_bank = result_bank.scalar() or Decimal("0.00")
 
-            if (total_wallet + total_bank + cryptocurrency_total) != supply.circulating:
-                logging.error("Circulating mismatch!")
-                return False
+                cryptocurrency_total_result = await session.execute(
+                    select(func.sum(CryptoAsset.amount * CryptoPrice.price))
+                    .join(CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol)
+                )
+                cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal("0.00")
 
-            if supply.circulating + supply.treasury != supply.total_supply:
-                logging.error("Total supply mismatch!")
-                return False
+                actual_circulating = AmountUtils.round_currency(
+                    total_wallet + total_bank + cryptocurrency_total
+                )
+                expected_circulating = supply.circulating
+                circulating_diff = (actual_circulating - expected_circulating).copy_abs()
 
-        return True
+                actual_total = AmountUtils.round_currency(
+                    actual_circulating + supply.treasury
+                )
+                expected_total = supply.total_supply
+                total_diff = (actual_total - expected_total).copy_abs()
+
+                ok = True
+                if circulating_diff > TOLERANCE:
+                    logging.error(
+                        "Circulating mismatch: actual=%s, stored=%s, diff=%s",
+                        actual_circulating,
+                        expected_circulating,
+                        circulating_diff,
+                    )
+                    ok = False
+
+                if total_diff > TOLERANCE:
+                    logging.error(
+                        "Total supply mismatch: actual=%s, stored=%s, diff=%s",
+                        actual_total,
+                        expected_total,
+                        total_diff,
+                    )
+                    ok = False
+
+                # Refresh stored supply values if validation passed and the
+                # snapshot is still consistent. This prevents the background
+                # task from constantly reporting stale supply values.
+                if ok and actual_circulating != expected_circulating:
+                    supply.circulating = actual_circulating
+                    supply.total_supply = actual_total
+
+        return ok
     def _calculate_dynamic_target(self, supply) -> tuple[Decimal, Decimal, Decimal]:
         """
         Calculate the dynamic treasury target and thresholds based on economy maturity.

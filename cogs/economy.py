@@ -1456,13 +1456,19 @@ class Economy(commands.Cog):
     @tasks.loop(minutes=10)
     async def validate_economy_task(self):
         try:
-            await self.bot.database.validate_economy()
+            valid = await self.bot.database.validate_economy()
         except ValueError as e:
             await self.bot.database.initialize_supply_record()
             logger.error(f"ValueError validating economy: {e}")
+            valid = False
         except Exception as e:
             logger.error(f"Error validating economy: {e}")
-        logger.info("Successfully validated the economy.")
+            valid = False
+
+        if valid:
+            logger.info("Successfully validated the economy.")
+        else:
+            logger.warning("Economy validation failed; see earlier error logs for details.")
 
     @validate_economy_task.before_loop
     async def before_validate_economy_task(self):

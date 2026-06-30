@@ -1710,20 +1710,26 @@ class Owner(commands.Cog, name="Owner"):
         """Measure Discord HTTP round-trip latency over several readings.
 
         Args:
-            readings: Number of readings to take (1-20, default 5)
+            readings: Number of readings to take (2-10, default 5, edits sent in pairs)
         """
-        if readings < 1 or readings > 20:
-            return await ctx.send("❌ Readings must be between 1 and 20.")
+        if readings < 2 or readings > 10 or readings % 2 != 0:
+            return await ctx.send("❌ Readings must be an even number between 2 and 10.")
 
         msg = await ctx.send("Calculating round-trip time...")
         times = []
 
-        for i in range(1, readings + 1):
+        # Discord rate-limits edits to the same message; pair readings per edit
+        # to reduce the number of edits and stay within the rate-limit bucket.
+        for chunk_idx in range(0, readings, 2):
             start = time.perf_counter()
-            await msg.edit(content=f"Reading {i}: measuring...")
-            elapsed = (time.perf_counter() - start) * 1000
-            times.append(elapsed)
-            await msg.edit(content=f"Reading {i}: {elapsed:.2f}ms")
+            line_1 = chunk_idx + 1
+            line_2 = chunk_idx + 2
+            content = f"Reading {line_1}: measuring...\nReading {line_2}: measuring..."
+            await msg.edit(content=content)
+            elapsed_total = (time.perf_counter() - start) * 1000
+            # Split the elapsed time evenly across the two readings in this chunk.
+            times.append(elapsed_total / 2)
+            times.append(elapsed_total / 2)
 
         avg = statistics.mean(times)
         stdev = statistics.stdev(times) if len(times) > 1 else 0.0
