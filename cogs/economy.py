@@ -1909,10 +1909,11 @@ class Economy(commands.Cog):
                     if ctx.author.top_role
                     else discord.Color.blurple()
                 )
+            await self.bot.database.add_reputation_score(ctx.author.id, 1)
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 86400
             )
-            
+
             # Build embed with multiplier info
             multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
             embed = discord.Embed(
@@ -1970,10 +1971,11 @@ class Economy(commands.Cog):
                     if ctx.author.top_role
                     else discord.Color.blurple()
                 )
+            await self.bot.database.add_reputation_score(ctx.author.id, 2)
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 604800
             )
-            
+
             # Build embed with multiplier info
             multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
             embed = discord.Embed(
@@ -2026,6 +2028,7 @@ class Economy(commands.Cog):
                     if ctx.author.top_role
                     else discord.Color.blurple()
                 )
+            await self.bot.database.add_reputation_score(ctx.author.id, 5)
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 2592000
             )
@@ -2704,13 +2707,15 @@ class Economy(commands.Cog):
         eligible = [
             (uid, bal)
             for uid, bal in top_users
-            if bal >= Decimal("10000") and resolved_users.get(uid) in guild_member_ids
+            if bal >= Decimal("10000")
+            and resolved_users.get(uid) in guild_member_ids
+            and resolved_users.get(uid) != ctx.author.id
         ]
 
         if not eligible:
             embed = discord.Embed(
-                title="Scout Report",
-                description="No guild members with balance ≥ 10,000 were found.",
+                title="Scout Result",
+                description="No eligible guild members with balance ≥ 10,000 were found.",
                 color=discord.Color.red(),
             )
             return await ctx.reply(embed=embed, delete_after=5)
@@ -2732,7 +2737,7 @@ class Economy(commands.Cog):
             name = f"`{raw_id}`" if raw_id else "Unknown user"
             avatar = None
 
-        embed = discord.Embed(title="Scout Report", color=discord.Color.blurple())
+        embed = discord.Embed(title="Scout Result", color=discord.Color.blurple())
         embed.add_field(name="User", value=name, inline=True)
         embed.add_field(
             name="Balance",
@@ -2907,6 +2912,8 @@ class Economy(commands.Cog):
                     f"{self.currency_name} **{await self.formatter(amount_fined)}**!\n"
                     f"{target.mention} received {self.currency_name} **{await self.formatter(bonus)}** as compensation."
                 )
+                await self.bot.database.add_reputation_score(user_id, -1)
+                await self.bot.database.add_reputation_score(target.id, 1)
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=target_wallet_id,
@@ -3251,6 +3258,7 @@ class Economy(commands.Cog):
             name="Money Drop", icon_url=self.utils.get_avatar_url(ctx.author)
         )
 
+        await self.bot.database.add_reputation_score(ctx.author.id, 1)
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 5
         )
@@ -3314,6 +3322,7 @@ class Economy(commands.Cog):
         view = AirDropView(
             self.bot, amount_converted, self.currency_name, wallet_id, ctx.author
         )
+        await self.bot.database.add_reputation_score(ctx.author.id, 1)
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 15
         )

@@ -562,7 +562,18 @@ class Reputation(Base):
     __tablename__ = "reputation"
 
     discord_id = Column(String(64), primary_key=True)
-    reputation = Column(Integer, default=0, nullable=False)
+    reputation = Column(Integer, default=0, nullable=False, server_default="0")
+
+    # Daily cap on reputation earned from player activity (reactions, games, etc.)
+    rep_earned_today = Column(Integer, default=0, nullable=False, server_default="0")
+    last_rep_earned_date = Column(Date, nullable=True)
+
+    # Peer reputation vote tracking and anti-abuse
+    good_reps_received = Column(Integer, default=0, nullable=False, server_default="0")
+    bad_reps_received = Column(Integer, default=0, nullable=False, server_default="0")
+    reps_given_today = Column(Integer, default=0, nullable=False, server_default="0")
+    last_rep_date = Column(Date, nullable=True)
+    last_rep_targets = Column(JSON, nullable=False, default=list, server_default="[]")
 
 class Sobs(Base):
     __tablename__ = "sobs"

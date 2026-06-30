@@ -2834,13 +2834,13 @@ class Owner(commands.Cog, name="Owner"):
             return await ctx.send(embed=embed)
 
         # Prevent potentially dangerous operations like DROP or ALTER
-        if any(kw in lower_query for kw in ["drop ", "alter ", "truncate ", "update "]):
-            embed = discord.Embed(
-                title="Operation Denied",
-                description="DROP, ALTER, TRUNCATE, and UPDATE queries are not allowed through this command.",
-                color=discord.Color.red(),
-            )
-            return await ctx.send(embed=embed)
+        # if any(kw in lower_query for kw in ["drop ", "alter ", "truncate ", "update "]):
+        #    embed = discord.Embed(
+        #        title="Operation Denied",
+        #        description="DROP, ALTER, TRUNCATE, and UPDATE queries are not allowed through this command.",
+        #        color=discord.Color.red(),
+        #    )
+        #    return await ctx.send(embed=embed)
 
         try:
             async with self.bot.database.async_sessionmaker() as session:

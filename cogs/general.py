@@ -1101,7 +1101,7 @@ class General(commands.Cog, name="General"):
         else:
             hypesquad_house = "None"
 
-        rep = await self.bot.database.get_reputation(member.id)
+        rep_info = await self.bot.database.get_reputation_full(member.id)
         sobs_rx, _ = await self.bot.database.get_reaction_stats(member.id, "sobs")
         skulls_rx, _ = await self.bot.database.get_reaction_stats(member.id, "skulls")
         flames_rx, _ = await self.bot.database.get_reaction_stats(member.id, "flames")
@@ -1140,7 +1140,13 @@ class General(commands.Cog, name="General"):
         )
         embed.add_field(
             name="__Stats__",
-            value=f"**Reputation:** {rep:,}\n**Sobs:** {sobs_rx:,} :sob:\n**Skulls:** {skulls_rx:,} :skull:\n**Flames:** {flames_rx:,} :fire:\n**Hearts:** {hearts_rx:,} :heart:",
+            value=(
+                f"**Reputation/Karma:** {rep_info['reputation']:,} — *{rep_info['title']}*\n"
+                f"**Sobs:** {sobs_rx:,} :sob:\n"
+                f"**Skulls:** {skulls_rx:,} :skull:\n"
+                f"**Flames:** {flames_rx:,} :fire:\n"
+                f"**Hearts:** {hearts_rx:,} :heart:"
+            ),
             inline=False,
         )
         embed.set_author(

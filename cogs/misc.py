@@ -182,6 +182,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
                 await self.bot.database.update_sobs(author_id, sobs_rx_delta=1)
                 await self.bot.database.update_sobs(user_id, sobs_tx_delta=1)
+                await self.bot.database.add_reputation_score(author_id, 3)
 
             elif reaction.emoji == "💀":
                 logging.debug(
@@ -189,6 +190,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
                 await self.bot.database.update_skulls(author_id, skulls_rx_delta=1)
                 await self.bot.database.update_skulls(user_id, skulls_tx_delta=1)
+                await self.bot.database.add_reputation_score(author_id, 1)
 
             elif reaction.emoji == "🔥":
                 logging.debug(
@@ -196,6 +198,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
                 await self.bot.database.update_flames(author_id, flames_rx_delta=1)
                 await self.bot.database.update_flames(user_id, flames_tx_delta=1)
+                await self.bot.database.add_reputation_score(author_id, 1)
 
             elif reaction.emoji == "❤️":
                 logging.debug(
@@ -203,6 +206,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
                 await self.bot.database.update_hearts(author_id, hearts_rx_delta=1)
                 await self.bot.database.update_hearts(user_id, hearts_tx_delta=1)
+                await self.bot.database.add_reputation_score(author_id, 2)
 
             elif reaction.emoji == "🤡":
                 logging.debug(
@@ -210,6 +214,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
                 await self.bot.database.update_clowns(author_id, clowns_rx_delta=1)
                 await self.bot.database.update_clowns(user_id, clowns_tx_delta=1)
+                await self.bot.database.add_reputation_score(author_id, -3)
 
     @commands.group(
         name="sobs",
@@ -730,25 +735,47 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.group(
         name="rep",
-        description="Update a users reputation.",
+        description="View or update a user's reputation score.",
         invoke_without_command=True,
     )
     @commands.guild_only()
     async def reputation(self, ctx: Context, member: discord.Member = None) -> None:
         member = member or ctx.author
-        rep = await self.bot.database.get_reputation(member.id)
+        info = await self.bot.database.get_reputation_full(member.id)
+
         embed = discord.Embed(
             title=f"{member.display_name}'s Reputation",
-            description=f"Score: **{rep:,}**",
             color=discord.Color.blurple(),
         )
         embed.set_author(
             name=member.display_name, icon_url=self.utils.get_avatar_url(member)
         )
+        embed.add_field(
+            name="Score",
+            value=f"**{info['reputation']:,}** — *{info['title']}*",
+            inline=False,
+        )
+        embed.add_field(
+            name="Votes",
+            value=f"+{info['good_reps_received']} good / -{info['bad_reps_received']} bad",
+            inline=False,
+        )
+        embed.add_field(
+            name="Earned Today",
+            value=f"{info['rep_earned_today']:,} / 500",
+            inline=False,
+        )
+
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 900
         )
         await ctx.reply(embed=embed)
+
+    @commands.command(name="karma", description="View a user's reputation score.")
+    @commands.guild_only()
+    async def karma(self, ctx: Context, member: discord.Member = None) -> None:
+        """Alias for !rep. Karma and reputation are the same score."""
+        await self.reputation(ctx, member)
 
     async def change_reputation(
         self, ctx: Context, member: discord.Member, amount: int
@@ -756,15 +783,24 @@ class Misc(commands.Cog, name="Misc"):
         if not member or member == ctx.author:
             await ctx.reply("Please specify a valid user other than yourself.")
             return
+        if member.bot:
+            await ctx.reply("You cannot vote for bots.")
+            return
 
-        new_rep = await self.bot.database.increment_reputation(member.id, amount)
+        result = await self.bot.database.give_rep(ctx.author.id, member.id, amount)
+        if not result.get("ok"):
+            await ctx.reply(f"{result['error']}", delete_after=10)
+            return
 
         action = "good" if amount > 0 else "bad"
         embed = discord.Embed(
             description=f"{ctx.author.mention} gave {abs(amount)} {action} rep to {member.mention}",
             color=discord.Color.blurple(),
         )
-        embed.set_footer(text=f"Current rep: {new_rep:,}")
+        embed.set_footer(
+            text=f"{member.display_name}: {result['reputation']:,} rep • "
+                 f"{result['reps_remaining']} votes left today"
+        )
         await ctx.reply(embed=embed, delete_after=15)
 
     @reputation.command(
@@ -782,7 +818,7 @@ class Misc(commands.Cog, name="Misc"):
     @reputation.command(
         name="leaderboard",
         aliases=["lb"],
-        description="Shows the top 10 users with the most and least reputation.",
+        description="Shows the top 10 users by reputation.",
     )
     async def rep_leaderboard(self, ctx: Context):
         top_users = await self.bot.database.get_top_reputation_users(limit=10)
@@ -905,7 +941,18 @@ class Misc(commands.Cog, name="Misc"):
         self, ctx: Context, member: discord.Member = None, rep: int = 0
     ):
         member = member or ctx.author
-        await self.change_reputation(ctx, member, rep)
+        new_rep = await self.bot.database.increment_reputation(member.id, rep)
+        if rep == 0:
+            action = "no"
+        elif rep > 0:
+            action = "good"
+        else:
+            action = "bad"
+        await ctx.reply(
+            f"{ctx.author.mention} applied {abs(rep)} {action} rep to {member.mention}. "
+            f"Current rep: {new_rep:,}",
+            delete_after=15,
+        )
 
     @commands.group(name="juul", invoke_without_command=True)
     @commands.guild_only()

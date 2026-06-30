@@ -13,6 +13,8 @@ from ..models import (
     ReactionSettings,
 )
 import logging
+from datetime import date
+import discord
 
 logger = logging.getLogger("discord_bot")
 
@@ -85,6 +87,201 @@ class SocialMixin(BaseManager):
                 if rep.discord_id == discord_id:
                     return rank
             return -1
+
+    # ------------------------------------------------------------------
+    # Unified reputation/karma score
+    # ------------------------------------------------------------------
+
+    DAILY_REP_EARNED_CAP = 500
+    DAILY_REPS_GIVEN_CAP = 5
+
+    def _today(self) -> date:
+        return discord.utils.utcnow().date()
+
+    @staticmethod
+    def reputation_title(score: int) -> str:
+        if score >= 10000:
+            return "Legendary"
+        if score >= 5000:
+            return "Paragon"
+        if score >= 2500:
+            return "Saint"
+        if score >= 1000:
+            return "Hero"
+        if score >= 500:
+            return "Guardian"
+        if score >= 250:
+            return "Respected"
+        if score >= 100:
+            return "Helpful"
+        if score >= 50:
+            return "Friendly"
+        if score >= 10:
+            return "Newcomer"
+        if score <= -100:
+            return "Villain"
+        if score <= -50:
+            return "Troublemaker"
+        if score <= -10:
+            return "Unpopular"
+        return "Neutral"
+
+    async def get_reputation_full(self, discord_id: int) -> dict:
+        """Return the unified reputation score and daily counters."""
+        discord_id = self.hash_user_id(discord_id)
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Reputation).filter_by(discord_id=discord_id)
+            )
+            rep = result.scalar_one_or_none()
+            if not rep:
+                return {
+                    "reputation": 0,
+                    "good_reps_received": 0,
+                    "bad_reps_received": 0,
+                    "rep_earned_today": 0,
+                    "title": self.reputation_title(0),
+                }
+            return {
+                "reputation": rep.reputation,
+                "good_reps_received": rep.good_reps_received,
+                "bad_reps_received": rep.bad_reps_received,
+                "rep_earned_today": rep.rep_earned_today,
+                "title": self.reputation_title(rep.reputation),
+            }
+
+    async def add_reputation_score(
+        self, discord_id: int, amount: int, *, cap: int = DAILY_REP_EARNED_CAP
+    ) -> dict:
+        """
+        Add to the unified reputation score, respecting the daily cap on positive
+        activity gains. Negative amounts (e.g., failed robbery) are uncapped.
+        """
+        raw_discord_id = discord_id
+        await self.ensure_user_identity(raw_discord_id)
+        discord_id = self.hash_user_id(raw_discord_id)
+        today = self._today()
+
+        try:
+            async with self.async_sessionmaker() as session:
+                async with session.begin():
+                    result = await session.execute(
+                        select(Reputation).filter_by(discord_id=discord_id)
+                    )
+                    rep = result.scalar_one_or_none()
+
+                    if not rep:
+                        rep = Reputation(discord_id=discord_id)
+                        session.add(rep)
+
+                    if rep.last_rep_earned_date != today:
+                        rep.rep_earned_today = 0
+                        rep.last_rep_earned_date = today
+
+                    applied = amount
+                    if amount > 0:
+                        room = cap - rep.rep_earned_today
+                        if room <= 0:
+                            applied = 0
+                        else:
+                            applied = min(amount, room)
+
+                    rep.reputation += applied
+                    if applied > 0:
+                        rep.rep_earned_today += applied
+
+                    await session.commit()
+
+                    return {
+                        "reputation": rep.reputation,
+                        "rep_earned_today": rep.rep_earned_today,
+                        "applied": applied,
+                        "capped": amount > 0 and applied < amount,
+                    }
+        except SQLAlchemyError as e:
+            logger.error(f"Error adding reputation for {raw_discord_id}: {e}")
+            return {"reputation": 0, "rep_earned_today": 0, "applied": 0, "capped": False}
+
+    async def give_rep(
+        self, from_id: int, to_id: int, amount: int
+    ) -> dict:
+        """
+        Give reputation to another user. Enforces anti-abuse rules:
+        - no self/bot votes
+        - max DAILY_REPS_GIVEN_CAP per day from the giver
+        - one vote per target per 24 hours
+        The receiver's unified reputation score is updated directly.
+        """
+        if from_id == to_id:
+            return {"ok": False, "error": "You cannot vote for yourself."}
+
+        raw_from = from_id
+        raw_to = to_id
+        await self.ensure_user_identity(raw_from)
+        await self.ensure_user_identity(raw_to)
+
+        from_hash = self.hash_user_id(raw_from)
+        to_hash = self.hash_user_id(raw_to)
+        today = self._today()
+
+        try:
+            async with self.async_sessionmaker() as session:
+                async with session.begin():
+                    from_rep = await session.execute(
+                        select(Reputation).filter_by(discord_id=from_hash)
+                    )
+                    from_rep = from_rep.scalar_one_or_none()
+                    if not from_rep:
+                        from_rep = Reputation(discord_id=from_hash)
+                        session.add(from_rep)
+
+                    if from_rep.last_rep_date != today:
+                        from_rep.reps_given_today = 0
+                        from_rep.last_rep_targets = []
+                        from_rep.last_rep_date = today
+
+                    if from_rep.reps_given_today >= self.DAILY_REPS_GIVEN_CAP:
+                        return {
+                            "ok": False,
+                            "error": f"You can only give {self.DAILY_REPS_GIVEN_CAP} rep votes per day.",
+                        }
+
+                    if to_hash in (from_rep.last_rep_targets or []):
+                        return {
+                            "ok": False,
+                            "error": "You have already voted for that user today.",
+                        }
+
+                    to_rep = await session.execute(
+                        select(Reputation).filter_by(discord_id=to_hash)
+                    )
+                    to_rep = to_rep.scalar_one_or_none()
+                    if not to_rep:
+                        to_rep = Reputation(discord_id=to_hash)
+                        session.add(to_rep)
+
+                    to_rep.reputation += amount
+                    if amount > 0:
+                        to_rep.good_reps_received += 1
+                    else:
+                        to_rep.bad_reps_received += 1
+
+                    from_rep.reps_given_today += 1
+                    targets = list(from_rep.last_rep_targets or [])
+                    targets.append(to_hash)
+                    from_rep.last_rep_targets = targets
+
+                    await session.commit()
+
+                    return {
+                        "ok": True,
+                        "reputation": to_rep.reputation,
+                        "reps_remaining": self.DAILY_REPS_GIVEN_CAP - from_rep.reps_given_today,
+                    }
+        except SQLAlchemyError as e:
+            logger.error(f"Error giving rep from {raw_from} to {raw_to}: {e}")
+            return {"ok": False, "error": f"Database error: {e}"}
+
     async def update_sobs(
         self, discord_id: int, sobs_rx_delta: int = 0, sobs_tx_delta: int = 0
     ):

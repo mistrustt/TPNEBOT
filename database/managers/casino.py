@@ -442,7 +442,7 @@ class CasinoMixin(BaseManager):
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
         user_id = self.hash_user_id(user_id)
-        return await self.record_game(
+        result = await self.record_game(
             user_id=raw_user_id,
             game_name=game_name,
             outcome="win",
@@ -452,6 +452,12 @@ class CasinoMixin(BaseManager):
             nonce=nonce,
             hash_hex=hash_hex,
         )
+        # Award a small player-earned karma point for winning (capped by daily karma system).
+        try:
+            await self.add_reputation_score(raw_user_id, 1)
+        except Exception:
+            pass
+        return result
     async def increment_loss(
         self,
         user_id: int,
