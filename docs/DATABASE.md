@@ -46,7 +46,8 @@ Overview of key SQLAlchemy models defined in `database/models.py`.
 - Reputation: Simple integer reputation score.
 - ReactionSettings: Toggle for self reaction allowance.
 - LastFMusers / LastFMvotes: Music integration user profile and voting tallies.
-- UserTimezone / UserLocation: Timezone and coarse geolocation data.
+- UserTimezone: Timezone string.
+- UserLocation: Encrypted coarse location string (no exact latitude/longitude).
 - FavoriteSongs: Stored song titles by user.
 - BoosterRole: Tracks booster role assignment per guild user.
 - Juul: Shared object mini game state (holder, stats).

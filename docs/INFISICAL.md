@@ -20,6 +20,7 @@ TPNEBOT fetches all runtime secrets from [Infisical](https://infisical.com/). `.
    - `DB_PW`
    - `USER_ID_HASH_KEY`
    - `STATS_SALT`
+   - `LOCATION_ENCRYPTION_KEY`
    - `ADMIN_API_SECRET`
    - `OPENROUTER_API_KEY`
    - `API_NINJAS_KEY`

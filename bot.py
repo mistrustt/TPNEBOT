@@ -122,7 +122,7 @@ class DiscordBot(commands.Bot):
             1382196396190470215,  # FLOW (GOATED ASF)
             1282494458339922033,  # jwa
         ]
-        self.version = "20251024a"
+        self.version = "2026.06.30"
         self.admin_api_server = None
         self.admin_api_secret = None
         super().__init__(
@@ -955,6 +955,7 @@ async def main() -> None:
             # Security / hashing
             "USER_ID_HASH_KEY": "USER_ID_HASH_KEY",
             "STATS_SALT": "STATS_SALT",
+            "LOCATION_ENCRYPTION_KEY": "LOCATION_ENCRYPTION_KEY",
             # Admin API
             "ADMIN_API_SECRET": "ADMIN_API_SECRET",
             # Third-party API keys

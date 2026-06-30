@@ -1,9 +1,12 @@
-"""Deterministic one-way hashing for Discord user IDs."""
+"""Deterministic one-way hashing for Discord user IDs and location encryption."""
 
+import base64
 import hashlib
 import hmac
 import logging
 import os
+
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger("discord_bot")
 _warned_missing_key = False
@@ -46,3 +49,41 @@ def hash_user_id(user_id: int) -> str:
 def hash_user_ids(user_ids: list[int]) -> list[str]:
     """Hash a sequence of Discord user IDs."""
     return [hash_user_id(uid) for uid in user_ids]
+
+
+_location_fernet: Fernet | None = None
+
+
+def _get_location_fernet() -> Fernet:
+    """Return a Fernet instance configured from LOCATION_ENCRYPTION_KEY."""
+    key = os.getenv("LOCATION_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError(
+            "LOCATION_ENCRYPTION_KEY is not set. "
+            "Store a Fernet key in Infisical under LOCATION_ENCRYPTION_KEY."
+        )
+    try:
+        return Fernet(key)
+    except ValueError as e:
+        raise RuntimeError(
+            "LOCATION_ENCRYPTION_KEY is not a valid Fernet key. "
+            "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        ) from e
+
+
+def get_location_fernet() -> Fernet:
+    """Return a cached Fernet instance for location encryption."""
+    global _location_fernet
+    if _location_fernet is None:
+        _location_fernet = _get_location_fernet()
+    return _location_fernet
+
+
+def encrypt_location(location: str) -> str:
+    """Encrypt a location string for storage."""
+    return get_location_fernet().encrypt(location.encode("utf-8")).decode("ascii")
+
+
+def decrypt_location(ciphertext: str) -> str:
+    """Decrypt a stored location string."""
+    return get_location_fernet().decrypt(ciphertext.encode("ascii")).decode("utf-8")

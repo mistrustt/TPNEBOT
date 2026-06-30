@@ -92,19 +92,50 @@ class MetricsPaginator(discord.ui.View):
         self.data = data
         self.title = title
         self.author_id = author_id
-        self.format_func = format_func or (lambda x: str(x))
+        self.format_func = format_func or (lambda x, rank=None: str(x))
         self.footer_text = footer_text
         self.color = color
         self.summary = summary or {}
         self.chart_view = chart_view
         self.current_page = 0
         self.per_page = ITEMS_PER_PAGE
+        self._formatted_lines: list[str] = []
+        self._page_boundaries: list[tuple[int, int]] = []
+        self._compute_pages()
+
+    def _compute_pages(self):
+        """Pre-format rows and split them into pages that fit in a Discord embed field."""
+        self._formatted_lines.clear()
+        self._page_boundaries.clear()
+        if not self.data:
+            self._page_boundaries.append((0, 0))
+            return
+
+        for idx, item in enumerate(self.data):
+            line = self.format_func(item, rank=idx + 1)
+            if len(line) > MAX_FIELD_VALUE_LENGTH:
+                line = line[:MAX_FIELD_VALUE_LENGTH - 3] + "..."
+            self._formatted_lines.append(line)
+
+        start = 0
+        current_len = 0
+        for idx, line in enumerate(self._formatted_lines):
+            line_len = len(line) + 1
+            if idx > start and (
+                idx - start >= self.per_page
+                or current_len + line_len > MAX_FIELD_VALUE_LENGTH
+            ):
+                self._page_boundaries.append((start, idx))
+                start = idx
+                current_len = line_len
+            else:
+                current_len += line_len
+
+        self._page_boundaries.append((start, len(self._formatted_lines)))
 
     def get_total_pages(self) -> int:
         """Calculate total number of pages."""
-        if not self.data:
-            return 1
-        return max(1, (len(self.data) - 1) // self.per_page + 1)
+        return max(1, len(self._page_boundaries))
 
     def get_page_embed(self) -> discord.Embed:
         """Generate embed for current page."""
@@ -120,17 +151,9 @@ class MetricsPaginator(discord.ui.View):
                 embed.description = "No data available."
             return embed
 
-        start = self.current_page * self.per_page
-        end = start + self.per_page
-        page_data = self.data[start:end]
+        start, end = self._page_boundaries[self.current_page]
+        body = "\n".join(self._formatted_lines[start:end])
 
-        lines = []
-        rank_offset = start
-        for idx, item in enumerate(page_data, start=1):
-            formatted = self.format_func(item, rank=rank_offset + idx)
-            lines.append(formatted)
-
-        body = "\n".join(lines)
         if embed.description:
             embed.add_field(name="Entries", value=body, inline=False)
         else:

@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     Numeric,
     String,
+    Text,
     ForeignKey,
     TIMESTAMP,
     Enum,
@@ -643,13 +644,7 @@ class UserLocation(Base):
     __tablename__ = "user_locations"
 
     user_id = Column(String(64), primary_key=True)
-    location = Column(String, nullable=True)
-    lat = Column(Numeric(precision=10, scale=6), nullable=True)
-    lon = Column(Numeric(precision=10, scale=6), nullable=True)
-
-    def __repr__(self):
-        return f"<UserLocation(user_id={self.user_id}, location='{self.location}', lat={self.lat}, lon={self.lon})>"
-
+    location_encrypted = Column(Text, nullable=True)
 
 class Block(Base):
     __tablename__ = "blocks"

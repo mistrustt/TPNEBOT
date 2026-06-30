@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy import delete, exists
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List
+from utils.security import encrypt_location, decrypt_location
 from ..models import (
     LastFMusers,
     UserTimezone,
@@ -162,7 +163,8 @@ class UserMixin(BaseManager):
                     delete(UserLocation).where(UserLocation.user_id == user_id)
                 )
 
-                user_location = UserLocation(user_id=user_id, location=location)
+                encrypted = encrypt_location(location) if location is not None else None
+                user_location = UserLocation(user_id=user_id, location_encrypted=encrypted)
                 session.add(user_location)
             await session.commit()
 
@@ -170,10 +172,12 @@ class UserMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
-                select(UserLocation.location).filter_by(user_id=user_id)
+                select(UserLocation.location_encrypted).filter_by(user_id=user_id)
             )
-            location = result.scalar_one_or_none()
-            return location
+            encrypted = result.scalar_one_or_none()
+            if encrypted is None:
+                return None
+            return decrypt_location(encrypted)
 
     async def log_name_change(
         self, user_id: int, old_name: str, new_name: str, change_type: str

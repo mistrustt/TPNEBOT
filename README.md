@@ -54,6 +54,7 @@ Recommended Python 3.11 or newer. Ensure compatibility with pinned dependency ve
 - `DB_PW`: Password for Postgres user postgres (required)
 - `DEVELOPER_CHANNEL_ID`: Channel ID for internal error reporting (required)
 - `USER_ID_HASH_KEY`: HMAC-SHA256 key used to hash Discord user IDs before storing them in the database. Must match the key used when running `migrations/secure_user_ids.sql` (required for hashed storage; falls back to `STATS_SALT`)
+- `LOCATION_ENCRYPTION_KEY`: Fernet key used to encrypt user locations stored in `user_locations`. Must match the key used by the running bot (required; loaded from Infisical)
 
 ## Architecture Overview
 High level module structure:

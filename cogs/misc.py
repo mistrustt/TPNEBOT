@@ -1218,7 +1218,7 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.command(
         name="setlocation",
-        aliases=["setweather", "setloc", "settz"],
+        aliases=["setloc", "settz"],
         help="Set your location for weather commands. (use in DMs for privacy)",
     )
     async def set_location(self, ctx, *, location: str = None):
@@ -1232,16 +1232,21 @@ class Misc(commands.Cog, name="Misc"):
             )
             return await ctx.send(embed=embed)
 
+        timezone_str = None
+
         if "," in location:
-            lat_lon = location.replace(" ", "").split(",")
-            if len(lat_lon) == 2:
-                standardized_location = f"{lat_lon[0]},{lat_lon[1]}"
-            else:
+            try:
+                lat_str, lon_str = [p.strip() for p in location.split(",")]
+                lat = round(float(lat_str), 1)
+                lon = round(float(lon_str), 1)
+            except ValueError:
                 embed = discord.Embed(
                     description="🚫 Invalid coordinates format! Use `latitude,longitude`.",
                     color=discord.Color.red(),
                 )
                 return await ctx.send(embed=embed)
+            standardized_location = f"{lat},{lon}"
+            timezone_str = self.timezone_finder.timezone_at(lng=lon, lat=lat)
 
         elif location.startswith(("iata:", "metar:", "auto:ip", "id:")):
             standardized_location = location
@@ -1254,84 +1259,19 @@ class Misc(commands.Cog, name="Misc"):
                     color=discord.Color.red(),
                 )
                 return await ctx.send(embed=embed)
-            latitude = location_data.latitude
-            longitude = location_data.longitude
-            timezone_str = self.timezone_finder.timezone_at(lng=longitude, lat=latitude)
-            if not location_data:
-                embed = discord.Embed(
-                    description="🚫 Invalid location! Please try again.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.send(embed=embed)
+            lat = round(location_data.latitude, 1)
+            lon = round(location_data.longitude, 1)
+            standardized_location = f"{lat},{lon}"
+            timezone_str = self.timezone_finder.timezone_at(lng=lon, lat=lat)
 
-            if timezone_str in pytz.all_timezones:
-                await self.bot.database.set_user_timezone(ctx.author.id, timezone_str)
-
-            standardized_location = location_data.address
+        if timezone_str and timezone_str in pytz.all_timezones:
+            await self.bot.database.set_user_timezone(ctx.author.id, timezone_str)
 
         await self.bot.database.set_user_location(ctx.author.id, standardized_location)
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 10
         )
         await ctx.reply(f"📍 Your location has been set.")
-
-    @commands.command(
-        name="adminsetloc",
-        help="Set a user's location for weather commands. (use in DMs for privacy)",
-        hidden=True,
-    )
-    @commands.is_owner()
-    async def admin_set_location(self, ctx, user_id: int, *, location: str = None):
-        try:
-            if location is None:
-                await self.bot.database.set_user_location(user_id, None)
-                await self.bot.database.set_user_timezone(user_id, None)
-                embed = discord.Embed(
-                    title="Location Cleared",
-                    description="📍 User's location has been cleared.",
-                    color=discord.Color.blurple(),
-                )
-                return await ctx.send(embed=embed)
-
-            if "," in location:
-                lat_lon = location.replace(" ", "").split(",")
-                if len(lat_lon) == 2:
-                    standardized_location = f"{lat_lon[0]},{lat_lon[1]}"
-                else:
-                    embed = discord.Embed(
-                        description="🚫 Invalid coordinates format! Use `latitude,longitude`.",
-                        color=discord.Color.red(),
-                    )
-                    return await ctx.send(embed=embed)
-
-            elif location.startswith(("iata:", "metar:", "auto:ip", "id:")):
-                standardized_location = location
-
-            else:
-                location_data = self.geolocator.geocode(location, exactly_one=True)
-                latitude = location_data.latitude
-                longitude = location_data.longitude
-                timezone_str = self.timezone_finder.timezone_at(
-                    lng=longitude, lat=latitude
-                )
-                if not location_data:
-                    embed = discord.Embed(
-                        description="🚫 Invalid location! Please try again.",
-                        color=discord.Color.red(),
-                    )
-                    return await ctx.send(embed=embed)
-
-                if timezone_str in pytz.all_timezones:
-                    await self.bot.database.set_user_timezone(user_id, timezone_str)
-
-                standardized_location = location_data.address
-
-            await self.bot.database.set_user_location(user_id, standardized_location)
-
-            await ctx.send(f"📍 User's location has been set.")
-
-        except Exception as e:
-            await ctx.send(f"🚫 Error setting location: `{str(e)}`")
 
     @commands.command(
         name="weather", aliases=["temp", "wind"], help="Check your local weather."

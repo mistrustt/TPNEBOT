@@ -36,6 +36,13 @@ Discord user IDs are stored as deterministic HMAC-SHA256 hex hashes (64 characte
 - Back up `USER_ID_HASH_KEY` securely. If it is lost, stored hashes cannot be resolved back to Discord IDs, which breaks leaderboard display, punishment lookups, and any other feature that needs to show or mention users from stored records.
 - The analytics tables `command_usage_daily` and `daily_user_exposure` continue to use their existing `user_hash` column; do not reuse their migration for operational tables unless the salt/key is identical.
 
+### Location data encryption
+User locations for weather/timezone commands are encrypted at rest with Fernet using `LOCATION_ENCRYPTION_KEY`. The encryption is performed before writing to the `user_locations` table and decrypted only when a weather request is made. Exact latitude/longitude coordinates are no longer stored; the bot stores only coarse coordinates (one decimal degree, ~11 km precision) or WeatherAPI lookup prefixes.
+
+- Run `migrations/encrypt_location_data.sql` once to convert an existing database. This migration clears existing plaintext locations; users must re-run `!setloc`.
+- Store `LOCATION_ENCRYPTION_KEY` in Infisical and load it via the bot's Infisical mapping.
+- Back up `LOCATION_ENCRYPTION_KEY` securely. If it is lost, stored locations cannot be decrypted and users must set them again.
+
 ## Fairness and Cryptography
 - HMAC based RNG should use unpredictable server seeds. Periodically rotate server seed, archiving previous seeds only for post game verification window.
 - Never share private keys created for wallet operations.
