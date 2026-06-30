@@ -2612,99 +2612,6 @@ class Owner(commands.Cog, name="Owner"):
         view = PaginationView(pages, server_details, self.bot)
         await ctx.send(embed=pages[0], view=view)
 
-    @commands.command(
-        name="server", help="Get information about a server by its ID.", hidden=True
-    )
-    @commands.is_owner()
-    async def server_info(self, ctx: Context, guild_id: int):
-        """Get information about a server by its ID."""
-        guild = self.bot.get_guild(guild_id)
-        if not guild:
-            return await ctx.send(f"🚫 Could not find a server with ID `{guild_id}`.")
-
-        member_count = guild.member_count
-        online_members = len(
-            [m for m in guild.members if m.status is not discord.Status.offline]
-        )
-        text_channels = len(guild.text_channels)
-        voice_channels = len(guild.voice_channels)
-        categories = len(guild.categories)
-        roles = len(guild.roles)
-        emojis = len(guild.emojis)
-        boosts = guild.premium_subscription_count
-        boost_level = guild.premium_tier
-        created_at = guild.created_at.strftime("%b %d, %Y")
-
-        embed = discord.Embed(
-            title=f"Server Information: {guild.name}", color=discord.Color.blurple()
-        )
-        if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url)
-        embed.add_field(name="ID", value=guild.id)
-        embed.add_field(name="Owner", value=guild.owner)
-        embed.add_field(
-            name="Members", value=f"{member_count} total\n{online_members} online"
-        )
-        embed.add_field(
-            name="Channels",
-            value=f"{text_channels} text\n{voice_channels} voice\n{categories} categories",
-        )
-        embed.add_field(name="Roles", value=roles)
-        embed.add_field(name="Emojis", value=emojis)
-        embed.add_field(name="Boosts", value=f"{boosts} (Level {boost_level})")
-        embed.add_field(name="Created", value=created_at)
-        await ctx.send(embed=embed)
-
-    @commands.command(
-        name="eval", help="Evaluate python code through the bot.", hidden=True
-    )
-    @commands.is_owner()
-    async def _eval(self, ctx: Context, *, body: str):
-        """Evaluates a code"""
-
-        env = {
-            "bot": self.bot,
-            "ctx": ctx,
-            "channel": ctx.channel,
-            "author": ctx.author,
-            "guild": ctx.guild,
-            "message": ctx.message,
-            "_": self._last_result,
-        }
-
-        env.update(globals())
-
-        body = self.cleanup_code(body)
-        stdout = io.StringIO()
-
-        to_compile = f'async def func():\n{textwrap.indent(body, "  ")}'
-
-        try:
-            exec(to_compile, env)
-        except Exception as e:
-            return await ctx.send(f"```py\n{e.__class__.__name__}: {e}\n```")
-
-        func = env["func"]
-        try:
-            with redirect_stdout(stdout):
-                ret = await func()
-        except Exception as e:
-            value = stdout.getvalue()
-            await ctx.send(f"```py\n{value}{traceback.format_exc()}\n```")
-        else:
-            value = stdout.getvalue()
-            try:
-                await ctx.message.add_reaction("\u2705")
-            except:
-                pass
-
-            if ret is None:
-                if value:
-                    await ctx.send(f"```py\n{value}\n```")
-            else:
-                self._last_result = ret
-                await ctx.send(f"```py\n{value}{ret}\n```")
-
     @commands.command(name="sudo", help="Run a command as another user", hidden=True)
     @commands.is_owner()
     async def sudo(
@@ -2776,7 +2683,7 @@ class Owner(commands.Cog, name="Owner"):
             return await ctx.send(
                 "Please provide a positive integer for the number of times."
             )
-        MAX_REPETITIONS = 50  # Set a safe upper limit to prevent abuse
+        MAX_REPETITIONS = 5  # Set a safe upper limit to prevent abuse
         if times > MAX_REPETITIONS:
             return await ctx.send(
                 f"Too many repetitions requested (max allowed is {MAX_REPETITIONS})."
@@ -2811,93 +2718,9 @@ class Owner(commands.Cog, name="Owner"):
 
         await ctx.send("Finished executing the command.")
 
-    @commands.command(name="shutdown", help="Make the bot shutdown.", hidden=True)
-    @commands.is_owner()
-    async def shutdown(self, ctx: Context) -> None:
-        # Only allow shutdown commands in a server
-        if isinstance(ctx.channel, discord.DMChannel):
-            return await ctx.send("This command can only be used in a server.")
-
-        # Confirmation view with timeout and proper disabling of buttons
-        class ConfirmView(discord.ui.View):
-            def __init__(self, timeout: float = 30):
-                super().__init__(timeout=timeout)
-                self.value = None
-
-            @discord.ui.button(label="Yes", style=discord.ButtonStyle.danger)
-            async def yes_button(
-                self, interaction: discord.Interaction, button: discord.ui.Button
-            ):
-                self.value = True
-                for child in self.children:
-                    child.disabled = True
-                embed = discord.Embed(
-                    description=f"{ctx.author.mention}, shutting down! ✅",
-                    color=ctx.author.top_role.color
-                    if ctx.author.top_role
-                    else discord.Color.blurple(),
-                )
-                await interaction.response.edit_message(
-                    embed=embed, view=self
-                )
-                self.stop()
-
-            @discord.ui.button(label="No", style=discord.ButtonStyle.secondary)
-            async def no_button(
-                self, interaction: discord.Interaction, button: discord.ui.Button
-            ):
-                self.value = False
-                for child in self.children:
-                    child.disabled = True
-                embed = discord.Embed(
-                    description=f"{ctx.author.mention}, shutdown cancelled! ❌",
-                    color=ctx.author.top_role.color
-                    if ctx.author.top_role
-                    else discord.Color.blurple(),
-                )
-                await interaction.response.edit_message(
-                    embed=embed, view=self
-                )
-                self.stop()
-
-            async def on_timeout(self):
-                # If the view times out, disable all buttons and send a message.
-                for child in self.children:
-                    child.disabled = True
-                if self.value is None:
-                    try:
-                        await ctx.send(
-                            "No response received in time. Shutdown cancelled."
-                        )
-                    except Exception:
-                        pass
-
-        view = ConfirmView(timeout=30)
-        embed = discord.Embed(
-            description=f"{ctx.author.mention}, are you sure you want to shut down? ℹ️",
-            color=ctx.author.top_role.color
-            if ctx.author.top_role
-            else discord.Color.blurple(),
-        )
-
-        # Send the embed with the confirmation buttons.
-        await ctx.send(embed=embed, view=view)
-        await view.wait()  # Wait until the view stops (button press or timeout)
-
-        if view.value is None:
-            # on_timeout already informed the user; nothing more to do.
-            return
-        elif view.value:
-            # Confirmation received to shutdown.
-            await asyncio.sleep(1)
-            await self.bot.close()
-        else:
-            return
-
     @commands.command(
-        name="resetcooldowns",
+        name="rscd",
         help="Resets all cooldowns for a specified user or all users if 'all' is specified",
-        aliases=["rscd"],
         hidden=True,
     )
     @commands.is_owner()

@@ -21,7 +21,6 @@ See `requirements.txt` for exact pinned versions. Major libraries:
 - python-dotenv: Environment variable loading
 - aiosqlite (used optionally if configured elsewhere) but primary target is Postgres
 - cryptography, hmac, hashlib: Secure operations (wallet keys, fairness)
-- jishaku: Developer diagnostics and live debugging
 - google generative libraries (optional advanced features)
 - numpy, pillow, geopy, h3, timezonefinder: Assorted utility features
 
@@ -80,7 +79,7 @@ Further schema explanations are in [DATABASE.md](https://github.com/mistrustt/TP
 Fairness uses HMAC SHA256 with server seed, client seed, and nonce to produce unbiased draws. Verification helpers in `utils/fairness.py` allow external reproduction and auditing of game outcomes. See [FAIRNESS.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/FAIRNESS.md) for reproducibility procedures.
 
 ## Development
-Enable developer diagnostics by loading the `jishaku` extension (auto loaded). Use logging output in `discord.log` for historical analysis. Rotating file handler restricts size.
+Use logging output in `discord.log` for historical analysis. Rotating file handler restricts size.
 
 ## Extending
 Add new cogs by creating a file in `cogs/` and loading via config (BotConfig table) or default auto load. Each cog should define a `setup` function returning an extension.

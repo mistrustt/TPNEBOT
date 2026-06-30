@@ -138,7 +138,6 @@ class DiscordBot(commands.Bot):
         return await self.database.get_prefix(message.guild.id) or "!"
 
     async def load_cogs(self) -> None:
-        await self.load_extension("jishaku")
         cogs_path = Path(__file__).parent / "cogs"
         config = await self.config
         loaded_cogs = config.loaded_cogs if config else []
