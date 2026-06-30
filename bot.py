@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils
 from utils.admin_api import AdminAPIServer
+from utils.infisical import InfisicalSecretsManager
 from database.manager import DatabaseManager
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -932,8 +933,34 @@ class DiscordBot(commands.Bot):
         finally:
             await super().close()
 
+
+async def main() -> None:
+    """Load secrets from Infisical (if configured) and start the bot."""
     load_dotenv()
 
+    infisical = InfisicalSecretsManager.from_env()
+    if infisical.is_configured:
+        logger.info("Infisical is configured; fetching secrets from Infisical")
+        await infisical.authenticate()
+        await infisical.load_secrets_into_environ(
+            {
+                "TOKEN": "TOKEN",
+                "DB_PW": "DB_PW",
+                "USER_ID_HASH_KEY": "USER_ID_HASH_KEY",
+                "STATS_SALT": "STATS_SALT",
+                "ADMIN_API_SECRET": "ADMIN_API_SECRET",
+            }
+        )
+        asyncio.create_task(infisical.refresh_loop())
+    else:
+        logger.info(
+            "Infisical is not configured (INFISICAL_CLIENT_ID/SECRET missing); "
+            "using secrets from environment/.env directly"
+        )
 
-bot = DiscordBot()
-bot.run(os.getenv("TOKEN"))
+    bot = DiscordBot()
+    await bot.start(os.environ.get("TOKEN", os.getenv("TOKEN")))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

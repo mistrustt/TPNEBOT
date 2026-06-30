@@ -37,11 +37,19 @@ services:
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${POSTGRES_USER}
       DB_NAME: ${POSTGRES_DB}
-      DB_PW: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # DB_PW is intentionally omitted here when Infisical is configured.
+      # The bot will read it from Infisical at startup. Keep it in .env for local runs.
+      DB_PW: ${DB_PW:-${POSTGRES_PASSWORD}}
       ADMIN_API_PORT: 8080
       # Allow the in-container admin API to bind 0.0.0.0 (still behind your network).
       # utils/admin_api.py also accepts the older ADMIN_API_ALLOW_EXTERNAL_BIND alias.
       ADMIN_API_BIND_EXTERNAL: "true"
+      # Infisical configuration (only needed if you are using Infisical secrets).
+      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_SITE_URL: ${INFISICAL_SITE_URL:-https://us.infisical.com}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     depends_on:
       db:
         condition: service_healthy
