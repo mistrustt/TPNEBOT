@@ -1,5 +1,5 @@
 # Docker Compose for TPNEBOT
-# - `app` runs the Discord bot (and the in-process admin API on :8080)
+# - `app` runs the Discord bot
 # - `db`  runs PostgreSQL 17 with a named volume for persistence
 #
 # All secrets (TOKEN, DB_PW, API keys, encryption keys) are fetched from
@@ -42,10 +42,6 @@ services:
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${POSTGRES_USER}
       DB_NAME: ${POSTGRES_DB}
-      ADMIN_API_PORT: 8080
-      # Allow the in-container admin API to bind 0.0.0.0 (still behind your network).
-      # utils/admin_api.py also accepts the older ADMIN_API_ALLOW_EXTERNAL_BIND alias.
-      ADMIN_API_BIND_EXTERNAL: "true"
       # Infisical machine-identity credentials. All secrets are fetched from
       # Infisical at startup; Infisical is mandatory.
       INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:?INFISICAL_CLIENT_ID must be set}
@@ -56,9 +52,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      # Expose the admin API (aiohttp) on the host. Override with ADMIN_API_PORT in .env.
-      - "${ADMIN_API_PORT:-8080}:8080"
+    # No host ports are exposed; the bot connects outbound to Discord only.
     volumes:
       - appdata:/app/data
     # Run as the unprivileged `tpnebot` user defined in the Dockerfile

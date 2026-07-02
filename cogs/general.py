@@ -293,7 +293,7 @@ class General(commands.Cog, name="General"):
         self.utils = MiscUtils(self)
         self.start_time = discord.utils.utcnow()
         self.session = aiohttp.ClientSession()
-        self.hidden_cogs: List[str] = ["Owner", "Media"]
+        self.hidden_cogs: List[str] = ["Owner"]
         self.per_page = 1
         self.snipes = {}
         self.edit_snipes = {}
@@ -422,6 +422,12 @@ class General(commands.Cog, name="General"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        """
+        Remove AFK status on any message and notify when an AFK user is mentioned.
+        This listener intentionally does NOT read message.content; it only needs
+        the on_message event and message.mentions, so it does not rely on the
+        Message Content privileged intent.
+        """
         if message.author.bot:
             return
         user_id = message.author.id
@@ -1398,7 +1404,7 @@ class General(commands.Cog, name="General"):
 
     @commands.command(
         name="8ball",
-        description="Ask the magic 8-ball a question and get a cryptic answer.",
+        description="Ask the magic 8-ball a question and get a cryptic answer. Your question is sent to OpenRouter AI.",
     )
     async def eight_ball(self, ctx: commands.Context, *, question: str) -> None:
         # Disallow questions longer than 100 characters (admins bypass)
@@ -1492,6 +1498,7 @@ class General(commands.Cog, name="General"):
             embed.set_author(
                 name="8Ball Answer:", icon_url=self.utils.get_avatar_url(ctx.author)
             )
+            embed.set_footer(text="Powered by OpenRouter AI")
             await self.bot.database.set_cooldown(
                 ctx.author.id, ctx.command.qualified_name, 15
             )
@@ -1499,7 +1506,7 @@ class General(commands.Cog, name="General"):
             logger.debug("8ball response sent")
 
     @commands.command(
-        name="ai", description="Ask the AI a question and get a response."
+        name="ai", description="Ask the AI a question and get a response. Your question is sent to OpenRouter AI."
     )
     async def ai(self, ctx: commands.Context, *, question: str):
         """Ask the AI a question and get a response."""
@@ -1586,18 +1593,25 @@ class General(commands.Cog, name="General"):
                     return
 
         # choose reply color
-        # if isinstance(ctx.channel, discord.DMChannel):
-        #    color = discord.Color.blurple()
-        # else:
-        #    color = ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+        if isinstance(ctx.channel, discord.DMChannel):
+            color = discord.Color.blurple()
+        else:
+            color = (
+                ctx.author.top_role.color
+                if ctx.author.top_role
+                else discord.Color.blurple()
+            )
 
-        # embed = discord.Embed(description=answer, color=color)
-        # embed.set_author(name="AI Response:", icon_url=self.utils.get_avatar_url(ctx.author))
+        embed = discord.Embed(description=answer, color=color)
+        embed.set_author(
+            name="AI Response:", icon_url=self.utils.get_avatar_url(ctx.author)
+        )
+        embed.set_footer(text="Powered by OpenRouter AI")
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 15
         )
         allowed = discord.AllowedMentions(everyone=False, users=False, roles=False)
-        await ctx.reply(answer, allowed_mentions=allowed)
+        await ctx.reply(embed=embed, allowed_mentions=allowed)
 
     @commands.command(name="emojisteal", description="Steal a custom server emoji")
     async def steal(self, ctx: commands.Context, emoji: str):
@@ -2934,32 +2948,62 @@ class General(commands.Cog, name="General"):
 
     @commands.command(name="forgetme")
     async def forget_me(self, ctx):
-        """Forget the user's data after confirmation with a 4-digit PIN."""
+        """
+        Delete all personal/economy/game/social data for the invoking user.
+        Requires confirming a PIN sent via DM. Server moderation records are
+        retained for community safety and cannot be self-deleted.
+        """
 
         user_id = ctx.author.id
         pin = f"{random.randint(1000, 9999)}"
+
         confirm_embed = discord.Embed(
-            title="Are you sure?",
-            description=f"Type the following 4-digit PIN to confirm data deletion:\n\n`{pin}`\n\nThis will delete **all** your data stored by the bot.",
+            title="🗑️ Data Deletion Request",
+            description=(
+                "You have requested to delete all data stored by TPNEBOT.\n\n"
+                "**This will delete:** your profile, economy balance, inventory, "
+                "games history, favorite songs, timezone/location, reaction counts, "
+                "role/name history, and any active cooldowns or effects.\n\n"
+                "**This will NOT delete:** server moderation records such as bans, "
+                "warnings, case notes, jail history, and audit logs. These are kept "
+                "for community safety and anti-abuse purposes.\n\n"
+                f"Type the following 4-digit PIN to confirm:\n\n`{pin}`\n\n"
+                "You have 60 seconds."
+            ),
             color=discord.Color.orange(),
         )
-        await ctx.author.send(embed=confirm_embed)
+
+        try:
+            dm_channel = await ctx.author.create_dm()
+            await dm_channel.send(embed=confirm_embed)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            logger.warning(f"Could not DM {ctx.author.id} for forgetme: {e}")
+            await ctx.reply(
+                "I couldn't send you a DM. Please enable DMs and try again.",
+                delete_after=10,
+            )
+            return
+
         await ctx.reply(
-            "I have sent you a confirmation message. Please check your DMs."
+            "I have sent you a confirmation message. Please check your DMs.",
+            delete_after=10,
         )
 
         def check(m):
-            return m.author.id == user_id and m.channel == ctx.channel
+            return m.author.id == user_id and isinstance(m.channel, discord.DMChannel)
 
         try:
-            msg = await self.bot.wait_for("message", timeout=30.0, check=check)
+            msg = await self.bot.wait_for("message", timeout=60.0, check=check)
         except asyncio.TimeoutError:
             timeout_embed = discord.Embed(
                 title="Timed Out",
                 description="Confirmation timed out. Your data was **not** deleted.",
                 color=discord.Color.red(),
             )
-            await ctx.reply(embed=timeout_embed)
+            try:
+                await dm_channel.send(embed=timeout_embed)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
             return
 
         if msg.content.strip() != pin:
@@ -2968,40 +3012,79 @@ class General(commands.Cog, name="General"):
                 description="The PIN you entered was incorrect. Your data was **not** deleted.",
                 color=discord.Color.red(),
             )
-            await ctx.reply(embed=fail_embed)
+            await dm_channel.send(embed=fail_embed)
             return
 
-        member_wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        bank_balance = Decimal(
-            str(await self.bot.database.get_bank_balance(member_wallet_id))
-        )
-        wallet_balance = Decimal(
-            str(await self.bot.database.get_wallet_balance(member_wallet_id))
-        )
+        # Remove any in-memory AFK state before wiping the database.
+        self.afk_users.pop(user_id, None)
 
-        if bank_balance >= 0:
-            await self.bot.database.withdraw_from_bank(
-                member_wallet_id,
-                bank_balance,
-                f"Admin Audit - Reset by {ctx.author.name}",
+        # Zero out economy balances so supply/circulating figures stay consistent
+        # after the wallet row is deleted.
+        try:
+            member_wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        except Exception:
+            member_wallet_id = None
+
+        if member_wallet_id is not None:
+            try:
+                bank_balance = Decimal(
+                    str(await self.bot.database.get_bank_balance(member_wallet_id))
+                )
+                if bank_balance > 0:
+                    await self.bot.database.withdraw_from_bank(
+                        member_wallet_id,
+                        bank_balance,
+                        "Data deletion - bank balance returned to wallet",
+                    )
+            except Exception as e:
+                logger.warning(f"forgetme bank reset failed for {user_id}: {e}")
+
+            try:
+                wallet_balance = Decimal(
+                    str(await self.bot.database.get_wallet_balance(member_wallet_id))
+                )
+                if wallet_balance > 0:
+                    await self.bot.database.process_treasury_transaction(
+                        member_wallet_id,
+                        -wallet_balance,
+                        "Data deletion - wallet balance returned to treasury",
+                    )
+            except Exception as e:
+                logger.warning(f"forgetme wallet reset failed for {user_id}: {e}")
+
+        try:
+            await self.bot.database.delete_all_data_for_user(user_id)
+        except Exception as e:
+            logger.exception(f"delete_all_data_for_user failed for {user_id}: {e}")
+            error_embed = discord.Embed(
+                title="Error",
+                description="Something went wrong while deleting your data. Please contact a developer.",
+                color=discord.Color.red(),
             )
+            await dm_channel.send(embed=error_embed)
+            return
 
-        if wallet_balance >= 0:
-            await self.bot.database.process_treasury_transaction(
-                member_wallet_id,
-                -wallet_balance,
-                f"Admin Audit - Reset by {ctx.author.name}",
-            )
+        try:
+            await self.bot.database.validate_economy()
+        except Exception as e:
+            logger.warning(f"forgetme validate_economy failed for {user_id}: {e}")
 
-        await self.bot.database.validate_economy()
+        logger.info(f"User {user_id} ({ctx.author.name}) used forgetme; data deleted.")
 
-        await self.bot.database.delete_all_data_for_user(user_id)
-        embed = discord.Embed(
+        success_embed = discord.Embed(
             title="Data Forgotten",
-            description="Your data has been successfully forgotten.",
+            description=(
+                "Your personal, economy, game, and social data has been deleted.\n\n"
+                "Server moderation records (bans, warnings, cases, jail history, audit logs) "
+                "have been retained for community safety."
+            ),
             color=discord.Color.green(),
         )
-        await ctx.reply(embed=embed)
+        await dm_channel.send(embed=success_embed)
+        await ctx.reply(
+            "Your data has been successfully deleted. Check your DMs for confirmation.",
+            delete_after=10,
+        )
 
 
 async def setup(bot) -> None:

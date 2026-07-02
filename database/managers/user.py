@@ -1,7 +1,7 @@
 from .base import BaseManager
 
 from sqlalchemy.future import select
-from sqlalchemy import delete, exists
+from sqlalchemy import delete, exists, update, func
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List
 from utils.security import encrypt_location, decrypt_location
@@ -21,12 +21,37 @@ from ..models import (
     Flames,
     Hearts,
     Sobs,
+    Clowns,
     HeardleGameStats,
     UserRoleHistory,
     Task,
     TempVoiceChannel,
     UserNameHistory,
     UserAlt,
+    CommandCooldown,
+    ImageMuteSetting,
+    CommandUsageDaily,
+    CommandLatencyDaily,
+    CommandErrorDaily,
+    DailyUserExposure,
+    ActiveEffect,
+    ItemCooldown,
+    TradeLog,
+    Bounty,
+    Loan,
+    LoanPayment,
+    Job,
+    UserVIP,
+    RakebackBalance,
+    RakebackTransaction,
+    GameHistory,
+    GameSession,
+    GameSessionEvent,
+    UserEconomicPreferences,
+    ForceRole,
+    CryptoAsset,
+    Juul,
+    TransferHistory,
 )
 from datetime import timezone
 import discord
@@ -408,60 +433,191 @@ class UserMixin(BaseManager):
         return linked
 
     async def delete_all_data_for_user(self, user_id: int):
-        """Deletes all data in the database for a specific user."""
-        user_id = self.hash_user_id(user_id)
+        """
+        Delete all personal, economy, game, and social data for a user.
+
+        Moderation records (Punishment, CaseNote, WatchdogLog, JailedUser,
+        Blacklist, SuspiciousActivityLog) are intentionally retained for
+        community safety and anti-abuse purposes. The UserIdentity mapping
+        row is also retained so those moderation records remain resolvable.
+        """
+        user_hash = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
+                # Social / profile data
                 await session.execute(
-                    delete(Reputation).where(Reputation.discord_id == user_id)
+                    delete(Reputation).where(Reputation.discord_id == user_hash)
                 )
                 await session.execute(
-                    delete(UserLocation).where(UserLocation.user_id == user_id)
+                    delete(UserLocation).where(UserLocation.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(HeardleGameStats).where(HeardleGameStats.user_id == user_id)
-                )
-                await session.execute(delete(Task).where(Task.user_id == user_id))
-                await session.execute(delete(Item).where(Item.user_id == user_id))
-                await session.execute(
-                    delete(LastFMusers).where(LastFMusers.discord_id == user_id)
+                    delete(UserTimezone).where(UserTimezone.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(LastFMvotes).where(LastFMvotes.discord_id == user_id)
-                )
-                await session.execute(delete(Sobs).where(Sobs.discord_id == user_id))
-                await session.execute(
-                    delete(Skulls).where(Skulls.discord_id == user_id)
+                    delete(LastFMusers).where(LastFMusers.discord_id == user_hash)
                 )
                 await session.execute(
-                    delete(Flames).where(Flames.discord_id == user_id)
+                    delete(LastFMvotes).where(LastFMvotes.discord_id == user_hash)
                 )
                 await session.execute(
-                    delete(Hearts).where(Hearts.discord_id == user_id)
+                    delete(FavoriteSongs).where(FavoriteSongs.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(FavoriteSongs).where(FavoriteSongs.user_id == user_id)
+                    delete(UserNameHistory).where(UserNameHistory.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(UserRoleHistory).where(UserRoleHistory.user_id == user_id)
+                    delete(UserRoleHistory).where(UserRoleHistory.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(UserNameHistory).where(UserNameHistory.user_id == user_id)
+                    delete(BoosterRole).where(BoosterRole.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(BoosterRole).where(BoosterRole.user_id == user_id)
+                    delete(ForceRole).where(ForceRole.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(UserTimezone).where(UserTimezone.user_id == user_id)
+                    delete(ImageMuteSetting).where(ImageMuteSetting.user_id == user_hash)
+                )
+
+                # Reaction counters
+                await session.execute(delete(Sobs).where(Sobs.discord_id == user_hash))
+                await session.execute(delete(Skulls).where(Skulls.discord_id == user_hash))
+                await session.execute(delete(Flames).where(Flames.discord_id == user_hash))
+                await session.execute(delete(Hearts).where(Hearts.discord_id == user_hash))
+                await session.execute(
+                    delete(Clowns).where(Clowns.discord_id == user_hash)
+                )
+
+                # Economy / inventory
+                await session.execute(
+                    delete(CryptoAsset).where(CryptoAsset.user_id == user_hash)
+                )
+                await session.execute(delete(Item).where(Item.user_id == user_hash))
+                await session.execute(
+                    delete(ItemCooldown).where(ItemCooldown.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(TempVoiceChannel).where(TempVoiceChannel.owner_id == user_id)
-                )
-                await session.execute(delete(Wallet).where(Wallet.user_id == user_id))
-                await session.execute(
-                    delete(Transaction).where(Transaction.from_user_id == user_id)
+                    delete(ActiveEffect).where(ActiveEffect.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(Transaction).where(Transaction.to_user_id == user_id)
+                    delete(Wallet).where(Wallet.user_id == user_hash)
                 )
-                await session.commit()
+                await session.execute(delete(Job).where(Job.user_id == user_hash))
+                await session.execute(
+                    delete(UserVIP).where(UserVIP.user_id == user_hash)
+                )
+                await session.execute(
+                    delete(RakebackBalance).where(RakebackBalance.user_id == user_hash)
+                )
+                await session.execute(
+                    delete(RakebackTransaction).where(
+                        RakebackTransaction.user_id == user_hash
+                    )
+                )
+                await session.execute(
+                    delete(UserEconomicPreferences).where(
+                        UserEconomicPreferences.user_id == user_hash
+                    )
+                )
+
+                # Financial transaction records (Option A: delete records where the
+                # user is a party; these are shared records but the user requested
+                # complete removal).
+                await session.execute(
+                    delete(Transaction).where(Transaction.from_user_id == user_hash)
+                )
+                await session.execute(
+                    delete(Transaction).where(Transaction.to_user_id == user_hash)
+                )
+                await session.execute(
+                    delete(TransferHistory).where(TransferHistory.sender_id == user_hash)
+                )
+                await session.execute(
+                    delete(TransferHistory).where(
+                        TransferHistory.receiver_id == user_hash
+                    )
+                )
+                await session.execute(
+                    delete(TradeLog).where(TradeLog.from_user_id == user_hash)
+                )
+                await session.execute(
+                    delete(TradeLog).where(TradeLog.to_user_id == user_hash)
+                )
+                await session.execute(
+                    delete(Bounty).where(Bounty.target_id == user_hash)
+                )
+                await session.execute(
+                    delete(Bounty).where(Bounty.issuer_id == user_hash)
+                )
+                await session.execute(
+                    delete(Bounty).where(Bounty.claimer_id == user_hash)
+                )
+                await session.execute(delete(Loan).where(Loan.user_id == user_hash))
+                await session.execute(
+                    delete(LoanPayment).where(LoanPayment.user_id == user_hash)
+                )
+
+                # Games
+                await session.execute(
+                    delete(HeardleGameStats).where(HeardleGameStats.user_id == user_hash)
+                )
+                await session.execute(
+                    delete(GameHistory).where(GameHistory.user_id == user_hash)
+                )
+                # Remove sessions the user owns; for sessions they only participate
+                # in, remove their hash from the participants array.
+                await session.execute(
+                    delete(GameSession).where(GameSession.owner_id == user_hash)
+                )
+                await session.execute(
+                    update(GameSession)
+                    .where(GameSession.owner_id != user_hash)
+                    .where(GameSession.participants.any(user_hash))
+                    .values(participants=func.array_remove(GameSession.participants, user_hash))
+                )
+
+                # Tasks / cooldowns / utility state
+                await session.execute(delete(Task).where(Task.user_id == user_hash))
+                await session.execute(
+                    delete(CommandCooldown).where(CommandCooldown.user_id == user_hash)
+                )
+                await session.execute(
+                    delete(TempVoiceChannel).where(TempVoiceChannel.owner_id == user_hash)
+                )
+
+                # Alt relationships
+                await session.execute(
+                    delete(UserAlt).where(UserAlt.main_user_id == user_hash)
+                )
+                await session.execute(
+                    delete(UserAlt).where(UserAlt.alt_user_id == user_hash)
+                )
+
+                # Aggregated analytics
+                await session.execute(
+                    delete(CommandUsageDaily).where(
+                        CommandUsageDaily.user_hash == user_hash
+                    )
+                )
+                await session.execute(
+                    delete(CommandLatencyDaily).where(
+                        CommandLatencyDaily.user_hash == user_hash
+                    )
+                )
+                await session.execute(
+                    delete(CommandErrorDaily).where(
+                        CommandErrorDaily.user_hash == user_hash
+                    )
+                )
+                await session.execute(
+                    delete(DailyUserExposure).where(
+                        DailyUserExposure.user_hash == user_hash
+                    )
+                )
+
+                # Guild-scoped fun objects the user currently holds
+                await session.execute(
+                    update(Juul)
+                    .where(Juul.holder_id == user_hash)
+                    .values(holder_id=None)
+                )

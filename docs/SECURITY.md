@@ -67,6 +67,12 @@ User locations for weather/timezone commands are encrypted at rest with Fernet u
 3. Patch vulnerability and deploy.
 4. Publish sanitized post mortem.
 
+### Breach notification
+If we become aware of unauthorized access to API data, Discord user data, or bot credentials, we will:
+- Notify Discord through the appropriate developer support channels as required by the Discord Developer Terms of Service.
+- Notify affected server owners and users to the extent we can identify them and as required by applicable law.
+- Document the incident and remediation steps in a private incident log, and publish a sanitized public summary when appropriate.
+
 ## Safe Contribution Guidelines
 - Validate input, especially user provided arguments in commands.
 - Avoid executing arbitrary code (disable eval like features unless restricted to owners).

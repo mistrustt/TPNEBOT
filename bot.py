@@ -15,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils
-from utils.admin_api import AdminAPIServer
 from utils.infisical import InfisicalSecretsManager
 from database.manager import DatabaseManager
 from sqlalchemy import text
@@ -123,11 +122,23 @@ class DiscordBot(commands.Bot):
             1282494458339922033,  # jwa
         ]
         self.version = "2026.06.30"
-        self.admin_api_server = None
-        self.admin_api_secret = None
+        # Discord privileged intents we require and why:
+        # - message_content: spam-channel enforcement, automated moderation
+        #   (PII/card/token detection), message delete/edit logging, attachment
+        #   filtering, and interactive wait-for command prompts.
+        # - members: server statistics, member lookup by name, role management,
+        #   on_member_join handling (autorole/jail reapply), and voice-channel
+        #   ownership tracking.
+        # - presences: online/idle/dnd/offline breakdown in server stats and
+        #   Spotify activity lookup for music features.
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.presences = True
+        intents.message_content = True
+
         super().__init__(
             command_prefix=commands.when_mentioned_or(self.get_prefix),
-            intents=discord.Intents.all(),
+            intents=intents,
             help_command=None,
             case_insensitive=True,
             allowed_mentions=discord.AllowedMentions(everyone=False),
@@ -270,22 +281,6 @@ class DiscordBot(commands.Bot):
             self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
             self.logger.info(f"Bot is ready. Awaiting gateway connection...")
-
-            # Start Admin API server if configured via environment variables
-            try:
-                host = os.getenv("ADMIN_API_HOST", "127.0.0.1")
-                port = int(os.getenv("ADMIN_API_PORT", "8080"))
-                secret = os.getenv("ADMIN_API_SECRET")
-                if not secret:
-                    self.logger.warning("ADMIN_API_SECRET not set; Admin API will not be started.")
-                else:
-                    api_server = AdminAPIServer(self, host=host, port=port, secret=secret)
-                    await api_server.start()
-                    self.admin_api_server = api_server
-                    self.admin_api_secret = secret
-                    self.logger.info(f"Admin API running on port {port}")
-            except Exception as e:
-                self.logger.error(f"Failed to start Admin API: {e}")
 
         except Exception as e:
             self.logger.error(f"An error occurred during setup: {e}")
@@ -922,16 +917,7 @@ class DiscordBot(commands.Bot):
             return
 
     async def close(self) -> None:
-        # Stop admin API server if running, then close the bot
-        try:
-            if getattr(self, "admin_api_server", None):
-                try:
-                    await self.admin_api_server.stop()
-                    self.logger.info("Admin API stopped cleanly.")
-                except Exception as e:
-                    self.logger.error(f"Error stopping Admin API: {e}")
-        finally:
-            await super().close()
+        await super().close()
 
 
 async def main() -> None:
@@ -956,8 +942,6 @@ async def main() -> None:
             "USER_ID_HASH_KEY": "USER_ID_HASH_KEY",
             "STATS_SALT": "STATS_SALT",
             "LOCATION_ENCRYPTION_KEY": "LOCATION_ENCRYPTION_KEY",
-            # Admin API
-            "ADMIN_API_SECRET": "ADMIN_API_SECRET",
             # Third-party API keys
             "OPENROUTER_API_KEY": "OPENROUTER_API_KEY",
             "API_NINJAS_KEY": "API_NINJAS_KEY",

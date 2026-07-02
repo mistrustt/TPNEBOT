@@ -1,6 +1,6 @@
 # Infisical Secrets Management
 
-TPNEBOT fetches all runtime secrets from [Infisical](https://infisical.com/). `.env` is used only for non-sensitive configuration (database host/port/name, Admin API host/port, developer channel ID) and for the Infisical machine-identity credentials.
+TPNEBOT fetches all runtime secrets from [Infisical](https://infisical.com/). `.env` is used only for non-sensitive configuration (database host/port/name, developer channel ID) and for the Infisical machine-identity credentials.
 
 ## How it works
 
@@ -21,7 +21,6 @@ TPNEBOT fetches all runtime secrets from [Infisical](https://infisical.com/). `.
    - `USER_ID_HASH_KEY`
    - `STATS_SALT`
    - `LOCATION_ENCRYPTION_KEY`
-   - `ADMIN_API_SECRET`
    - `OPENROUTER_API_KEY`
    - `API_NINJAS_KEY`
    - `COINMARKETCAP_API_KEY`
@@ -45,9 +44,6 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
 DB_NAME=postgres
-ADMIN_API_HOST=127.0.0.1
-ADMIN_API_PORT=8080
-ADMIN_API_BIND_EXTERNAL=0
 ```
 
 6. Run `docker compose up -d`.

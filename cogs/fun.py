@@ -1,7 +1,6 @@
 import asyncio
 from enum import member
 import os
-import base64
 import random
 from datetime import timedelta
 import aiohttp
@@ -23,59 +22,10 @@ class Fun(commands.Cog, name="Fun"):
         self.bot = bot
         self.utils = MiscUtils(self)
         self.ban_roulette_history = {}
-        self.nickname_list = [
-            "FeelsBrettMan",
-            "WorkedWinner",
-            "FrivolingMango_7374788",
-            "Envy is a Chud",
-            "KeeNola",
-            "TortaPounder43",
-            "ChudMaster28",
-            "LabubuLover25",
-            "imNateHiggers",
-            "Proud Indian 🇮🇳",
-            "Proud Jew ✡️",
-            "Proud Homosexual 🏳️‍🌈",
-            "lncr",
-            "Daniel Goon",
-            "Albo",
-            "gummy",
-            "d4vd",
-            "P Diddy",
-            "Charlie Kirk",
-            "Cuck",
-            "Noob Tube Nigga",
-            "We almost level 10 daddy",
-            "That one chud",
-            "Chiev",
-            "NigarGod69",
-            "Bill Putemtosleep Cosby",
-            "temp237",
-            "Eli Butthole",
-            "Chaos 🤓🤓",
-            "JustinSlave",
-            "Nah leak the vault googly 😭😭",
-            "Vices is a real song bro",
-            "Nah trust me bro",
-            # if you have something funny then add it pls,
-            # fk you envy NEVER ADD TO THE FUKN LIST AGAIN PUNK
-        ]
 
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message): 
-        try:
-            msg = message.content.split(' ')
-            prefix = base64.b64decode(msg[0]).decode("utf-8")
-            msg.pop(0)
-            new_msg = f'{prefix} ' + ' '.join(msg)
-            message.content = new_msg
-            await self.bot.process_commands(message)
-        except Exception:
-            return
 
     @commands.command(
         name="randomfact", aliases=["rfact"], description="Get a random fact."
@@ -118,17 +68,16 @@ class Fun(commands.Cog, name="Fun"):
                             color=color,
                             timestamp=discord.utils.utcnow(),
                         )
-                        embed.set_footer(text="Source: API Ninjas")
                     else:
                         embed = discord.Embed(
                             title="Oops!",
-                            description="Couldn't parse a fact from API Ninjas.",
+                            description="Couldn't parse a fact from the API.",
                             color=discord.Color.red(),
                         )
                 else:
                     embed = discord.Embed(
                         title="Error!",
-                        description="There was a problem contacting the Facts API. Please try again later.",
+                        description="There was a problem contacting the API. Please try again later.",
                         color=discord.Color.red(),
                     )
                     embed.set_image(url=f"https://http.cat/{request.status}")
@@ -370,38 +319,6 @@ class Fun(commands.Cog, name="Fun"):
                 )
                 await ctx.reply(embed=embed)
 
-    @commands.command(name="age", help="Find out your true age.")
-    async def age(self, ctx: Context, member: discord.Member = None):
-        member = member or ctx.author
-
-        max_range = -1
-        min_range = 13  # Lets not get niggas banned
-
-        rand_percent = random.randint(1, 100)
-        if rand_percent < 70:
-            max_range = 30
-        elif rand_percent < 90:
-            max_range = 49
-        else:
-            max_range = 99
-        age = random.randint(min_range, max_range)
-
-        note = ""
-        if age < 18:
-            note = "You young as hell twin 👶"
-        elif age > 30 and age < 50:
-            note = "Damn you old as hell. Shoutout eli and problem 💪💪"
-        else:
-            note = "Duke dennis 🧓"
-
-        final_messagge = f"You are {age} years old. {note}".strip()
-        embed = discord.Embed(description=final_messagge)
-        embed.set_author(
-            name=f"{member.display_name}'s Age",
-            icon_url=self.utils.get_avatar_url(member),
-        )
-        await ctx.reply(embed=embed)
-
     @commands.command(
         name="penis", aliases=["dih"], help="Find out how large your penis is."
     )
@@ -416,25 +333,6 @@ class Fun(commands.Cog, name="Fun"):
         embed = discord.Embed(description=f"{penis}")
         embed.set_author(
             name=f"{member.display_name}'s Penis Size",
-            icon_url=self.utils.get_avatar_url(member),
-        )
-        await ctx.reply(embed=embed)
-
-    @commands.command(
-        name="boobs", aliases=["tits"], help="Find out how large your tits are."
-    )
-    async def boobs(self, ctx: Context, member: discord.Member = None):
-        member = member or ctx.author
-
-        size = random.randint(50, 72)
-
-        color = discord.Color.blurple()
-        if not isinstance(ctx.channel, discord.DMChannel) and ctx.author.top_role:
-            color = ctx.author.top_role.color
-
-        embed = discord.Embed(description=f"{size}", color=color)
-        embed.set_author(
-            name=f"{member.display_name}'s Boob Size",
             icon_url=self.utils.get_avatar_url(member),
         )
         await ctx.reply(embed=embed)
@@ -714,153 +612,6 @@ class Fun(commands.Cog, name="Fun"):
             )
 
         await ctx.send(embed=embed)
-
-    @commands.command(aliases=["rnick"], help="Gives a random nickname to a user")
-    @commands.has_guild_permissions(manage_nicknames=True)
-    async def randomnick(self, ctx: Context, member: discord.Member = None):
-        if member is None:
-            member = ctx.author
-
-        chosen_nickname = random.choice(self.nickname_list)
-
-        await member.edit(nick=chosen_nickname, reason="Random Nickname Command")
-        await Embeds.send_success_embed(
-            ctx,
-            ctx.author,
-            f"{member.mention}'s nickname has been changed to `{chosen_nickname}`!",
-        )
-
-    @commands.command(
-        name="nickroulette", aliases=["nr"], help="Play a game of nickname roulette"
-    )
-    @commands.has_guild_permissions(manage_nicknames=True)
-    async def nicknameroulette(self, ctx: Context):
-        """Play a game of nickname roulette. Players react to join the game and one player is randomly selected to get a forced nickname."""
-        embed = discord.Embed(
-            title="Nickname Roulette",
-            description="React with 🏷️ to join the game! You have 15 seconds.",
-            color=discord.Color.blurple(),
-        )
-        message = await ctx.reply(embed=embed)
-        await message.add_reaction("🏷️")
-
-        await asyncio.sleep(15)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 15
-        )
-
-        message = await ctx.fetch_message(message.id)
-        users = set()
-        for reaction in message.reactions:
-            if str(reaction.emoji) == "🏷️":
-                async for user in reaction.users():
-                    if not user.bot:
-                        users.add(user)
-
-        if len(users) < 2:
-            embed = discord.Embed(
-                title="Nickname Roulette",
-                description="Not enough players joined the game. Need at least 2 players.",
-                color=discord.Color.red(),
-            )
-            await message.edit(embed=embed)
-            return
-
-        nickname_user = random.choice(list(users))
-
-        victim = await ctx.guild.fetch_member(nickname_user.id)
-        if not victim:
-            embed = discord.Embed(
-                title="Nickname Roulette",
-                description="Could not find the selected user in the guild.",
-                color=discord.Color.red(),
-            )
-            await message.edit(embed=embed)
-            return
-
-        nickname_duration = random.randint(300, 3600)  # 5 minutes to 1 hour
-
-        if not hasattr(self.bot, "recent_nicknames"):
-            self.bot.recent_nicknames = []
-
-        available_nicknames = [
-            nick for nick in self.nickname_list if nick not in self.bot.recent_nicknames
-        ]
-
-        if not available_nicknames:
-            self.bot.recent_nicknames = []
-            available_nicknames = self.nickname_list
-
-        chosen_nickname = random.choice(available_nicknames)
-
-        self.bot.recent_nicknames.append(chosen_nickname)
-        if len(self.bot.recent_nicknames) > 5:
-            self.bot.recent_nicknames.pop(0)
-
-        try:
-            original_nickname = victim.display_name
-            await victim.edit(nick=chosen_nickname, reason="Lost Nickname Roulette")
-
-            if not hasattr(self.bot, "nickname_force"):
-                self.bot.nickname_force = {}
-
-            end_time = discord.utils.utcnow() + timedelta(seconds=nickname_duration)
-            self.bot.nickname_force[victim.id] = {
-                "nickname": chosen_nickname,
-                "original_nickname": original_nickname,
-                "end_time": end_time,
-                "guild_id": ctx.guild.id,
-            }
-
-            embed = discord.Embed(
-                title="Nickname Roulette",
-                description=f"{victim.mention} has been given the nickname '{chosen_nickname}' for {nickname_duration // 60} minutes and {nickname_duration % 60} seconds! ⏰",
-                color=discord.Color.orange(),
-            )
-        except discord.Forbidden:
-            embed = discord.Embed(
-                title="Nickname Roulette",
-                description=f"{victim.mention} would have gotten a nickname, but I don't have permission! ⏰",
-                color=discord.Color.red(),
-            )
-        except Exception as e:
-            embed = discord.Embed(
-                title="Nickname Roulette",
-                description=f"Failed to change nickname for {victim.mention}: {str(e)}",
-                color=discord.Color.red(),
-            )
-
-        await ctx.send(embed=embed)
-
-    @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """Monitor nickname changes and forcenicks from Nick Roulette."""
-        if not hasattr(self.bot, "nickname_force"):
-            return
-
-        if after.id not in self.bot.nickname_force:
-            return
-
-        force_info = self.bot.nickname_force[after.id]
-
-        if discord.utils.utcnow() > force_info["end_time"]:
-            try:
-                await after.edit(
-                    nick=force_info.get("original_nickname"),
-                    reason="Nick Roulette expired",
-                )
-            except (discord.Forbidden, discord.HTTPException):
-                pass
-            del self.bot.nickname_force[after.id]
-            return
-
-        if before.nick != after.nick and after.nick != force_info["nickname"]:
-            try:
-                await after.edit(
-                    nick=force_info["nickname"], reason="Forcenicked from Nick Roulette"
-                )
-            except discord.Forbidden:
-                del self.bot.nickname_force[after.id]     
 
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))

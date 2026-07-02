@@ -14,6 +14,50 @@ TPNEBOT is a modular Discord bot featuring an economy, casino style games with p
 - Role and booster management, command role restrictions, lockdown handling
 - Developer quality of life (dynamic cog loading, debug mode, structured logging)
 
+## Required Discord Privileged Intents
+
+TPNEBOT requires the following Discord privileged intents. Each is enabled only because the bot's stated functionality genuinely requires it and no reasonable alternative exists.
+
+### Message Content
+Used for:
+- **Spam-channel enforcement** (`community` cog): deletes any message in a designated channel that is not exactly `"999"`.
+- **Automated moderation** (`watchdog` cog): detects and deletes PII, credit-card numbers, and Discord tokens; logs the event to a server-configured channel.
+- **Message logging** (`watchdog` and `general` cogs): records deleted/edited message content to server-configured mod-log channels.
+- **Attachment filtering** (`moderation` cog): removes disallowed audio attachments.
+- **Interactive prompts** (`music`, `owner`, `roles` cogs): reads user reply content for trivia, setup, and selection flows.
+- **Channel cleanup** (`moderation` cog): identifies bot/command messages during `purge`.
+
+The bot **does not** use message content to train AI/ML models, sell or share data, scrape users, profile users, or make decisions about employment, housing, insurance, etc.
+
+### Server Members
+Used for:
+- **Server statistics**: human/bot/online member counts in `membercount` and `serverinfo`.
+- **Member resolution**: lookup by name/nickname/ID/mention in moderation, role, and owner commands.
+- **Role management**: listing role members, assigning/removing roles.
+- **Rejoin handling**: `on_member_join` re-applies jail roles and autoroles.
+- **Minimum-member gate**: leaves servers with fewer than 10 human members on `on_guild_join`.
+- **Voice channels**: temporary-channel ownership based on current VC members.
+- **Name-change tracking**: logs username/nickname changes when configured.
+
+### Presence
+Used for:
+- **Server statistics**: online/idle/dnd/offline breakdown in `membercount` and `serverinfo`.
+- **Spotify lookup** (`music` cog): finds a user's active Spotify listening activity.
+
+## Data Deletion / Right to be Forgotten
+
+Users can delete their personal data at any time by running `!forgetme`. The bot will send a confirmation PIN via DM; once confirmed, it removes:
+
+- Profile and social data (reputation, reaction counters, LastFM link, favorite songs, timezone/location, name/role history).
+- Economy data (wallet, bank, inventory, crypto, jobs, loans, trade/bounty history, rakeback, VIP status).
+- Game data (game history, active effects/cooldowns, game session participation, heardle stats).
+- Utility state (AFK status, command cooldowns, alt relationships, temporary voice channels).
+
+The following are **retained** for community safety and anti-abuse purposes:
+
+- Server moderation records: punishments, case notes, watchdog audit logs, jail history, blacklists, and suspicious-activity logs.
+- The `user_identities` mapping row is also kept so retained moderation records remain resolvable by server staff.
+
 ## Requirements
 See `requirements.txt` for exact pinned versions. Major libraries:
 - discord.py: Core Discord API library
@@ -102,13 +146,13 @@ docker compose logs -f app
 
 `docker-compose.yml` brings up the bot and a PostgreSQL 16 service with a named volume
 (`tpnebot_pgdata`). The `app` service waits for the database to become healthy before
-starting. The in-process admin API (aiohttp) is exposed on `127.0.0.1:8080` by default.
-Set `ADMIN_API_ALLOW_EXTERNAL_BIND=1` in `.env` to make the admin API bind to `0.0.0.0`
-inside the container. The bot itself never opens a host port — it connects outbound to
-Discord.
+starting. The bot connects outbound to Discord only and does not expose any host ports.
 
 ## Security
 Operational database tables store Discord user IDs as deterministic HMAC-SHA256 hashes rather than raw values. A single `user_identities` mapping table records `user_hash -> user_id` so the bot can resolve hashes back to raw IDs when required by Discord API calls. Run `migrations/secure_user_ids.sql` to migrate an existing database, and keep `USER_ID_HASH_KEY` secret and backed up — losing it prevents resolving stored hashes. See [SECURITY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/SECURITY.md).
+
+## Privacy
+TPNEBOT collects and processes Discord data only as needed to operate its features. Discord user IDs are hashed before storage, locations are encrypted at rest, and a `!forgetme` command lets users delete their personal/economy/game/social data. Server moderation records are retained for community safety. TPNEBOT is a non-commercial project and does not sell, monetize, or use data for AI/ML training. See the full [PRIVACY.md](https://github.com/mistrustt/TPNEBOT/blob/main/docs/PRIVACY.md).
 
 ## Disclaimer
 This documentation was generated automatically based on the current repository structure.

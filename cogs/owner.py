@@ -18,7 +18,6 @@ import time
 import statistics
 import psutil
 from utils.misc import MiscUtils
-from utils.admin_api import AdminAPIServer
 from utils.metrics_charts import MetricsChartView
 from utils.fairness import (
     SUPERGAMBLE_WIN_THRESHOLD, SUPERGAMBLE_BASE_MULTIPLIER,
@@ -1435,59 +1434,6 @@ class Owner(commands.Cog, name="Owner"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
-
-    @commands.command(name="startapi", hidden=True)
-    @commands.is_owner()
-    async def start_api(self, ctx: Context, host: str = "127.0.0.1", port: int = 8080, secret: str = None):
-        """Start a lightweight admin API server (owner only).
-
-        The server exposes a small JSON status endpoint and a shutdown endpoint
-        protected by an admin secret. If `secret` is not provided one will be
-        generated and DM'd to the command invoker.
-        """
-        if getattr(self.bot, "admin_api_server", None):
-            return await ctx.send("⚠️ Admin API already running.")
-
-        # generate secret if not provided
-        secret = secret or uuid.uuid4().hex
-
-        server = AdminAPIServer(self.bot, host=host, port=port, secret=secret)
-
-        try:
-            await server.start()
-        except Exception as e:
-            return await ctx.send(f"❌ Failed to start Admin API: {e}")
-
-        # store reference on bot so it can be stopped later
-        self.bot.admin_api_server = server
-        self.bot.admin_api_secret = secret
-
-        try:
-            await ctx.author.send(f"Admin API started at http://{host}:{port}\nSecret: {secret}\nUse header X-Admin-Secret to authenticate.")
-            await ctx.send(f"✅ Admin API started on {host}:{port} (secret sent to your DMs)")
-        except Exception:
-            await ctx.send(f"✅ Admin API started on {host}:{port} (could not send DM with secret)")
-
-    @commands.command(name="stopapi", hidden=True)
-    @commands.is_owner()
-    async def stop_api(self, ctx: Context):
-        """Stop the admin API server if it's running."""
-        server = getattr(self.bot, "admin_api_server", None)
-        if not server:
-            return await ctx.send("⚠️ Admin API is not running.")
-
-        try:
-            await server.stop()
-        except Exception as e:
-            return await ctx.send(f"❌ Failed to stop Admin API: {e}")
-
-        try:
-            delattr(self.bot, "admin_api_server")
-            delattr(self.bot, "admin_api_secret")
-        except Exception:
-            pass
-
-        await ctx.send("✅ Admin API stopped.")
 
     @commands.group(
         name="todo", aliases=["task"], invoke_without_command=True, hidden=True
