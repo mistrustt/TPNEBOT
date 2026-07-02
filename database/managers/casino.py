@@ -428,6 +428,75 @@ class CasinoMixin(BaseManager):
                     session, user_id
                 )
                 return revealed_seed, new_hash
+
+    async def bump_fairgate_nonce(self, user_id: int) -> int:
+        """Return the current wallet nonce and increment it for the next draw.
+
+        FairGate caller-supplied nonces reuse the wallet nonce column so the
+        bot does not need a second counter. We delegate to ``bump_and_get``
+        and discard the local server seed it creates.
+        """
+        _server_seed, _client_seed, nonce_before = await self.bump_and_get(user_id)
+        return nonce_before
+
+    async def record_fairgate_game(
+        self,
+        user_id: int,
+        game_name: str,
+        outcome: str,
+        bet,
+        client_seed: str,
+        nonce: int,
+        hash_hex: str,
+    ) -> None:
+        """Insert a FairGate-resolved game history entry.
+
+        The raw server seed is not known until FairGate rotates/reveals it, so
+        ``used_server_seed`` is left NULL and must be back-filled later via
+        ``backfill_fairgate_seed``.
+        """
+        await self.ensure_user_identity(user_id)
+        user_id = self.hash_user_id(user_id)
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                session.add(
+                    GameHistory(
+                        user_id=user_id,
+                        game_name=game_name,
+                        outcome=outcome,
+                        wagered=bet,
+                        client_seed=client_seed,
+                        used_server_seed=None,
+                        nonce=nonce,
+                        hash=hash_hex,
+                        provider="fairgate",
+                    )
+                )
+                # Retain the small karma reward for wins.
+                if outcome == "win":
+                    try:
+                        await self.add_reputation_score(user_id, 1)
+                    except Exception:
+                        pass
+
+    async def backfill_fairgate_seed(
+        self, hash_hex: str, revealed_seed: str
+    ) -> int:
+        """Back-fill the revealed server seed for FairGate rows matching ``hash_hex``.
+
+        Returns the number of rows updated.
+        """
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(GameHistory)
+                    .where(GameHistory.provider == "fairgate")
+                    .where(GameHistory.hash == hash_hex)
+                    .where(GameHistory.used_server_seed.is_(None))
+                    .values(used_server_seed=revealed_seed)
+                )
+                return result.rowcount
+
     async def increment_win(
         self,
         user_id: int,

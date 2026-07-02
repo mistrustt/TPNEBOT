@@ -1,5 +1,6 @@
 import re
 import json
+import os
 import discord
 import logging
 import asyncio
@@ -33,6 +34,7 @@ from utils.fairness import (
     CRASH_RANGES,
     evaluate_slots,
 )
+from utils.fairgate import FairGateClient, FairGateError
 from textwrap import shorten
 
 logger = logging.getLogger("discord_bot")
@@ -531,6 +533,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         currency_name: str,
         session_id=None,
         num_bombs: int = 5,
+        provider: str = "local",
     ):
         super().__init__(timeout=600)
         self.bomb_positions = bomb_positions
@@ -538,6 +541,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.bet_amount = bet_amount
         self.bot = bot
         self.PF = PF
+        self.provider = provider
         self.session_id = session_id
         self.num_bombs = num_bombs
         self.formatted_bet = formatted_bet
@@ -573,6 +577,37 @@ class MinesGridLayout(discord.ui.LayoutView):
                 button = action_row.children[col_idx]
                 pos = row_idx * 5 + col_idx
                 self.grid_buttons.append(button)
+
+    async def _record_mines_outcome(self, outcome: str):
+        """Persist the game result using the active provider."""
+        try:
+            if self.provider == "fairgate":
+                await self.bot.database.record_fairgate_game(
+                    self.user_id,
+                    "mines",
+                    outcome,
+                    self.bet_amount,
+                    client_seed=self.PF["client_seed"],
+                    nonce=self.PF["nonce"],
+                    hash_hex=self.PF["server_seed_hash"],
+                )
+            else:
+                recorder = (
+                    self.bot.database.increment_win
+                    if outcome == "win"
+                    else self.bot.database.increment_loss
+                )
+                await recorder(
+                    self.user_id,
+                    "mines",
+                    self.bet_amount,
+                    client_seed=self.PF["client_seed"],
+                    seed_used=self.PF["server_seed"],
+                    nonce=self.PF["nonce"],
+                    hash_hex=self.PF["server_seed_hash"],
+                )
+        except Exception as e:
+            logger.error(f"Failed to record mines {outcome}: {e}")
 
     @property
     def _channel_id(self) -> int | None:
@@ -642,18 +677,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         final_grid = self._create_final_grid()
 
         # Record loss
-        try:
-            await self.bot.database.increment_loss(
-                self.user_id,
-                "mines",
-                self.bet_amount,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
-            )
-        except Exception as e:
-            logger.error(f"Failed to record mines loss: {e}")
+        await self._record_mines_outcome("loss")
 
         # Process game result for rakeback
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
@@ -721,18 +745,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
 
         # Record win
-        try:
-            await self.bot.database.increment_win(
-                self.user_id,
-                "mines",
-                self.bet_amount,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
-            )
-        except Exception as e:
-            logger.error(f"Failed to record mines win: {e}")
+        await self._record_mines_outcome("win")
 
         # Process game result for rakeback
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
@@ -926,18 +939,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
 
         # Record win
-        try:
-            await self.bot.database.increment_win(
-                self.user_id,
-                "mines",
-                self.bet_amount,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
-            )
-        except Exception as e:
-            logger.error(f"Failed to record mines win: {e}")
+        await self._record_mines_outcome("win")
 
         # Process game result for rakeback only if user actually played
         if self.gems_clicked > 0:
@@ -3366,10 +3368,132 @@ class Casino(commands.Cog):
         ]
         self.fair = ProvenFairness()
 
+        # FairGate integration (optional, game-by-game).
+        self.fairgate_enabled_games = self._load_fairgate_enabled_games()
+        self.fairgate_client: FairGateClient | None = None
+        self._fairgate_backfill_task: asyncio.Task | None = None
+        self._last_backfilled_hash: str | None = None
+        try:
+            self.fairgate_client = FairGateClient.from_env()
+            logger.info(
+                f"FairGate middleware initialized; enabled games: "
+                f"{', '.join(sorted(self.fairgate_enabled_games)) if self.fairgate_enabled_games else '(none)'}"
+            )
+            # Only backfill seeds when a game is actually using FairGate.
+            if self.fairgate_enabled_games and self.fairgate_client.api_key:
+                self._fairgate_backfill_task = asyncio.create_task(
+                    self._fairgate_backfill_loop()
+                )
+        except FairGateError as e:
+            logger.warning(f"FairGate middleware is configured but init failed: {e}")
+            self.fairgate_enabled_games = set()
+
         # SLOTS constants imported from fairness.py
         self.SLOTS_SYMBOLS = SLOTS_SYMBOLS
         self.SLOTS_PAYLINES = SLOTS_PAYLINES
         self.SLOTS_REEL_WEIGHTS = SLOTS_REEL_WEIGHTS
+
+    def cog_unload(self) -> None:
+        if self._fairgate_backfill_task:
+            self._fairgate_backfill_task.cancel()
+        if self.fairgate_client:
+            asyncio.create_task(self.fairgate_client.close())
+
+    @staticmethod
+    def _load_fairgate_enabled_games() -> set[str]:
+        """Read the comma-separated FAIRGATE_ENABLED_GAMES env var."""
+        raw = os.getenv("FAIRGATE_ENABLED_GAMES", "").strip()
+        if not raw:
+            return set()
+        return {g.strip().lower() for g in raw.split(",") if g.strip()}
+
+    def is_fairgate_enabled(self, game_name: str) -> bool:
+        if not self.fairgate_client:
+            return False
+        return (
+            game_name.lower() in self.fairgate_enabled_games
+            and self.fairgate_client.api_key is not None
+        )
+
+    async def _fairgate_backfill_loop(self) -> None:
+        """Poll FairGate for revealed seeds and back-fill pending game rows."""
+        if not self.fairgate_client:
+            return
+        # Stagger the first poll to avoid hammering the API on cog load.
+        await asyncio.sleep(30)
+        while True:
+            try:
+                await self._fairgate_poll_and_backfill()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"FairGate backfill poll failed: {e}")
+            await asyncio.sleep(300)
+
+    async def _fairgate_poll_and_backfill(self) -> None:
+        """Fetch the current seed status and back-fill any revealed seed pair."""
+        seed = await self.fairgate_client.get_seed(force=True)
+        revealed_seed = (
+            seed.get("previous_server_seed")
+            or seed.get("revealed_server_seed")
+            or seed.get("server_seed")
+        )
+        revealed_hash = (
+            seed.get("previous_server_seed_hash")
+            or seed.get("revealed_server_seed_hash")
+            or seed.get("server_seed_hash")
+        )
+        if not revealed_seed or not revealed_hash:
+            return
+        if revealed_hash == self._last_backfilled_hash:
+            return
+        updated = await self.bot.database.backfill_fairgate_seed(
+            revealed_hash, revealed_seed
+        )
+        if updated:
+            logger.info(
+                f"Back-filled {updated} FairGate game rows for seed "
+                f"{revealed_hash[:12]}..."
+            )
+            self._last_backfilled_hash = revealed_hash
+
+    async def start_fairgate_proof(self, user_id: int) -> dict:
+        """Capture a FairGate proof bundle for a single game.
+
+        Returns ``server_seed_hash`` from the active app seed, plus the user's
+        ``client_seed`` and the next unused nonce.
+        """
+        client_seed, _nonce = await self.bot.database.get_client_seed(user_id)
+        nonce = await self.bot.database.bump_fairgate_nonce(user_id)
+        seed = await self.fairgate_client.get_seed()
+        return {
+            "server_seed_hash": seed["server_seed_hash"],
+            "server_seed": None,
+            "client_seed": client_seed,
+            "nonce": nonce,
+        }
+
+    async def fairgate_play_mines(
+        self,
+        user_id: int,
+        client_seed: str,
+        nonce: int,
+        server_seed_hash: str | None = None,
+        *,
+        rows: int = 5,
+        cols: int = 5,
+        mines: int = 3,
+    ) -> list[int]:
+        """Resolve a mines board through FairGate."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="mines",
+            params={"rows": rows, "cols": cols, "mines": mines},
+            client_seed=client_seed,
+            nonce=nonce,
+            server_seed_hash=server_seed_hash,
+        )
+        return result["outcome"]["bombs"]
 
     @staticmethod
     def _is_hash(value) -> bool:
@@ -4151,6 +4275,14 @@ class Casino(commands.Cog):
 
         server_seed = record.used_server_seed
         client_seed = record.client_seed
+        provider = getattr(record, "provider", "local")
+
+        # FairGate-backed games are verified remotely once the seed is revealed.
+        if provider == "fairgate":
+            return await self._verify_fairgate_game(
+                ctx, record, member, game_key, nonce, extra_args
+            )
+
         server_hash_short = hashlib.sha256(server_seed.encode()).hexdigest()[:12] + "…"
 
         pf = self.fair
@@ -4390,6 +4522,111 @@ class Casino(commands.Cog):
                 color=discord.Color.red(),
             )
             return await ctx.reply(embed=embed, mention_author=False)
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    async def _verify_fairgate_game(
+        self,
+        ctx: commands.Context,
+        record: Any,
+        member: discord.Member | discord.User,
+        game_key: str,
+        nonce: int,
+        extra_args: list[str],
+    ):
+        """Verify a FairGate-backed game outcome against the remote verify endpoint."""
+        server_seed = record.used_server_seed
+        client_seed = record.client_seed
+        server_seed_hash = record.hash
+
+        embed = discord.Embed(
+            title=f"🔒 FairGate Verified — {game_key.title()}",
+            color=discord.Color.blurple(),
+        )
+        try:
+            embed.set_thumbnail(url=member.display_avatar.url)
+        except (AttributeError, discord.HTTPException):
+            pass
+
+        if not server_seed:
+            embed.description = (
+                f"User: {member.display_name}\n"
+                f"Nonce: `{nonce}` • Client Seed: `{client_seed}`\n"
+                f"Server Seed Hash: `{server_seed_hash}`\n\n"
+                "The server seed for this FairGate session has not been revealed yet. "
+                "Verification will be available once the active seed is rotated."
+            )
+            return await ctx.reply(embed=embed, mention_author=False)
+
+        params = None
+        if game_key == "mines":
+            bombs = await self.bot.database.fetch_mines_bomb_count(member.id, nonce)
+            if bombs is None:
+                bombs = 3
+                embed.add_field(
+                    name="⚠️ Note",
+                    value=(
+                        "Could not locate the session bomb count, falling back to 3. "
+                        "If the board below doesn't match, the session row may have been pruned."
+                    ),
+                    inline=False,
+                )
+            params = {"rows": 5, "cols": 5, "mines": bombs}
+
+        try:
+            proof = await self.fairgate_client.verify(
+                server_seed=server_seed,
+                server_seed_hash=server_seed_hash,
+                client_seed=client_seed,
+                nonce=nonce,
+                game=game_key,
+                params=params,
+            )
+        except Exception as e:
+            logger.exception("FairGate verification failed")
+            embed.color = discord.Color.red()
+            embed.description = f"FairGate verification failed: `{e}`"
+            return await ctx.reply(embed=embed, mention_author=False)
+
+        embed.description = (
+            f"User: {member.display_name}\n"
+            f"Nonce: `{nonce}` • Client Seed: `{client_seed}`\n"
+            f"Server Seed Hash: `{server_seed_hash}`\n"
+            f"Algorithm: `{proof.get('algorithm', 'sha256_tag')}`"
+        )
+
+        outcome = proof.get("outcome")
+        if game_key == "mines" and outcome is not None:
+            bomb_cells = sorted(outcome.get("bombs", []))
+            bomb_emoji = "<:bombs:1278849752301309994>"
+            gem_emoji = "<:gems:1278849818025918497>"
+            bomb_set = set(bomb_cells)
+            grid = ""
+            for row in range(5):
+                grid += "".join(
+                    bomb_emoji if (row * 5 + col) in bomb_set else gem_emoji
+                    for col in range(5)
+                ) + "\n"
+            embed.add_field(
+                name="💣 Mines — Revealed Board",
+                value=(
+                    f"Bombs: **{len(bomb_cells)}** • Safe cells: **{25 - len(bomb_cells)}**\n"
+                    f"Positions: `{bomb_cells}`\n"
+                    f"{grid}"
+                ),
+                inline=False,
+            )
+        else:
+            pretty = (
+                json.dumps(outcome, indent=2)
+                if not isinstance(outcome, str)
+                else outcome
+            )
+            embed.add_field(
+                name="🎲 Outcome",
+                value=f"```json\n{shorten(pretty, width=900, placeholder='…')}```",
+                inline=False,
+            )
 
         await ctx.reply(embed=embed, mention_author=False)
 
@@ -6771,6 +7008,145 @@ class Casino(commands.Cog):
         except discord.HTTPException:
             pass
 
+    @commands.command(name="fairgateadmin", hidden=True)
+    @commands.is_owner()
+    async def fairgate_admin(
+        self,
+        ctx: commands.Context,
+        action: str,
+        name: str | None = None,
+        allowed_games: str = "",
+        rotation_policy: str = "after_each_bet",
+        algorithm: str = "sha256_tag",
+    ):
+        """Owner-only FairGate administration.
+
+        Actions:
+          create <name> [games] [rotation_policy] [algorithm]
+          rotate <app_id>
+          get <app_id>
+
+        Examples:
+          !fairgateadmin create "TPNEBOT Casino" mines,dice,roulette after_each_bet sha256_tag
+          !fairgateadmin rotate 66083062d68ec7a091a45ae3bf55ef23
+          !fairgateadmin get 66083062d68ec7a091a45ae3bf55ef23
+        """
+        if not self.fairgate_client:
+            return await ctx.send(
+                "FairGate client is not initialized. Check FAIRGATE_BASE_URL and FAIRGATE_API_KEY.",
+                delete_after=10,
+            )
+
+        action = action.lower().strip()
+
+        try:
+            if action == "create":
+                if not name:
+                    return await ctx.send(
+                        "Usage: `!fairgateadmin create <name> [games] [policy] [algorithm]`",
+                        delete_after=10,
+                    )
+                games = (
+                    [g.strip().lower() for g in allowed_games.split(",") if g.strip()]
+                    if allowed_games
+                    else None
+                )
+                result = await self.fairgate_client.create_app(
+                    name=name,
+                    allowed_games=games,
+                    rotation_policy=rotation_policy,
+                    algorithm=algorithm,
+                )
+                app_id = result.get("id", "unknown")
+                api_key = result.get("api_key", "unknown")
+
+                embed = discord.Embed(
+                    title="🔧 FairGate App Created",
+                    description=f"App **`{name}`** registered successfully.",
+                    color=discord.Color.green(),
+                )
+                embed.add_field(name="App ID", value=f"`{app_id}`", inline=False)
+                embed.add_field(
+                    name="Allowed Games",
+                    value=", ".join(games) if games else "(all built-in games)",
+                    inline=False,
+                )
+                embed.add_field(name="Rotation Policy", value=rotation_policy, inline=True)
+                embed.add_field(name="Algorithm", value=algorithm, inline=True)
+
+                await ctx.send(embed=embed)
+
+                # DM the API key to the owner so it does not sit in a channel.
+                try:
+                    await ctx.author.send(
+                        f"FairGate app `{name}` (`{app_id}`) API key:\n```\n{api_key}\n```\n"
+                        "Store this in Infisical as FAIRGATE_API_KEY for the bot to use it."
+                    )
+                    await ctx.send("API key sent via DM.", delete_after=10)
+                except discord.Forbidden:
+                    await ctx.send(
+                        "Could not DM the API key. Copy it from the server logs or Infisical.",
+                        delete_after=10,
+                    )
+                return
+
+            if action == "rotate":
+                if not name:
+                    return await ctx.send(
+                        "Usage: `!fairgateadmin rotate <app_id>`", delete_after=10
+                    )
+                result = await self.fairgate_client.rotate_app_seed(name)
+                embed = discord.Embed(
+                    title="🔄 FairGate Seed Rotated",
+                    color=discord.Color.blurple(),
+                )
+                embed.add_field(
+                    name="New Server Seed Hash",
+                    value=f"`{result.get('server_seed_hash', 'n/a')}`",
+                    inline=False,
+                )
+                if "expires_at" in result:
+                    embed.add_field(
+                        name="Expires At", value=result["expires_at"], inline=True
+                    )
+                if "max_usage" in result:
+                    embed.add_field(
+                        name="Max Usage", value=result["max_usage"], inline=True
+                    )
+                return await ctx.send(embed=embed)
+
+            if action == "get":
+                if not name:
+                    return await ctx.send(
+                        "Usage: `!fairgateadmin get <app_id>`", delete_after=10
+                    )
+                result = await self.fairgate_client.get_app(name)
+                embed = discord.Embed(
+                    title="📋 FairGate App Info", color=discord.Color.blurple()
+                )
+                for key in ("id", "name", "allowed_games", "rotation_policy", "algorithm", "created_at"):
+                    if key in result:
+                        value = result[key]
+                        if isinstance(value, list):
+                            value = ", ".join(str(v) for v in value)
+                        embed.add_field(name=key.replace("_", " ").title(), value=value, inline=False)
+                return await ctx.send(embed=embed)
+
+            await ctx.send(
+                f"Unknown action `{action}`. Use `create`, `rotate`, or `get`.",
+                delete_after=10,
+            )
+
+        except FairGateError as e:
+            logger.exception("FairGate admin command failed")
+            await ctx.send(
+                f"FairGate admin command failed ({e.status or 'no status'}): `{e}`",
+                delete_after=10,
+            )
+        except Exception as e:
+            logger.exception("Unexpected error in fairgate admin command")
+            await ctx.send(f"Unexpected error: `{e}`", delete_after=10)
+
     @commands.command(name="mines")
     async def mines(
         self, ctx: commands.Context, num_bombs: int = None, bet_amount: str = None
@@ -6870,7 +7246,13 @@ class Casino(commands.Cog):
                 await ctx.reply(view=view)
                 return
 
-            PF = await self.start_game_proof(user_id)
+            if self.is_fairgate_enabled("mines"):
+                provider = "fairgate"
+                PF = await self.start_fairgate_proof(user_id)
+            else:
+                provider = "local"
+                PF = await self.start_game_proof(user_id)
+
             session_id = await self._create_game_session(
                 ctx,
                 "mines",
@@ -6893,9 +7275,21 @@ class Casino(commands.Cog):
             )
 
             grid_size = 5
-            bomb_positions = await self.fair_sample(
-                user_id, list(range(grid_size * grid_size)), num_bombs
-            )
+            if provider == "fairgate":
+                bomb_positions = await self.fairgate_play_mines(
+                    user_id,
+                    client_seed=PF["client_seed"],
+                    nonce=PF["nonce"],
+                    server_seed_hash=PF["server_seed_hash"],
+                    rows=grid_size,
+                    cols=grid_size,
+                    mines=num_bombs,
+                )
+                bomb_positions = set(bomb_positions)
+            else:
+                bomb_positions = await self.fair_sample(
+                    user_id, list(range(grid_size * grid_size)), num_bombs
+                )
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
             init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
@@ -6929,6 +7323,7 @@ class Casino(commands.Cog):
                 currency_name=self.currency_name,
                 session_id=session_id,
                 num_bombs=num_bombs,
+                provider=provider,
             )
 
             try:

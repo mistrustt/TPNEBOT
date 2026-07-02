@@ -1072,6 +1072,10 @@ async def main() -> None:
             "LASTFM_API_KEY": "LASTFM_API_KEY",
             "GENIUS_API_KEY": "GENIUS_API_KEY",
             "FREECRYPTOAPI_API_KEY": "FREECRYPTOAPI_API_KEY",
+            # FairGate provably-fair backend
+            "FAIRGATE_BASE_URL": "FAIRGATE_BASE_URL",
+            "FAIRGATE_API_KEY": "FAIRGATE_API_KEY",
+            "FAIRGATE_ADMIN_API_KEY": "FAIRGATE_ADMIN_API_KEY",
         }
     )
     asyncio.create_task(infisical.refresh_loop())
