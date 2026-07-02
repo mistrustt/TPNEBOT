@@ -313,6 +313,46 @@ class CoreMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error recording owner command audit: {str(e)}")
 
+    async def get_owner_audit_log(
+        self,
+        *,
+        user_id: Optional[int] = None,
+        command_name: Optional[str] = None,
+        guild_id: Optional[int] = None,
+        limit: int = 50,
+        before: Optional[datetime] = None,
+        after: Optional[datetime] = None,
+    ) -> list[OwnerAuditLog]:
+        """Return recent owner-only command audit log entries.
+
+        Results are ordered newest first. The ``user_id`` filter matches the
+        hashed Discord ID stored in the table.
+        """
+        try:
+            async with self.async_sessionmaker() as session:
+                stmt = select(OwnerAuditLog)
+                if user_id is not None:
+                    stmt = stmt.where(
+                        OwnerAuditLog.user_id == self.hash_user_id(user_id)
+                    )
+                if command_name is not None:
+                    stmt = stmt.where(OwnerAuditLog.command_name == command_name)
+                if guild_id is not None:
+                    stmt = stmt.where(OwnerAuditLog.guild_id == guild_id)
+                if before is not None:
+                    stmt = stmt.where(OwnerAuditLog.created_at < before)
+                if after is not None:
+                    stmt = stmt.where(OwnerAuditLog.created_at > after)
+                stmt = (
+                    stmt.order_by(OwnerAuditLog.created_at.desc())
+                    .limit(max(1, min(limit, 500)))
+                )
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+        except SQLAlchemyError as e:
+            logging.error(f"Error fetching owner command audit log: {str(e)}")
+            return []
+
     async def purge_stats_before(self, cutoff_date) -> None:
         try:
             async with self.async_sessionmaker() as session:

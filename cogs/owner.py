@@ -4565,6 +4565,135 @@ class Owner(commands.Cog, name="Owner"):
         )
         await msg.edit(embed=embed)
 
+    @commands.command(
+        name="ownerlog",
+        aliases=["ownerlogs", "adminlog"],
+        description="View the owner-only command audit log.",
+        hidden=True,
+    )
+    @commands.is_owner()
+    async def owner_log(
+        self,
+        ctx: Context,
+        user: Optional[Union[discord.Member, discord.User, int]] = None,
+        command_name: Optional[str] = None,
+        limit: int = 25,
+    ):
+        """Display recent invocations of owner-only commands.
+
+        Arguments:
+            user: Optional user filter (member, user, or raw ID).
+            command_name: Optional command-name filter.
+            limit: Number of entries to fetch (1-100, default 25).
+        """
+        limit = max(1, min(limit, 100))
+        user_id = None
+        if user is not None:
+            user_id = user.id if isinstance(user, (discord.Member, discord.User)) else int(user)
+
+        entries = await self.bot.database.get_owner_audit_log(
+            user_id=user_id,
+            command_name=command_name,
+            guild_id=ctx.guild.id if ctx.guild else None,
+            limit=limit,
+        )
+
+        if not entries:
+            embed = discord.Embed(
+                title="Owner Command Audit Log",
+                description="No matching entries found.",
+                color=discord.Color.orange(),
+            )
+            return await ctx.reply(embed=embed)
+
+        lines = []
+        for entry in entries:
+            timestamp = discord.utils.format_dt(entry.created_at, "R") if entry.created_at else "unknown"
+            user_resolved = await self._resolve_user_display(entry.user_id)
+            location = f"guild `{entry.guild_id}`" if entry.guild_id else "DMs"
+            if entry.channel_id:
+                location += f" / channel `{entry.channel_id}`"
+            arg_summary = ""
+            if entry.args:
+                arg_summary = f" | args: `{self._truncate(str(entry.args), 60)}`"
+            lines.append(
+                f"**`{entry.command_name}`** by {user_resolved} — {timestamp}\n↳ {location}{arg_summary}"
+            )
+
+        pages = []
+        per_page = 5
+        for i in range(0, len(lines), per_page):
+            chunk = lines[i : i + per_page]
+            embed = discord.Embed(
+                title="Owner Command Audit Log",
+                description="\n\n".join(chunk),
+                color=discord.Color.blurple(),
+            )
+            embed.set_footer(text=f"Page {i // per_page + 1}/{(len(lines) - 1) // per_page + 1} • {len(entries)} entries")
+            pages.append(embed)
+
+        if len(pages) == 1:
+            return await ctx.reply(embed=pages[0])
+
+        view = self._SimplePaginator(pages, ctx.author.id)
+        view.message = await ctx.reply(embed=pages[0], view=view)
+
+    @staticmethod
+    def _truncate(text: str, max_len: int) -> str:
+        """Return a truncated string with an ellipsis if it exceeds max_len."""
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 3] + "..."
+
+    async def _resolve_user_display(self, user_hash: str) -> str:
+        """Try to resolve a stored user hash to a mention or ID string."""
+        raw_id = await self.bot.database.resolve_user_hash(user_hash)
+        if raw_id is None:
+            return f"`{user_hash[:12]}...`"
+        user = self.bot.get_user(raw_id)
+        if user:
+            return user.mention
+        return f"<@{raw_id}>"
+
+    class _SimplePaginator(discord.ui.View):
+        """Minimal paginator for owner log embeds."""
+
+        def __init__(self, pages: list[discord.Embed], author_id: int):
+            super().__init__(timeout=180)
+            self.pages = pages
+            self.author_id = author_id
+            self.current_page = 0
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self.author_id:
+                await interaction.response.send_message(
+                    "This paginator isn't for you.", ephemeral=True
+                )
+                return False
+            return True
+
+        @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️")
+        async def previous(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
+            if self.current_page > 0:
+                self.current_page -= 1
+                await interaction.response.edit_message(
+                    embed=self.pages[self.current_page], view=self
+                )
+            else:
+                await interaction.response.defer()
+
+        @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, emoji="▶️")
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if self.current_page < len(self.pages) - 1:
+                self.current_page += 1
+                await interaction.response.edit_message(
+                    embed=self.pages[self.current_page], view=self
+                )
+            else:
+                await interaction.response.defer()
+
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
