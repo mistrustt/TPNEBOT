@@ -593,6 +593,10 @@ class UserMixin(BaseManager):
                     delete(UserAlt).where(UserAlt.alt_user_id == user_hash)
                 )
 
+                # Owner/admin command audit log is intentionally NOT deleted. It is
+                # a compliance/security record tied to bot administrators and is
+                # not personal data of the requesting user.
+
                 # Aggregated analytics
                 await session.execute(
                     delete(CommandUsageDaily).where(

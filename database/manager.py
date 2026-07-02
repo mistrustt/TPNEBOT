@@ -82,6 +82,7 @@ from .models import (
     SuspiciousActivityLog,
     SuspiciousActivityType,
     TransferHistory,
+    OwnerAuditLog,
     Job,
     VIPTier,
     UserVIP,
@@ -110,7 +111,7 @@ from .managers import (
 
 logger = logging.getLogger("discord_bot")
 
-ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owner IDs
+ADMIN_IDS = {284439598422163476, 1099696209637167145, 881692219260665867}  # Owner IDs
 
 
 class DatabaseManager(

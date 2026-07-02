@@ -16,6 +16,7 @@ from ..models import (
     DailyUserExposure,
     Blacklist,
     Task,
+    OwnerAuditLog,
 )
 from datetime import datetime, timezone
 import discord
@@ -276,6 +277,42 @@ class CoreMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error recording user exposure: {str(e)}")
+
+    async def record_owner_command(
+        self,
+        *,
+        user_id: int,
+        command_name: str,
+        guild_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        args: Optional[dict] = None,
+    ) -> None:
+        """
+        Record a successfully executed owner-only command invocation.
+
+        The ``args`` dict should already be redacted/sanitized; this method does
+        not scrub secrets or PII on its own.
+        """
+        try:
+            user_hash = self.hash_user_id(user_id)
+            created_at = discord.utils.utcnow()
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            async with self.async_sessionmaker() as session:
+                session.add(
+                    OwnerAuditLog(
+                        user_id=user_hash,
+                        command_name=command_name,
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        args=args,
+                        created_at=created_at,
+                    )
+                )
+                await session.commit()
+        except SQLAlchemyError as e:
+            logging.error(f"Error recording owner command audit: {str(e)}")
+
     async def purge_stats_before(self, cutoff_date) -> None:
         try:
             async with self.async_sessionmaker() as session:

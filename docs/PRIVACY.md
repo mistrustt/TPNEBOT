@@ -17,7 +17,17 @@ TPNEBOT is operated as a hobby/community project. **We do not charge for use of 
 - Discord user IDs are stored as **deterministic HMAC-SHA256 hashes** in most operational database tables. A single `user_identities` mapping table retains the original ID so staff can resolve moderation records.
 - Guild and channel IDs are stored as plain numeric values because they are server-level configuration data.
 
-### 1.2 Message content
+### 1.2 Bot owner/administrator command audit log
+When a bot owner or administrator runs a restricted (`is_owner`) command, the following is recorded in the database for accountability:
+- **Hashed user ID** of the invoking administrator.
+- **Command name** (e.g., `shutdown`, `eval`, `metrics usage`).
+- **Guild ID** and **channel ID** where the command was invoked, when applicable.
+- **Redacted command arguments**: raw snowflakes, token-like strings, and overly long strings are replaced with type markers or truncated summaries. This log intentionally does **not** store secrets, raw passwords, or the full contents of large code blocks.
+- A **timestamp** of the invocation.
+
+This audit log is retained for security and accountability and is **not** deleted by `!forgetme`.
+
+### 1.3 Message content
 We read message content only where required by specific features:
 - **Spam-channel enforcement:** messages in a designated channel that are not exactly `"999"` are deleted.
 - **Automated moderation:** messages are scanned for PII, credit-card numbers, and Discord tokens; matching messages are deleted and logged.
@@ -28,22 +38,22 @@ We read message content only where required by specific features:
 
 We do **not** read message content for general monitoring, advertising, or AI/ML training.
 
-### 1.3 Member/presence data
+### 1.4 Member/presence data
 - **Guild member lists** are used for server statistics, role management, and member lookup commands.
 - **Online/idle/dnd/offline status** is used only for the `membercount`/`serverinfo` status breakdown.
 - **Spotify activity** is read only when a user invokes a music feature that looks up their currently playing Spotify track.
 
-### 1.4 Economy, game, and social data
+### 1.5 Economy, game, and social data
 We store data needed for the bot's economy, casino, games, music, and community features, including but not limited to:
 - Wallet and bank balances, transaction history, inventory, items, jobs, loans, crypto holdings.
 - Game history, heardle stats, rakeback, VIP status.
 - Reputation, reaction counters, favorite songs, timezone, location, role/nickname history.
 - Command usage, latency, and error statistics (aggregated by user hash).
 
-### 1.5 Location data
+### 1.6 Location data
 - Locations provided via weather/timezone commands are **encrypted at rest** with Fernet (`LOCATION_ENCRYPTION_KEY`) and stored as coarse coordinates or lookup prefixes.
 
-### 1.6 Third-party service data
+### 1.7 Third-party service data
 - **Last.fm username:** stored when you link your Last.fm account.
 - **OpenRouter:** when you use `!ai` or `!8ball`, your question/prompt text is sent to OpenRouter's API to generate a response. We do not retain the response beyond sending it back to you.
 
@@ -99,10 +109,11 @@ You can delete most of your personal data at any time by running the `!forgetme`
 - Utility state (AFK status, command cooldowns, alt relationships, temporary voice channels).
 
 ### 4.2 Data we retain
-Even after `!forgetme`, the following are kept for community safety and anti-abuse purposes:
+Even after `!forgetme`, the following are kept for community safety, anti-abuse, and operator accountability:
 
 - Server moderation records: punishments, case notes, watchdog audit logs, jail history, blacklists, and suspicious-activity logs.
 - The `user_identities` mapping row so retained moderation records remain resolvable by server staff.
+- Owner/administrator command audit log entries (see [1.2](#12-bot-owneradministrator-command-audit-log)).
 
 ### 4.3 Server removal
 If TPNEBOT is removed from a server, the guild's configuration data may remain until a server owner or bot administrator requests deletion.

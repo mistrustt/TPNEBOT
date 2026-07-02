@@ -42,6 +42,95 @@ def _root_cause_is_db_error(error) -> bool:
         return True
     return False
 
+
+def _is_owner_predicate(check) -> bool:
+    """Return True if *check* is the discord.py owner-only predicate."""
+    qualname = getattr(check, "__qualname__", "")
+    if qualname.startswith("is_owner.<locals>.predicate"):
+        return True
+    # App-command owner checks are defined in cogs/owner.py as _owner_check.
+    name = getattr(check, "__name__", "")
+    if name == "_owner_check":
+        return True
+    # check_any wraps a list of predicates in its closure.
+    if qualname.startswith("check_any.<locals>.predicate"):
+        closure = getattr(check, "__closure__", None) or ()
+        for cell in closure:
+            value = cell.cell_contents
+            if isinstance(value, list):
+                for inner in value:
+                    if _is_owner_predicate(inner):
+                        return True
+    return False
+
+
+def _command_has_owner_check(cmd) -> bool:
+    """Return True if *cmd* (or any parent group) is gated by commands.is_owner()."""
+    checks: list = list(getattr(cmd, "checks", []))
+    parent = getattr(cmd, "parent", None)
+    while parent is not None:
+        checks.extend(getattr(parent, "checks", []))
+        parent = getattr(parent, "parent", None)
+    return any(_is_owner_predicate(c) for c in checks)
+
+
+def _redact_command_args(args: tuple, kwargs: dict) -> dict:
+    """Return a redacted JSON-serializable copy of command arguments.
+
+    Tokens, raw Discord IDs, and overly long strings are replaced. Numeric IDs
+    are kept as type markers ("user_id", "guild_id", etc.) without the raw value
+    when they look like Discord snowflakes. This keeps the audit log useful for
+    accountability without storing sensitive or high-precision arguments.
+    """
+    import re
+
+    _DISCORD_ID_RE = re.compile(r"^\d{17,20}$")
+    _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{23,28}\.[A-Za-z0-9_-]{6,7}\.[A-Za-z0-9_-]{27,}")
+
+    def _redact_value(value, key: str = ""):
+        if isinstance(value, (discord.Member, discord.User)):
+            return {"type": "user_id", "value": value.id}
+        if isinstance(value, discord.Role):
+            return {"type": "role_id", "value": value.id}
+        if isinstance(value, discord.TextChannel):
+            return {"type": "channel_id", "value": value.id}
+        if isinstance(value, discord.Guild):
+            return {"type": "guild_id", "value": value.id}
+        if isinstance(value, str):
+            if _TOKEN_RE.search(value):
+                return "<redacted: token-like string>"
+            if _DISCORD_ID_RE.match(value) and (key == "" or "id" in key.lower()):
+                return {"type": "snowflake", "length": len(value)}
+            if len(value) > 256:
+                return {"type": "string", "length": len(value), "prefix": value[:32]}
+            return value
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            if 10**16 <= abs(value) <= 10**21:
+                return {"type": "snowflake", "length": len(str(value))}
+            return value
+        if isinstance(value, float):
+            return round(value, 6)
+        if isinstance(value, (list, tuple)):
+            return [_redact_value(v) for v in value]
+        if isinstance(value, dict):
+            return {k: _redact_value(v, k) for k, v in value.items()}
+        return str(type(value).__name__)
+
+    # ctx.args is [self, ctx, *args] for cog commands and [ctx, *args] otherwise.
+    positional: list
+    if len(args) >= 2 and isinstance(args[1], Context):
+        positional = list(args[2:])
+    elif args and isinstance(args[0], Context):
+        positional = list(args[1:])
+    else:
+        positional = list(args)
+    return {
+        "positional": [_redact_value(v) for v in positional],
+        "keyword": {k: _redact_value(v, k) for k, v in kwargs.items()},
+    }
+
 class LoggingFormatter(logging.Formatter):
     COLORS = {
         logging.DEBUG: "\x1b[38;1m",
@@ -510,8 +599,16 @@ class DiscordBot(commands.Bot):
                     latency_ms=latency_ms,
                     used_at=used_at,
                 )
+            if _command_has_owner_check(ctx.command):
+                await self.database.record_owner_command(
+                    user_id=user.id,
+                    command_name=command_name,
+                    guild_id=guild.id if guild else None,
+                    channel_id=channel.id,
+                    args=_redact_command_args(ctx.args, ctx.kwargs),
+                )
         except Exception as e:
-            self.logger.warning(f"Stats tracking failed: {e}")
+            self.logger.warning(f"Owner command audit failed: {e}")
 
         self.logger.info(
             f"Command '{command_name}' executed by {user} (ID: {user.id}) "
@@ -555,6 +652,18 @@ class DiscordBot(commands.Bot):
                 )
         except Exception as e:
             self.logger.warning(f"Stats tracking failed: {e}")
+
+        try:
+            if _command_has_owner_check(command):
+                await self.database.record_owner_command(
+                    user_id=interaction.user.id,
+                    command_name=command.qualified_name,
+                    guild_id=interaction.guild.id if interaction.guild else None,
+                    channel_id=interaction.channel_id,
+                    args={"slash": True},
+                )
+        except Exception as e:
+            self.logger.warning(f"Owner command audit failed: {e}")
 
         self.logger.info(
             f"Slash /{command.name} used by {interaction.user} "

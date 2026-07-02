@@ -984,6 +984,25 @@ class TransferHistory(Base):
     )
 
 
+class OwnerAuditLog(Base):
+    """Tamper-resistant log of successfully executed owner-only commands."""
+
+    __tablename__ = "owner_audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    command_name = Column(String, nullable=False)
+    guild_id = Column(BigInteger, nullable=True)
+    channel_id = Column(BigInteger, nullable=True)
+    args = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
+
+    __table_args__ = (
+        Index("ix_owner_audit_user_created", "user_id", "created_at"),
+        Index("ix_owner_audit_command_created", "command_name", "created_at"),
+    )
+
+
 class CommandRoleRestriction(Base):
     __tablename__ = "command_role_restrictions"
 
