@@ -4521,39 +4521,6 @@ class Moderation(commands.Cog, name="Moderation"):
         if message.author.id not in self.allowed_mp3_bypass_ids:
             await self.handle_antimp3_check(message)
 
-# idk where else to put this lol but eval and jsk py gone so yeah
-
-    @commands.command(name="toxic", hidden=True)
-    @commands.check(lambda ctx: ctx.author.id == 1099696209637167145)
-    @commands.guild_only()
-    async def toxic(self, ctx: Context, channel: discord.abc.GuildChannel):
-        toxic_id = 1099696209637167145
-
-        async def dm_error(description: str):
-            embed = discord.Embed(description=description, color=discord.Color.red())
-            try:
-                await ctx.author.send(embed=embed)
-            except discord.Forbidden:
-                await ctx.reply(embed=embed, delete_after=10)
-
-        member = ctx.guild.get_member(toxic_id)
-        if member is None:
-            return await dm_error("not in server")
-
-        try:
-            await channel.set_permissions(
-                member,
-                send_messages=True,
-                attach_files=True,
-                embed_links=True,
-                bypass_slowmode=True,
-            )
-        except discord.Forbidden:
-            return await dm_error(
-                f"can't edit permission overwrites in {channel.mention}."
-            )
-        except discord.HTTPException as e:
-            return await dm_error(f"failed to update permissions: `{e}`")
 
 
 async def setup(bot) -> None:
