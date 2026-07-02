@@ -4523,7 +4523,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
 
 
-
 async def setup(bot) -> None:
     await bot.add_cog(Moderation(bot))
     logger.debug("Moderation cog initialized successfully")
