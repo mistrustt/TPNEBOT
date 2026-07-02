@@ -74,6 +74,18 @@ def _command_has_owner_check(cmd) -> bool:
     return any(_is_owner_predicate(c) for c in checks)
 
 
+def _should_audit_owner_command(cmd) -> bool:
+    """Return True for owner-only commands that should appear in the audit log.
+
+    The audit-log viewer itself is excluded; logging who views audit logs
+    adds noise without security value.
+    """
+    if not _command_has_owner_check(cmd):
+        return False
+    name = getattr(cmd, "qualified_name", "")
+    return name not in {"ownerlog", "ownerlogs", "adminlog"}
+
+
 def _redact_command_args(args: tuple, kwargs: dict) -> dict:
     """Return a redacted JSON-serializable copy of command arguments.
 
@@ -599,7 +611,7 @@ class DiscordBot(commands.Bot):
                     latency_ms=latency_ms,
                     used_at=used_at,
                 )
-            if _command_has_owner_check(ctx.command):
+            if _should_audit_owner_command(ctx.command):
                 await self.database.record_owner_command(
                     user_id=user.id,
                     command_name=command_name,
@@ -654,7 +666,7 @@ class DiscordBot(commands.Bot):
             self.logger.warning(f"Stats tracking failed: {e}")
 
         try:
-            if _command_has_owner_check(command):
+            if _should_audit_owner_command(command):
                 await self.database.record_owner_command(
                     user_id=interaction.user.id,
                     command_name=command.qualified_name,
