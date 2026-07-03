@@ -782,8 +782,8 @@ class GameHistory(Base):
     nonce = Column(Integer, nullable=False)
     hash = Column(String(64), nullable=False)  # sha256 hex is 64 chars
     provider = Column(
-        String(16), nullable=False, default="local", server_default="local"
-    )  # 'local' or 'fairgate'
+        String(16), nullable=False, default="fairgate", server_default="fairgate"
+    )  # 'fairgate' is the only supported provider
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

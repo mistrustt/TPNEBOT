@@ -7,7 +7,7 @@ import asyncio
 import datetime
 import secrets
 import functools
-import hmac, hashlib
+import hashlib
 from itertools import combinations
 from collections import Counter
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, InvalidOperation
@@ -19,9 +19,8 @@ from utils.misc import MiscUtils
 from utils.amount import AmountUtils
 from collections import defaultdict
 from decimal import Decimal
-from typing import Sequence, List, Any, Optional
+from typing import Any, Optional
 from utils.fairness import (
-    ProvenFairness, U64_RANGE,
     DICE_PAYOUTS, DICE_EVEN_ODD_PAYOUT,
     LADDER_STEP_PROBS, LADDER_STEP_MULTS, LADDER_MAX_STEP,
     HILO_CARDS, HILO_CARD_VALUES,
@@ -304,7 +303,7 @@ class CrashView(discord.ui.LayoutView):
         # Process game result for rakeback
         await self.casino.process_game_result(uid, "crash", bet)
         pf = self.pf_data.get(uid, {})
-        await self.casino._record_fairgate_outcome(
+        await self.casino._record_game_outcome(
             uid, "crash", "win", bet, pf
         )
 
@@ -398,12 +397,8 @@ class CrashView(discord.ui.LayoutView):
                             # Process game result for rakeback
                             await self.casino.process_game_result(uid, "crash", self.players[uid])
                             pf = self.pf_data.get(uid, {})
-                            await self.bot.database.increment_loss(
-                                uid, "crash", bet=self.players[uid],
-                                client_seed=pf.get("client_seed"),
-                                seed_used=pf["server_seed"],
-                                nonce=pf.get("nonce"),
-                                hash_hex=pf.get("server_seed_hash"),
+                            await self.casino._record_game_outcome(
+                                uid, "crash", "loss", self.players[uid], pf,
                             )
                             await self.casino._log_game_event(
                                 self.session_id,
@@ -422,12 +417,8 @@ class CrashView(discord.ui.LayoutView):
                             # Process game result for rakeback
                             await self.casino.process_game_result(uid, "crash", self.players[uid])
                             pf = self.pf_data.get(uid, {})
-                            await self.bot.database.increment_loss(
-                                uid, "crash", bet=self.players[uid],
-                                client_seed=pf.get("client_seed"),
-                                seed_used=pf["server_seed"],
-                                nonce=pf.get("nonce"),
-                                hash_hex=pf.get("server_seed_hash"),
+                            await self.casino._record_game_outcome(
+                                uid, "crash", "loss", self.players[uid], pf,
                             )
                             await self.casino._log_game_event(
                                 self.session_id,
@@ -504,7 +495,6 @@ class MinesGridLayout(discord.ui.LayoutView):
         currency_name: str,
         session_id=None,
         num_bombs: int = 5,
-        provider: str = "fairgate",
     ):
         super().__init__(timeout=600)
         self.bomb_positions = bomb_positions
@@ -512,7 +502,6 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.bet_amount = bet_amount
         self.bot = bot
         self.PF = PF
-        self.provider = provider
         self.session_id = session_id
         self.num_bombs = num_bombs
         self.formatted_bet = formatted_bet
@@ -552,14 +541,8 @@ class MinesGridLayout(discord.ui.LayoutView):
     async def _record_mines_outcome(self, outcome: str):
         """Persist the game result through FairGate."""
         try:
-            await self.bot.database.record_fairgate_game(
-                self.user_id,
-                "mines",
-                outcome,
-                self.bet_amount,
-                client_seed=self.PF["client_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
+            await self.casino._record_game_outcome(
+                self.user_id, "mines", outcome, self.bet_amount, self.PF
             )
         except Exception as e:
             logger.error(f"Failed to record mines {outcome}: {e}")
@@ -1147,7 +1130,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         success = side == "heads"
         if success:
             self.winnings = Decimal(self.winnings) * 2
-            await self.casino._record_fairgate_outcome(
+            await self.casino._record_game_outcome(
                 self.user_id,
                 "double",
                 "win",
@@ -1172,7 +1155,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 {"round": self.rounds, "winnings": str(self.winnings)},
             )
         else:
-            await self.casino._record_fairgate_outcome(
+            await self.casino._record_game_outcome(
                 self.user_id,
                 "double",
                 "loss",
@@ -1656,7 +1639,7 @@ class RouletteView(discord.ui.LayoutView):
 
         # ── Record outcome ──
         net_won = total_winnings > 0
-        await self.cog._record_fairgate_outcome(
+        await self.cog._record_game_outcome(
             self.user_id, "roulette", "win" if net_won else "loss", total_wager, PF
         )
         if net_won:
@@ -1943,7 +1926,7 @@ class HiLoView(discord.ui.LayoutView):
         await self.cog.process_game_result(self.user_id, "hilo", self.bet_amount)
 
         outcome = "win" if win else "loss"
-        await self.cog._record_fairgate_outcome(
+        await self.cog._record_game_outcome(
             self.user_id, "hilo", outcome, self.bet_amount, self.PF
         )
         await self.cog._remove_refund(self.session_id, user_id=self.user_id)
@@ -2292,7 +2275,7 @@ class PokerView(View):
         player_ties = player_rank == bot_rank
 
         if player_wins:
-            await self.cog._record_fairgate_outcome(
+            await self.cog._record_game_outcome(
                 self.user_id, "poker", "win", self.bet, self.PF
             )
             payout = self.bet * Decimal("2")
@@ -2305,14 +2288,8 @@ class PokerView(View):
         elif player_ties:
             # Tied hand → push. Record the round as a push (counts toward
             # total wagered but not toward wins or losses) and refund the bet.
-            await self.bot.database.record_fairgate_game(
-                self.user_id,
-                "poker",
-                "push",
-                self.bet,
-                client_seed=self.PF["client_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
+            await self.cog._record_game_outcome(
+                self.user_id, "poker", "push", self.bet, self.PF
             )
             await self.bot.database.process_treasury_transaction(
                 wallet_id=self.wallet_id, amount=self.bet, description="Poker Push"
@@ -2321,7 +2298,7 @@ class PokerView(View):
             result = f"It's a tie! Your bet of **{formatted}** has been refunded."
             color = discord.Color.greyple()
         else:
-            await self.cog._record_fairgate_outcome(
+            await self.cog._record_game_outcome(
                 self.user_id, "poker", "loss", self.bet, self.PF
             )
             formatted = await self.cog.formatter(self.bet)
@@ -2355,7 +2332,7 @@ class PokerView(View):
                 "Not your game!", ephemeral=True
             )
 
-        await self.cog._record_fairgate_outcome(
+        await self.cog._record_game_outcome(
             self.user_id, "poker", "loss", self.bet, self.PF
         )
         formatted = await self.cog.formatter(self.bet)
@@ -2522,10 +2499,8 @@ class LadderView(discord.ui.LayoutView):
             if self.step >= self.MAX_STEP:
                 # Reached the top — auto cash-out
                 await self.cog.process_game_result(self.user_id, "ladder", self.bet)
-                await self.bot.database.increment_win(
-                    self.user_id, "ladder", self.bet,
-                    client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
-                    nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+                await self.cog._record_game_outcome(
+                    self.user_id, "ladder", "win", self.bet, self.PF,
                 )
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id,
@@ -2570,10 +2545,8 @@ class LadderView(discord.ui.LayoutView):
         else:
             # ── fell ──
             await self.cog.process_game_result(self.user_id, "ladder", self.bet)
-            await self.bot.database.increment_loss(
-                self.user_id, "ladder", self.bet,
-                client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+            await self.cog._record_game_outcome(
+                self.user_id, "ladder", "loss", self.bet, self.PF,
             )
             formatted_bet = await self.cog.formatter(self.bet)
             content = (
@@ -2604,10 +2577,8 @@ class LadderView(discord.ui.LayoutView):
 
         final_reward = self.bet * self.current_multiplier
         await self.cog.process_game_result(self.user_id, "ladder", self.bet)
-        await self.bot.database.increment_win(
-            self.user_id, "ladder", self.bet,
-            client_seed=self.PF["client_seed"], seed_used=self.PF["server_seed"],
-            nonce=self.PF["nonce"], hash_hex=self.PF["server_seed_hash"],
+        await self.cog._record_game_outcome(
+            self.user_id, "ladder", "win", self.bet, self.PF,
         )
         await self.bot.database.process_treasury_transaction(
             wallet_id=self.wallet_id,
@@ -2955,22 +2926,11 @@ class SlotsView(discord.ui.LayoutView):
             # Record this spin in game_history (spin-again was previously
             # missing the increment call, so all but the first spin in a
             # session were absent from history and from wager metrics).
-            if total_winnings > 0:
-                await self.bot.database.increment_win(
-                    user_id, "slots", self.bet,
-                    client_seed=final_PF["client_seed"],
-                    seed_used=final_PF["server_seed"],
-                    nonce=final_PF["nonce"],
-                    hash_hex=final_PF["server_seed_hash"],
-                )
-            else:
-                await self.bot.database.increment_loss(
-                    user_id, "slots", self.bet,
-                    client_seed=final_PF["client_seed"],
-                    seed_used=final_PF["server_seed"],
-                    nonce=final_PF["nonce"],
-                    hash_hex=final_PF["server_seed_hash"],
-                )
+            await self.cog._record_game_outcome(
+                user_id, "slots",
+                "win" if total_winnings > 0 else "loss",
+                self.bet, final_PF,
+            )
             
             # Check for free spins trigger (max 1 retrigger)
             new_free_spins = 0
@@ -3289,10 +3249,8 @@ class Casino(commands.Cog):
             "hilo",
             "keno",
         ]
-        self.fair = ProvenFairness()
 
-        # FairGate integration (optional, game-by-game).
-        self.fairgate_enabled_games = self._load_fairgate_enabled_games()
+        # FairGate integration (all casino games now use FairGate).
         self.fairgate_client: FairGateClient | None = None
         self._fairgate_backfill_task: asyncio.Task | None = None
         self._last_backfilled_hash: str | None = None
@@ -3308,7 +3266,6 @@ class Casino(commands.Cog):
                 )
         except FairGateError as e:
             logger.warning(f"FairGate middleware is configured but init failed: {e}")
-            self.fairgate_enabled_games = set()
 
         # SLOTS constants imported from fairness.py
         self.SLOTS_SYMBOLS = SLOTS_SYMBOLS
@@ -3320,18 +3277,6 @@ class Casino(commands.Cog):
             self._fairgate_backfill_task.cancel()
         if self.fairgate_client:
             asyncio.create_task(self.fairgate_client.close())
-
-    @staticmethod
-    def _load_fairgate_enabled_games() -> set[str]:
-        """Legacy env var reader kept for compatibility; no longer used for gating."""
-        raw = os.getenv("FAIRGATE_ENABLED_GAMES", "").strip()
-        if not raw:
-            return set()
-        return {g.strip().lower() for g in raw.split(",") if g.strip()}
-
-    def is_fairgate_enabled(self, game_name: str) -> bool:
-        """All casino games now resolve RNG through FairGate when configured."""
-        return self.fairgate_client is not None and self.fairgate_client.api_key is not None
 
     async def _fairgate_backfill_loop(self) -> None:
         """Poll FairGate for revealed seeds and back-fill pending game rows."""
@@ -3428,7 +3373,7 @@ class Casino(commands.Cog):
         )
         return result["outcome"]["bombs"]
 
-    async def _record_fairgate_outcome(
+    async def _record_game_outcome(
         self,
         user_id: int,
         game_name: str,
@@ -3881,114 +3826,6 @@ class Casino(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
-
-    async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
-        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)
-        msg = f"{client_seed}:{nonce}:{tag}".encode()
-        digest = hmac.new(server_seed.encode(), msg, hashlib.sha256).digest()
-        u64 = int.from_bytes(digest[:8], "big")
-        proof = {
-            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
-            "client_seed": client_seed,
-            "nonce": nonce,
-            "tag": tag,
-            "u64_hex": digest[:8].hex(),
-        }
-        return u64, proof
-
-    async def fair_randbelow(
-        self, user_id: int, upper: int, *, tag: str = "randbelow"
-    ) -> int:
-        if upper <= 0:
-            raise ValueError("upper must be > 0")
-        u64, _ = await self._next_u64(user_id, tag=tag)
-
-        limit = U64_RANGE - (U64_RANGE % upper)
-        while u64 >= limit:
-            u64 = int.from_bytes(
-                hashlib.sha256(u64.to_bytes(8, "big")).digest()[:8], "big"
-            )
-        return u64 % upper
-
-    async def fair_random(self, user_id: int) -> float:
-        u64, _ = await self._next_u64(user_id, tag="random")
-        return u64 / float(U64_RANGE)
-
-    async def fair_sample(self, user_id: int, seq: Sequence[Any], k: int) -> List[Any]:
-        """
-        Sample k elements without replacement using a Fisher–Yates shuffle.
-        We increment the nonce inside fair_randbelow per swap; there is NO extra increment here.
-        """
-        if k < 0 or k > len(seq):
-            raise ValueError(
-                "Sample size cannot exceed sequence length and must be non-negative."
-            )
-        clone = list(seq)
-        await self.fair_shuffle(user_id, clone)
-        return clone[:k]
-
-    async def fair_choice(
-        self, user_id: int, seq: Sequence[Any], *, tag: str = "choice"
-    ):
-        if not seq:
-            raise ValueError("sequence must be non-empty")
-        idx = await self.fair_randbelow(user_id, len(seq), tag=tag)
-        return seq[idx]
-
-    async def fair_shuffle(self, user_id: int, deck: List[Any]) -> None:
-        for i in range(len(deck) - 1, 0, -1):
-            j = await self.fair_randbelow(user_id, i + 1, tag=f"shuffle:{i}")
-            deck[i], deck[j] = deck[j], deck[i]
-
-    async def fair_uniform(
-        self, user_id: int, min_value: float, max_value: float
-    ) -> float:
-        if min_value >= max_value:
-            raise ValueError("min_value must be less than max_value")
-        r = await self.fair_random(user_id)
-        return min_value + (max_value - min_value) * r
-
-    async def fair_systemrandom(
-        self, user_id: int, min_value: int, max_value: int, *, tag: str = "systemrandom"
-    ) -> int:
-        if min_value > max_value:
-            raise ValueError("min_value must be <= max_value")
-        span = (max_value - min_value) + 1
-        idx = await self.fair_randbelow(user_id, span, tag=tag)
-        return min_value + idx
-
-    async def prove_fairness(self, user_id: int) -> dict:
-        """
-        Publish commitment only; reveal raw seed only after rotation.
-        """
-        server_seed = await self.bot.database.get_server_seed(user_id)
-        client_seed, nonce = await self.bot.database.get_client_seed(user_id)
-        return {
-            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
-            "client_seed": client_seed,
-            "nonce": nonce,
-        }
-
-    async def start_game_proof(self, user_id: int) -> dict:
-        """
-        Capture full provable-fairness state for a single game, including the
-        raw server seed.
-
-        This is the preferred entry point for any game command that records
-        into ``game_history``. Unlike :meth:`prove_fairness`, it bumps the
-        wallet nonce and returns the live server seed (not just its hash) so
-        the post-game ``record_game`` call can write a non-null
-        ``used_server_seed`` at insert time. That makes the most recent game
-        immediately verifiable via ``!casino verify`` — without waiting for
-        the user's *next* game to back-fill via seed rotation.
-        """
-        server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)
-        return {
-            "server_seed": server_seed,
-            "server_seed_hash": hashlib.sha256(server_seed.encode()).hexdigest(),
-            "client_seed": client_seed,
-            "nonce": nonce,
-        }
 
     def _fmt_no_sci(
         self, x: Decimal, *, max_frac: int = 2, rounding=ROUND_HALF_UP
@@ -4471,257 +4308,17 @@ class Casino(commands.Cog):
             )
             return await ctx.reply(embed=embed, delete_after=8, mention_author=False)
 
-        server_seed = record.used_server_seed
-        client_seed = record.client_seed
         provider = getattr(record, "provider", "local")
 
-        # FairGate-backed games are verified remotely once the seed is revealed.
-        if provider == "fairgate":
-            return await self._verify_fairgate_game(
-                ctx, record, member, game_key, nonce, extra_args
+        if provider != "fairgate":
+            return await ctx.reply(
+                "This record is from the deprecated local fairness system and can no longer be verified.",
+                mention_author=False,
             )
 
-        server_hash_short = hashlib.sha256(server_seed.encode()).hexdigest()[:12] + "…"
-
-        pf = self.fair
-        title = f"🔒 Provably Fair — {game_key.title()}"
-        desc = (
-            f"User: {member.display_name}\n"
-            f"Nonce: `{nonce}` • Client Seed: `{client_seed}`\n"
-            f"Server Hash: `{server_hash_short}`"
+        return await self._verify_fairgate_game(
+            ctx, record, member, game_key, nonce, extra_args
         )
-        embed = discord.Embed(
-            title=title, description=desc, color=discord.Color.blurple()
-        )
-        try:
-            embed.set_thumbnail(url=member.display_avatar.url)
-        except (AttributeError, discord.HTTPException):
-            pass
-
-        try:
-            if game_key == "gamble":
-                result = pf.verify_gamble(server_seed, client_seed, nonce)
-                pretty = (
-                    json.dumps(result, indent=2)
-                    if not isinstance(result, str)
-                    else result
-                )
-                embed.add_field(
-                    name="🎰 Gamble Result",
-                    value=f"```json\n{shorten(pretty, width=900, placeholder='…')}\n```",
-                    inline=False,
-                )
-
-            elif game_key in ("supergamble", "sgamble"):
-                result = pf.verify_supergamble(server_seed, client_seed, nonce)
-                pretty = (
-                    json.dumps(result, indent=2)
-                    if not isinstance(result, str)
-                    else result
-                )
-                embed.add_field(
-                    name="💥 SuperGamble",
-                    value=f"```json\n{shorten(pretty, width=900, placeholder='…')}\n```",
-                    inline=False,
-                )
-
-            elif game_key in ("dice", "roll"):
-                die1, die2 = pf.verify_dice(server_seed, client_seed, nonce)
-                total = die1 + die2
-                embed.add_field(
-                    name="🎲 Dice",
-                    value=f"Die 1: **{die1}** • Die 2: **{die2}**\nTotal: **{total}**",
-                    inline=False,
-                )
-
-            elif game_key == "ladder":
-                if not extra_args:
-                    return await ctx.reply(
-                        "For ladder, supply both nonce and step.", mention_author=False
-                    )
-                step = int(extra_args[0])
-                roll_pct, threshold = pf.verify_ladder(
-                    server_seed, client_seed, nonce, step
-                )
-
-                bar_len = 20
-                # roll is the raw 0-9999 draw from fair_randbelow; convert to
-                # a 0-100 percentage for display. threshold is already 0-100.
-                roll_pct_disp = roll_pct / 100
-                filled = int(min(max(roll_pct_disp, 0), 100) / 100 * bar_len)
-                bar = "█" * filled + "░" * (bar_len - filled)
-                embed.add_field(
-                    name="🪜 Ladder Roll",
-                    value=f"Step: **{step}**\nRoll: `{roll_pct_disp:.2f}%` • Threshold: `{threshold:.2f}%`\n`{bar}`",
-                    inline=False,
-                )
-
-            elif game_key == "slots":
-                slots_data = pf.verify_slots(server_seed, client_seed, nonce)
-                
-                # Build display string
-                display_parts = []
-                
-                # Grid display
-                grid_display = slots_data.get("grid_display", "")
-                if grid_display:
-                    display_parts.append(f"Grid:\n{grid_display}")
-                
-                # Wins
-                wins = slots_data.get("wins", [])
-                if wins:
-                    win_strs = []
-                    for win in wins:
-                        win_strs.append(
-                            f"Line {win['payline_id']}: {win['symbol']} x{win['count']} = {win['payout']:.2f}x"
-                        )
-                    display_parts.append("Wins:\n" + "\n".join(win_strs))
-                
-                # Scatters
-                scatter_count = slots_data.get("scatter_count", 0)
-                scatter_payout = slots_data.get("scatter_payout", 0)
-                if scatter_count > 0:
-                    display_parts.append(f"Scatters: {scatter_count} = {scatter_payout:.2f}x")
-                
-                # Total
-                total_payout = slots_data.get("total_payout", 0)
-                display_parts.append(f"Total Payout: {total_payout:.2f}x")
-                
-                slots_str = "\n\n".join(display_parts)
-                embed.add_field(
-                    name="🎰 Slots Outcome",
-                    value=f"```{shorten(slots_str, width=900, placeholder='…')}```",
-                    inline=False,
-                )
-
-            elif game_key == "blackjack" or game_key == "bj":
-                bj = pf.verify_blackjack(server_seed, client_seed, nonce)
-                shuffled = bj.get("shuffled_deck", [])
-                player_cards = bj.get("player_cards", [])
-                dealer_cards = bj.get("dealer_cards", [])
-                embed.add_field(
-                    name="🃏 Blackjack — Player",
-                    value=f"{', '.join(player_cards)}",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="🃏 Blackjack — Dealer",
-                    value=f"{', '.join(dealer_cards)}",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="🔀 Shuffled Deck (full)",
-                    value=f"```{', '.join(shuffled)}```",
-                    inline=False,
-                )
-
-            elif game_key in ("ridebus", "bus"):
-                result = pf.verify_ridebus(server_seed, client_seed, nonce)
-                pretty = (
-                    json.dumps(result, indent=2)
-                    if not isinstance(result, str)
-                    else result
-                )
-                embed.add_field(
-                    name="🚌 Ridebus",
-                    value=f"```json\n{shorten(pretty, width=900, placeholder='…')}\n```",
-                    inline=False,
-                )
-
-            elif game_key == "poker":
-                pk = pf.verify_poker(server_seed, client_seed, nonce)
-                player_hand = pk.get("player_hand", [])
-                bot_hand = pk.get("bot_hand", [])
-                community = pk.get("community", [])
-                embed.add_field(
-                    name="🂡 Poker — Player",
-                    value=f"{', '.join(player_hand)}",
-                    inline=False,
-                )
-                embed.add_field(
-                    name="🤖 Poker — Bot", value=f"{', '.join(bot_hand)}", inline=False
-                )
-                embed.add_field(
-                    name="🃏 Community", value=f"{', '.join(community)}", inline=False
-                )
-
-            elif game_key == "roulette":
-                r = pf.verify_roulette(server_seed, client_seed, nonce)
-                color = r.get("color", "Unknown")
-                spin_result = r.get("spin_result", "—")
-                emoji = (
-                    "🟢"
-                    if color.lower() == "green"
-                    else ("🔴" if color.lower() == "red" else "⚫")
-                )
-                embed.add_field(
-                    name="🎡 Roulette",
-                    value=f"{emoji} {color.title()} • **{spin_result}**",
-                    inline=False,
-                )
-
-            elif game_key == "mines":
-                # Mines needs the bomb count, which is not stored in
-                # GameHistory. Pull it from the GameSession that was created
-                # alongside the game; fall back to 3 (legacy default) only if
-                # the session row is gone.
-                bombs = await self.bot.database.fetch_mines_bomb_count(
-                    user_id, nonce
-                )
-                if bombs is None:
-                    bombs = 3
-                    embed.add_field(
-                        name="⚠️ Note",
-                        value=(
-                            "Could not locate the session for this game, so "
-                            "verification used the default bomb count of 3. "
-                            "If the result below doesn't match, the session "
-                            "row may have been pruned."
-                        ),
-                        inline=False,
-                    )
-                mines_result = pf.verify_mines(
-                    server_seed, client_seed, nonce,
-                    board_size=25, bombs=bombs,
-                )
-                bomb_cells = sorted(mines_result.get("bomb_cells", []))
-
-                bomb_emoji = "<:bombs:1278849752301309994>"
-                gem_emoji = "<:gems:1278849818025918497>"
-                bomb_set = set(bomb_cells)
-                grid = ""
-                for row in range(5):
-                    grid += "".join(
-                        bomb_emoji if (row * 5 + col) in bomb_set else gem_emoji
-                        for col in range(5)
-                    ) + "\n"
-
-                embed.add_field(
-                    name="💣 Mines — Revealed Board",
-                    value=(
-                        f"Bombs: **{bombs}** • Safe cells: **{25 - bombs}**\n"
-                        f"Positions: `{bomb_cells}`\n"
-                        f"Next nonce: `{mines_result.get('next_nonce')}`\n"
-                        f"{grid}"
-                    ),
-                    inline=False,
-                )
-
-            else:
-                return await ctx.reply(
-                    f"Unknown game '{game_key}'.", mention_author=False
-                )
-
-        except Exception as e:
-            logger.exception("Error while verifying PF data")
-            embed = discord.Embed(
-                title="⚠️ Verification Error",
-                description=f"An error occurred while verifying: {e}",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, mention_author=False)
-
-        await ctx.reply(embed=embed, mention_author=False)
 
     async def _verify_fairgate_game(
         self,
@@ -5019,7 +4616,7 @@ class Casino(commands.Cog):
 
             if is_winner:
                 winnings = Decimal(amount) * win_multiplier
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "gamble", "win", amount, PF
                 )
                 try:
@@ -5055,7 +4652,7 @@ class Casino(commands.Cog):
                     final_state={"winnings": str(winnings)},
                 )
             else:
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "gamble", "loss", amount, PF
                 )
                 embed = discord.Embed(
@@ -5163,7 +4760,7 @@ class Casino(commands.Cog):
                 winnings = (amount * raw_multiplier).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "supergamble", "win", amount, PF
                 )
             elif sg_outcome == "mega_win":
@@ -5171,7 +4768,7 @@ class Casino(commands.Cog):
                 winnings = (amount * raw_multiplier).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "supergamble", "win", amount, PF
                 )
             elif sg_outcome == "recovery":
@@ -5234,13 +4831,13 @@ class Casino(commands.Cog):
                     description=f"You lost, but recovered **{await self.formatter(winnings)} {self.currency_name}**!",
                     color=discord.Color.blurple(),
                 )
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "supergamble", "loss", amount, PF
                 )
                 outcome = "loss"
                 outcome_amount = winnings
             else:
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "supergamble", "loss", amount, PF
                 )
                 embed = discord.Embed(
@@ -5272,74 +4869,6 @@ class Casino(commands.Cog):
                 embed=discord.Embed(description=str(e), color=discord.Color.red()),
                 delete_after=5,
             )
-
-    def _generate_spin_grid(self, user_id: int, nonce_start: int) -> tuple[list[list[str]], dict]:
-        """Generate a 5x4 grid using weighted reel strips with provable fairness.
-        
-        Returns:
-            tuple: (grid, verification_data)
-            - grid: 5x4 grid as list of columns (reels), each column is list of 4 symbols
-            - verification_data: dict with reel positions for fairness verification
-        """
-        grid = []
-        verification = {"reel_positions": [], "nonce_start": nonce_start}
-        
-        for reel_idx in range(5):
-            weights = self.SLOTS_REEL_WEIGHTS[reel_idx]
-            symbols = list(weights.keys())
-            weight_values = list(weights.values())
-            total_weight = sum(weight_values)
-            
-            # Generate 4 symbols for this reel (column)
-            reel_symbols = []
-            for row_idx in range(4):
-                # Use fair_randbelow for provable fairness
-                # Note: This will be called via async in the actual command
-                # For now, we'll use the deterministic selection
-                import random
-                pos = random.randrange(total_weight)
-                cumulative = 0
-                selected = symbols[0]
-                for sym, w in zip(symbols, weight_values):
-                    cumulative += w
-                    if pos < cumulative:
-                        selected = sym
-                        break
-                reel_symbols.append(selected)
-            
-            grid.append(reel_symbols)
-            verification["reel_positions"].append(pos if 'pos' in dir() else 0)
-        
-        return grid, verification
-
-    async def _async_generate_spin_grid(self, user_id: int, nonce_start: int) -> tuple[list[list[str]], dict]:
-        """Async version that uses fair_randbelow for provable fairness."""
-        grid = []
-        verification = {"reel_positions": [], "nonce_start": nonce_start}
-
-        for reel_idx in range(5):
-            weights = self.SLOTS_REEL_WEIGHTS[reel_idx]
-            symbols = list(weights.keys())
-            weight_values = list(weights.values())
-            total_weight = sum(weight_values)
-
-            reel_symbols = []
-            for row_idx in range(4):
-                # Use provable fairness RNG
-                pos = await self.fair_randbelow(user_id, total_weight)
-                cumulative = 0
-                selected = symbols[0]
-                for sym, w in zip(symbols, weight_values):
-                    cumulative += w
-                    if pos < cumulative:
-                        selected = sym
-                        break
-                reel_symbols.append(selected)
-
-            grid.append(reel_symbols)
-            verification["reel_positions"].append(pos)
-
-        return grid, verification
 
     async def fairgate_generate_slots_grid(
         self, user_id: int, PF: dict
@@ -5575,21 +5104,11 @@ class Casino(commands.Cog):
             await self.bot.database.process_treasury_transaction(
                 wallet_id, winnings, "Slots Win"
             )
-            await self.bot.database.increment_win(
-                user_id, "slots", stake,
-                client_seed=final_PF["client_seed"],
-                seed_used=final_PF["server_seed"],
-                nonce=final_PF["nonce"],
-                hash_hex=final_PF["server_seed_hash"],
-            )
-        else:
-            await self.bot.database.increment_loss(
-                user_id, "slots", stake,
-                client_seed=final_PF["client_seed"],
-                seed_used=final_PF["server_seed"],
-                nonce=final_PF["nonce"],
-                hash_hex=final_PF["server_seed_hash"],
-            )
+        await self._record_game_outcome(
+            user_id, "slots",
+            "win" if winnings > 0 else "loss",
+            stake, final_PF,
+        )
 
         # Check for free spins trigger
         free_spins_awarded = 0
@@ -5773,11 +5292,11 @@ class Casino(commands.Cog):
                 )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
-            await self._record_fairgate_outcome(
+            await self._record_game_outcome(
                 user_id, "dice", "win", amount, PF
             )
         else:
-            await self._record_fairgate_outcome(
+            await self._record_game_outcome(
                 user_id, "dice", "loss", amount, PF
             )
 
@@ -6103,12 +5622,12 @@ class Casino(commands.Cog):
             if player_score > 21:
                 outcome = "loss"
                 result = f"Bust! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "blackjack", "loss", hand_bet, PF
                 )
             elif dealer_score > 21 or player_score > dealer_score:
                 outcome = "win"
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "blackjack", "win", hand_bet, PF
                 )
 
@@ -6143,14 +5662,8 @@ class Casino(commands.Cog):
                 outcome = "tie"
                 winnings = Decimal(hand_bet)
                 try:
-                    await self.bot.database.record_fairgate_game(
-                        user_id,
-                        "blackjack",
-                        "push",
-                        hand_bet,
-                        client_seed=PF["client_seed"],
-                        nonce=PF["nonce"],
-                        hash_hex=PF["server_seed_hash"],
+                    await self._record_game_outcome(
+                        user_id, "blackjack", "push", hand_bet, PF
                     )
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,
@@ -6172,7 +5685,7 @@ class Casino(commands.Cog):
                 )
             else:
                 outcome = "loss"
-                await self._record_fairgate_outcome(
+                await self._record_game_outcome(
                     user_id, "blackjack", "loss", hand_bet, PF
                 )
                 result = f"Dealer wins! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
@@ -7634,7 +7147,6 @@ class Casino(commands.Cog):
                 currency_name=self.currency_name,
                 session_id=session_id,
                 num_bombs=num_bombs,
-                provider="fairgate",
             )
 
             try:
@@ -7743,7 +7255,7 @@ class GameUI(discord.ui.LayoutView):
         player_bet: int,
         formatted_bet,
         player_wallet,
-        PF: ProvenFairness,
+        PF: dict,
         session_id=None,
     ):
         super().__init__(timeout=None)
@@ -7760,7 +7272,7 @@ class GameUIContainer(discord.ui.Container):
         player_bet: int,
         formatted_bet,
         player_wallet,
-        PF: ProvenFairness,
+        PF: dict,
         session_id=None,
     ):
         super().__init__(accent_color=0x2B2D31)
@@ -7894,7 +7406,7 @@ class StakeSelect(discord.ui.Select):
 
 
 class BetButton(discord.ui.Button):
-    def __init__(self, cog: Casino, PF: ProvenFairness):
+    def __init__(self, cog: Casino, PF: dict):
         super().__init__(label="Bet", style=discord.ButtonStyle.green)
         self.bot = cog.bot
         self.cog: Casino = cog
@@ -8040,25 +7552,13 @@ class BetButton(discord.ui.Button):
                         amount=Decimal(total_win),
                         description=f"Keno Win",
                     )
-                    await self.bot.database.increment_win(
-                        table_ui_view.player.id,
-                        "keno",
-                        player_bet,
-                        client_seed=self.PF["client_seed"],
-                        seed_used=self.PF["server_seed"],
-                        nonce=self.PF["nonce"],
-                        hash_hex=self.PF["server_seed_hash"],
-                    )
-                else:
-                    await self.bot.database.increment_loss(
-                        table_ui_view.player.id,
-                        "keno",
-                        player_bet,
-                        client_seed=self.PF["client_seed"],
-                        seed_used=self.PF["server_seed"],
-                        nonce=self.PF["nonce"],
-                        hash_hex=self.PF["server_seed_hash"],
-                    )
+                await self.cog._record_game_outcome(
+                    table_ui_view.player.id,
+                    "keno",
+                    "win" if total_win >= player_bet else "loss",
+                    player_bet,
+                    self.PF,
+                )
 
             except ValueError as e:
                 embed = discord.Embed(

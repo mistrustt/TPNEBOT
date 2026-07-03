@@ -1,5 +1,4 @@
--- Track whether a game was resolved locally or via FairGate.
--- 'local'  -> utils/fairness.py + per-wallet server_seed
--- 'fairgate' -> FairGate backend with sha256_tag algorithm
+-- Track whether a game was resolved via FairGate.
+-- 'fairgate' is the only supported provider after the FairGate transition.
 ALTER TABLE game_history
-    ADD COLUMN provider VARCHAR(16) NOT NULL DEFAULT 'local';
+    ADD COLUMN provider VARCHAR(16) NOT NULL DEFAULT 'fairgate';
