@@ -242,6 +242,42 @@ class FairGateClient:
         """Manually rotate the app's active server seed."""
         return await self._request("POST", f"/apps/{app_id}/rotate")
 
+    async def list_games(self) -> dict[str, Any]:
+        """List the games supported by this FairGate instance."""
+        return await self._request("GET", "/games")
+
+    async def patch_app(
+        self,
+        app_id: str,
+        *,
+        name: str | None = None,
+        allowed_games: list[str] | None = None,
+        rotation_policy: str | None = None,
+        rotation_config: dict[str, Any] | None = None,
+        algorithm: str | None = None,
+    ) -> dict[str, Any]:
+        """Update metadata for an existing FairGate app.
+
+        Requires ``FAIRGATE_ADMIN_API_KEY`` to be configured. Only fields
+        that are passed are sent to the server.
+        """
+        payload: dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if allowed_games is not None:
+            payload["allowed_games"] = allowed_games
+        if rotation_policy is not None:
+            payload["rotation_policy"] = rotation_policy
+        if rotation_config is not None:
+            payload["rotation_config"] = rotation_config
+        if algorithm is not None:
+            payload["algorithm"] = algorithm
+        if not payload:
+            raise ValueError("patch_app called with no fields to update")
+        return await self._request(
+            "PATCH", f"/apps/{app_id}", json_body=payload, admin=True
+        )
+
     async def verify(
         self,
         *,

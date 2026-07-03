@@ -44,7 +44,8 @@ class CrashView(discord.ui.LayoutView):
     """Crash game view using Components V2 Container system."""
 
     def __init__(
-        self, bot: commands.Bot, host_id: int, channel_id: int, session_id=None
+        self, bot: commands.Bot, host_id: int, channel_id: int, session_id=None,
+        provider: str = "local"
     ):
         super().__init__(timeout=None)
         self.bot = bot
@@ -52,6 +53,7 @@ class CrashView(discord.ui.LayoutView):
         self.host_id = host_id
         self.channel_id = channel_id
         self.session_id = session_id
+        self.provider = provider
 
         self.game_task: asyncio.Task | None = None
         self.is_running = False
@@ -238,7 +240,10 @@ class CrashView(discord.ui.LayoutView):
 
             self.players[uid] = bet
             # Capture PF data before generate_crash_point consumes the nonce
-            self.pf_data[uid] = await self.casino.start_game_proof(uid)
+            if self.provider == "fairgate":
+                self.pf_data[uid] = await self.casino.start_fairgate_proof(uid)
+            else:
+                self.pf_data[uid] = await self.casino.start_game_proof(uid)
             self.crash_points[uid] = await self.generate_crash_point(uid)
 
             await self.casino._log_game_event(
@@ -324,6 +329,11 @@ class CrashView(discord.ui.LayoutView):
 
         # Get user's house edge (lower for higher VIP tiers)
         house_edge = await self.casino.calculate_house_edge(user_id)
+
+        if self.provider == "fairgate":
+            return await self.casino.fairgate_generate_crash_point(
+                user_id, self.pf_data[user_id], house_edge
+            )
 
         r = await self.casino.fair_random(user_id)
 
@@ -1120,6 +1130,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         user_id,
         PF,
         session_id=None,
+        provider: str = "local",
     ):
         super().__init__(timeout=60)
         self.bot = bot
@@ -1131,6 +1142,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         self.user_id = user_id
         self.rounds = 0
         self.PF = PF
+        self.provider = provider
         self.session_id = session_id
         self.message: discord.Message | None = None
 
@@ -1187,17 +1199,21 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         # Process game result for rakeback
         await self.casino.process_game_result(self.user_id, "double", self.initial_amount)
 
-        success = await self.casino.fair_choice(self.user_id, [True, False])
+        if self.provider == "fairgate":
+            self.PF = await self.casino.bump_fairgate_pf(self.user_id, self.PF)
+            side = await self.casino.fairgate_play_coinflip(self.user_id, self.PF, choice="heads")
+            success = side == "heads"
+        else:
+            success = await self.casino.fair_choice(self.user_id, [True, False])
         if success:
             self.winnings = Decimal(self.winnings) * 2
-            revealed_seed, new_hash = await self.bot.database.increment_win(
+            await self.casino._record_fairgate_outcome(
                 self.user_id,
                 "double",
+                "win",
                 self.initial_amount,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
+                self.PF,
+                self.provider,
             )
             self.rounds += 1
 
@@ -1217,14 +1233,13 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 {"round": self.rounds, "winnings": str(self.winnings)},
             )
         else:
-            revealed_seed, new_hash = await self.bot.database.increment_loss(
+            await self.casino._record_fairgate_outcome(
                 self.user_id,
                 "double",
+                "loss",
                 self.initial_amount,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
+                self.PF,
+                self.provider,
             )
 
             # Build loss container (no buttons)
@@ -1640,7 +1655,12 @@ class RouletteView(discord.ui.LayoutView):
         total_wager = self.bet_amount * num_bets
 
         # ── Fairness & session ──
-        PF = await self.cog.start_game_proof(self.user_id)
+        provider = "fairgate" if self.cog.is_fairgate_enabled("roulette") else "local"
+        PF = (
+            await self.cog.start_fairgate_proof(self.user_id)
+            if provider == "fairgate"
+            else await self.cog.start_game_proof(self.user_id)
+        )
 
         try:
             await self.bot.database.process_treasury_transaction(
@@ -1673,15 +1693,25 @@ class RouletteView(discord.ui.LayoutView):
         )
 
         # ── Spin ──
-        spin_result = await self.cog.fair_choice(self.user_id, ROULETTE_ALL_NUMBERS)
-
-        is_int = isinstance(spin_result, int)
-        is_red = is_int and spin_result in ROULETTE_RED_NUMBERS
-        is_black = is_int and spin_result in ROULETTE_BLACK_NUMBERS
-        is_green = (spin_result == 0) or (spin_result == "00")
-        is_even = is_int and spin_result != 0 and (spin_result % 2 == 0)
-        is_odd = is_int and (spin_result % 2 == 1)
-        color_label = "Green" if is_green else ("Red" if is_red else "Black")
+        if provider == "fairgate":
+            outcome = await self.cog.fairgate_play_roulette(self.user_id, PF, wheel="american")
+            spin_result = outcome["pocket"]
+            color_label = outcome.get("color", "Unknown").title()
+            is_green = color_label.lower() == "green"
+            is_red = color_label.lower() == "red"
+            is_black = color_label.lower() == "black"
+            is_int = isinstance(spin_result, int)
+            is_even = is_int and spin_result != 0 and (spin_result % 2 == 0)
+            is_odd = is_int and (spin_result % 2 == 1)
+        else:
+            spin_result = await self.cog.fair_choice(self.user_id, ROULETTE_ALL_NUMBERS)
+            is_int = isinstance(spin_result, int)
+            is_red = is_int and spin_result in ROULETTE_RED_NUMBERS
+            is_black = is_int and spin_result in ROULETTE_BLACK_NUMBERS
+            is_green = (spin_result == 0) or (spin_result == "00")
+            is_even = is_int and spin_result != 0 and (spin_result % 2 == 0)
+            is_odd = is_int and (spin_result % 2 == 1)
+            color_label = "Green" if is_green else ("Red" if is_red else "Black")
 
         # ── Evaluate each bet ──
         total_winnings = Decimal(0)
@@ -1703,24 +1733,16 @@ class RouletteView(discord.ui.LayoutView):
 
         # ── Record outcome ──
         net_won = total_winnings > 0
+        await self.cog._record_fairgate_outcome(
+            self.user_id, "roulette", "win" if net_won else "loss", total_wager, PF, provider
+        )
         if net_won:
-            await self.bot.database.increment_win(
-                self.user_id, "roulette", total_wager,
-                client_seed=PF["client_seed"], seed_used=PF["server_seed"],
-                nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
-            )
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id, amount=total_winnings, description="Roulette Win"
                 )
             except ValueError:
                 pass
-        else:
-            await self.bot.database.increment_loss(
-                self.user_id, "roulette", total_wager,
-                client_seed=PF["client_seed"], seed_used=PF["server_seed"],
-                nonce=PF["nonce"], hash_hex=PF["server_seed_hash"],
-            )
 
         await self.bot.database.set_cooldown(self.user_id, "roulette", 5)
 
@@ -1833,7 +1855,8 @@ class HiLoView(discord.ui.LayoutView):
 
     def __init__(self, bot, cog, user: discord.Member, bet_amount: Decimal,
                  wallet_id: int, currency_name: str, current_card: str,
-                 house_edge: Decimal, PF: dict, session_id, ctx: Context):
+                 house_edge: Decimal, PF: dict, session_id, ctx: Context,
+                 provider: str = "local", deck: list[str] | None = None):
         super().__init__(timeout=300)
         self.bot = bot
         self.cog: Casino = cog
@@ -1847,9 +1870,11 @@ class HiLoView(discord.ui.LayoutView):
         self.current_card = current_card
         self.house_edge = house_edge
         self.PF = PF
+        self.provider = provider
         self.session_id = session_id
         self.message: discord.Message | None = None
 
+        self.deck = list(deck) if deck else []
         self.multiplier = Decimal("1.0")
         self.history: list[str] = []
         self.game_active = True
@@ -1980,6 +2005,13 @@ class HiLoView(discord.ui.LayoutView):
 
     # ── Game lifecycle ──
 
+    async def _next_fairgate_card(self) -> str:
+        """Pop the next card from the pre-shuffled deck, drawing a fresh deck if needed."""
+        if not self.deck:
+            self.PF = await self.cog.bump_fairgate_pf(self.user_id, self.PF)
+            self.deck = await self.cog.fairgate_play_hilo_deck(self.user_id, self.PF)
+        return self.deck.pop(0)
+
     async def _end_game(self, win: bool):
         self.game_active = False
 
@@ -2056,10 +2088,14 @@ class HiLoView(discord.ui.LayoutView):
             await interaction.response.defer()
             self.has_played = True
             self.history.append(self.current_card)
-            # Exclude the current card so the multiplier math (which assumes
-            # 12 remaining cards) lines up with the actual draw distribution.
-            candidates = [c for c in HILO_CARDS if c != self.current_card]
-            next_card = await self.cog.fair_choice(self.user_id, candidates)
+
+            if self.provider == "fairgate":
+                next_card = await self._next_fairgate_card()
+            else:
+                # Exclude the current card so the multiplier math (which assumes
+                # 12 remaining cards) lines up with the actual draw distribution.
+                candidates = [c for c in HILO_CARDS if c != self.current_card]
+                next_card = await self.cog.fair_choice(self.user_id, candidates)
 
             multiplier_increase = self._calculate_multiplier(self.history[-1], "higher")
 
@@ -2106,10 +2142,14 @@ class HiLoView(discord.ui.LayoutView):
             await interaction.response.defer()
             self.has_played = True
             self.history.append(self.current_card)
-            # Exclude the current card so the multiplier math (which assumes
-            # 12 remaining cards) lines up with the actual draw distribution.
-            candidates = [c for c in HILO_CARDS if c != self.current_card]
-            next_card = await self.cog.fair_choice(self.user_id, candidates)
+
+            if self.provider == "fairgate":
+                next_card = await self._next_fairgate_card()
+            else:
+                # Exclude the current card so the multiplier math (which assumes
+                # 12 remaining cards) lines up with the actual draw distribution.
+                candidates = [c for c in HILO_CARDS if c != self.current_card]
+                next_card = await self.cog.fair_choice(self.user_id, candidates)
 
             multiplier_increase = self._calculate_multiplier(self.history[-1], "lower")
 
@@ -2161,7 +2201,10 @@ class HiLoView(discord.ui.LayoutView):
             await interaction.response.defer()
             self.skips_used += 1
             self.history.append(self.current_card)
-            self.current_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
+            if self.provider == "fairgate":
+                self.current_card = await self._next_fairgate_card()
+            else:
+                self.current_card = await self.cog.fair_choice(self.user_id, HILO_CARDS)
             self._update_button_labels()
             self._rebuild_container()
             await interaction.followup.edit_message(interaction.message.id, view=self)
@@ -2240,6 +2283,7 @@ class PokerView(View):
         user_id,
         PF,
         session_id=None,
+        provider: str = "local",
     ):
         super().__init__(timeout=60)
         self.bot = bot
@@ -2252,6 +2296,7 @@ class PokerView(View):
         self.wallet_id = wallet_id
         self.user_id = user_id
         self.PF = PF
+        self.provider = provider
         self.session_id = session_id
         self.message: discord.Message | None = None
 
@@ -2353,14 +2398,8 @@ class PokerView(View):
         player_ties = player_rank == bot_rank
 
         if player_wins:
-            revealed_seed, new_hash = await self.bot.database.increment_win(
-                self.user_id,
-                "poker",
-                self.bet,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
+            await self.cog._record_fairgate_outcome(
+                self.user_id, "poker", "win", self.bet, self.PF, self.provider
             )
             payout = self.bet * Decimal("2")
             await self.bot.database.process_treasury_transaction(
@@ -2372,16 +2411,27 @@ class PokerView(View):
         elif player_ties:
             # Tied hand → push. Record the round as a push (counts toward
             # total wagered but not toward wins or losses) and refund the bet.
-            revealed_seed, new_hash = await self.bot.database.record_game(
-                self.user_id,
-                "poker",
-                outcome="push",
-                bet=self.bet,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
-            )
+            if self.provider == "fairgate":
+                await self.bot.database.record_fairgate_game(
+                    self.user_id,
+                    "poker",
+                    "push",
+                    self.bet,
+                    client_seed=self.PF["client_seed"],
+                    nonce=self.PF["nonce"],
+                    hash_hex=self.PF["server_seed_hash"],
+                )
+            else:
+                await self.bot.database.record_game(
+                    self.user_id,
+                    "poker",
+                    outcome="push",
+                    bet=self.bet,
+                    client_seed=self.PF["client_seed"],
+                    seed_used=self.PF["server_seed"],
+                    nonce=self.PF["nonce"],
+                    hash_hex=self.PF["server_seed_hash"],
+                )
             await self.bot.database.process_treasury_transaction(
                 wallet_id=self.wallet_id, amount=self.bet, description="Poker Push"
             )
@@ -2389,14 +2439,8 @@ class PokerView(View):
             result = f"It's a tie! Your bet of **{formatted}** has been refunded."
             color = discord.Color.greyple()
         else:
-            revealed_seed, new_hash = await self.bot.database.increment_loss(
-                self.user_id,
-                "poker",
-                self.bet,
-                client_seed=self.PF["client_seed"],
-                seed_used=self.PF["server_seed"],
-                nonce=self.PF["nonce"],
-                hash_hex=self.PF["server_seed_hash"],
+            await self.cog._record_fairgate_outcome(
+                self.user_id, "poker", "loss", self.bet, self.PF, self.provider
             )
             formatted = await self.cog.formatter(self.bet)
             result = f"You lose! You lost **{formatted}**."
@@ -2429,14 +2473,8 @@ class PokerView(View):
                 "Not your game!", ephemeral=True
             )
 
-        revealed_seed, new_hash = await self.bot.database.increment_loss(
-            self.user_id,
-            "poker",
-            self.bet,
-            client_seed=self.PF["client_seed"],
-            seed_used=self.PF["server_seed"],
-            nonce=self.PF["nonce"],
-            hash_hex=self.PF["server_seed_hash"],
+        await self.cog._record_fairgate_outcome(
+            self.user_id, "poker", "loss", self.bet, self.PF, self.provider
         )
         formatted = await self.cog.formatter(self.bet)
         result = f"You folded. You lost **{formatted}**."
@@ -2492,7 +2530,7 @@ class LadderView(discord.ui.LayoutView):
 
     def __init__(
         self, *, bot, cog, user_id: int, bet: Decimal, wallet_id,
-        PF: dict, session_id, currency_name: str,
+        PF: dict, session_id, currency_name: str, provider: str = "local",
     ):
         super().__init__(timeout=60)
         self.bot = bot
@@ -2501,6 +2539,7 @@ class LadderView(discord.ui.LayoutView):
         self.bet = bet
         self.wallet_id = wallet_id
         self.PF = PF
+        self.provider = provider
         self.session_id = session_id
         self.currency_name = currency_name
         self.step = 0
@@ -2588,7 +2627,12 @@ class LadderView(discord.ui.LayoutView):
 
         success_chance = self.STEP_PROBS.get(self.step, 0)
         threshold = success_chance * 100
-        roll = await self.cog.fair_randbelow(self.user_id, 10000)
+        if self.provider == "fairgate":
+            roll = (await self.cog.fairgate_play_numbers(
+                self.user_id, self.PF, pool=10000, pick=1, replacement=True
+            ))[0]
+        else:
+            roll = await self.cog.fair_randbelow(self.user_id, 10000)
 
         if roll < threshold:
             # ── success ──
@@ -2626,6 +2670,10 @@ class LadderView(discord.ui.LayoutView):
                 )
                 self.stop()
                 return
+
+            # Still climbing — allocate the next nonce for the following step.
+            if self.provider == "fairgate":
+                self.PF = await self.cog.bump_fairgate_pf(self.user_id, self.PF)
 
             # Still climbing
             next_prob = self.STEP_PROBS.get(self.step, 0)
@@ -2811,7 +2859,7 @@ class SlotsView(discord.ui.LayoutView):
                     scatter_count: int, winnings: Decimal, free_spins: int = 0,
                     multiplier: Decimal = Decimal("1"), pf_data: dict = None,
                     scatter_payout: Decimal = Decimal("0"),
-                    verification: dict = None):
+                    verification: dict = None, provider: str = "local"):
         super().__init__(timeout=300.0)  # 5 minute timeout
         self.cog = cog
         self.user_id = user_id
@@ -2825,6 +2873,7 @@ class SlotsView(discord.ui.LayoutView):
         self.free_spins = free_spins
         self.multiplier = multiplier
         self.pf_data = pf_data or {}
+        self.provider = provider
         self.verification = verification or {}
         
         # State tracking
@@ -3001,25 +3050,28 @@ class SlotsView(discord.ui.LayoutView):
             
             # Get user ID and provable fairness data for this spin
             user_id = interaction.user.id
-            PF = await self.cog.start_game_proof(user_id)
-            
-            # Generate new grid
-            grid, verification = await self.cog._async_generate_spin_grid(user_id, PF["nonce"])
-            
+            if self.provider == "fairgate":
+                PF = await self.cog.start_fairgate_proof(user_id)
+                grid, verification, final_PF = await self.cog.fairgate_generate_slots_grid(user_id, PF)
+            else:
+                PF = await self.cog.start_game_proof(user_id)
+                grid, verification = await self.cog._async_generate_spin_grid(user_id, PF["nonce"])
+                final_PF = PF
+
             # Evaluate results
             winning_lines = self.cog._evaluate_paylines(grid)
             scatter_count = self.cog._count_scatters(grid)
             scatter_payout = self.cog._calculate_scatter_payout(scatter_count)
-            
+
             # Calculate winnings (payout multipliers * bet amount)
             line_winnings = sum(Decimal(str(line["payout"])) for line in winning_lines)
             total_multiplier = line_winnings + scatter_payout
             total_winnings = self.bet * total_multiplier * self.multiplier
-            
+
             # Apply house edge (8%)
             if total_winnings > 0:
                 total_winnings = AmountUtils.round_currency(total_winnings * Decimal("0.92"))
-            
+
             # Award winnings
             if total_winnings > 0:
                 wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -3035,18 +3087,18 @@ class SlotsView(discord.ui.LayoutView):
             if total_winnings > 0:
                 await self.bot.database.increment_win(
                     user_id, "slots", self.bet,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                    client_seed=final_PF["client_seed"],
+                    seed_used=final_PF["server_seed"],
+                    nonce=final_PF["nonce"],
+                    hash_hex=final_PF["server_seed_hash"],
                 )
             else:
                 await self.bot.database.increment_loss(
                     user_id, "slots", self.bet,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                    client_seed=final_PF["client_seed"],
+                    seed_used=final_PF["server_seed"],
+                    nonce=final_PF["nonce"],
+                    hash_hex=final_PF["server_seed_hash"],
                 )
             
             # Check for free spins trigger (max 1 retrigger)
@@ -3473,6 +3525,21 @@ class Casino(commands.Cog):
             "nonce": nonce,
         }
 
+    async def bump_fairgate_pf(self, user_id: int, PF: dict) -> dict:
+        """Return a new FairGate proof bundle reusing the same seed hash.
+
+        Used by interactive games that need multiple FairGate draws within a
+        single user session (e.g., double-or-nothing rounds). The wallet nonce
+        is bumped while the active server seed hash stays the same.
+        """
+        nonce = await self.bot.database.bump_fairgate_nonce(user_id)
+        return {
+            "server_seed_hash": PF["server_seed_hash"],
+            "server_seed": None,
+            "client_seed": PF["client_seed"],
+            "nonce": nonce,
+        }
+
     async def fairgate_play_mines(
         self,
         user_id: int,
@@ -3494,6 +3561,288 @@ class Casino(commands.Cog):
             server_seed_hash=server_seed_hash,
         )
         return result["outcome"]["bombs"]
+
+    async def _record_fairgate_outcome(
+        self,
+        user_id: int,
+        game_name: str,
+        outcome: str,
+        bet_amount,
+        PF: dict,
+        provider: str,
+    ) -> None:
+        """Persist a win/loss using the active provider.
+
+        ``outcome`` must be ``"win"`` or ``"loss"``.
+        """
+        if provider == "fairgate":
+            await self.bot.database.record_fairgate_game(
+                user_id,
+                game_name,
+                outcome,
+                bet_amount,
+                client_seed=PF["client_seed"],
+                nonce=PF["nonce"],
+                hash_hex=PF["server_seed_hash"],
+            )
+        else:
+            recorder = (
+                self.bot.database.increment_win
+                if outcome == "win"
+                else self.bot.database.increment_loss
+            )
+            await recorder(
+                user_id,
+                game_name,
+                bet_amount,
+                client_seed=PF["client_seed"],
+                seed_used=PF["server_seed"],
+                nonce=PF["nonce"],
+                hash_hex=PF["server_seed_hash"],
+            )
+
+    async def fairgate_play_coinflip(
+        self, user_id: int, PF: dict, *, choice: str = "heads"
+    ) -> str:
+        """Resolve a coinflip through FairGate; returns the winning side."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="coinflip",
+            params={"choice": choice},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]["side"]
+
+    @staticmethod
+    def _map_supergamble_roll(roll: float) -> tuple[str, Decimal, str]:
+        """Map a uniform [0, 100) roll to the supergamble outcome distribution.
+
+        Preserves the local two-roll probabilities using a single roll so the
+        result is verifiable through FairGate's dice-target engine:
+          - mega win: 2.25%  (0.15 * 0.15)
+          - normal win: 12.75% (0.85 * 0.15)
+          - recovery: 8.5%   (0.85 * 0.10)
+          - loss: 76.5%
+        """
+        if roll < 2.25:
+            return (
+                "mega_win",
+                SUPERGAMBLE_BONUS_MULTIPLIER,
+                "\n🌟 **MEGA WIN!** Extra multiplier applied!",
+            )
+        if roll < 15.0:
+            return "win", SUPERGAMBLE_BASE_MULTIPLIER, ""
+        if roll < 23.5:
+            return "recovery", SUPERGAMBLE_RECOVERY_MULTIPLIER, ""
+        return "loss", Decimal("0"), ""
+
+    async def fairgate_play_supergamble(
+        self, user_id: int, PF: dict
+    ) -> tuple[str, Decimal, str]:
+        """Resolve supergamble through FairGate's dice target engine."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="dice",
+            params={"mode": "target", "target": 50.0, "over": True},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        roll = float(result["outcome"]["roll"])
+        return self._map_supergamble_roll(roll)
+
+    async def fairgate_play_dice_sum(
+        self, user_id: int, PF: dict, *, dice: int = 2, sides: int = 6
+    ) -> int:
+        """Resolve a dice sum through FairGate; returns the integer total."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="dice",
+            params={"mode": "sum", "dice": dice, "sides": sides},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return int(result["outcome"]["roll"])
+
+    async def fairgate_play_roulette(
+        self, user_id: int, PF: dict, *, wheel: str = "american"
+    ) -> dict:
+        """Resolve a roulette spin through FairGate."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="roulette",
+            params={"wheel": wheel},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]
+
+    async def fairgate_play_crash(
+        self, user_id: int, PF: dict, *, target: float, max_crash: float, buckets: list
+    ) -> dict:
+        """Resolve a crash point through FairGate bucket mode."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="crash",
+            params={
+                "mode": "buckets",
+                "target": target,
+                "max_crash": max_crash,
+                "buckets": buckets,
+            },
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]
+
+    async def fairgate_generate_crash_point(
+        self, user_id: int, PF: dict, house_edge: Decimal
+    ) -> Decimal:
+        """Generate a per-user crash point using FairGate ``numbers`` draws.
+
+        Mirrors the local bucket logic: draw a bucket from a 10,000-space
+        distribution (45/35/15/5), then draw a cent-precise value inside the
+        bucket, and apply the same VIP boost used locally.
+        """
+        base_edge = 0.04
+
+        # 1) Bucket draw (one nonce).
+        bucket_roll = (await self.fairgate_play_numbers(
+            user_id=user_id, PF=PF, pool=10000, pick=1, replacement=True
+        ))[0]
+
+        if bucket_roll < 4500:
+            lo, hi = 1.0, 2.0
+        elif bucket_roll < 8000:
+            lo, hi = 2.0, 5.0
+        elif bucket_roll < 9500:
+            lo, hi = 5.0, 20.0
+        else:
+            lo, hi = 20.0, 50.0
+
+        # 2) Value draw inside the bucket (next nonce).
+        PF = await self.bump_fairgate_pf(user_id, PF)
+        cents_pool = int((hi - lo) * 100)
+        value_roll = (await self.fairgate_play_numbers(
+            user_id=user_id, PF=PF, pool=cents_pool, pick=1, replacement=True
+        ))[0]
+        v = lo + (value_roll / 100.0)
+
+        # 3) Advance the wallet nonce so the next game starts at the same
+        #    offset as the local path (two consumed nonces total).
+        await self.bot.database.bump_fairgate_nonce(user_id)
+
+        # 4) VIP boost (same formula as local generate_crash_point).
+        user_edge = float(house_edge)
+        if 0 < user_edge < base_edge:
+            boost = (base_edge - user_edge) / base_edge
+            v = v + (hi - v) * boost
+
+        return Decimal(str(round(v, 2)))
+
+    async def fairgate_play_ladder(
+        self,
+        user_id: int,
+        PF: dict,
+        *,
+        step: int,
+        probability: float,
+        multiplier: float,
+    ) -> dict:
+        """Resolve a single ladder step through FairGate."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="ladder",
+            params={"step": step, "probability": probability, "multiplier": multiplier},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]
+
+    async def fairgate_play_numbers(
+        self,
+        user_id: int,
+        PF: dict,
+        *,
+        pool: int,
+        pick: int,
+        replacement: bool = False,
+    ) -> list[int]:
+        """Resolve a number draw through FairGate; returns the drawn numbers."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="numbers",
+            params={"pool": pool, "pick": pick, "replacement": replacement},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]["numbers"]
+
+    async def fairgate_play_ridebus(
+        self, user_id: int, PF: dict, *, deck_count: int = 1
+    ) -> list[str]:
+        """Resolve a shuffled deck through FairGate (ridebus engine)."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="ridebus",
+            params={"deck_count": deck_count},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]["deck"]
+
+    async def fairgate_play_hilo(
+        self, user_id: int, PF: dict, *, deck_count: int = 1
+    ) -> dict:
+        """Resolve the first two cards for Hi-Lo through FairGate."""
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="hilo",
+            params={"deck_count": deck_count},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]
+
+    async def fairgate_play_hilo_deck(
+        self, user_id: int, PF: dict
+    ) -> list[str]:
+        """Draw a full shuffled 13-rank abstract deck for multi-round Hi-Lo.
+
+        The ``numbers`` engine returns a permutation of ``0..12`` which maps
+        directly onto ``HILO_CARDS`` (A, 2 … K). The caller consumes cards
+        from the returned list and refreshes it when exhausted.
+        """
+        numbers = await self.fairgate_play_numbers(
+            user_id=user_id, PF=PF, pool=13, pick=13, replacement=False
+        )
+        return [HILO_CARDS[n] for n in numbers]
+
+    async def fairgate_play_slots(
+        self, user_id: int, PF: dict, *, reels: int = 5, rows: int = 4
+    ) -> dict:
+        """Resolve a slot spin through FairGate.
+
+        Uses the visible window result; the caller evaluates paylines.
+        """
+        result = await self.fairgate_client.play(
+            user_id=user_id,
+            game="slots",
+            params={"reels": reels, "rows": rows, "visible": True},
+            client_seed=PF["client_seed"],
+            nonce=PF["nonce"],
+            server_seed_hash=PF["server_seed_hash"],
+        )
+        return result["outcome"]
 
     @staticmethod
     def _is_hash(value) -> bool:
@@ -4558,7 +4907,10 @@ class Casino(commands.Cog):
             )
             return await ctx.reply(embed=embed, mention_author=False)
 
+        # Map TPNEBOT game names to the actual FairGate engine game and the
+        # params that were passed to ``/play`` for the recorded nonce.
         params = None
+        verify_game = game_key
         if game_key == "mines":
             bombs = await self.bot.database.fetch_mines_bomb_count(member.id, nonce)
             if bombs is None:
@@ -4572,6 +4924,62 @@ class Casino(commands.Cog):
                     inline=False,
                 )
             params = {"rows": 5, "cols": 5, "mines": bombs}
+        elif game_key in ("gamble", "double"):
+            verify_game = "coinflip"
+            params = {"choice": "heads"}
+        elif game_key == "supergamble":
+            verify_game = "dice"
+            params = {"mode": "target", "target": 50.0, "over": True}
+        elif game_key == "dice":
+            verify_game = "dice"
+            params = {"mode": "sum", "dice": 2, "sides": 6}
+        elif game_key == "roulette":
+            verify_game = "roulette"
+            params = {"wheel": "american"}
+        elif game_key in ("blackjack", "poker"):
+            verify_game = "ridebus"
+            params = {"deck_count": 1}
+        elif game_key == "hilo":
+            verify_game = "numbers"
+            params = {"pool": 13, "pick": 13, "replacement": False}
+        elif game_key == "ladder":
+            verify_game = "numbers"
+            params = {"pool": 10000, "pick": 1, "replacement": True}
+        elif game_key == "keno":
+            verify_game = "numbers"
+            params = {"pool": 30, "pick": 8, "replacement": False}
+        elif game_key == "crash":
+            # Crash points are generated via two ``numbers`` draws; the
+            # recorded nonce is the first (bucket) draw.
+            verify_game = "numbers"
+            params = {"pool": 10000, "pick": 1, "replacement": True}
+            embed.add_field(
+                name="⚠️ Note",
+                value=(
+                    "Crash uses two FairGate draws (bucket + value). "
+                    "This verifies the bucket draw only."
+                ),
+                inline=False,
+            )
+        elif game_key == "slots":
+            # Slots uses one ``numbers`` draw per reel; the recorded nonce is
+            # the final reel's draw. We don't store the reel index, so verify
+            # against the first reel's weight distribution as a best-effort.
+            verify_game = "numbers"
+            first_weights = self.SLOTS_REEL_WEIGHTS[0]
+            params = {
+                "pool": sum(first_weights.values()),
+                "pick": 4,
+                "replacement": True,
+            }
+            embed.add_field(
+                name="⚠️ Note",
+                value=(
+                    "Slots uses one FairGate draw per reel; this verifies "
+                    "the first reel's parameters only."
+                ),
+                inline=False,
+            )
 
         try:
             proof = await self.fairgate_client.verify(
@@ -4579,7 +4987,7 @@ class Casino(commands.Cog):
                 server_seed_hash=server_seed_hash,
                 client_seed=client_seed,
                 nonce=nonce,
-                game=game_key,
+                game=verify_game,
                 params=params,
             )
         except Exception as e:
@@ -4691,7 +5099,12 @@ class Casino(commands.Cog):
             user_id = ctx.author.id
             session_id = None
 
-            PF = await self.start_game_proof(user_id)
+            provider = "fairgate" if self.is_fairgate_enabled("gamble") else "local"
+            PF = (
+                await self.start_fairgate_proof(user_id)
+                if provider == "fairgate"
+                else await self.start_game_proof(user_id)
+            )
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -4749,21 +5162,19 @@ class Casino(commands.Cog):
             )
 
             win_multiplier = Decimal("2.0")
-            is_winner = await self.fair_randbelow(user_id, 2) == 1
+            if provider == "fairgate":
+                side = await self.fairgate_play_coinflip(user_id, PF, choice="heads")
+                is_winner = side == "heads"
+            else:
+                is_winner = await self.fair_randbelow(user_id, 2) == 1
 
             # Process game result for rakeback
             await self.process_game_result(user_id, "gamble", amount)
 
             if is_winner:
                 winnings = Decimal(amount) * win_multiplier
-                revealed_seed, new_hash = await self.bot.database.increment_win(
-                    user_id,
-                    "gamble",
-                    amount,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                await self._record_fairgate_outcome(
+                    user_id, "gamble", "win", amount, PF, provider
                 )
                 try:
                     await self.bot.database.process_treasury_transaction(
@@ -4798,14 +5209,8 @@ class Casino(commands.Cog):
                     final_state={"winnings": str(winnings)},
                 )
             else:
-                revealed_seed, new_hash = await self.bot.database.increment_loss(
-                    user_id,
-                    "gamble",
-                    amount,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                await self._record_fairgate_outcome(
+                    user_id, "gamble", "loss", amount, PF, provider
                 )
                 embed = discord.Embed(
                     description=f"You lost {self.currency_name} **{await self.formatter(amount)}**",
@@ -4842,7 +5247,12 @@ class Casino(commands.Cog):
             user_id = ctx.author.id
             session_id = None
 
-            PF = await self.start_game_proof(user_id)
+            provider = "fairgate" if self.is_fairgate_enabled("supergamble") else "local"
+            PF = (
+                await self.start_fairgate_proof(user_id)
+                if provider == "fairgate"
+                else await self.start_game_proof(user_id)
+            )
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -4897,11 +5307,6 @@ class Casino(commands.Cog):
                 reason="supergamble_bet",
             )
 
-            win_roll = await self.fair_randbelow(user_id, 100)
-            bonus_roll = await self.fair_randbelow(user_id, 100)
-
-            win_chance = SUPERGAMBLE_WIN_THRESHOLD
-            win = win_roll < win_chance
             base_multiplier = SUPERGAMBLE_BASE_MULTIPLIER
             bonus_multiplier = SUPERGAMBLE_BONUS_MULTIPLIER
 
@@ -4914,38 +5319,62 @@ class Casino(commands.Cog):
                 treasury / total_supply if total_supply > 0 else Decimal("0")
             )
 
+            if provider == "fairgate":
+                sg_outcome, _multiplier, bonus_text = await self.fairgate_play_supergamble(
+                    user_id, PF
+                )
+            else:
+                win_roll = await self.fair_randbelow(user_id, 100)
+                bonus_roll = await self.fair_randbelow(user_id, 100)
+                win = win_roll < SUPERGAMBLE_WIN_THRESHOLD
+                if win:
+                    is_mega = bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD
+                    sg_outcome = "mega_win" if is_mega else "win"
+                    bonus_text = (
+                        "\n🌟 **MEGA WIN!** Extra multiplier applied!"
+                        if is_mega
+                        else ""
+                    )
+                else:
+                    recovery_allowed = (
+                        bonus_roll < SUPERGAMBLE_RECOVERY_THRESHOLD
+                        and treasury_ratio >= Decimal("0.1")
+                    )
+                    sg_outcome = "recovery" if recovery_allowed else "loss"
+                    bonus_text = ""
+
             # Process game result for rakeback
             await self.process_game_result(user_id, "supergamble", amount)
 
-            if win:
-                raw_multiplier = (
-                    bonus_multiplier if bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD else base_multiplier
-                )
-                bonus_text = (
-                    "\n🌟 **MEGA WIN!** Extra multiplier applied!"
-                    if bonus_roll < SUPERGAMBLE_MEGA_THRESHOLD
-                    else ""
-                )
-
+            if sg_outcome == "win":
+                raw_multiplier = base_multiplier
                 winnings = (amount * raw_multiplier).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
+                await self._record_fairgate_outcome(
+                    user_id, "supergamble", "win", amount, PF, provider
+                )
+            elif sg_outcome == "mega_win":
+                raw_multiplier = bonus_multiplier
+                winnings = (amount * raw_multiplier).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                await self._record_fairgate_outcome(
+                    user_id, "supergamble", "win", amount, PF, provider
+                )
+            elif sg_outcome == "recovery":
+                raw_multiplier = SUPERGAMBLE_RECOVERY_MULTIPLIER
+                winnings = AmountUtils.round_currency(amount * raw_multiplier)
+            else:
+                raw_multiplier = Decimal("0")
+                winnings = Decimal("0")
 
+            if sg_outcome in ("win", "mega_win"):
                 if winnings > treasury:
                     winnings = treasury
                     bonus_text += (
                         "\n💸 Treasury couldn't pay full amount — payout capped."
                     )
-
-                revealed_seed, new_hash = await self.bot.database.increment_win(
-                    user_id,
-                    "supergamble",
-                    amount,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
-                )
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id, winnings, "SuperGamble Win"
@@ -4969,56 +5398,45 @@ class Casino(commands.Cog):
                 )
                 outcome = "win"
                 outcome_amount = winnings
-
-            else:
-                recovery_roll = bonus_roll
-                recovery_allowed = recovery_roll < SUPERGAMBLE_RECOVERY_THRESHOLD and treasury_ratio >= Decimal(
-                    "0.1"
-                )
-                if recovery_allowed:
-                    recovery = AmountUtils.round_currency(amount * SUPERGAMBLE_RECOVERY_MULTIPLIER)
-                    if recovery > treasury:
-                        recovery = treasury
-
-                    try:
-                        await self.bot.database.process_treasury_transaction(
-                            wallet_id, recovery, "SuperGamble Loss Recovery"
-                        )
-                    except ValueError as e:
-                        embed = discord.Embed(
-                            description=f"🚫 Transaction failed: {e}",
-                            color=discord.Color.red(),
-                        )
-                        await self._end_game_session(
-                            session_id,
-                            outcome="error",
-                            reason=str(e),
-                            final_state={"recovery": str(recovery)},
-                        )
-                        await ctx.reply(embed=embed, delete_after=5)
-                        return
-                    embed = discord.Embed(
-                        description=f"You lost, but recovered **{await self.formatter(recovery)} {self.currency_name}**!",
-                        color=discord.Color.blurple(),
+            elif sg_outcome == "recovery":
+                if winnings > treasury:
+                    winnings = treasury
+                try:
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id, winnings, "SuperGamble Loss Recovery"
                     )
-                    outcome = "loss"
-                    outcome_amount = recovery
-                else:
-                    revealed_seed, new_hash = await self.bot.database.increment_loss(
-                        user_id,
-                        "supergamble",
-                        amount,
-                        client_seed=PF["client_seed"],
-                        seed_used=PF["server_seed"],
-                        nonce=PF["nonce"],
-                        hash_hex=PF["server_seed_hash"],
-                    )
+                except ValueError as e:
                     embed = discord.Embed(
-                        description=f"You lost **{await self.formatter(amount)} {self.currency_name}**.",
+                        description=f"🚫 Transaction failed: {e}",
                         color=discord.Color.red(),
                     )
-                    outcome = "loss"
-                    outcome_amount = amount
+                    await self._end_game_session(
+                        session_id,
+                        outcome="error",
+                        reason=str(e),
+                        final_state={"recovery": str(winnings)},
+                    )
+                    await ctx.reply(embed=embed, delete_after=5)
+                    return
+                embed = discord.Embed(
+                    description=f"You lost, but recovered **{await self.formatter(winnings)} {self.currency_name}**!",
+                    color=discord.Color.blurple(),
+                )
+                await self._record_fairgate_outcome(
+                    user_id, "supergamble", "loss", amount, PF, provider
+                )
+                outcome = "loss"
+                outcome_amount = winnings
+            else:
+                await self._record_fairgate_outcome(
+                    user_id, "supergamble", "loss", amount, PF, provider
+                )
+                embed = discord.Embed(
+                    description=f"You lost **{await self.formatter(amount)} {self.currency_name}**.",
+                    color=discord.Color.red(),
+                )
+                outcome = "loss"
+                outcome_amount = amount
 
             await self.bot.database.set_cooldown(
                 user_id, ctx.command.qualified_name, 60
@@ -5086,13 +5504,13 @@ class Casino(commands.Cog):
         """Async version that uses fair_randbelow for provable fairness."""
         grid = []
         verification = {"reel_positions": [], "nonce_start": nonce_start}
-        
+
         for reel_idx in range(5):
             weights = self.SLOTS_REEL_WEIGHTS[reel_idx]
             symbols = list(weights.keys())
             weight_values = list(weights.values())
             total_weight = sum(weight_values)
-            
+
             reel_symbols = []
             for row_idx in range(4):
                 # Use provable fairness RNG
@@ -5105,11 +5523,58 @@ class Casino(commands.Cog):
                         selected = sym
                         break
                 reel_symbols.append(selected)
-            
+
             grid.append(reel_symbols)
             verification["reel_positions"].append(pos)
-        
+
         return grid, verification
+
+    async def fairgate_generate_slots_grid(
+        self, user_id: int, PF: dict
+    ) -> tuple[list[list[str]], dict, dict]:
+        """Generate a 5×4 slots grid through FairGate using the local reel weights.
+
+        Each reel draws 4 independent positions from its weighted strip via the
+        FairGate ``numbers`` engine. One nonce is consumed per reel.
+        Returns ``(grid, verification, final_PF)``.
+        """
+        grid = []
+        verification = {"reel_positions": [], "nonce_start": PF["nonce"], "provider": "fairgate"}
+        current_PF = PF
+
+        for reel_idx in range(5):
+            weights = self.SLOTS_REEL_WEIGHTS[reel_idx]
+            symbols = list(weights.keys())
+            weight_values = list(weights.values())
+            total_weight = sum(weight_values)
+
+            positions = await self.fairgate_play_numbers(
+                user_id=user_id,
+                PF=current_PF,
+                pool=total_weight,
+                pick=4,
+                replacement=True,
+            )
+
+            reel_symbols = []
+            for pos in positions:
+                cumulative = 0
+                selected = symbols[0]
+                for sym, w in zip(symbols, weight_values):
+                    cumulative += w
+                    if pos < cumulative:
+                        selected = sym
+                        break
+                reel_symbols.append(selected)
+
+            grid.append(reel_symbols)
+            verification["reel_positions"].append(positions)
+
+            # Each reel consumes one wallet nonce.
+            if reel_idx < 4:
+                current_PF = await self.bump_fairgate_pf(user_id, current_PF)
+
+        return grid, verification, current_PF
 
     def _evaluate_paylines(self, grid: list[list[str]]) -> list[dict]:
         """Evaluate all 10 paylines against the grid.
@@ -5273,10 +5738,14 @@ class Casino(commands.Cog):
             )
 
         # Get provable fairness data
-        PF = await self.start_game_proof(user_id)
-
-        # Generate initial spin grid
-        grid, verification = await self._async_generate_spin_grid(user_id, PF["nonce"])
+        provider = "fairgate" if self.is_fairgate_enabled("slots") else "local"
+        if provider == "fairgate":
+            PF = await self.start_fairgate_proof(user_id)
+            grid, verification, final_PF = await self.fairgate_generate_slots_grid(user_id, PF)
+        else:
+            PF = await self.start_game_proof(user_id)
+            grid, verification = await self._async_generate_spin_grid(user_id, PF["nonce"])
+            final_PF = PF
 
         # Evaluate paylines
         payline_wins = self._evaluate_paylines(grid)
@@ -5302,18 +5771,18 @@ class Casino(commands.Cog):
             )
             await self.bot.database.increment_win(
                 user_id, "slots", stake,
-                client_seed=PF["client_seed"],
-                seed_used=PF["server_seed"],
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
+                client_seed=final_PF["client_seed"],
+                seed_used=final_PF["server_seed"],
+                nonce=final_PF["nonce"],
+                hash_hex=final_PF["server_seed_hash"],
             )
         else:
             await self.bot.database.increment_loss(
                 user_id, "slots", stake,
-                client_seed=PF["client_seed"],
-                seed_used=PF["server_seed"],
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
+                client_seed=final_PF["client_seed"],
+                seed_used=final_PF["server_seed"],
+                nonce=final_PF["nonce"],
+                hash_hex=final_PF["server_seed_hash"],
             )
 
         # Check for free spins trigger
@@ -5333,8 +5802,9 @@ class Casino(commands.Cog):
             winnings=winnings,
             free_spins=free_spins_awarded,
             multiplier=Decimal("1"),  # Removed 2x multiplier for treasury safety
-            pf_data=PF,
+            pf_data=final_PF,
             verification=verification,
+            provider=provider,
         )
         view.has_played = True  # Mark initial spin as played for loss message display
 
@@ -5359,7 +5829,12 @@ class Casino(commands.Cog):
         user_id = ctx.author.id
         session_id = None
 
-        PF = await self.start_game_proof(user_id)
+        provider = "fairgate" if self.is_fairgate_enabled("dice") else "local"
+        PF = (
+            await self.start_fairgate_proof(user_id)
+            if provider == "fairgate"
+            else await self.start_game_proof(user_id)
+        )
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -5436,9 +5911,13 @@ class Casino(commands.Cog):
             reason="dice_bet",
         )
 
-        die1 = await self.fair_randbelow(user_id, 6) + 1
-        die2 = await self.fair_randbelow(user_id, 6) + 1
-        total = die1 + die2
+        if provider == "fairgate":
+            total = await self.fairgate_play_dice_sum(user_id, PF, dice=2, sides=6)
+            die1 = die2 = None  # FairGate sum mode does not expose individual dice
+        else:
+            die1 = await self.fair_randbelow(user_id, 6) + 1
+            die2 = await self.fair_randbelow(user_id, 6) + 1
+            total = die1 + die2
         even_or_odd = "E" if total % 2 == 0 else "O"
 
         self.roll_history.setdefault(user_id, []).append(even_or_odd)
@@ -5469,17 +5948,22 @@ class Casino(commands.Cog):
         # Apply RTP boost for VIP players
         rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
 
+        if provider == "fairgate":
+            roll_desc = f"total **{total}**"
+        else:
+            roll_desc = f"{die1} and {die2} (total {total})"
+
         if (normalized_guess in ["even", "evens"] and total % 2 == 0) or (
             normalized_guess in ["odd", "odds"] and total % 2 == 1
         ):
             winnings = Decimal(amount) * Decimal(even_odd_payout) * rtp_boost
-            result = f"🎲 You rolled {die1} and {die2} (total {total})\nYou guessed correctly and won {currency_name} **{await self.formatter(winnings)}**!"
+            result = f"🎲 You rolled {roll_desc}\nYou guessed correctly and won {currency_name} **{await self.formatter(winnings)}**!"
         elif normalized_guess.isdigit() and int(normalized_guess) == total:
             multiplier = payout_multipliers[total]
             winnings = Decimal(amount) * Decimal(multiplier) * rtp_boost
-            result = f"🎲 You rolled {die1} and {die2} (total {total})\nExact match! You won {currency_name} **{await self.formatter(winnings)}** with a {multiplier}x payout!"
+            result = f"🎲 You rolled {roll_desc}\nExact match! You won {currency_name} **{await self.formatter(winnings)}** with a {multiplier}x payout!"
         else:
-            result = f"🎲 You rolled {die1} and {die2} (total {total})\nYou lost {currency_name} **{await self.formatter(amount)}**."
+            result = f"🎲 You rolled {roll_desc}\nYou lost {currency_name} **{await self.formatter(amount)}**."
 
         winnings = AmountUtils.round_currency(winnings) if winnings else 0
 
@@ -5497,24 +5981,12 @@ class Casino(commands.Cog):
                 )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
-            revealed_seed, new_hash = await self.bot.database.increment_win(
-                user_id,
-                "dice",
-                amount,
-                client_seed=PF["client_seed"],
-                seed_used=PF["server_seed"],
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
+            await self._record_fairgate_outcome(
+                user_id, "dice", "win", amount, PF, provider
             )
         else:
-            revealed_seed, new_hash = await self.bot.database.increment_loss(
-                user_id,
-                "dice",
-                amount,
-                client_seed=PF["client_seed"],
-                seed_used=PF["server_seed"],
-                nonce=PF["nonce"],
-                hash_hex=PF["server_seed_hash"],
+            await self._record_fairgate_outcome(
+                user_id, "dice", "loss", amount, PF, provider
             )
 
         embed.description = result
@@ -5602,7 +6074,12 @@ class Casino(commands.Cog):
         user_id = ctx.author.id
         session_id = None
 
-        PF = await self.start_game_proof(user_id)
+        provider = "fairgate" if self.is_fairgate_enabled("double") else "local"
+        PF = (
+            await self.start_fairgate_proof(user_id)
+            if provider == "fairgate"
+            else await self.start_game_proof(user_id)
+        )
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -5679,6 +6156,7 @@ class Casino(commands.Cog):
             user_id=user_id,
             PF=PF,
             session_id=session_id,
+            provider=provider,
         )
         await view.build_initial_container()
 
@@ -5700,7 +6178,12 @@ class Casino(commands.Cog):
         user_id = ctx.author.id
         session_id = None
 
-        PF = await self.start_game_proof(user_id)
+        provider = "fairgate" if self.is_fairgate_enabled("blackjack") else "local"
+        PF = (
+            await self.start_fairgate_proof(user_id)
+            if provider == "fairgate"
+            else await self.start_game_proof(user_id)
+        )
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -5779,10 +6262,13 @@ class Casino(commands.Cog):
             reason="blackjack_bet",
         )
 
-        suits = ["♥", "♦", "♣", "♠"]
-        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-        deck = [f"{r}{s}" for s in suits for r in ranks]
-        await self.fair_shuffle(user_id, deck)
+        if provider == "fairgate":
+            deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+        else:
+            suits = ["♥", "♦", "♣", "♠"]
+            ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+            deck = [f"{r}{s}" for s in suits for r in ranks]
+            await self.fair_shuffle(user_id, deck)
 
         # Calculate house edge for RTP tracking
         house_edge = await self.calculate_house_edge(user_id)
@@ -5842,25 +6328,13 @@ class Casino(commands.Cog):
             if player_score > 21:
                 outcome = "loss"
                 result = f"Bust! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
-                revealed_seed, new_hash = await self.bot.database.increment_loss(
-                    user_id,
-                    "blackjack",
-                    hand_bet,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                await self._record_fairgate_outcome(
+                    user_id, "blackjack", "loss", hand_bet, PF, provider
                 )
             elif dealer_score > 21 or player_score > dealer_score:
                 outcome = "win"
-                revealed_seed, new_hash = await self.bot.database.increment_win(
-                    user_id,
-                    "blackjack",
-                    hand_bet,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                await self._record_fairgate_outcome(
+                    user_id, "blackjack", "win", hand_bet, PF, provider
                 )
 
                 # Check if it's a natural blackjack (21 with 2 cards) for 3:2 payout
@@ -5894,16 +6368,27 @@ class Casino(commands.Cog):
                 outcome = "tie"
                 winnings = Decimal(hand_bet)
                 try:
-                    revealed_seed, new_hash = await self.bot.database.record_game(
-                        user_id,
-                        "blackjack",
-                        outcome="push",
-                        bet=hand_bet,
-                        client_seed=PF["client_seed"],
-                        seed_used=PF["server_seed"],
-                        nonce=PF["nonce"],
-                        hash_hex=PF["server_seed_hash"],
-                    )
+                    if provider == "fairgate":
+                        await self.bot.database.record_fairgate_game(
+                            user_id,
+                            "blackjack",
+                            "push",
+                            hand_bet,
+                            client_seed=PF["client_seed"],
+                            nonce=PF["nonce"],
+                            hash_hex=PF["server_seed_hash"],
+                        )
+                    else:
+                        await self.bot.database.record_game(
+                            user_id,
+                            "blackjack",
+                            outcome="push",
+                            bet=hand_bet,
+                            client_seed=PF["client_seed"],
+                            seed_used=PF["server_seed"],
+                            nonce=PF["nonce"],
+                            hash_hex=PF["server_seed_hash"],
+                        )
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,
                         amount=winnings,
@@ -5924,14 +6409,8 @@ class Casino(commands.Cog):
                 )
             else:
                 outcome = "loss"
-                revealed_seed, new_hash = await self.bot.database.increment_loss(
-                    user_id,
-                    "blackjack",
-                    hand_bet,
-                    client_seed=PF["client_seed"],
-                    seed_used=PF["server_seed"],
-                    nonce=PF["nonce"],
-                    hash_hex=PF["server_seed_hash"],
+                await self._record_fairgate_outcome(
+                    user_id, "blackjack", "loss", hand_bet, PF, provider
                 )
                 result = f"Dealer wins! You lost {self.currency_name} **{await self.formatter(hand_bet)}**."
 
@@ -6430,7 +6909,12 @@ class Casino(commands.Cog):
     )
     async def poker(self, ctx: commands.Context, bet_amount: str):
         user_id = ctx.author.id
-        PF = await self.start_game_proof(user_id)
+        provider = "fairgate" if self.is_fairgate_enabled("poker") else "local"
+        PF = (
+            await self.start_fairgate_proof(user_id)
+            if provider == "fairgate"
+            else await self.start_game_proof(user_id)
+        )
         session_id = None
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -6490,10 +6974,13 @@ class Casino(commands.Cog):
 
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
 
-        suits = ["♥", "♦", "♣", "♠"]
-        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-        deck = [f"{r}{s}" for s in suits for r in ranks]
-        await self.fair_shuffle(user_id, deck)
+        if provider == "fairgate":
+            deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+        else:
+            suits = ["♥", "♦", "♣", "♠"]
+            ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+            deck = [f"{r}{s}" for s in suits for r in ranks]
+            await self.fair_shuffle(user_id, deck)
 
         player_hand = [deck.pop(), deck.pop()]
         bot_hand = [deck.pop(), deck.pop()]
@@ -6521,6 +7008,7 @@ class Casino(commands.Cog):
             user_id,
             PF,
             session_id=session_id,
+            provider=provider,
         )
         msg = await ctx.reply(embed=embed, view=view)
         view.message = msg
@@ -6541,7 +7029,12 @@ class Casino(commands.Cog):
         self.active_players.add(user_id)
 
         try:
-            PF = await self.start_game_proof(user_id)
+            provider = "fairgate" if self.is_fairgate_enabled("hilo") else "local"
+            PF = (
+                await self.start_fairgate_proof(user_id)
+                if provider == "fairgate"
+                else await self.start_game_proof(user_id)
+            )
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -6591,13 +7084,26 @@ class Casino(commands.Cog):
             )
 
             house_edge = await self.calculate_house_edge(user_id)
-            current_card = await self.fair_choice(user_id, HILO_CARDS[1:-1])
+            if provider == "fairgate":
+                deck = await self.fairgate_play_hilo_deck(user_id, PF)
+                # First card must be between 2 and Q (local parity).
+                first_idx = next(
+                    (i for i, c in enumerate(deck) if c in HILO_CARDS[1:-1]),
+                    None,
+                )
+                if first_idx is None:
+                    raise RuntimeError("FairGate Hi-Lo deck contained no valid starting card")
+                current_card = deck.pop(first_idx)
+            else:
+                deck = None
+                current_card = await self.fair_choice(user_id, HILO_CARDS[1:-1])
 
             view = HiLoView(
                 bot=self.bot, cog=self, user=user, bet_amount=bet_amount,
                 wallet_id=wallet_id, currency_name=self.currency_name,
                 current_card=current_card, house_edge=house_edge,
                 PF=PF, session_id=session_id, ctx=ctx,
+                provider=provider, deck=deck,
             )
             view.message = await ctx.reply(view=view)
             self._register_session_handler(session_id, view.force_end)
@@ -6620,7 +7126,12 @@ class Casino(commands.Cog):
     async def luckyladder(self, ctx: Context, bet_amount: str):
         """Start climbing the Lucky Ladder with a bet. Uses Components V2 Container system."""
         user_id = ctx.author.id
-        PF = await self.start_game_proof(user_id)
+        provider = "fairgate" if self.is_fairgate_enabled("ladder") else "local"
+        PF = (
+            await self.start_fairgate_proof(user_id)
+            if provider == "fairgate"
+            else await self.start_game_proof(user_id)
+        )
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -6681,7 +7192,7 @@ class Casino(commands.Cog):
         view = LadderView(
             bot=self.bot, cog=self, user_id=user_id, bet=amount,
             wallet_id=wallet_id, PF=PF, session_id=session_id,
-            currency_name=self.currency_name,
+            currency_name=self.currency_name, provider=provider,
         )
         await view.build_initial_container()
 
@@ -6706,7 +7217,8 @@ class Casino(commands.Cog):
             owner_id=ctx.author.id,
             state={"host_id": ctx.author.id},
         )
-        view = CrashView(self.bot, ctx.author.id, cid, session_id=session_id)
+        provider = "fairgate" if self.is_fairgate_enabled("crash") else "local"
+        view = CrashView(self.bot, ctx.author.id, cid, session_id=session_id, provider=provider)
         self.active_games[cid] = view
 
         async def force_end(refund: bool = False):
@@ -7025,11 +7537,17 @@ class Casino(commands.Cog):
           create <name> [games] [rotation_policy] [algorithm]
           rotate <app_id>
           get <app_id>
+          games
+          patch <app_id> [games] [rotation_policy] [algorithm]
+          health
 
         Examples:
           !fairgateadmin create "TPNEBOT Casino" mines,dice,roulette after_each_bet sha256_tag
           !fairgateadmin rotate 66083062d68ec7a091a45ae3bf55ef23
           !fairgateadmin get 66083062d68ec7a091a45ae3bf55ef23
+          !fairgateadmin games
+          !fairgateadmin patch 66083062d68ec7a091a45ae3bf55ef23 mines,dice,roulette
+          !fairgateadmin health
         """
         if not self.fairgate_client:
             return await ctx.send(
@@ -7132,8 +7650,75 @@ class Casino(commands.Cog):
                         embed.add_field(name=key.replace("_", " ").title(), value=value, inline=False)
                 return await ctx.send(embed=embed)
 
+            if action == "games":
+                result = await self.fairgate_client.list_games()
+                games = result.get("games", result)
+                if isinstance(games, dict):
+                    lines = [f"**{k}**: {v}" for k, v in games.items()]
+                elif isinstance(games, list):
+                    lines = [f"• {g}" for g in games]
+                else:
+                    lines = [str(games)]
+                embed = discord.Embed(
+                    title="🎮 FairGate Supported Games",
+                    description="\n".join(lines) if lines else "No games returned.",
+                    color=discord.Color.blurple(),
+                )
+                return await ctx.send(embed=embed)
+
+            if action == "patch":
+                if not name:
+                    return await ctx.send(
+                        "Usage: `!fairgateadmin patch <app_id> [games] [policy] [algorithm]`",
+                        delete_after=10,
+                    )
+                games = (
+                    [g.strip().lower() for g in allowed_games.split(",") if g.strip()]
+                    if allowed_games
+                    else None
+                )
+                kwargs: dict[str, Any] = {}
+                if games is not None:
+                    kwargs["allowed_games"] = games
+                if rotation_policy != "after_each_bet":
+                    kwargs["rotation_policy"] = rotation_policy
+                if algorithm != "sha256_tag":
+                    kwargs["algorithm"] = algorithm
+                if not kwargs:
+                    return await ctx.send(
+                        "Provide at least one field to patch (games, policy, or algorithm).",
+                        delete_after=10,
+                    )
+                result = await self.fairgate_client.patch_app(name, **kwargs)
+                embed = discord.Embed(
+                    title="🔧 FairGate App Updated",
+                    description=f"App **`{name}`** patched successfully.",
+                    color=discord.Color.green(),
+                )
+                for key in ("id", "name", "allowed_games", "rotation_policy", "algorithm"):
+                    if key in result:
+                        value = result[key]
+                        if isinstance(value, list):
+                            value = ", ".join(str(v) for v in value)
+                        embed.add_field(name=key.replace("_", " ").title(), value=value, inline=False)
+                return await ctx.send(embed=embed)
+
+            if action == "health":
+                result = await self.fairgate_client.health()
+                status = result.get("status", "unknown")
+                embed = discord.Embed(
+                    title="💓 FairGate Health",
+                    description=f"Status: **`{status}`**",
+                    color=discord.Color.green() if status == "ok" else discord.Color.yellow(),
+                )
+                for key, value in result.items():
+                    if key == "status":
+                        continue
+                    embed.add_field(name=key.replace("_", " ").title(), value=str(value), inline=False)
+                return await ctx.send(embed=embed)
+
             await ctx.send(
-                f"Unknown action `{action}`. Use `create`, `rotate`, or `get`.",
+                f"Unknown action `{action}`. Use `create`, `rotate`, `get`, `games`, `patch`, or `health`.",
                 delete_after=10,
             )
 
@@ -7352,7 +7937,12 @@ class Casino(commands.Cog):
         try:
             user_id = ctx.author.id
 
-            PF = await self.start_game_proof(user_id)
+            provider = "fairgate" if self.is_fairgate_enabled("keno") else "local"
+            PF = (
+                await self.start_fairgate_proof(user_id)
+                if provider == "fairgate"
+                else await self.start_game_proof(user_id)
+            )
 
             wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
             balance = await self.bot.database.get_wallet_balance(wallet_id)
@@ -7392,7 +7982,8 @@ class Casino(commands.Cog):
 
             formatted_bet = await self.formatter(amount)
             game_ui_view = GameUI(
-                self, amount, formatted_bet, wallet_id, PF, session_id=session_id
+                self, amount, formatted_bet, wallet_id, PF, session_id=session_id,
+                provider=provider,
             )
             table_ui_view = TableUI(self, session_id=session_id)
 
@@ -7434,10 +8025,12 @@ class GameUI(discord.ui.LayoutView):
         player_wallet,
         PF: ProvenFairness,
         session_id=None,
+        provider: str = "local",
     ):
         super().__init__(timeout=None)
         self.container = GameUIContainer(
-            cog, player_bet, formatted_bet, player_wallet, PF, session_id=session_id
+            cog, player_bet, formatted_bet, player_wallet, PF, session_id=session_id,
+            provider=provider,
         )
         self.add_item(self.container)
 
@@ -7451,6 +8044,7 @@ class GameUIContainer(discord.ui.Container):
         player_wallet,
         PF: ProvenFairness,
         session_id=None,
+        provider: str = "local",
     ):
         super().__init__(accent_color=0x2B2D31)
         self.table_ui_view: TableUI = None
@@ -7467,7 +8061,7 @@ class GameUIContainer(discord.ui.Container):
         action_row.add_item(StakeSelect())
 
         action_row2 = discord.ui.ActionRow()
-        action_row2.add_item(BetButton(cog, PF))
+        action_row2.add_item(BetButton(cog, PF, provider=provider))
         action_row2.add_item(RandomPickButton(cog))
         action_row2.add_item(ClearTableButton())
 
@@ -7583,11 +8177,12 @@ class StakeSelect(discord.ui.Select):
 
 
 class BetButton(discord.ui.Button):
-    def __init__(self, cog: Casino, PF: ProvenFairness):
+    def __init__(self, cog: Casino, PF: ProvenFairness, provider: str = "local"):
         super().__init__(label="Bet", style=discord.ButtonStyle.green)
         self.bot = cog.bot
         self.cog: Casino = cog
         self.PF = PF
+        self.provider = provider
 
     async def handle_bullshit(self, table_ui_view: TableUI, itn: discord.Interaction):
         if table_ui_view.player != itn.user:
@@ -7611,9 +8206,19 @@ class BetButton(discord.ui.Button):
             else:
                 button.style = table_ui_view.default_color
 
-        selected = await self.cog.fair_sample(
-            table_ui_view.player.id, all_buttons, table_ui_view.max_picks
-        )
+        if self.provider == "fairgate":
+            drawn = await self.cog.fairgate_play_numbers(
+                user_id=table_ui_view.player.id,
+                PF=self.PF,
+                pool=len(all_buttons),
+                pick=table_ui_view.max_picks,
+                replacement=False,
+            )
+            selected = [all_buttons[i] for i in drawn]
+        else:
+            selected = await self.cog.fair_sample(
+                table_ui_view.player.id, all_buttons, table_ui_view.max_picks
+            )
         for button in selected:
             button.style = table_ui_view.win_color
 
