@@ -205,10 +205,19 @@ class FairGateClient:
         try:
             return await self._request("POST", "/play", json_body=payload)
         except SeedGoneError:
-            logger.warning("FairGate seed rotated; refreshing and retrying")
+            logger.warning("FairGate seed rotated (410 Gone); refreshing and retrying")
             await self.get_seed(force=True)
             payload["server_seed_hash"] = self._active_hash(None)
             return await self._request("POST", "/play", json_body=payload)
+        except FairGateError as exc:
+            # Some FairGate instances return the mismatch as a non-410 error.
+            msg = str(exc).lower()
+            if "server seed hash" in msg or "active session" in msg:
+                logger.warning("FairGate seed mismatch; refreshing and retrying")
+                await self.get_seed(force=True)
+                payload["server_seed_hash"] = self._active_hash(None)
+                return await self._request("POST", "/play", json_body=payload)
+            raise
 
     async def create_app(
         self,

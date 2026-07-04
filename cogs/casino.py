@@ -4779,6 +4779,7 @@ class Casino(commands.Cog):
                 winnings = Decimal("0")
 
             if sg_outcome in ("win", "mega_win"):
+                treasury = await self.bot.database.get_treasury_balance()
                 if winnings > treasury:
                     winnings = treasury
                     bonus_text += (
@@ -4808,6 +4809,7 @@ class Casino(commands.Cog):
                 outcome = "win"
                 outcome_amount = winnings
             elif sg_outcome == "recovery":
+                treasury = await self.bot.database.get_treasury_balance()
                 if winnings > treasury:
                     winnings = treasury
                 try:
