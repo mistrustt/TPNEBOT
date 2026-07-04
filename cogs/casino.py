@@ -34,6 +34,7 @@ from utils.fairness import (
     evaluate_slots,
 )
 from utils.fairgate import FairGateClient, FairGateError
+from aiohttp import ClientConnectorError, ServerDisconnectedError
 from textwrap import shorten
 
 logger = logging.getLogger("discord_bot")
@@ -241,8 +242,27 @@ class CrashView(discord.ui.LayoutView):
 
             self.players[uid] = bet
             # Capture PF data before generate_crash_point consumes the nonce
-            self.pf_data[uid] = await self.casino.start_fairgate_proof(uid)
-            self.crash_points[uid] = await self.generate_crash_point(uid)
+            try:
+                self.pf_data[uid] = await self.casino.start_fairgate_proof(uid)
+                self.crash_points[uid] = await self.generate_crash_point(uid)
+            except FairGateError as exc:
+                logger.exception("Crash point generation failed for user %s: %s", uid, exc)
+                try:
+                    await self.casino._remove_refund(self.session_id, user_id=uid)
+                except Exception:
+                    pass
+                try:
+                    await self.bot.database.process_treasury_transaction(
+                        wallet, bet, "Crash Refund — FairGate unreachable"
+                    )
+                except Exception:
+                    logger.exception("Crash refund failed for user %s", uid)
+                self.players.pop(uid, None)
+                self.pf_data.pop(uid, None)
+                return await sub_int.response.send_message(
+                    "🚫 The game server could not be reached. Your bet has been refunded.",
+                    ephemeral=True,
+                )
 
             await self.casino._log_game_event(
                 self.session_id,
@@ -611,12 +631,8 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.grid_buttons[pos].emoji = self.bomb_emoji
         self.grid_buttons[pos].style = discord.ButtonStyle.danger
 
-        # Disable all buttons
-        for button in self.grid_buttons:
-            button.disabled = True
-
-        # Reveal all positions
-        final_grid = self._create_final_grid()
+        # Reveal all remaining buttons directly and disable the grid.
+        self._reveal_grid_buttons()
 
         # Record loss
         await self._record_mines_outcome("loss")
@@ -625,7 +641,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
 
         # Update container text
-        self.container.game_text.content = f"### 💥 BOOM! Game Over\nYou lost **{self.formatted_bet}** {self.currency_name}\n\n{final_grid}"
+        self.container.game_text.content = f"### 💥 BOOM! Game Over\nYou lost **{self.formatted_bet}** {self.currency_name}"
 
         # Remove cashout button
         self.container.cashout_row.children[0].disabled = True
@@ -675,9 +691,8 @@ class MinesGridLayout(discord.ui.LayoutView):
         multiplier = await self._calculate_multiplier()
         winnings = self.bet_amount * Decimal(str(multiplier))
 
-        # Disable all buttons
-        for button in self.grid_buttons:
-            button.disabled = True
+        # Reveal any unrevealed gems and disable the grid.
+        self._reveal_grid_buttons()
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
         await self.bot.database.process_treasury_transaction(
@@ -692,13 +707,11 @@ class MinesGridLayout(discord.ui.LayoutView):
         # Process game result for rakeback
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
 
-        final_grid = self._create_final_grid()
-
         # Update container
         formatted_winnings = await casino.formatter(winnings)
         self.container.game_text.content = (
             f"### 🎉 PERFECT! All Gems Cleared!\n"
-            f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!\n\n{final_grid}"
+            f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!"
         )
         self.container.cashout_row.children[0].disabled = True
 
@@ -801,22 +814,24 @@ class MinesGridLayout(discord.ui.LayoutView):
 
         return expected
 
-    def _create_final_grid(self) -> str:
-        """Create the final grid display."""
-        final_grid = ""
-        for row in range(5):
-            final_grid += (
-                "".join(
-                    [
-                        self.bomb_emoji
-                        if (row * 5 + col) in self.bomb_positions
-                        else self.gem_emoji
-                        for col in range(5)
-                    ]
-                )
-                + "\n"
-            )
-        return final_grid
+    def _reveal_grid_buttons(self) -> None:
+        """Reveal the final grid state on the existing buttons.
+
+        Called once when the game ends. Sets each unrevealed button to its
+        bomb/gem style and emoji, then disables every grid button so the
+        player can't keep clicking.
+        """
+        for pos, button in enumerate(self.grid_buttons):
+            button.disabled = True
+            if pos in self.clicked_positions:
+                # Already revealed by player; leave as-is.
+                continue
+            if pos in self.bomb_positions:
+                button.emoji = self.bomb_emoji
+                button.style = discord.ButtonStyle.danger
+            else:
+                button.emoji = self.gem_emoji
+                button.style = discord.ButtonStyle.success
 
     async def _emergency_end(self, interaction: Interaction):
         """Handle critical errors by refunding."""
@@ -830,6 +845,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             description="Mines game refund due to error",
         )
 
+        # Disable all grid buttons; don't reveal bombs since the game errored.
         for button in self.grid_buttons:
             button.disabled = True
 
@@ -880,9 +896,8 @@ class MinesGridLayout(discord.ui.LayoutView):
         multiplier = await self._calculate_multiplier()
         winnings = self.bet_amount * Decimal(str(multiplier))
 
-        # Disable all buttons
-        for button in self.grid_buttons:
-            button.disabled = True
+        # Reveal remaining bombs/gems and disable the grid.
+        self._reveal_grid_buttons()
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
         await self.bot.database.process_treasury_transaction(
@@ -898,13 +913,11 @@ class MinesGridLayout(discord.ui.LayoutView):
         if self.gems_clicked > 0:
             await casino.process_game_result(self.user_id, "mines", self.bet_amount)
 
-        final_grid = self._create_final_grid()
-
         # Update container
         formatted_winnings = await casino.formatter(winnings)
         self.container.game_text.content = (
             f"### 💰 Cashed Out!\n"
-            f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!\n\n{final_grid}"
+            f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!"
         )
         self.container.cashout_row.children[0].disabled = True
 
@@ -923,8 +936,8 @@ class MinesGridLayout(discord.ui.LayoutView):
         casino: Casino = self.bot.get_cog("Casino")
         self.game_over = True
 
-        for button in self.grid_buttons:
-            button.disabled = True
+        # Reveal final grid state and disable all buttons.
+        self._reveal_grid_buttons()
 
         if refund:
             wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
@@ -1071,6 +1084,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         winnings,
         currency_name,
         user_id,
+        wallet_id,
         PF,
         session_id=None,
     ):
@@ -1082,6 +1096,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         self.winnings = winnings
         self.currency_name = currency_name
         self.user_id = user_id
+        self.wallet_id = wallet_id
         self.rounds = 0
         self.PF = PF
         self.session_id = session_id
@@ -1141,7 +1156,21 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         await self.casino.process_game_result(self.user_id, "double", self.initial_amount)
 
         self.PF = await self.casino.bump_fairgate_pf(self.user_id, self.PF)
-        side = await self.casino.fairgate_play_coinflip(self.user_id, self.PF, choice="heads")
+        try:
+            side = await self.casino.fairgate_play_coinflip(self.user_id, self.PF, choice="heads")
+        except FairGateError as exc:
+            logger.exception("Double-or-nothing round failed for user %s: %s", self.user_id, exc)
+            await self.casino._refund_game_session(
+                self.session_id,
+                user_id=self.user_id,
+                wallet_id=self.wallet_id,
+                amount=self.initial_amount,
+                reason="FairGate unreachable — double-or-nothing bet refunded",
+            )
+            content = "🚫 The game server could not be reached. Your bet has been refunded."
+            self._build_container(accent_color=0xED4245, content=content, show_buttons=False)
+            await interaction.response.edit_message(view=self)
+            return
         success = side == "heads"
         if success:
             self.winnings = Decimal(self.winnings) * 2
@@ -1635,6 +1664,29 @@ class RouletteView(discord.ui.LayoutView):
 
         try:
             await self._do_spin(interaction)
+        except (FairGateError, ClientConnectorError, ServerDisconnectedError, asyncio.TimeoutError) as exc:
+            logger.exception("Roulette spin failed for user %s: %s", self.user_id, exc)
+            # Refund the wagered amount since FairGate could not resolve the spin.
+            await self.cog._refund_game_session(
+                self.session_id,
+                user_id=self.user_id,
+                wallet_id=self.wallet_id,
+                amount=self.bet_amount * len(self.selected_bets),
+                reason="FairGate unreachable — roulette spin refunded",
+            )
+            self.game_phase = "betting"
+            self._rebuild_container()
+            try:
+                await interaction.followup.edit_message(interaction.message.id, view=self)
+            except Exception:
+                pass
+            try:
+                await interaction.followup.send(
+                    "🚫 The spin failed. Your wager has been refunded — try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
         except Exception as exc:
             logger.exception("Roulette spin failed for user %s: %s", self.user_id, exc)
             self.game_phase = "betting"
@@ -2000,11 +2052,23 @@ class HiLoView(discord.ui.LayoutView):
 
     # ── Game lifecycle ──
 
-    async def _next_fairgate_card(self) -> str:
+    async def _next_fairgate_card(self) -> str | None:
         """Pop the next card from the pre-shuffled deck, drawing a fresh deck if needed."""
         if not self.deck:
             self.PF = await self.cog.bump_fairgate_pf(self.user_id, self.PF)
-            self.deck = await self.cog.fairgate_play_hilo_deck(self.user_id, self.PF)
+            try:
+                self.deck = await self.cog.fairgate_play_hilo_deck(self.user_id, self.PF)
+            except FairGateError as exc:
+                logger.exception("HiLo deck refresh failed for user %s: %s", self.user_id, exc)
+                await self.force_end(refund=True)
+                content = "🚫 The game server could not be reached. Your bet has been refunded."
+                self._rebuild_container(status="Error", result_text=content)
+                if self.message:
+                    try:
+                        await self.message.edit(view=self)
+                    except Exception:
+                        pass
+                return None
         return self.deck.pop(0)
 
     async def _end_game(self, win: bool):
@@ -2074,6 +2138,12 @@ class HiLoView(discord.ui.LayoutView):
             self.history.append(self.current_card)
 
             next_card = await self._next_fairgate_card()
+            if next_card is None:
+                await interaction.followup.send(
+                    "🚫 The game server could not be reached. Your bet has been refunded.",
+                    ephemeral=True,
+                )
+                return
 
             multiplier_increase = self._calculate_multiplier(self.history[-1], "higher")
 
@@ -2122,6 +2192,12 @@ class HiLoView(discord.ui.LayoutView):
             self.history.append(self.current_card)
 
             next_card = await self._next_fairgate_card()
+            if next_card is None:
+                await interaction.followup.send(
+                    "🚫 The game server could not be reached. Your bet has been refunded.",
+                    ephemeral=True,
+                )
+                return
 
             multiplier_increase = self._calculate_multiplier(self.history[-1], "lower")
 
@@ -2174,6 +2250,12 @@ class HiLoView(discord.ui.LayoutView):
             self.skips_used += 1
             self.history.append(self.current_card)
             self.current_card = await self._next_fairgate_card()
+            if self.current_card is None:
+                await interaction.followup.send(
+                    "🚫 The game server could not be reached. Your bet has been refunded.",
+                    ephemeral=True,
+                )
+                return
             self._update_button_labels()
             self._rebuild_container()
             await interaction.followup.edit_message(interaction.message.id, view=self)
@@ -2575,9 +2657,27 @@ class LadderView(discord.ui.LayoutView):
 
         success_chance = self.STEP_PROBS.get(self.step, 0)
         threshold = success_chance * 100
-        roll = (await self.cog.fairgate_play_numbers(
-            self.user_id, self.PF, pool=10000, pick=1, replacement=True
-        ))[0]
+        try:
+            roll = (await self.cog.fairgate_play_numbers(
+                self.user_id, self.PF, pool=10000, pick=1, replacement=True
+            ))[0]
+        except FairGateError as exc:
+            logger.exception("Ladder climb failed for user %s: %s", self.user_id, exc)
+            await self.cog._refund_game_session(
+                self.session_id,
+                user_id=self.user_id,
+                wallet_id=self.wallet_id,
+                amount=self.bet,
+                reason="FairGate unreachable — ladder bet refunded",
+            )
+            self._build_container(
+                accent_color=0xED4245,
+                content="🚫 The game server could not be reached. Your bet has been refunded.",
+                show_buttons=False,
+            )
+            await interaction.response.edit_message(view=self)
+            self.stop()
+            return
 
         if roll < threshold:
             # ── success ──
@@ -2958,15 +3058,17 @@ class SlotsView(discord.ui.LayoutView):
             self.is_spinning = True
             self._update_button_states()
         
+        wallet_id = None
+        is_free_spin = self.free_spins > 0
         try:
             # Deduct bet (or use free spin)
-            if self.free_spins > 0:
+            if is_free_spin:
                 self.free_spins -= 1
                 # Free spins don't deduct from balance
             else:
                 wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
                 balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
-                
+
                 if balance < self.bet:
                     await interaction.response.send_message(
                         f"Insufficient balance! You have {await self.cog.formatter(balance)}",
@@ -2975,20 +3077,46 @@ class SlotsView(discord.ui.LayoutView):
                     self.is_spinning = False
                     self._update_button_states()
                     return
-                
+
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id,
                     amount=-self.bet,
                     description="Slots Bet"
                 )
-            
+
             # Run animation
             await self._run_animation(interaction)
-            
+
             # Get user ID and provable fairness data for this spin
             user_id = interaction.user.id
-            PF = await self.cog.start_fairgate_proof(user_id)
-            grid, verification, final_PF = await self.cog.fairgate_generate_slots_grid(user_id, PF)
+            try:
+                PF = await self.cog.start_fairgate_proof(user_id)
+                grid, verification, final_PF = await self.cog.fairgate_generate_slots_grid(user_id, PF)
+            except FairGateError as exc:
+                logger.exception("Slots re-spin failed for user %s: %s", user_id, exc)
+                if not is_free_spin and wallet_id is not None:
+                    try:
+                        await self.bot.database.process_treasury_transaction(
+                            wallet_id=wallet_id,
+                            amount=self.bet,
+                            description="Slots Refund — FairGate unreachable",
+                        )
+                    except Exception:
+                        logger.exception("Slots re-spin refund failed for user %s", user_id)
+                self.is_spinning = False
+                self._update_button_states()
+                content = (
+                    "🚫 The game server could not be reached. "
+                    + ("Your bet has been refunded." if not is_free_spin else "No bet was taken for this free spin.")
+                )
+                container = discord.ui.Container(
+                    discord.ui.TextDisplay(content),
+                    accent_color=0xED4245,
+                )
+                self.clear_items()
+                self.add_item(container)
+                await interaction.followup.edit_message(interaction.message.id, view=self)
+                return
 
             # Evaluate results
             winning_lines = self.cog._evaluate_paylines(grid)
@@ -3921,6 +4049,52 @@ class Casino(commands.Cog):
         )
         self.session_registry.pop(str(session_id), None)
 
+    async def _refund_game_session(
+        self,
+        session_id,
+        *,
+        user_id: int,
+        wallet_id: str | int,
+        amount: Decimal,
+        reason: str,
+    ) -> bool:
+        """Refund the player's bet for a session that failed before resolution.
+
+        The refund is recorded as a treasury transaction, the pending refund
+        entry is removed, and the session is ended with ``refund: True`` in its
+        final state. Returns ``True`` if the refund succeeded.
+        """
+        db = getattr(self.bot, "database", None)
+        if not db or not session_id:
+            return False
+        try:
+            await db.process_treasury_transaction(
+                wallet_id=str(wallet_id),
+                amount=amount,
+                description=f"Refund — {reason}",
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to refund session %s for user %s: %s", session_id, user_id, exc
+            )
+            return False
+
+        try:
+            await self._remove_refund(session_id, user_id=user_id)
+        except Exception:
+            pass
+
+        try:
+            await self._end_game_session(
+                session_id,
+                outcome="cancelled",
+                reason="fairgate_failure",
+                final_state={"refund": True, "reason": reason},
+            )
+        except Exception:
+            pass
+        return True
+
     def _register_session_handler(self, session_id, handler) -> None:
         if session_id:
             self.session_registry[str(session_id)] = handler
@@ -4733,7 +4907,23 @@ class Casino(commands.Cog):
             )
 
             win_multiplier = Decimal("2.0")
-            side = await self.fairgate_play_coinflip(user_id, PF, choice="heads")
+            try:
+                side = await self.fairgate_play_coinflip(user_id, PF, choice="heads")
+            except FairGateError as exc:
+                logger.exception("Gamble failed for user %s: %s", user_id, exc)
+                await self._refund_game_session(
+                    session_id,
+                    user_id=user_id,
+                    wallet_id=wallet_id,
+                    amount=amount,
+                    reason="FairGate unreachable — gamble bet refunded",
+                )
+                embed = discord.Embed(
+                    description="🚫 The game server could not be reached. Your bet has been refunded.",
+                    color=discord.Color.red(),
+                )
+                await ctx.reply(embed=embed, delete_after=5)
+                return
             is_winner = side == "heads"
 
             # Process game result for rakeback
@@ -4873,9 +5063,25 @@ class Casino(commands.Cog):
             base_multiplier = SUPERGAMBLE_BASE_MULTIPLIER
             bonus_multiplier = SUPERGAMBLE_BONUS_MULTIPLIER
 
-            sg_outcome, _multiplier, bonus_text = await self.fairgate_play_supergamble(
-                user_id, PF
-            )
+            try:
+                sg_outcome, _multiplier, bonus_text = await self.fairgate_play_supergamble(
+                    user_id, PF
+                )
+            except FairGateError as exc:
+                logger.exception("SuperGamble failed for user %s: %s", user_id, exc)
+                await self._refund_game_session(
+                    session_id,
+                    user_id=user_id,
+                    wallet_id=wallet_id,
+                    amount=amount,
+                    reason="FairGate unreachable — supergamble bet refunded",
+                )
+                embed = discord.Embed(
+                    description="🚫 The game server could not be reached. Your bet has been refunded.",
+                    color=discord.Color.red(),
+                )
+                await ctx.reply(embed=embed, delete_after=5)
+                return
 
             # Process game result for rakeback
             await self.process_game_result(user_id, "supergamble", amount)
@@ -5207,7 +5413,45 @@ class Casino(commands.Cog):
 
         # Get provable fairness data
         PF = await self.start_fairgate_proof(user_id)
-        grid, verification, final_PF = await self.fairgate_generate_slots_grid(user_id, PF)
+
+        session_id = await self._create_game_session(
+            ctx,
+            "slots",
+            owner_id=user_id,
+            wager_total=stake,
+            state={
+                "user_id": user_id,
+                "bet": str(stake),
+                "wallet_id": str(wallet_id),
+                "currency": currency,
+            },
+            rng=PF,
+        )
+        await self._add_refund(
+            session_id,
+            user_id=user_id,
+            wallet_id=str(wallet_id),
+            amount=stake,
+            reason="slots_bet",
+        )
+
+        try:
+            grid, verification, final_PF = await self.fairgate_generate_slots_grid(user_id, PF)
+        except FairGateError as exc:
+            logger.exception("Slots spin failed for user %s: %s", user_id, exc)
+            await self._refund_game_session(
+                session_id,
+                user_id=user_id,
+                wallet_id=wallet_id,
+                amount=stake,
+                reason="FairGate unreachable — slots bet refunded",
+            )
+            embed = discord.Embed(
+                description="🚫 The game server could not be reached. Your bet has been refunded.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
 
         # Evaluate paylines
         payline_wins = self._evaluate_paylines(grid)
@@ -5357,7 +5601,23 @@ class Casino(commands.Cog):
             reason="dice_bet",
         )
 
-        total = await self.fairgate_play_dice_sum(user_id, PF, dice=2, sides=6)
+        try:
+            total = await self.fairgate_play_dice_sum(user_id, PF, dice=2, sides=6)
+        except FairGateError as exc:
+            logger.exception("Dice roll failed for user %s: %s", user_id, exc)
+            await self._refund_game_session(
+                session_id,
+                user_id=user_id,
+                wallet_id=wallet_id,
+                amount=amount,
+                reason="FairGate unreachable — dice bet refunded",
+            )
+            embed = discord.Embed(
+                description="🚫 The game server could not be reached. Your bet has been refunded.",
+                color=discord.Color.red(),
+            )
+            await ctx.reply(embed=embed, delete_after=5)
+            return
         die1 = die2 = None  # FairGate sum mode does not expose individual dice
         even_or_odd = "E" if total % 2 == 0 else "O"
 
@@ -5587,6 +5847,7 @@ class Casino(commands.Cog):
             winnings=amount,
             currency_name=self.currency_name,
             user_id=user_id,
+            wallet_id=wallet_id,
             PF=PF,
             session_id=session_id,
         )
@@ -5689,7 +5950,25 @@ class Casino(commands.Cog):
             reason="blackjack_bet",
         )
 
-        deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+        try:
+            deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+        except FairGateError as exc:
+            logger.exception("Blackjack deck draw failed for user %s: %s", user_id, exc)
+            await self._refund_game_session(
+                session_id,
+                user_id=user_id,
+                wallet_id=wallet_id,
+                amount=amount,
+                reason="FairGate unreachable — blackjack bet refunded",
+            )
+            container = discord.ui.Container(
+                discord.ui.TextDisplay("🚫 The game server could not be reached. Your bet has been refunded."),
+                accent_color=0xED4245,
+            )
+            view = discord.ui.LayoutView()
+            view.add_item(container)
+            await ctx.reply(view=view, delete_after=5)
+            return
 
         # Calculate house edge for RTP tracking
         house_edge = await self.calculate_house_edge(user_id)
@@ -6372,7 +6651,24 @@ class Casino(commands.Cog):
 
         await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
 
-        deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+        try:
+            deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+        except FairGateError as exc:
+            logger.exception("Poker deck draw failed for user %s: %s", user_id, exc)
+            await self._refund_game_session(
+                session_id,
+                user_id=user_id,
+                wallet_id=wallet_id,
+                amount=bet,
+                reason="FairGate unreachable — poker bet refunded",
+            )
+            return await ctx.reply(
+                embed=discord.Embed(
+                    description="🚫 The game server could not be reached. Your bet has been refunded.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=5,
+            )
 
         player_hand = [deck.pop(), deck.pop()]
         bot_hand = [deck.pop(), deck.pop()]
@@ -6470,7 +6766,24 @@ class Casino(commands.Cog):
             )
 
             house_edge = await self.calculate_house_edge(user_id)
-            deck = await self.fairgate_play_hilo_deck(user_id, PF)
+            try:
+                deck = await self.fairgate_play_hilo_deck(user_id, PF)
+            except FairGateError as exc:
+                logger.exception("HiLo deck draw failed for user %s: %s", user_id, exc)
+                await self._refund_game_session(
+                    session_id,
+                    user_id=user_id,
+                    wallet_id=wallet_id,
+                    amount=bet_amount,
+                    reason="FairGate unreachable — hilo bet refunded",
+                )
+                self.active_players.discard(user_id)
+                embed = discord.Embed(
+                    description="🚫 The game server could not be reached. Your bet has been refunded.",
+                    color=discord.Color.red(),
+                )
+                await ctx.reply(embed=embed, delete_after=5)
+                return
             # First card must be between 2 and Q (local parity).
             first_idx = next(
                 (i for i, c in enumerate(deck) if c in HILO_CARDS[1:-1]),
@@ -6693,9 +7006,29 @@ class Casino(commands.Cog):
                 )
                 current_game.players[uid] = amt
 
-                current_game.crash_points[
-                    uid
-                ] = await current_game.generate_crash_point(uid)
+                try:
+                    current_game.pf_data[uid] = await casino_cog.start_fairgate_proof(uid)
+                    current_game.crash_points[
+                        uid
+                    ] = await current_game.generate_crash_point(uid)
+                except FairGateError as exc:
+                    logger.exception("Crash point generation failed for user %s: %s", uid, exc)
+                    try:
+                        await casino_cog._remove_refund(current_game.session_id, user_id=uid)
+                    except Exception:
+                        pass
+                    try:
+                        await self.bot.database.process_treasury_transaction(
+                            wallet_id, amt, "Crash Refund — FairGate unreachable"
+                        )
+                    except Exception:
+                        logger.exception("Crash refund failed for user %s", uid)
+                    current_game.players.pop(uid, None)
+                    current_game.pf_data.pop(uid, None)
+                    return await modal_inter.response.send_message(
+                        "🚫 The game server could not be reached. Your bet has been refunded.",
+                        ephemeral=True,
+                    )
 
                 await modal_inter.response.send_message(
                     f"Joined at {amt}", ephemeral=True
@@ -7123,7 +7456,7 @@ class Casino(commands.Cog):
                 container = discord.ui.Container(accent_color=0xFEE2E2)
                 container.add_item(discord.ui.TextDisplay(
                     "### ⚠️ Missing Arguments\n"
-                    "Syntax: `!mines (bomb amount) (bet amount)`\n"
+                    "Syntax: `!mines <bombs> <bet>`\n"
                     "Usage: `!mines 5 5000`"
                 ))
                 view = discord.ui.LayoutView()
@@ -7237,16 +7570,39 @@ class Casino(commands.Cog):
             )
 
             grid_size = 5
-            bomb_positions = await self.fairgate_play_mines(
-                user_id,
-                client_seed=PF["client_seed"],
-                nonce=PF["nonce"],
-                server_seed_hash=PF["server_seed_hash"],
-                rows=grid_size,
-                cols=grid_size,
-                mines=num_bombs,
-            )
-            bomb_positions = set(bomb_positions)
+            try:
+                bomb_positions = await self.fairgate_play_mines(
+                    user_id,
+                    client_seed=PF["client_seed"],
+                    nonce=PF["nonce"],
+                    server_seed_hash=PF["server_seed_hash"],
+                    rows=grid_size,
+                    cols=grid_size,
+                    mines=num_bombs,
+                )
+                bomb_positions = set(bomb_positions)
+            except (FairGateError, ClientConnectorError, ServerDisconnectedError, asyncio.TimeoutError) as exc:
+                logger.exception("Mines round failed for user %s: %s", user_id, exc)
+                refunded = await self._refund_game_session(
+                    session_id,
+                    user_id=user_id,
+                    wallet_id=wallet_id,
+                    amount=bet_amount,
+                    reason="FairGate unreachable — mines bet refunded",
+                )
+                container = discord.ui.Container(accent_color=0xFEE2E2)
+                container.add_item(discord.ui.TextDisplay(
+                    "### ❌ FairGate Unavailable\n"
+                    "The game server could not be reached. Your bet has been refunded."
+                    if refunded
+                    else "### ❌ FairGate Unavailable\n"
+                         "The game server could not be reached. A refund was queued; "
+                         "contact staff if it is not applied."
+                ))
+                view = discord.ui.LayoutView()
+                view.add_item(container)
+                await ctx.reply(view=view)
+                return
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
             # Starting multiplier is always 1.0 (no gems revealed yet). Compute
@@ -7287,7 +7643,7 @@ class Casino(commands.Cog):
                 pass
 
         except Exception as e:
-            logger.error(f"Error in mines command: {str(e)}")
+            logger.exception("Error in mines command: %s", e)
             container = discord.ui.Container(accent_color=0xFEE2E2)
             container.add_item(discord.ui.TextDisplay(
                 f"### ❌ An Error Occurred\n{str(e)}"
@@ -7563,13 +7919,23 @@ class BetButton(discord.ui.Button):
             else:
                 button.style = table_ui_view.default_color
 
-        drawn = await self.cog.fairgate_play_numbers(
-            user_id=table_ui_view.player.id,
-            PF=self.PF,
-            pool=len(all_buttons),
-            pick=table_ui_view.max_picks,
-            replacement=False,
-        )
+        try:
+            drawn = await self.cog.fairgate_play_numbers(
+                user_id=table_ui_view.player.id,
+                PF=self.PF,
+                pool=len(all_buttons),
+                pick=table_ui_view.max_picks,
+                replacement=False,
+            )
+        except FairGateError as exc:
+            logger.exception("Keno draw failed for user %s: %s", table_ui_view.player.id, exc)
+            embed = discord.Embed(
+                description="🚫 The game server could not be reached. No bet has been taken.",
+                color=discord.Color.red(),
+            )
+            await itn.response.send_message(embed=embed, ephemeral=True)
+            return None
+
         selected = [all_buttons[i] for i in drawn]
         for button in selected:
             button.style = table_ui_view.win_color
@@ -7597,9 +7963,10 @@ class BetButton(discord.ui.Button):
             table_ui_view: TableUI = self.parent.parent.table_ui_view
             game_ui_container: GameUIContainer = self.parent.parent
 
-            bet_multiplier, player_bet, wallet_id = await self.handle_bullshit(
-                table_ui_view, itn
-            )
+            result = await self.handle_bullshit(table_ui_view, itn)
+            if result is None:
+                return
+            bet_multiplier, player_bet, wallet_id = result
 
             # Calculate house edge for RTP tracking and bonus
             house_edge = await self.cog.calculate_house_edge(table_ui_view.player.id)
@@ -7732,13 +8099,21 @@ class RandomPickButton(discord.ui.Button):
         all_buttons = table_ui_view.get_all_buttons()
 
         pf = await self.cog.start_fairgate_proof(table_ui_view.player.id)
-        drawn = await self.cog.fairgate_play_numbers(
-            user_id=table_ui_view.player.id,
-            PF=pf,
-            pool=len(all_buttons),
-            pick=table_ui_view.max_picks,
-            replacement=False,
-        )
+        try:
+            drawn = await self.cog.fairgate_play_numbers(
+                user_id=table_ui_view.player.id,
+                PF=pf,
+                pool=len(all_buttons),
+                pick=table_ui_view.max_picks,
+                replacement=False,
+            )
+        except FairGateError as exc:
+            logger.exception("Keno random pick failed for user %s: %s", table_ui_view.player.id, exc)
+            embed = discord.Embed(
+                description="🚫 The game server could not be reached. Please try again.",
+                color=discord.Color.red(),
+            )
+            return await itn.response.send_message(embed=embed, ephemeral=True)
         selected = [all_buttons[i] for i in drawn]
 
         for button in all_buttons:

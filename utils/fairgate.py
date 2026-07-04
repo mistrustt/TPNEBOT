@@ -218,6 +218,12 @@ class FairGateClient:
                 payload["server_seed_hash"] = self._active_hash(None)
                 return await self._request("POST", "/play", json_body=payload)
             raise
+        except (TimeoutError, asyncio.TimeoutError):
+            # Re-raise as FairGateError so callers can uniformly catch failures.
+            raise FairGateError("FairGate request timed out", status=None)
+        except OSError as exc:
+            # aiohttp network/connection errors subclass OSError.
+            raise FairGateError(f"FairGate connection error: {exc}", status=None)
 
     async def create_app(
         self,
