@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Any
 from urllib.parse import urlencode, urljoin
-
+import asyncio
 import aiohttp
 
 logger = logging.getLogger("discord_bot")
