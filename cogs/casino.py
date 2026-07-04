@@ -714,7 +714,7 @@ class MinesGridLayout(discord.ui.LayoutView):
 
     @staticmethod
     def _compute_mines_multiplier(
-        bomb_count: int, gem_count: int, house_edge: float = 0.04
+        bomb_count: int, gem_count: int, house_edge: float = 0.01
     ) -> float:
         """Compute the mines payout multiplier from probability.
 
@@ -725,7 +725,9 @@ class MinesGridLayout(discord.ui.LayoutView):
         Args:
             bomb_count: Number of bombs placed on the 25-cell grid (1-24).
             gem_count: Number of gems the player has successfully revealed.
-            house_edge: House edge fraction (default 4%).
+            house_edge: House edge fraction (default 1%, matching the
+                ``mines_settings`` table). User-adjusted VIP edges can lower
+                this via the caller.
 
         Returns:
             The fair multiplier for the current state. Returns 1.0 when no
@@ -757,59 +759,47 @@ class MinesGridLayout(discord.ui.LayoutView):
         return (1.0 - house_edge) / prob
 
     async def _calculate_multiplier(self, house_edge: float | None = None) -> float:
-        """Calculate the current multiplier.
+        """Calculate the current multiplier from the mines probability formula.
 
-        Prefers the database value when present, but falls back to a
-        probability-based calculation if the DB row is missing or the stored
-        value is clearly wrong (e.g. a 22-bomb / 1-gem payout of 825x instead
-        of ~8.25x). This keeps the game playable even if the mines_settings
-        table is mis-populated.
+        The multiplier is authoritative: ``(1 / P(x)) * RTP``, where
+        ``P(x) = C(25-M, x) / C(25, x)`` and ``RTP = 1 - house_edge``.
+        Database values are ignored unless they match the math exactly
+        (within floating-point tolerance); this prevents stored misconfigurations
+        from being exploited.
 
         Args:
-            house_edge: House edge fraction to use for the fallback math.
-                Defaults to the user's adjusted edge, falling back to 4%.
+            house_edge: House edge fraction to use. Defaults to the user's
+                adjusted edge (based on a 1% base), falling back to 1%.
         """
         casino: Casino = self.bot.get_cog("Casino")
         if house_edge is None:
             try:
-                house_edge = float(await casino.calculate_house_edge(self.user_id))
+                house_edge = float(await casino.calculate_house_edge(
+                    self.user_id, base_edge=Decimal("0.01")
+                ))
             except Exception as e:
-                logger.warning("Failed to load house edge for mines; using 4%% base: %s", e)
-                house_edge = 0.04
+                logger.warning("Failed to load house edge for mines; using 1%% base: %s", e)
+                house_edge = 0.01
 
         bomb_count = len(self.bomb_positions)
         gem_count = self.gems_clicked
-        fallback = self._compute_mines_multiplier(bomb_count, gem_count, house_edge)
+        expected = self._compute_mines_multiplier(bomb_count, gem_count, house_edge)
+
+        # Optional DB cache: only accepted if it matches the formula.
         try:
-            multiplier = await self.bot.database.get_mines_multiplier(
-                bomb_count, gem_count
-            )
-            if multiplier is None:
-                return fallback
-            value = float(multiplier)
-            # Sanity check: probability-derived value should be within an
-            # order of magnitude of the stored value. If the stored value is
-            # wildly off (off by >=10x), it's bad data and we trust the math.
-            if fallback > 0 and (value > fallback * 10 or value < fallback / 10):
+            db_value = await self.bot.database.get_mines_multiplier(bomb_count, gem_count)
+            if db_value is not None:
+                value = float(db_value)
+                if value > 0 and abs(value - expected) / expected <= 1e-6:
+                    return value
                 logger.warning(
-                    "Mines multiplier sanity check failed: bomb=%s gem=%s "
-                    "db=%s math=%s — using math-derived value",
-                    bomb_count, gem_count, value, fallback,
+                    "Mines DB multiplier ignored: bomb=%s gem=%s db=%s math=%s",
+                    bomb_count, gem_count, value, expected,
                 )
-                return fallback
-            # Clamp permissive DB values to the configured house-edge math so
-            # mines cannot pay out more than the target RTP allows.
-            if value > fallback:
-                logger.warning(
-                    "Mines DB multiplier exceeds target RTP: bomb=%s gem=%s "
-                    "db=%s math=%s — clamping to math-derived value",
-                    bomb_count, gem_count, value, fallback,
-                )
-                return fallback
-            return value
         except Exception as e:
-            logger.error(f"Error calculating multiplier: {str(e)}")
-            return fallback
+            logger.error(f"Error reading mines multiplier from DB: {str(e)}")
+
+        return expected
 
     def _create_final_grid(self) -> str:
         """Create the final grid display."""
@@ -7259,18 +7249,14 @@ class Casino(commands.Cog):
             bomb_positions = set(bomb_positions)
 
             remaining_safe_cells = grid_size * grid_size - num_bombs
-            init_multi = await self.bot.database.get_mines_multiplier(num_bombs, 0)
-            db_multi = float(init_multi) if init_multi else 1.0
-            math_multi = MinesGridLayout._compute_mines_multiplier(num_bombs, 0)
-            # Prefer DB value when sane, fall back to math-derived value.
-            if math_multi > 0 and (db_multi > math_multi * 10 or db_multi < math_multi / 10):
-                multiplier = math_multi
-            else:
-                multiplier = db_multi
+            # Starting multiplier is always 1.0 (no gems revealed yet). Compute
+            # from the formula; ignore DB values to prevent stored abuse.
+            house_edge = await self.calculate_house_edge(user_id, base_edge=Decimal("0.01"))
+            multiplier = MinesGridLayout._compute_mines_multiplier(
+                num_bombs, 0, float(house_edge)
+            )
 
-            # Calculate house edge for RTP tracking
-            house_edge = await self.calculate_house_edge(user_id)
-            base_edge = Decimal("0.04")
+            base_edge = Decimal("0.01")
             # Apply RTP boost for VIP players - multiplier boost
             if house_edge < base_edge:
                 rtp_boost = float(1 + (float(base_edge) - float(house_edge)) / float(base_edge) * 0.1)
