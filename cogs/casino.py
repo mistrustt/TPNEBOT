@@ -1327,6 +1327,51 @@ ROULETTE_BET_LABELS = {
 }
 
 
+def _roulette_choice_to_fairgate(choice: str) -> tuple[str, int | None]:
+    """Map a TPNEBOT roulette bet choice to a FairGate ``bet_type``/``number`` pair.
+
+    FairGate only supports a subset of common roulette bets; the bot evaluates
+    all other bets (green, dozens, columns) locally against the spin result.
+    The spin pocket is independent of the chosen bet type, so any *valid*
+    FairGate bet can serve as the "proof bet" for the same outcome.
+    """
+    choice = choice.lower().strip()
+    if choice in {"red", "black", "odd", "even", "low", "high"}:
+        return choice, None
+    if choice == "green":
+        # 0 and 00 are both green; FairGate reports 00 as pocket 0.
+        return "number", 0
+    if choice == "dozen1":
+        return "low", None
+    if choice == "dozen3":
+        return "high", None
+    # dozen2 and the columns have no direct FairGate equivalent; pick a
+    # neutral, valid outside bet so the request is accepted.
+    if choice in {"dozen2", "column1", "column2", "column3"}:
+        return "red", None
+    if choice.isdigit():
+        return "number", int(choice)
+    if choice == "00":
+        return "number", 0
+    return "red", None
+
+
+def _roulette_fairgate_params(choices: list[str], wheel: str = "american") -> dict[str, Any]:
+    """Build the FairGate ``params`` dict for a roulette spin.
+
+    Uses the first selected bet as the proof bet. All selected bets are still
+    evaluated locally; this just satisfies FairGate's required ``bet_type`` field.
+    """
+    if not choices:
+        bet_type, number = "red", None
+    else:
+        bet_type, number = _roulette_choice_to_fairgate(choices[0])
+    params: dict[str, Any] = {"wheel": wheel, "bet_type": bet_type}
+    if number is not None:
+        params["number"] = number
+    return params
+
+
 class RouletteNumberModal(discord.ui.Modal, title="Pick a Number"):
     number_input = discord.ui.TextInput(
         label="Number (0–36 or 00)",
@@ -1484,7 +1529,9 @@ class RouletteView(discord.ui.LayoutView):
             return Decimal(3)
         elif choice == "column3" and is_int and (spin_result % 3 == 0 and spin_result != 0):
             return Decimal(3)
-        elif (choice.isdigit() and is_int and int(choice) == spin_result) or (choice == "00" and spin_result == "00"):
+        elif (choice.isdigit() and is_int and int(choice) == spin_result) or (
+            choice == "00" and (spin_result == "00" or (is_int and spin_result == 0))
+        ):
             return Decimal(36)
         return Decimal(0)
 
@@ -1634,10 +1681,16 @@ class RouletteView(discord.ui.LayoutView):
             await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
             return
 
+        session_state = {
+            "user_id": self.user_id,
+            "bet": str(self.bet_amount),
+            "wallet_id": str(self.wallet_id),
+            "bets": bets,
+            "fairgate_bet": _roulette_fairgate_params(bets, wheel="american"),
+        }
         self.session_id = await self.cog._create_game_session(
             self.ctx, "roulette", owner_id=self.user_id, wager_total=total_wager,
-            state={"user_id": self.user_id, "bet": str(self.bet_amount),
-                   "wallet_id": str(self.wallet_id), "bets": bets},
+            state=session_state,
             rng=PF,
         )
         await self.cog._add_refund(
@@ -1654,7 +1707,9 @@ class RouletteView(discord.ui.LayoutView):
         )
 
         # ── Spin ──
-        outcome = await self.cog.fairgate_play_roulette(self.user_id, PF, wheel="american")
+        outcome = await self.cog.fairgate_play_roulette(
+            self.user_id, PF, **session_state["fairgate_bet"]
+        )
         spin_result = outcome["pocket"]
         color_label = outcome.get("color", "Unknown").title()
         is_green = color_label.lower() == "green"
@@ -3507,17 +3562,30 @@ class Casino(commands.Cog):
         return int(result["outcome"]["roll"])
 
     async def fairgate_play_roulette(
-        self, user_id: int, PF: dict, *, wheel: str = "american"
+        self,
+        user_id: int,
+        PF: dict,
+        *,
+        wheel: str = "american",
+        bet_type: str = "red",
+        number: int | None = None,
     ) -> dict:
         """Resolve a roulette spin through FairGate.
+
+        FairGate requires ``bet_type`` (and ``number`` for single-number bets).
+        The spin pocket is independent of the bet type; the caller should pass
+        the same proof-bet params that were stored for ``!casino verify``.
 
         Normalises the response so both ``pocket`` (FairGate native) and
         ``spin_result`` (legacy local naming) are accepted.
         """
+        params: dict[str, Any] = {"wheel": wheel, "bet_type": bet_type}
+        if number is not None:
+            params["number"] = number
         result = await self.fairgate_client.play(
             user_id=user_id,
             game="roulette",
-            params={"wheel": wheel},
+            params=params,
             client_seed=PF["client_seed"],
             nonce=PF["nonce"],
             server_seed_hash=PF["server_seed_hash"],
@@ -4436,7 +4504,19 @@ class Casino(commands.Cog):
             params = {"mode": "sum", "dice": 2, "sides": 6}
         elif game_key == "roulette":
             verify_game = "roulette"
-            params = {"wheel": "american"}
+            params = await self.bot.database.fetch_roulette_fairgate_params(member.id, nonce)
+            if params is None:
+                params = {"wheel": "american", "bet_type": "red"}
+                embed.add_field(
+                    name="⚠️ Note",
+                    value=(
+                        "Could not locate the roulette proof bet used for this spin. "
+                        "Falling back to a default red bet. The pocket shown is still "
+                        "correct, but the server-side win/loss flag may not match "
+                        "your actual bet."
+                    ),
+                    inline=False,
+                )
         elif game_key in ("blackjack", "poker"):
             verify_game = "ridebus"
             params = {"deck_count": 1}

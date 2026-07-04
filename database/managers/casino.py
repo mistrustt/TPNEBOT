@@ -3,7 +3,7 @@ from .base import BaseManager
 from sqlalchemy.future import select
 from sqlalchemy import update, case, literal_column
 from sqlalchemy import func
-from typing import List, Optional
+from typing import Any, List, Optional
 import hashlib
 import secrets
 from ..models import (
@@ -684,6 +684,41 @@ class CasinoMixin(BaseManager):
             except (TypeError, ValueError):
                 continue
         return None
+
+    async def fetch_roulette_fairgate_params(
+        self, user_id: int, nonce: int, *, lookback: int = 200
+    ) -> dict[str, Any] | None:
+        """Return the FairGate roulette params used for a given spin.
+
+        The params (``wheel``, ``bet_type``, and optionally ``number``) are
+        stored in the session ``state`` JSON column. We walk back through the
+        user's most recent roulette sessions and match on the ``nonce`` recorded
+        in the ``rng`` JSON column.
+        """
+        user_id = self.hash_user_id(user_id)
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(GameSession)
+                .where(
+                    GameSession.owner_id == user_id,
+                    GameSession.game_name == "roulette",
+                )
+                .order_by(GameSession.created_at.desc())
+                .limit(lookback)
+            )
+            sessions = result.scalars().all()
+
+        for gs in sessions:
+            rng = gs.rng or {}
+            if rng.get("nonce") != nonce:
+                continue
+            state = gs.state or {}
+            fg_bet = state.get("fairgate_bet")
+            if not isinstance(fg_bet, dict):
+                continue
+            return dict(fg_bet)
+        return None
+
     async def get_wager_stats(
         self, user_id: int, game_name: str
     ) -> tuple[Decimal, Decimal, Decimal]:
