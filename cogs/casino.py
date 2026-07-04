@@ -59,6 +59,8 @@ class CrashView(discord.ui.LayoutView):
         self.game_phase: str = None
         self.current_multiplier = Decimal("1.0")
 
+        self.max_allowed_bet = Decimal("0")
+
         self.players: dict[int, Decimal] = {}
         self.crash_points: dict[int, Decimal] = {}
         self.cashed_out: dict[int, Decimal] = {}
@@ -186,7 +188,9 @@ class CrashView(discord.ui.LayoutView):
                 "You've already joined!", ephemeral=True
             )
 
-        max_allowed = await self.bot.database.get_max_gamble_amount(uid, False, Decimal("50.0"))  # 50x max payout for crash
+        max_allowed = self.max_allowed_bet or await self.bot.database.get_max_gamble_amount(
+            uid, False, Decimal("50.0")
+        )  # 50x max payout for crash
         formatted_max = await self.casino.short_formatter(max_allowed)
 
         modal = discord.ui.Modal(title="Join Crash Game")
@@ -710,7 +714,7 @@ class MinesGridLayout(discord.ui.LayoutView):
 
     @staticmethod
     def _compute_mines_multiplier(
-        bomb_count: int, gem_count: int, house_edge: float = 0.01
+        bomb_count: int, gem_count: int, house_edge: float = 0.04
     ) -> float:
         """Compute the mines payout multiplier from probability.
 
@@ -721,7 +725,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         Args:
             bomb_count: Number of bombs placed on the 25-cell grid (1-24).
             gem_count: Number of gems the player has successfully revealed.
-            house_edge: House edge fraction (default 1%).
+            house_edge: House edge fraction (default 4%).
 
         Returns:
             The fair multiplier for the current state. Returns 1.0 when no
@@ -752,7 +756,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             return 1.0
         return (1.0 - house_edge) / prob
 
-    async def _calculate_multiplier(self) -> float:
+    async def _calculate_multiplier(self, house_edge: float | None = None) -> float:
         """Calculate the current multiplier.
 
         Prefers the database value when present, but falls back to a
@@ -760,10 +764,22 @@ class MinesGridLayout(discord.ui.LayoutView):
         value is clearly wrong (e.g. a 22-bomb / 1-gem payout of 825x instead
         of ~8.25x). This keeps the game playable even if the mines_settings
         table is mis-populated.
+
+        Args:
+            house_edge: House edge fraction to use for the fallback math.
+                Defaults to the user's adjusted edge, falling back to 4%.
         """
+        casino: Casino = self.bot.get_cog("Casino")
+        if house_edge is None:
+            try:
+                house_edge = float(await casino.calculate_house_edge(self.user_id))
+            except Exception as e:
+                logger.warning("Failed to load house edge for mines; using 4%% base: %s", e)
+                house_edge = 0.04
+
         bomb_count = len(self.bomb_positions)
         gem_count = self.gems_clicked
-        fallback = self._compute_mines_multiplier(bomb_count, gem_count)
+        fallback = self._compute_mines_multiplier(bomb_count, gem_count, house_edge)
         try:
             multiplier = await self.bot.database.get_mines_multiplier(
                 bomb_count, gem_count
@@ -778,6 +794,15 @@ class MinesGridLayout(discord.ui.LayoutView):
                 logger.warning(
                     "Mines multiplier sanity check failed: bomb=%s gem=%s "
                     "db=%s math=%s — using math-derived value",
+                    bomb_count, gem_count, value, fallback,
+                )
+                return fallback
+            # Clamp permissive DB values to the configured house-edge math so
+            # mines cannot pay out more than the target RTP allows.
+            if value > fallback:
+                logger.warning(
+                    "Mines DB multiplier exceeds target RTP: bomb=%s gem=%s "
+                    "db=%s math=%s — clamping to math-derived value",
                     bomb_count, gem_count, value, fallback,
                 )
                 return fallback
@@ -1571,6 +1596,26 @@ class RouletteView(discord.ui.LayoutView):
 
         await interaction.response.defer()
 
+        try:
+            await self._do_spin(interaction)
+        except Exception as exc:
+            logger.exception("Roulette spin failed for user %s: %s", self.user_id, exc)
+            self.game_phase = "betting"
+            self._rebuild_container()
+            try:
+                await interaction.followup.edit_message(interaction.message.id, view=self)
+            except Exception:
+                pass
+            try:
+                await interaction.followup.send(
+                    "🚫 The spin failed. Your wager has not been taken — try again.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    async def _do_spin(self, interaction: discord.Interaction):
+        """Actual roulette spin logic, separated so the callback can report errors."""
         bets = list(self.selected_bets)
         num_bets = len(bets)
         total_wager = self.bet_amount * num_bets
@@ -3464,7 +3509,11 @@ class Casino(commands.Cog):
     async def fairgate_play_roulette(
         self, user_id: int, PF: dict, *, wheel: str = "american"
     ) -> dict:
-        """Resolve a roulette spin through FairGate."""
+        """Resolve a roulette spin through FairGate.
+
+        Normalises the response so both ``pocket`` (FairGate native) and
+        ``spin_result`` (legacy local naming) are accepted.
+        """
         result = await self.fairgate_client.play(
             user_id=user_id,
             game="roulette",
@@ -3473,7 +3522,25 @@ class Casino(commands.Cog):
             nonce=PF["nonce"],
             server_seed_hash=PF["server_seed_hash"],
         )
-        return result["outcome"]
+        outcome = result.get("outcome", result)
+        # Accept either FairGate's "pocket" or the legacy "spin_result" key.
+        if "pocket" not in outcome and "spin_result" in outcome:
+            outcome = dict(outcome)
+            outcome["pocket"] = outcome.pop("spin_result")
+        # Compute colour if the server did not include it.
+        if "color" not in outcome:
+            pocket = outcome.get("pocket")
+            if isinstance(pocket, int):
+                if pocket == 0 or pocket == "00":
+                    color = "Green"
+                elif pocket in ROULETTE_RED_NUMBERS:
+                    color = "Red"
+                else:
+                    color = "Black"
+            else:
+                color = "Unknown"
+            outcome["color"] = color
+        return outcome
 
     async def fairgate_play_crash(
         self, user_id: int, PF: dict, *, target: float, max_crash: float, buckets: list
@@ -3497,45 +3564,33 @@ class Casino(commands.Cog):
     async def fairgate_generate_crash_point(
         self, user_id: int, PF: dict, house_edge: Decimal
     ) -> Decimal:
-        """Generate a per-user crash point using FairGate ``numbers`` draws.
+        """Generate a per-user crash point using a FairGate ``numbers`` draw.
 
-        Mirrors the local bucket logic: draw a bucket from a 10,000-space
-        distribution (45/35/15/5), then draw a cent-precise value inside the
-        bucket, and apply the same VIP boost used locally.
+        Uses the standard inverse-transform crash distribution so that the
+        expected return equals ``1 - house_edge``. A uniform roll ``r`` in
+        ``[0, 1)`` produces ``target_rtp / (1 - r)``, capped at a sane max.
         """
         base_edge = 0.04
+        max_crash = 50.0
+        precision = 1_000_000  # six decimal places of uniformity
 
-        # 1) Bucket draw (one nonce).
-        bucket_roll = (await self.fairgate_play_numbers(
-            user_id=user_id, PF=PF, pool=10000, pick=1, replacement=True
+        # 1) Uniform roll in [0, precision) (one nonce).
+        roll = (await self.fairgate_play_numbers(
+            user_id=user_id, PF=PF, pool=precision, pick=1, replacement=True
         ))[0]
+        r = roll / precision
 
-        if bucket_roll < 4500:
-            lo, hi = 1.0, 2.0
-        elif bucket_roll < 8000:
-            lo, hi = 2.0, 5.0
-        elif bucket_roll < 9500:
-            lo, hi = 5.0, 20.0
-        else:
-            lo, hi = 20.0, 50.0
-
-        # 2) Value draw inside the bucket (next nonce).
-        PF = await self.bump_fairgate_pf(user_id, PF)
-        cents_pool = int((hi - lo) * 100)
-        value_roll = (await self.fairgate_play_numbers(
-            user_id=user_id, PF=PF, pool=cents_pool, pick=1, replacement=True
-        ))[0]
-        v = lo + (value_roll / 100.0)
-
-        # 3) Advance the wallet nonce so the next game starts at the same
-        #    offset as the local path (two consumed nonces total).
-        await self.bot.database.bump_fairgate_nonce(user_id)
-
-        # 4) VIP boost (same formula as local generate_crash_point).
+        # 2) Apply the user's adjusted house edge (default 4%).
         user_edge = float(house_edge)
-        if 0 < user_edge < base_edge:
-            boost = (base_edge - user_edge) / base_edge
-            v = v + (hi - v) * boost
+        edge = max(0.0, min(user_edge, base_edge))
+        target_rtp = 1.0 - edge
+
+        # 3) Inverse-transform crash point.
+        #    P(crash > m) = target_rtp / m, so the expected multiplier is
+        #    exactly target_rtp (house edge = 1 - target_rtp).
+        denominator = max(1e-9, 1.0 - r)
+        v = target_rtp / denominator
+        v = max(1.0, min(v, max_crash))
 
         return Decimal(str(round(v, 2)))
 
@@ -4395,15 +4450,15 @@ class Casino(commands.Cog):
             verify_game = "numbers"
             params = {"pool": 30, "pick": 8, "replacement": False}
         elif game_key == "crash":
-            # Crash points are generated via two ``numbers`` draws; the
-            # recorded nonce is the first (bucket) draw.
+            # Crash points are generated from one uniform ``numbers`` draw on a
+            # 1,000,000-space pool using the standard inverse-transform formula.
             verify_game = "numbers"
-            params = {"pool": 10000, "pick": 1, "replacement": True}
+            params = {"pool": 1_000_000, "pick": 1, "replacement": True}
             embed.add_field(
                 name="⚠️ Note",
                 value=(
-                    "Crash uses two FairGate draws (bucket + value). "
-                    "This verifies the bucket draw only."
+                    "Crash uses one FairGate numbers draw. Recompute the crash "
+                    "point as (1 - house_edge) / (1 - roll / 1_000_000)."
                 ),
                 inline=False,
             )
@@ -6470,6 +6525,12 @@ class Casino(commands.Cog):
             state={"host_id": ctx.author.id},
         )
         view = CrashView(self.bot, ctx.author.id, cid, session_id=session_id)
+        try:
+            view.max_allowed_bet = await self.bot.database.get_max_gamble_amount(
+                ctx.author.id, False, Decimal("50.0")
+            )
+        except Exception:
+            view.max_allowed_bet = Decimal("0")
         self.active_games[cid] = view
 
         async def force_end(refund: bool = False):
