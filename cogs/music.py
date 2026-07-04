@@ -305,45 +305,54 @@ class Music(commands.Cog, name="Music"):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
         await self.sync_blacktea()
 
+    async def _safe_lastfm_request(
+        self, url: str, error_context: str = "Last.fm API request"
+    ) -> dict | None:
+        """Make a safe Last.fm API request with error handling.
+
+        Args:
+            url: The API endpoint URL
+            error_context: Description for logging purposes
+
+        Returns:
+            dict: The JSON response data, or None if request failed
+        """
+        try:
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    logger.warning(
+                        f"{error_context}: Last.fm API returned status {response.status}"
+                    )
+                    return None
+
+                data = await response.json()
+                return data
+
+        except (aiohttp.ClientError, aiohttp.ContentTypeError) as e:
+            logger.error(f"{error_context}: {type(e).__name__} - {e}")
+            return None
+        except (KeyError, TypeError, ValueError) as e:
+            logger.error(
+                f"{error_context}: Response parsing error - {type(e).__name__} - {e}"
+            )
+            return None
+
     async def update_user_index(self, lastfm_username: str):
         """Fetch and index recent listening data for a user."""
-        url_recent = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={quote(lastfm_username)}&api_key={LASTFM_API_KEY}&format=json"
-        
-        async def _safe_lastfm_request(url: str, error_context: str = "Last.fm API request"):
-            """Make a safe Last.fm API request with error handling.
-            
-            Args:
-                url: The API endpoint URL
-                error_context: Description for logging purposes
-                
-            Returns:
-                dict: The JSON response data, or None if request failed
-            """
-            try:
-                async with self.session.get(url) as response:
-                    if response.status != 200:
-                        logger.warning(f"{error_context}: Last.fm API returned status {response.status}")
-                        return None
-                    
-                    data = await response.json()
-                    return data
-                    
-            except (aiohttp.ClientError, aiohttp.ContentTypeError) as e:
-                logger.error(f"{error_context}: {type(e).__name__} - {e}")
-                return None
-            except (KeyError, TypeError, ValueError) as e:
-                logger.error(f"{error_context}: Response parsing error - {type(e).__name__} - {e}")
-                return None
+        url_recent = (
+            f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks"
+            f"&user={quote(lastfm_username)}&api_key={LASTFM_API_KEY}&format=json"
+        )
 
-        result = await _safe_lastfm_request(url_recent)
+        result = await self._safe_lastfm_request(url_recent)
         if result is not None:
             recent_tracks = result.get("recenttracks", {})
             tracks = recent_tracks.get("track", [])
-            
+
             if not isinstance(tracks, list):
                 logger.debug(f"Invalid tracks format for user {lastfm_username}")
                 return []
-            
+
             return tracks
         else:
             logger.warning(f"Last.fm API request failed for user {lastfm_username}")
