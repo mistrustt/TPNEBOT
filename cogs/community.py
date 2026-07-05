@@ -163,7 +163,7 @@ class Community(commands.Cog, name="Community"):
         await ctx.send(embed=embed, view=view)
 
     @grail.command(name="add")
-    async def add_favorite(self, ctx: Context, *, song_title: str):
+    async def grail_add(self, ctx: Context, *, song_title: str):
         """Add a favorite song."""
         if len(song_title) > 64:
             await ctx.reply("Song title cannot be longer than 64 characters.")
@@ -185,7 +185,7 @@ class Community(commands.Cog, name="Community"):
         await ctx.reply(embed=embed)
 
     @grail.command(name="remove")
-    async def remove_favorite(self, ctx: Context, *, song_title: str):
+    async def grail_remove(self, ctx: Context, *, song_title: str):
         """Remove a favorite song by title."""
         favorite_songs = await self.bot.database.get_favorite_songs(ctx.author.id)
         song_title_lower = song_title.lower()
@@ -222,7 +222,7 @@ class Community(commands.Cog, name="Community"):
         await ctx.reply(embed=embed)
 
     @grail.command(name="list")
-    async def default(self, ctx: commands.Context, member: discord.Member = None):
+    async def grail_list(self, ctx: commands.Context, member: discord.Member = None):
         """View your favorite songs."""
         member = member or ctx.author
 

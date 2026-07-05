@@ -711,6 +711,11 @@ class MinesGridLayout(discord.ui.LayoutView):
             f"### 🎉 PERFECT! All Gems Cleared!\n"
             f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!"
         )
+        self.container.stats_text.content = (
+            f"💎 **Gems Clicked:** {self.gems_clicked}\n"
+            f"📈 **Final Multiplier:** x{multiplier:.3g}\n"
+            f"🏆 **Win:** {self.currency_name} {formatted_winnings}"
+        )
         self.container.cashout_row.children[0].disabled = True
 
         await casino._remove_refund(self.session_id, user_id=self.user_id)
@@ -916,6 +921,11 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.container.game_text.content = (
             f"### 💰 Cashed Out!\n"
             f"You won **{formatted_winnings}** {self.currency_name} at {multiplier:.2f}x!"
+        )
+        self.container.stats_text.content = (
+            f"💎 **Gems Clicked:** {self.gems_clicked}\n"
+            f"📈 **Final Multiplier:** x{multiplier:.3g}\n"
+            f"🏆 **Win:** {self.currency_name} {formatted_winnings}"
         )
         self.container.cashout_row.children[0].disabled = True
 
