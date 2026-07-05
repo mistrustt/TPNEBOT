@@ -3631,6 +3631,79 @@ class Owner(commands.Cog, name="Owner"):
                 embed=discord.Embed(description=str(e), color=discord.Color.red())
             )
 
+    @adminbank.command(name="giveall", hidden=True)
+    @commands.is_owner()
+    async def admin_bank_giveall(self, ctx: Context, amount: str):
+        """Give a specified amount to every user in the server."""
+        if ctx.guild is None:
+            embed = discord.Embed(
+                description="🚫 This command can only be used in a server.",
+                color=discord.Color.red(),
+            )
+            return await ctx.reply(embed=embed, delete_after=5)
+
+        try:
+            treasury = await self.bot.database.get_treasury_balance()
+            amount = await self.amount_handler(amount, treasury)
+            amount = Decimal(amount)
+
+            members = [m for m in ctx.guild.members if not m.bot]
+            if not members:
+                embed = discord.Embed(
+                    description="🚫 No eligible users found in this server.",
+                    color=discord.Color.red(),
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+
+            total_cost = amount * Decimal(len(members))
+            if total_cost > treasury:
+                embed = discord.Embed(
+                    description=(
+                        f"🚫 Insufficient treasury funds. Giving **{await self.formatter(amount)}** "
+                        f"to **{len(members)}** users would require "
+                        f"**{await self.formatter(total_cost)}**, but the treasury only has "
+                        f"**{await self.formatter(treasury)}**."
+                    ),
+                    color=discord.Color.red(),
+                )
+                return await ctx.reply(embed=embed, delete_after=5)
+
+            success = 0
+            failed = 0
+            for member in members:
+                try:
+                    wallet_id = await self.bot.database.get_wallet_id_for_user(member.id)
+                    await self.bot.database.process_treasury_transaction(
+                        wallet_id,
+                        amount,
+                        f"Admin Audit - Mass Grant from {ctx.author.name}",
+                    )
+                    success += 1
+                except Exception:
+                    failed += 1
+
+            await self.bot.database.update_supply()
+
+            embed = discord.Embed(
+                description=(
+                    f"Gave {self.currency_name} **{await self.formatter(amount)}** to "
+                    f"**{success}** user(s)."
+                ),
+                color=discord.Color.green(),
+            )
+            if failed:
+                embed.add_field(
+                    name="Failed",
+                    value=f"**{failed}** user(s) could not be paid.",
+                    inline=False,
+                )
+            embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
+            await ctx.send(embed=embed)
+        except ValueError as e:
+            await ctx.send(
+                embed=discord.Embed(description=str(e), color=discord.Color.red())
+            )
+
     @adminbank.command(
         name="take", aliases=["steal", "seize", "confiscate"], hidden=True
     )
