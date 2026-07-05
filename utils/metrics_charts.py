@@ -5,11 +5,9 @@ with improved styling and visualization options.
 """
 
 import io
-from datetime import datetime
 from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 import discord
@@ -87,19 +85,6 @@ def _trim_labels(labels: list[str], max_len: int = 18) -> list[str]:
         (label[: max_len - 1] + "…") if len(label) > max_len else label
         for label in labels
     ]
-
-
-def format_dates_on_axis(ax: Axes, dates: list[datetime], rotation: int = 45) -> None:
-    """Format date axis with proper date formatting.
-
-    Args:
-        ax: Matplotlib axes object.
-        dates: List of datetime objects.
-        rotation: Rotation angle for date labels.
-    """
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=rotation, ha="right")
 
 
 def render_line_chart(

@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from typing import Any
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urljoin
 import asyncio
 import aiohttp
 

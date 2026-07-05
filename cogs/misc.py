@@ -7,7 +7,6 @@ import aiohttp
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 import pytz
-from datetime import datetime
 from utils.misc import MiscUtils
 import asyncio
 from faker import Faker

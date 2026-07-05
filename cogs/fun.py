@@ -8,11 +8,7 @@ import discord
 import logging
 from discord.ext import commands
 from discord.ext.commands import Context
-from datetime import datetime
-import logging
 from utils.misc import MiscUtils
-from utils.embeds import Embeds
-from database.models import PunishmentType
 
 logger = logging.getLogger("discord_bot")
 

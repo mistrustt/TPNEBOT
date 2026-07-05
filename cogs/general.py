@@ -43,9 +43,6 @@ MESSAGE_LINK = re.compile(
     r"(?P<guild>\d+)/(?P<channel>\d+)/(?P<message>\d+)"
 )
 
-HEX_COLOR = re.compile(r"^(?:#)?([0-9A-Fa-f]{6})\s+(.+)$")
-
-
 class HelpSelect(ui.Select):
     def __init__(self, bot, embeds_by_cog):
         self.bot = bot

@@ -1,16 +1,14 @@
 import re
 import json
-import os
 import discord
 import logging
 import asyncio
 import datetime
 import secrets
-import functools
 import hashlib
 from itertools import combinations
 from collections import Counter
-from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, InvalidOperation
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from discord import ui, ButtonStyle, Interaction
 from discord.ui import View, Button
 from discord.ext import commands

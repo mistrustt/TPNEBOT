@@ -3,14 +3,11 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ext.commands import Context
 import os
-import io
 import uuid
 import copy
 import hashlib
 import json
 import re
-import traceback
-from contextlib import redirect_stdout
 import textwrap
 import logging
 import asyncio
@@ -41,16 +38,13 @@ from database.models import (
     DailyUserExposure,
     RakebackBalance,
 )
-from database.manager import ItemType, EffectType
+from database.manager import ItemType
 import importlib.util
 from utils.embeds import Embeds
 
 logger = logging.getLogger("discord_bot")
 
 MAX_FIELD_VALUE_LENGTH = 1024
-MAX_EMBED_DESC_LENGTH = 2048
-MAX_EMBED_CHAR_LENGTH = 6000
-MAX_EMBED_DESCRIPTION = 4096  # Discord's max embed description length
 
 
 ITEMS_PER_PAGE = 15
@@ -229,9 +223,6 @@ class MetricsPaginator(discord.ui.View):
             await interaction.followup.send(
                 f"Failed to render chart: {e}", ephemeral=True
             )
-
-
-MAX_FIELDS = 25
 
 
 class TodoPaginator(discord.ui.View):

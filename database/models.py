@@ -26,7 +26,6 @@ import hashlib
 import json
 import discord
 from sqlalchemy.orm import relationship
-from datetime import datetime
 import enum
 
 Base = declarative_base()
@@ -38,12 +37,6 @@ class UserIdentity(Base):
     user_hash = Column(String(64), primary_key=True)
     user_id = Column(BigInteger, nullable=False, unique=True)
 
-
-
-class CaseStatus(enum.Enum):
-    OPEN = "open"
-    CLOSED = "closed"
-    REVIEWED = "reviewed"
 
 
 class PunishmentType(enum.Enum):
@@ -94,7 +87,6 @@ class ServerSettings(Base):
     mute_role_id = Column(BigInteger, nullable=True)
     imute_role_id = Column(BigInteger, nullable=True)
     rmute_role_id = Column(BigInteger, nullable=True)
-    booster_role_id = Column(BigInteger, nullable=True)
     watchdog_channel_id = Column(BigInteger, nullable=True)
     member_count_channel_id = Column(BigInteger, nullable=True)
     report_channel_id = Column(BigInteger, nullable=True)
@@ -135,14 +127,6 @@ Punishment.notes = relationship(
 )
 
 
-class WatchdogSetting(Base):
-    __tablename__ = "watchdog_settings"
-
-    guild_id = Column(BigInteger, primary_key=True)
-    enabled = Column(Boolean, default=True)
-    channel_id = Column(BigInteger, nullable=False)
-
-
 class WatchdogLog(Base):
     __tablename__ = "watchdog_log"
 
@@ -151,14 +135,6 @@ class WatchdogLog(Base):
     guild_id = Column(BigInteger, nullable=False)
     punishment_type = Column(Enum(PunishmentType), nullable=False)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
-
-
-class JailSetting(Base):
-    __tablename__ = "jail_settings"
-
-    guild_id = Column(BigInteger, primary_key=True)
-    role_id = Column(BigInteger, nullable=False)
-    channel_id = Column(BigInteger, nullable=False)
 
 
 class JailedUser(Base):
@@ -825,13 +801,6 @@ class GameSessionEvent(Base):
     event_type = Column(String, nullable=False)
     payload = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class ReportSetting(Base):
-    __tablename__ = "report_settings"
-
-    guild_id = Column(BigInteger, primary_key=True)
-    channel_id = Column(BigInteger, nullable=False)
 
 
 class Task(Base):

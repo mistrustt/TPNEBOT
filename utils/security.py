@@ -1,6 +1,5 @@
 """Deterministic one-way hashing for Discord user IDs and location encryption."""
 
-import base64
 import hashlib
 import hmac
 import logging
@@ -44,11 +43,6 @@ def hash_user_id(user_id: int) -> str:
     """
     key = _get_hash_key()
     return hmac.new(key, str(int(user_id)).encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def hash_user_ids(user_ids: list[int]) -> list[str]:
-    """Hash a sequence of Discord user IDs."""
-    return [hash_user_id(uid) for uid in user_ids]
 
 
 _location_fernet: Fernet | None = None

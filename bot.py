@@ -438,25 +438,41 @@ class DiscordBot(commands.Bot):
                 command_name, channel_id
             )
             if command_enabled is False:
-                embed = discord.Embed(
-                    title="Error!",
-                    description=f"The `{command_name}` command is disabled in this channel by staff.",
-                    color=discord.Color.orange(),
-                )
-                await ctx.send(embed=embed, delete_after=5)
-                return
+                if ctx.author.id in self.owner_ids:
+                    embed = discord.Embed(
+                        title="Notice",
+                        description=f"The `{command_name}` command is disabled in this channel by staff, but you are an owner and can still use it.",
+                        color=discord.Color.orange(),
+                    )
+                    await ctx.send(embed=embed, delete_after=5)
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description=f"The `{command_name}` command is disabled in this channel by staff.",
+                        color=discord.Color.orange(),
+                    )
+                    await ctx.send(embed=embed, delete_after=5)
+                    return
 
             command_enabled_global = await self.database.get_command_status(
                 command_name
             )
             if command_enabled_global is False:
-                embed = discord.Embed(
-                    title="Error!",
-                    description=f"The `{command_name}` command is currently disabled for maintenance.",
-                    color=discord.Color.orange(),
-                )
-                await ctx.send(embed=embed, delete_after=5)
-                return
+                if ctx.author.id in self.owner_ids:
+                    embed = discord.Embed(
+                        title="Notice",
+                        description=f"The `{command_name}` command is currently disabled for maintenance, but you are an owner and can still use it.",
+                        color=discord.Color.orange(),
+                    )
+                    await ctx.send(embed=embed, delete_after=5)
+                else:
+                    embed = discord.Embed(
+                        title="Error!",
+                        description=f"The `{command_name}` command is currently disabled for maintenance.",
+                        color=discord.Color.orange(),
+                    )
+                    await ctx.send(embed=embed, delete_after=5)
+                    return
 
             remaining_cooldown = await self.database.get_cooldown(user_id, command_name)
             if remaining_cooldown > 0:

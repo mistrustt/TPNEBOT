@@ -1,24 +1,3 @@
-from sqlalchemy.future import select
-from sqlalchemy import update, delete, text, exists, case, literal_column, distinct
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.exc import (
-    SQLAlchemyError,
-    OperationalError,
-    DBAPIError,
-    DisconnectionError,
-    TimeoutError as SATimeoutError,
-)
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import func
-import asyncio
-from contextlib import asynccontextmanager
-import functools
-from typing import List, Optional, Tuple
-import hashlib
-import time
-import secrets
-import os
-import aiohttp
 from .models import (
     Base,
     BotConfig,
@@ -89,13 +68,6 @@ from .models import (
     RakebackBalance,
     RakebackTransaction,
 )
-from datetime import datetime, timedelta, timezone
-import discord
-import uuid
-import logging
-from decimal import Decimal, ROUND_HALF_UP
-from utils.amount import AmountUtils
-
 from .managers import (
     BaseManager,
     CoreMixin,
@@ -108,11 +80,6 @@ from .managers import (
     SocialMixin,
     MusicMixin,
 )
-
-logger = logging.getLogger("discord_bot")
-
-ADMIN_IDS = {284439598422163476, 1099696209637167145, 881692219260665867}  # Owner IDs
-
 
 class DatabaseManager(
     CoreMixin,

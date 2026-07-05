@@ -12,50 +12,10 @@ import humanfriendly
 from discord.ext.commands import Context
 from database.models import PunishmentType
 from utils.misc import MiscUtils
-from typing import Optional, Union
+from typing import Optional
 from matplotlib.ticker import MaxNLocator
 
 logger = logging.getLogger("discord_bot")
-
-
-def parse_duration(duration_str: str) -> int:
-    """
-    Parse a duration string and return seconds.
-    Supported units: s, m, h, d (e.g. "15m", "2h", "1d").
-    """
-    seconds = 0
-    for amount, unit in re.findall(r"(\d+)([smhd])", duration_str):
-        amount = int(amount)
-        if unit == "s":
-            seconds += amount
-        elif unit == "m":
-            seconds += amount * 60
-        elif unit == "h":
-            seconds += amount * 3600
-        elif unit == "d":
-            seconds += amount * 86400
-    if seconds == 0:
-        raise ValueError("Invalid duration format")
-    return seconds
-
-
-def format_duration(seconds: int) -> str:
-    """Converts a duration in seconds to a human-readable string like '1m', '2h', '3d', etc."""
-    weeks, seconds = divmod(seconds, 604800)
-    days, seconds = divmod(seconds, 86400)
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
-
-    if weeks > 0:
-        return f"{weeks}w"
-    elif days > 0:
-        return f"{days}d"
-    elif hours > 0:
-        return f"{hours}h"
-    elif minutes > 0:
-        return f"{minutes}m"
-    else:
-        return f"{seconds}s"
 
 
 class Moderation(commands.Cog, name="Moderation"):
@@ -1191,14 +1151,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 ),
                 view=view,
             )
-        #except Exception as e:
-        #    embed = discord.Embed(
-        #        title="Ban Error",
-        #        description=f"An error occurred while attempting to ban {member.name}. Make sure my top role is above theirs.",
-        #        color=discord.Color.red(),
-        #    )
-        #    await ctx.send(embed=embed)
-
     @commands.command(
         name="tempban", description="Temporarily bans a user for a specified duration."
     )
