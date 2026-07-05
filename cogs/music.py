@@ -1806,7 +1806,6 @@ class Music(commands.Cog, name="Music"):
                 )
             )
 
-
     async def fetch_song(self, ctx: commands.Context, query: str, allow_unsurfaced: bool = True):
         query = query.replace('’', "'")
         async with self.session.get(
