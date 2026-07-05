@@ -220,11 +220,51 @@ class BaseManager:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             await self.create_tables()
+            await self._repair_daily_user_hash_columns()
 
         try:
             await self._db_retry(_init, retries=self._db_retry_count, base_delay=2.0)
         except SQLAlchemyError as e:
             logger.error(f"Error initializing database: {e}")
+
+    async def _repair_daily_user_hash_columns(self):
+        """
+        Ensure the daily analytics tables have the user_hash column and related
+        constraints added by later model changes. Older deployments created these
+        tables before user_hash existed, so Base.metadata.create_all() skips them.
+        """
+        repairs = [
+            {
+                "table": "command_usage_daily",
+                "column_ddl": "ALTER TABLE command_usage_daily ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
+                "index_ddl": "CREATE INDEX IF NOT EXISTS ix_command_usage_daily_user_hash ON command_usage_daily(user_hash)",
+            },
+            {
+                "table": "command_latency_daily",
+                "column_ddl": "ALTER TABLE command_latency_daily ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
+                "index_ddl": "CREATE INDEX IF NOT EXISTS ix_command_latency_daily_user_hash ON command_latency_daily(user_hash)",
+            },
+            {
+                "table": "command_error_daily",
+                "column_ddl": "ALTER TABLE command_error_daily ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
+                "index_ddl": "CREATE INDEX IF NOT EXISTS ix_command_error_daily_user_hash ON command_error_daily(user_hash)",
+            },
+            {
+                "table": "daily_user_exposure",
+                "column_ddl": "ALTER TABLE daily_user_exposure ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
+                "index_ddl": "CREATE INDEX IF NOT EXISTS ix_daily_user_exposure_user_hash ON daily_user_exposure(user_hash)",
+            },
+        ]
+
+        async with self.engine.begin() as conn:
+            for repair in repairs:
+                table = repair["table"]
+                try:
+                    await conn.execute(text(repair["column_ddl"]))
+                    await conn.execute(text(repair["index_ddl"]))
+                    logger.info(f"Repaired schema for table: {table}")
+                except SQLAlchemyError as e:
+                    logger.warning(f"Schema repair for {table} failed (may be expected): {e}")
 
     def get_session(self):
         """Provide a transactional scope around a series of operations."""
