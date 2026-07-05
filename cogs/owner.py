@@ -16,16 +16,6 @@ import statistics
 import psutil
 from utils.misc import MiscUtils
 from utils.metrics_charts import MetricsChartView
-from utils.fairness import (
-    SUPERGAMBLE_WIN_THRESHOLD, SUPERGAMBLE_BASE_MULTIPLIER,
-    SUPERGAMBLE_BONUS_MULTIPLIER, SUPERGAMBLE_MEGA_THRESHOLD,
-    DICE_PAYOUTS, DICE_EVEN_ODD_PAYOUT,
-    LADDER_STEP_PROBS, LADDER_STEP_MULTS, LADDER_MAX_STEP,
-    CRASH_RANGES, CRASH_BUCKET_NAMES,
-    ROULETTE_ALL_NUMBERS, ROULETTE_RED_NUMBERS, ROULETTE_BLACK_NUMBERS,
-    SLOTS_REEL_WEIGHTS, SLOTS_PAYLINES, SLOTS_SYMBOLS,
-    evaluate_slots,
-)
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from sqlalchemy import text, select, func
@@ -36,7 +26,6 @@ from database.models import (
     CommandLatencyDaily,
     CommandErrorDaily,
     DailyUserExposure,
-    RakebackBalance,
 )
 from database.manager import ItemType
 import importlib.util
@@ -107,7 +96,7 @@ class MetricsPaginator(discord.ui.View):
         for idx, item in enumerate(self.data):
             line = self.format_func(item, rank=idx + 1)
             if len(line) > MAX_FIELD_VALUE_LENGTH:
-                line = line[:MAX_FIELD_VALUE_LENGTH - 3] + "..."
+                line = line[: MAX_FIELD_VALUE_LENGTH - 3] + "..."
             self._formatted_lines.append(line)
 
         start = 0
@@ -136,7 +125,8 @@ class MetricsPaginator(discord.ui.View):
 
         if self.summary:
             embed.description = "\n".join(
-                f"{emoji} **{label}:** {value}" for emoji, label, value in self._summary_rows()
+                f"{emoji} **{label}:** {value}"
+                for emoji, label, value in self._summary_rows()
             )
 
         if not self.data:
@@ -184,7 +174,9 @@ class MetricsPaginator(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️")
+    @discord.ui.button(
+        label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️"
+    )
     async def previous(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -324,12 +316,18 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
             label="Quantity (or 'unlimited')",
             placeholder="Enter quantity or 'unlimited'",
             max_length=20,
-            default="unlimited" if (edit_item and edit_item.unlimited) else (str(edit_item.quantity) if edit_item else None),
+            default="unlimited"
+            if (edit_item and edit_item.unlimited)
+            else (str(edit_item.quantity) if edit_item else None),
         )
         self.add_item(self.quantity_input)
 
         # Item type input
-        item_type_default = edit_item.item_type.value if (edit_item and edit_item.item_type) else "collectible"
+        item_type_default = (
+            edit_item.item_type.value
+            if (edit_item and edit_item.item_type)
+            else "collectible"
+        )
         self.item_type_input = discord.ui.TextInput(
             label="Item Type (collectible/redeemable/consumable)",
             placeholder="collectible, redeemable, or consumable",
@@ -354,7 +352,9 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
             placeholder="e.g., 100 for currency, 1.5 for 1.5x multiplier",
             max_length=20,
             required=False,
-            default=str(edit_item.effect_value) if (edit_item and edit_item.effect_value) else None,
+            default=str(edit_item.effect_value)
+            if (edit_item and edit_item.effect_value)
+            else None,
         )
         self.add_item(self.effect_value_input)
 
@@ -364,7 +364,9 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
             placeholder="e.g., 3600 for 1 hour. Leave empty for instant effects",
             max_length=10,
             required=False,
-            default=str(edit_item.effect_duration) if (edit_item and edit_item.effect_duration) else None,
+            default=str(edit_item.effect_duration)
+            if (edit_item and edit_item.effect_duration)
+            else None,
         )
         self.add_item(self.effect_duration_input)
 
@@ -374,7 +376,9 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
             placeholder="Time between uses. Leave empty for no cooldown",
             max_length=10,
             required=False,
-            default=str(edit_item.cooldown_seconds) if (edit_item and edit_item.cooldown_seconds) else None,
+            default=str(edit_item.cooldown_seconds)
+            if (edit_item and edit_item.cooldown_seconds)
+            else None,
         )
         self.add_item(self.cooldown_input)
 
@@ -415,17 +419,22 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
                 # Update existing item
                 async with self.bot.database.async_sessionmaker() as session:
                     from sqlalchemy import update
-                    stmt = update(type(self.edit_item)).where(type(self.edit_item).id == self.edit_item.id).values(
-                        name=name,
-                        description=description,
-                        price=price,
-                        quantity=quantity,
-                        unlimited=unlimited,
-                        item_type=item_type,
-                        effect=effect,
-                        effect_value=effect_value,
-                        effect_duration=effect_duration,
-                        cooldown_seconds=cooldown_seconds,
+
+                    stmt = (
+                        update(type(self.edit_item))
+                        .where(type(self.edit_item).id == self.edit_item.id)
+                        .values(
+                            name=name,
+                            description=description,
+                            price=price,
+                            quantity=quantity,
+                            unlimited=unlimited,
+                            item_type=item_type,
+                            effect=effect,
+                            effect_value=effect_value,
+                            effect_duration=effect_duration,
+                            cooldown_seconds=cooldown_seconds,
+                        )
                     )
                     await session.execute(stmt)
                     await session.commit()
@@ -457,11 +466,19 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
                 )
 
             if effect:
-                embed.add_field(name="Effect", value=f"{effect}: {effect_value or 'N/A'}", inline=True)
+                embed.add_field(
+                    name="Effect",
+                    value=f"{effect}: {effect_value or 'N/A'}",
+                    inline=True,
+                )
             if effect_duration:
-                embed.add_field(name="Duration", value=f"{effect_duration}s", inline=True)
+                embed.add_field(
+                    name="Duration", value=f"{effect_duration}s", inline=True
+                )
             if cooldown_seconds:
-                embed.add_field(name="Cooldown", value=f"{cooldown_seconds}s", inline=True)
+                embed.add_field(
+                    name="Cooldown", value=f"{cooldown_seconds}s", inline=True
+                )
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -508,6 +525,7 @@ def _fmt_list(items: Iterable[str]) -> str:
 async def _owner_check(interaction: discord.Interaction) -> bool:
     """App-command check used for owner-only slash commands."""
     return await interaction.client.is_owner(interaction.user)
+
 
 class Owner(commands.Cog, name="Owner"):
     def __init__(self, bot) -> None:
@@ -560,29 +578,31 @@ class Owner(commands.Cog, name="Owner"):
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        list_string = json.dumps(sorted(self.whitelist_clubhouse), separators=(',', ':'))
-    
+        list_string = json.dumps(
+            sorted(self.whitelist_clubhouse), separators=(",", ":")
+        )
+
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_clubhouse
 
     def is_whitelisted_tpne(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        list_string = json.dumps(sorted(self.whitelist_tpne), separators=(',', ':'))
-    
+        list_string = json.dumps(sorted(self.whitelist_tpne), separators=(",", ":"))
+
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_tpne
 
     def is_whitelisted_mistrust(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        list_string = json.dumps(sorted(self.whitelist_mistrust), separators=(',', ':'))
-    
+        list_string = json.dumps(sorted(self.whitelist_mistrust), separators=(",", ":"))
+
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_mistrust
-    
+
     def is_whitelisted_private(self, user_id: int):
         """Check if the user ID is in the whitelist."""
-        list_string = json.dumps(sorted(self.whitelist_private), separators=(',', ':'))
-    
+        list_string = json.dumps(sorted(self.whitelist_private), separators=(",", ":"))
+
         list_hash = hashlib.sha256(list_string.encode()).hexdigest()
         return list_hash, user_id in self.whitelist_private
 
@@ -655,7 +675,9 @@ class Owner(commands.Cog, name="Owner"):
                         CommandUsageDaily.is_slash,
                         func.sum(CommandUsageDaily.count).label("total"),
                     )
-                    .group_by(CommandUsageDaily.command_name, CommandUsageDaily.is_slash)
+                    .group_by(
+                        CommandUsageDaily.command_name, CommandUsageDaily.is_slash
+                    )
                     .order_by(text("total DESC"))
                 )
                 stmt = stmt.where(CommandUsageDaily.bucket_date >= cutoff)
@@ -666,10 +688,14 @@ class Owner(commands.Cog, name="Owner"):
                 rows = result.all()
         except Exception as e:
             self.bot.logger.error(f"Database error in metrics_usage: {e}")
-            return await ctx.send("❌ An error occurred while fetching usage data. Please try again later.")
+            return await ctx.send(
+                "❌ An error occurred while fetching usage data. Please try again later."
+            )
 
         if not rows:
-            return await ctx.send(f"No command usage data found for the last {days} day(s).")
+            return await ctx.send(
+                f"No command usage data found for the last {days} day(s)."
+            )
 
         grand_total = sum(int(r[2]) for r in rows)
         max_total = max(int(r[2]) for r in rows)
@@ -706,7 +732,10 @@ class Owner(commands.Cog, name="Owner"):
                 ctx.author.id,
                 chart_type="bar",
                 title="Command Usage",
-                labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _ in rows],
+                labels=[
+                    f"{name} ({'slash' if is_slash else 'prefix'})"
+                    for name, is_slash, _ in rows
+                ],
                 values=[int(total) for _, _, total in rows],
                 ylabel="Calls",
                 limit=15,
@@ -743,7 +772,9 @@ class Owner(commands.Cog, name="Owner"):
                         func.sum(CommandLatencyDaily.latency_ms_sum).label("sum_ms"),
                         func.sum(CommandLatencyDaily.latency_count).label("count"),
                     )
-                    .group_by(CommandLatencyDaily.command_name, CommandLatencyDaily.is_slash)
+                    .group_by(
+                        CommandLatencyDaily.command_name, CommandLatencyDaily.is_slash
+                    )
                     .order_by(text("sum_ms DESC"))
                 )
                 stmt = stmt.where(CommandLatencyDaily.bucket_date >= cutoff)
@@ -754,10 +785,14 @@ class Owner(commands.Cog, name="Owner"):
                 rows = result.all()
         except Exception as e:
             self.bot.logger.error(f"Database error in metrics_latency: {e}")
-            return await ctx.send("❌ An error occurred while fetching latency data. Please try again later.")
+            return await ctx.send(
+                "❌ An error occurred while fetching latency data. Please try again later."
+            )
 
         if not rows:
-            return await ctx.send(f"No command latency data found for the last {days} day(s).")
+            return await ctx.send(
+                f"No command latency data found for the last {days} day(s)."
+            )
 
         processed = []
         for name, is_slash, sum_ms, count in rows:
@@ -766,13 +801,19 @@ class Owner(commands.Cog, name="Owner"):
 
         max_avg = max(r[2] for r in processed)
         grand_calls = sum(r[3] for r in processed)
-        overall_avg = sum(r[2] * r[3] for r in processed) // grand_calls if grand_calls else 0
+        overall_avg = (
+            sum(r[2] * r[3] for r in processed) // grand_calls if grand_calls else 0
+        )
 
         def format_row(row, rank):
             name, is_slash, avg, count = row
             icon = "⚡" if is_slash else "⌨️"
             bar = _bar_visual(avg, max_avg)
-            color = "🟢" if avg <= overall_avg * 1.2 else ("🟡" if avg <= overall_avg * 2 else "🔴")
+            color = (
+                "🟢"
+                if avg <= overall_avg * 1.2
+                else ("🟡" if avg <= overall_avg * 2 else "🔴")
+            )
             return (
                 f"`{rank:>2}.` {icon} `{name[:24]:<24}` "
                 f"{bar} `{avg:>6} ms` {color} ({_human_number(count)} calls)"
@@ -796,7 +837,10 @@ class Owner(commands.Cog, name="Owner"):
                 ctx.author.id,
                 chart_type="bar",
                 title="Command Latency (Avg)",
-                labels=[f"{name} ({'slash' if is_slash else 'prefix'})" for name, is_slash, _, _ in rows],
+                labels=[
+                    f"{name} ({'slash' if is_slash else 'prefix'})"
+                    for name, is_slash, _, _ in rows
+                ],
                 values=[avg for _, _, avg, _ in processed],
                 ylabel="Avg ms",
                 limit=15,
@@ -848,10 +892,14 @@ class Owner(commands.Cog, name="Owner"):
                 rows = result.all()
         except Exception as e:
             self.bot.logger.error(f"Database error in metrics_errors: {e}")
-            return await ctx.send("❌ An error occurred while fetching error data. Please try again later.")
+            return await ctx.send(
+                "❌ An error occurred while fetching error data. Please try again later."
+            )
 
         if not rows:
-            return await ctx.send(f"No command error data found for the last {days} day(s).")
+            return await ctx.send(
+                f"No command error data found for the last {days} day(s)."
+            )
 
         grand_total = sum(int(r[3]) for r in rows)
         max_total = max(int(r[3]) for r in rows)
@@ -872,7 +920,11 @@ class Owner(commands.Cog, name="Owner"):
         command_totals = {}
         for name, _, _, total in rows:
             command_totals[name] = command_totals.get(name, 0) + int(total)
-        chart_labels, chart_values = zip(*sorted(command_totals.items(), key=lambda x: x[1], reverse=True)) if command_totals else ([], [])
+        chart_labels, chart_values = (
+            zip(*sorted(command_totals.items(), key=lambda x: x[1], reverse=True))
+            if command_totals
+            else ([], [])
+        )
 
         summary = {
             "Total": _human_number(grand_total),
@@ -924,7 +976,9 @@ class Owner(commands.Cog, name="Owner"):
             async with self.bot.database.async_sessionmaker() as session:
                 stmt = select(
                     func.count().label("rows"),
-                    func.count(func.distinct(DailyUserExposure.user_hash)).label("unique"),
+                    func.count(func.distinct(DailyUserExposure.user_hash)).label(
+                        "unique"
+                    ),
                 )
                 stmt = stmt.where(DailyUserExposure.bucket_date >= cutoff)
                 if guild_id:
@@ -934,7 +988,9 @@ class Owner(commands.Cog, name="Owner"):
                 row = result.first()
         except Exception as e:
             self.bot.logger.error(f"Database error in metrics_exposure: {e}")
-            return await ctx.send("❌ An error occurred while fetching exposure data. Please try again later.")
+            return await ctx.send(
+                "❌ An error occurred while fetching exposure data. Please try again later."
+            )
 
         total_rows = row.rows if row else 0
         unique_users = row.unique if row else 0
@@ -943,9 +999,15 @@ class Owner(commands.Cog, name="Owner"):
             title="👤 User Exposure",
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Unique Users", value=_human_number(unique_users), inline=True)
-        embed.add_field(name="Exposure Rows", value=_human_number(total_rows), inline=True)
-        embed.add_field(name="Daily Average", value=_human_number(total_rows // days), inline=True)
+        embed.add_field(
+            name="Unique Users", value=_human_number(unique_users), inline=True
+        )
+        embed.add_field(
+            name="Exposure Rows", value=_human_number(total_rows), inline=True
+        )
+        embed.add_field(
+            name="Daily Average", value=_human_number(total_rows // days), inline=True
+        )
         embed.set_footer(text=f"Days: {days}")
 
         view = MetricsChartView(
@@ -999,10 +1061,14 @@ class Owner(commands.Cog, name="Owner"):
                 rows = result.all()
         except Exception as e:
             self.bot.logger.error(f"Database error in metrics_topguilds: {e}")
-            return await ctx.send("❌ An error occurred while fetching guild data. Please try again later.")
+            return await ctx.send(
+                "❌ An error occurred while fetching guild data. Please try again later."
+            )
 
         if not rows:
-            return await ctx.send(f"No guild usage data found for command `{command_name}` in the last {days} day(s).")
+            return await ctx.send(
+                f"No guild usage data found for command `{command_name}` in the last {days} day(s)."
+            )
 
         grand_total = sum(int(r[1]) for r in rows)
         max_total = max(int(r[1]) for r in rows)
@@ -1067,7 +1133,9 @@ class Owner(commands.Cog, name="Owner"):
         valid_metrics = {"usage", "errors", "latency", "exposure"}
         metric = metric.lower()
         if metric not in valid_metrics:
-            return await ctx.send(f"❌ Invalid metric `{metric}`. Valid options: {', '.join(sorted(valid_metrics))}")
+            return await ctx.send(
+                f"❌ Invalid metric `{metric}`. Valid options: {', '.join(sorted(valid_metrics))}"
+            )
 
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
@@ -1092,7 +1160,9 @@ class Owner(commands.Cog, name="Owner"):
                         .order_by(CommandErrorDaily.bucket_date.asc())
                     )
                     if command_name:
-                        stmt = stmt.where(CommandErrorDaily.command_name == command_name)
+                        stmt = stmt.where(
+                            CommandErrorDaily.command_name == command_name
+                        )
                     if guild_id:
                         stmt = stmt.where(CommandErrorDaily.guild_id == guild_id)
                     ylabel = "Errors"
@@ -1102,7 +1172,9 @@ class Owner(commands.Cog, name="Owner"):
                     stmt = (
                         select(
                             CommandLatencyDaily.bucket_date,
-                            func.sum(CommandLatencyDaily.latency_ms_sum).label("sum_ms"),
+                            func.sum(CommandLatencyDaily.latency_ms_sum).label(
+                                "sum_ms"
+                            ),
                             func.sum(CommandLatencyDaily.latency_count).label("count"),
                         )
                         .where(CommandLatencyDaily.bucket_date >= cutoff)
@@ -1110,7 +1182,9 @@ class Owner(commands.Cog, name="Owner"):
                         .order_by(CommandLatencyDaily.bucket_date.asc())
                     )
                     if command_name:
-                        stmt = stmt.where(CommandLatencyDaily.command_name == command_name)
+                        stmt = stmt.where(
+                            CommandLatencyDaily.command_name == command_name
+                        )
                     if guild_id:
                         stmt = stmt.where(CommandLatencyDaily.guild_id == guild_id)
                     ylabel = "Avg ms"
@@ -1120,9 +1194,9 @@ class Owner(commands.Cog, name="Owner"):
                     stmt = (
                         select(
                             DailyUserExposure.bucket_date,
-                            func.count(func.distinct(DailyUserExposure.user_hash)).label(
-                                "unique"
-                            ),
+                            func.count(
+                                func.distinct(DailyUserExposure.user_hash)
+                            ).label("unique"),
                         )
                         .where(DailyUserExposure.bucket_date >= cutoff)
                         .group_by(DailyUserExposure.bucket_date)
@@ -1144,7 +1218,9 @@ class Owner(commands.Cog, name="Owner"):
                         .order_by(CommandUsageDaily.bucket_date.asc())
                     )
                     if command_name:
-                        stmt = stmt.where(CommandUsageDaily.command_name == command_name)
+                        stmt = stmt.where(
+                            CommandUsageDaily.command_name == command_name
+                        )
                     if guild_id:
                         stmt = stmt.where(CommandUsageDaily.guild_id == guild_id)
                     ylabel = "Calls"
@@ -1155,10 +1231,14 @@ class Owner(commands.Cog, name="Owner"):
                 rows = result.all()
         except Exception as e:
             self.bot.logger.error(f"Database error in metrics_perday: {e}")
-            return await ctx.send("❌ An error occurred while fetching per-day data. Please try again later.")
+            return await ctx.send(
+                "❌ An error occurred while fetching per-day data. Please try again later."
+            )
 
         if not rows:
-            return await ctx.send(f"No per-day data found for metric `{metric}` in the last {days} day(s).")
+            return await ctx.send(
+                f"No per-day data found for metric `{metric}` in the last {days} day(s)."
+            )
 
         # Build labels and values for chart
         labels = []
@@ -1804,9 +1884,7 @@ class Owner(commands.Cog, name="Owner"):
             created = s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"
             raw_owner = resolved_owners.get(getattr(s, "owner_id", None))
             owner_str = f"<@{raw_owner}>" if raw_owner else "Unknown"
-            lines.append(
-                f"{s.id} • {s.game_name} • owner {owner_str} • {created}"
-            )
+            lines.append(f"{s.id} • {s.game_name} • owner {owner_str} • {created}")
         embed = discord.Embed(
             title="Active Game Sessions",
             description="\n".join(lines),
@@ -1830,19 +1908,24 @@ class Owner(commands.Cog, name="Owner"):
         resolved_participants = await self._resolve_ids(participant_ids)
         raw_owner = await self._resolve_id(getattr(gs, "owner_id", None))
 
-        embed = discord.Embed(
-            title=f"Session {gs.id}", color=discord.Color.blurple()
-        )
+        embed = discord.Embed(title=f"Session {gs.id}", color=discord.Color.blurple())
         embed.add_field(name="Game", value=gs.game_name, inline=True)
-        embed.add_field(name="Owner", value=f"<@{raw_owner}>" if raw_owner else "Unknown", inline=True)
+        embed.add_field(
+            name="Owner",
+            value=f"<@{raw_owner}>" if raw_owner else "Unknown",
+            inline=True,
+        )
         embed.add_field(name="Channel", value=str(gs.channel_id), inline=True)
         embed.add_field(name="Wager", value=str(gs.wager_total), inline=True)
         embed.add_field(
             name="Participants",
             value=", ".join(
-                f"<@{resolved_participants.get(p, p)}>" if resolved_participants.get(p) else f"Unknown ({p})"
+                f"<@{resolved_participants.get(p, p)}>"
+                if resolved_participants.get(p)
+                else f"Unknown ({p})"
                 for p in participant_ids
-            ) or "—",
+            )
+            or "—",
             inline=False,
         )
         embed.add_field(
@@ -1859,9 +1942,7 @@ class Owner(commands.Cog, name="Owner"):
 
     @gamesession.command(name="events", hidden=True)
     @commands.is_owner()
-    async def gamesession_events(
-        self, ctx: Context, session_id: str, limit: int = 10
-    ):
+    async def gamesession_events(self, ctx: Context, session_id: str, limit: int = 10):
         try:
             sid = uuid.UUID(session_id)
         except ValueError:
@@ -1961,9 +2042,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(color=discord.Color.blurple(), title="Cog Unload Results")
         if succeeded:
-            embed.add_field(
-                name="✅ Unloaded", value=_fmt_list(succeeded), inline=False
-            )
+            embed.add_field(name="✅ Unloaded", value=_fmt_list(succeeded), inline=False)
         if failed:
             embed.add_field(
                 name="🚫 Failed to unload", value="\n".join(failed), inline=False
@@ -1994,9 +2073,7 @@ class Owner(commands.Cog, name="Owner"):
 
         embed = discord.Embed(color=discord.Color.blurple(), title="Cog Reload Results")
         if succeeded:
-            embed.add_field(
-                name="🔁 Reloaded", value=_fmt_list(succeeded), inline=False
-            )
+            embed.add_field(name="🔁 Reloaded", value=_fmt_list(succeeded), inline=False)
         if failed:
             embed.add_field(
                 name="🚫 Failed to reload", value="\n".join(failed), inline=False
@@ -2121,7 +2198,9 @@ class Owner(commands.Cog, name="Owner"):
         # Prepare entries
         entries = []
         user_ids = [getattr(r, "user_id", None) for r in rows]
-        admin_ids = [getattr(r, "admin_id", None) for r in rows if getattr(r, "admin_id", None)]
+        admin_ids = [
+            getattr(r, "admin_id", None) for r in rows if getattr(r, "admin_id", None)
+        ]
         resolved_ids = await self._resolve_ids(user_ids + admin_ids)
 
         for r in rows:
@@ -2185,7 +2264,9 @@ class Owner(commands.Cog, name="Owner"):
                     inline=True,
                 )
             if item["admin_id"]:
-                embed.add_field(name="Added by", value=f"<@{item['admin_id']}>", inline=True)
+                embed.add_field(
+                    name="Added by", value=f"<@{item['admin_id']}>", inline=True
+                )
             embed.add_field(name="Reason", value=item["reason"], inline=False)
             embed.set_footer(
                 text="Use ◀ / ▶ to navigate, ❌ to remove • Controls expire in 3 minutes"
@@ -2485,7 +2566,7 @@ class Owner(commands.Cog, name="Owner"):
 
         # Pagination: set number of servers per embed
         servers_per_page = 1
-        
+
         def rebuild_pages():
             """Helper to rebuild pages from current server_details."""
             pages = []
@@ -2498,7 +2579,11 @@ class Owner(commands.Cog, name="Owner"):
                 current_batch = server_details[i : i + servers_per_page]
                 for name, details, _ in current_batch:
                     embed.add_field(name=name, value=details, inline=False)
-                total_pages = ((len(server_details)-1)//servers_per_page)+1 if server_details else 0
+                total_pages = (
+                    ((len(server_details) - 1) // servers_per_page) + 1
+                    if server_details
+                    else 0
+                )
                 embed.set_footer(text=f"Page {len(pages)+1} of {total_pages}")
                 pages.append(embed)
             return pages
@@ -2517,7 +2602,8 @@ class Owner(commands.Cog, name="Owner"):
             async def interaction_check(self, interaction: discord.Interaction) -> bool:
                 if not await self.bot.is_owner(interaction.user):
                     await interaction.response.send_message(
-                        "🚫 Only bot admins can interact with these buttons.", ephemeral=True
+                        "🚫 Only bot admins can interact with these buttons.",
+                        ephemeral=True,
                     )
                     return False
                 return True
@@ -2560,21 +2646,23 @@ class Owner(commands.Cog, name="Owner"):
                 if not invite_channel:
                     return await interaction.response.send_message(
                         f"❌ No suitable channel found in `{guild.name}` to create an invite.",
-                        ephemeral=True
+                        ephemeral=True,
                     )
 
                 try:
                     invite = await invite_channel.create_invite(
-                        max_age=86400, max_uses=1, unique=True, reason="Created by owner"
+                        max_age=86400,
+                        max_uses=1,
+                        unique=True,
+                        reason="Created by owner",
                     )
                     await interaction.response.send_message(
                         f"✅ Invite created for **{guild.name}**: {invite.url}\n*Expires in 24 hours, 1 use.*",
-                        ephemeral=True
+                        ephemeral=True,
                     )
                 except Exception as e:
                     await interaction.response.send_message(
-                        f"❌ Failed to create invite: {e}",
-                        ephemeral=True
+                        f"❌ Failed to create invite: {e}", ephemeral=True
                     )
 
             @discord.ui.button(label="Leave Server", style=discord.ButtonStyle.red)
@@ -2585,18 +2673,17 @@ class Owner(commands.Cog, name="Owner"):
                 try:
                     await guild.leave()
                     await interaction.response.send_message(
-                        f"✅ Successfully left **{guild.name}**.",
-                        ephemeral=True
+                        f"✅ Successfully left **{guild.name}**.", ephemeral=True
                     )
                     # Remove from server_details and rebuild pages
                     self.server_details.pop(self.current)
                     self.embeds = rebuild_pages()
-                    
+
                     if not self.embeds:
                         await interaction.message.edit(
                             content="The bot is not in any servers anymore.",
                             embed=None,
-                            view=None
+                            view=None,
                         )
                     else:
                         if self.current >= len(self.embeds):
@@ -2606,8 +2693,7 @@ class Owner(commands.Cog, name="Owner"):
                         )
                 except Exception as e:
                     await interaction.response.send_message(
-                        f"❌ Failed to leave server: {e}",
-                        ephemeral=True
+                        f"❌ Failed to leave server: {e}", ephemeral=True
                     )
 
         view = PaginationView(pages, server_details, self.bot)
@@ -2725,18 +2811,20 @@ class Owner(commands.Cog, name="Owner"):
         hidden=True,
     )
     @commands.is_owner()
-    async def reset_cooldowns(self, ctx: Context, user: Union[discord.User, str] = None):
+    async def reset_cooldowns(
+        self, ctx: Context, user: Union[discord.User, str] = None
+    ):
         """Resets all cooldowns for a specified user or all users if 'all' is specified."""
         user = user or ctx.author
 
         # Check if 'all' was passed
         if isinstance(user, str) and user.lower() == "all":
             all_commands = [cmd.name for cmd in self.bot.commands]
-            
+
             # Clear all cooldowns for all users
             for command_name in all_commands:
                 await self.bot.database.clear_all_cooldowns()
-            
+
             embed = discord.Embed(
                 description="All cooldowns for all users have been reset.",
                 color=discord.Color.blurple(),
@@ -2827,7 +2915,9 @@ class Owner(commands.Cog, name="Owner"):
 
         return False
 
-    @commands.group(name="command", aliases=["cmd"], invoke_without_command=True, hidden=True)
+    @commands.group(
+        name="command", aliases=["cmd"], invoke_without_command=True, hidden=True
+    )
     @commands.is_owner()
     async def command_cog(self, ctx: Context):
         """Manage bot commands."""
@@ -2860,9 +2950,7 @@ class Owner(commands.Cog, name="Owner"):
         embed.set_footer(text=f"Use {prefix}command <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @command_cog.command(
-        name="enable", help="Enable a command bot-wide.", hidden=True
-    )
+    @command_cog.command(name="enable", help="Enable a command bot-wide.", hidden=True)
     @commands.is_owner()
     async def enable_bot_command(self, ctx: Context, *, command_name: str):
         """Enable a command bot-wide."""
@@ -2880,14 +2968,18 @@ class Owner(commands.Cog, name="Owner"):
 
         if current_status:
             await Embeds.send_error_embed(
-                ctx.channel, ctx.author, f"The `{command_name}` command is already enabled globally."
+                ctx.channel,
+                ctx.author,
+                f"The `{command_name}` command is already enabled globally.",
             )
         else:
             await self.bot.database.set_command_status(
                 command_name, enabled=True, channel_id=None
             )
             await Embeds.send_success_embed(
-                ctx.channel, ctx.author, f"The `{command_name}` command has been enabled globally."
+                ctx.channel,
+                ctx.author,
+                f"The `{command_name}` command has been enabled globally.",
             )
 
     @command_cog.command(
@@ -2910,14 +3002,18 @@ class Owner(commands.Cog, name="Owner"):
 
         if not current_status:
             await Embeds.send_error_embed(
-                ctx.channel, ctx.author, f"The `{command_name}` command is already disabled globally."
+                ctx.channel,
+                ctx.author,
+                f"The `{command_name}` command is already disabled globally.",
             )
         else:
             await self.bot.database.set_command_status(
                 command_name, enabled=False, channel_id=None
             )
             await Embeds.send_success_embed(
-                ctx.channel, ctx.author, f"The `{command_name}` command has been disabled globally."
+                ctx.channel,
+                ctx.author,
+                f"The `{command_name}` command has been disabled globally.",
             )
 
     @commands.group(name="bank", invoke_without_command=True, hidden=True)
@@ -3093,9 +3189,11 @@ class Owner(commands.Cog, name="Owner"):
         """Reset a user's bank and wallet balance to zero."""
         try:
             member_wallet_id = await self.bot.database.get_wallet_id_for_user(member.id)
-            
-            bank_balance = Decimal(str(await self.bot.database.get_bank_balance(member_wallet_id)))
-            
+
+            bank_balance = Decimal(
+                str(await self.bot.database.get_bank_balance(member_wallet_id))
+            )
+
             if bank_balance != 0:
                 await self.bot.database.withdraw_from_bank(
                     member_wallet_id,
@@ -3103,7 +3201,9 @@ class Owner(commands.Cog, name="Owner"):
                     f"Admin Audit - Reset (Bank Clear) by {ctx.author.name}",
                 )
 
-            total_wallet_balance = Decimal(str(await self.bot.database.get_wallet_balance(member_wallet_id)))
+            total_wallet_balance = Decimal(
+                str(await self.bot.database.get_wallet_balance(member_wallet_id))
+            )
 
             if total_wallet_balance != 0:
                 await self.bot.database.process_treasury_transaction(
@@ -3122,7 +3222,11 @@ class Owner(commands.Cog, name="Owner"):
             await ctx.send(embed=embed)
 
         except Exception as e:
-            await ctx.send(embed=discord.Embed(description=f"❌ Error: {e}", color=discord.Color.red()))
+            await ctx.send(
+                embed=discord.Embed(
+                    description=f"❌ Error: {e}", color=discord.Color.red()
+                )
+            )
 
     @adminbank.command(name="refund", aliases=["reimburse"], hidden=True)
     @commands.is_owner()
@@ -3130,7 +3234,9 @@ class Owner(commands.Cog, name="Owner"):
         """Refund a transaction."""
 
         try:
-            await self.bot.database.refund_transaction(txid, f"Admin Audit - Refund by {ctx.author.name}")
+            await self.bot.database.refund_transaction(
+                txid, f"Admin Audit - Refund by {ctx.author.name}"
+            )
             await self.bot.database.validate_economy()
 
             embed = discord.Embed(
@@ -3213,9 +3319,7 @@ class Owner(commands.Cog, name="Owner"):
 
             if not tier:
                 valid_tiers = ", ".join(t.name for t in tiers)
-                return await ctx.send(
-                    f"Invalid tier name. Valid tiers: {valid_tiers}"
-                )
+                return await ctx.send(f"Invalid tier name. Valid tiers: {valid_tiers}")
 
             success = await self.bot.database.set_user_vip_tier(user.id, tier.id)
 
@@ -3227,7 +3331,11 @@ class Owner(commands.Cog, name="Owner"):
                 )
                 embed.add_field(name="Tier ID", value=str(tier.id), inline=True)
                 embed.add_field(name="Level", value=str(tier.level), inline=True)
-                embed.add_field(name="Rakeback Rate", value=f"{float(tier.rakeback_rate) * 100:.0f}%", inline=True)
+                embed.add_field(
+                    name="Rakeback Rate",
+                    value=f"{float(tier.rakeback_rate) * 100:.0f}%",
+                    inline=True,
+                )
                 await ctx.send(embed=embed)
             else:
                 await ctx.send("Failed to update VIP tier.")
@@ -3357,10 +3465,14 @@ class Owner(commands.Cog, name="Owner"):
                 balance = result.scalar_one_or_none()
 
                 if not balance:
-                    balance = RakebackBalance(user_id=user.id, accumulated=amount_decimal)
+                    balance = RakebackBalance(
+                        user_id=user.id, accumulated=amount_decimal
+                    )
                     session.add(balance)
                 else:
-                    balance.accumulated = (balance.accumulated or Decimal("0")) + amount_decimal
+                    balance.accumulated = (
+                        balance.accumulated or Decimal("0")
+                    ) + amount_decimal
 
                 await session.commit()
 
@@ -3378,8 +3490,7 @@ class Owner(commands.Cog, name="Owner"):
     @adminbank.command(name="initviptiers", hidden=True)
     @commands.is_owner()
     async def init_vip_tiers(self, ctx: Context):
-        """Initialize default VIP tiers.
-        """
+        """Initialize default VIP tiers."""
         try:
             await self.bot.database.ensure_default_vip_tiers()
             tiers = await self.bot.database.get_all_vip_tiers()
@@ -3421,7 +3532,9 @@ class Owner(commands.Cog, name="Owner"):
                         f"**Daily Minted:** {result.get('daily_minted', 0)}\n"
                         f"**Daily Burned:** {result.get('daily_burned', 0)}"
                     ),
-                    color=discord.Color.green() if action == "mint" else discord.Color.orange(),
+                    color=discord.Color.green()
+                    if action == "mint"
+                    else discord.Color.orange(),
                 )
             elif action == "error":
                 embed = discord.Embed(
@@ -3436,15 +3549,23 @@ class Owner(commands.Cog, name="Owner"):
                     color=discord.Color.greyple(),
                 )
                 if "treasury_health" in result:
-                    embed.add_field(name="Treasury Health", value=f"{result['treasury_health']:.2%}", inline=True)
+                    embed.add_field(
+                        name="Treasury Health",
+                        value=f"{result['treasury_health']:.2%}",
+                        inline=True,
+                    )
                 if "target" in result:
-                    embed.add_field(name="Target", value=f"{result['target']:.2%}", inline=True)
+                    embed.add_field(
+                        name="Target", value=f"{result['target']:.2%}", inline=True
+                    )
 
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except Exception as e:
             await ctx.send(
-                embed=discord.Embed(description=f"Error: {e}", color=discord.Color.red())
+                embed=discord.Embed(
+                    description=f"Error: {e}", color=discord.Color.red()
+                )
             )
 
     @commands.command(name="shopitem", hidden=True)
@@ -3580,14 +3701,19 @@ class Owner(commands.Cog, name="Owner"):
             )
         await ctx.send(embed=embed)
 
-    @app_commands.command(name="shopmodal", description="Open a modal to create a new shop item with effect configuration.")
+    @app_commands.command(
+        name="shopmodal",
+        description="Open a modal to create a new shop item with effect configuration.",
+    )
     @app_commands.check(_owner_check)
     async def shop_item_modal(self, interaction: discord.Interaction):
         """Open a modal to create a new shop item with effect configuration."""
         modal = ShopItemModal(self.bot)
         await interaction.response.send_modal(modal)
 
-    @app_commands.command(name="editshopitem", description="Edit an existing shop item using a modal.")
+    @app_commands.command(
+        name="editshopitem", description="Edit an existing shop item using a modal."
+    )
     @app_commands.check(_owner_check)
     @app_commands.describe(item_id="The ID of the shop item to edit")
     async def edit_shop_item(self, interaction: discord.Interaction, item_id: int):
@@ -3665,7 +3791,9 @@ class Owner(commands.Cog, name="Owner"):
         """Give an item directly to a user."""
         # Get the shop item to copy
         shop_items = await self.bot.database.list_shop_items()
-        shop_item = next((i for i in shop_items if i.name.lower() == item_name.lower()), None)
+        shop_item = next(
+            (i for i in shop_items if i.name.lower() == item_name.lower()), None
+        )
 
         if not shop_item:
             embed = discord.Embed(
@@ -3696,7 +3824,10 @@ class Owner(commands.Cog, name="Owner"):
             color=discord.Color.green(),
         )
         if shop_item.effect:
-            embed.add_field(name="Effect", value=f"{shop_item.effect}: {shop_item.effect_value or 'N/A'}")
+            embed.add_field(
+                name="Effect",
+                value=f"{shop_item.effect}: {shop_item.effect_value or 'N/A'}",
+            )
         await ctx.send(embed=embed)
 
     @commands.command(name="vieweffects", hidden=True)
@@ -3784,7 +3915,11 @@ class Owner(commands.Cog, name="Owner"):
         limit = max(1, min(limit, 100))
         user_id = None
         if user is not None:
-            user_id = user.id if isinstance(user, (discord.Member, discord.User)) else int(user)
+            user_id = (
+                user.id
+                if isinstance(user, (discord.Member, discord.User))
+                else int(user)
+            )
 
         entries = await self.bot.database.get_owner_audit_log(
             user_id=user_id,
@@ -3803,7 +3938,11 @@ class Owner(commands.Cog, name="Owner"):
 
         lines = []
         for entry in entries:
-            timestamp = discord.utils.format_dt(entry.created_at, "R") if entry.created_at else "unknown"
+            timestamp = (
+                discord.utils.format_dt(entry.created_at, "R")
+                if entry.created_at
+                else "unknown"
+            )
             user_resolved = await self._resolve_user_display(entry.user_id)
             location = f"guild `{entry.guild_id}`" if entry.guild_id else "DMs"
             if entry.channel_id:
@@ -3824,7 +3963,9 @@ class Owner(commands.Cog, name="Owner"):
                 description="\n\n".join(chunk),
                 color=discord.Color.blurple(),
             )
-            embed.set_footer(text=f"Page {i // per_page + 1}/{(len(lines) - 1) // per_page + 1} • {len(entries)} entries")
+            embed.set_footer(
+                text=f"Page {i // per_page + 1}/{(len(lines) - 1) // per_page + 1} • {len(entries)} entries"
+            )
             pages.append(embed)
 
         if len(pages) == 1:
@@ -3867,7 +4008,9 @@ class Owner(commands.Cog, name="Owner"):
                 return False
             return True
 
-        @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️")
+        @discord.ui.button(
+            label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️"
+        )
         async def previous(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
@@ -3879,8 +4022,12 @@ class Owner(commands.Cog, name="Owner"):
             else:
                 await interaction.response.defer()
 
-        @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, emoji="▶️")
-        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        @discord.ui.button(
+            label="Next", style=discord.ButtonStyle.secondary, emoji="▶️"
+        )
+        async def next(
+            self, interaction: discord.Interaction, button: discord.ui.Button
+        ):
             if self.current_page < len(self.pages) - 1:
                 self.current_page += 1
                 await interaction.response.edit_message(
@@ -3892,4 +4039,4 @@ class Owner(commands.Cog, name="Owner"):
 
 async def setup(bot) -> None:
     await bot.add_cog(Owner(bot))
-    logger.debug("Owner cog initialized successfully") 
+    logger.debug("Owner cog initialized successfully")

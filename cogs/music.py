@@ -620,6 +620,7 @@ class Music(commands.Cog, name="Music"):
         )
         embed.set_footer(text="Data from Last.fm")
         await ctx.reply(embed=embed)
+
     @lastfm.command(name="topartists", aliases=["tar"])
     async def top_artists(self, ctx: Context):
         """Display the user's top artists on Last.fm."""
@@ -1335,7 +1336,38 @@ class Music(commands.Cog, name="Music"):
                 )
             )
 
-    @commands.command(name="jnp")
+    @commands.group(name="jwapi")
+    async def juicewrld_api(self, ctx: commands.Context) -> None:
+        prefix = await self.bot.get_prefix(ctx.message)
+        if isinstance(prefix, list):
+            prefix = prefix[0]
+
+        subcmds = getattr(ctx.command, "commands", []) or []
+        lines = []
+        for cmd in sorted(subcmds, key=lambda c: c.name):
+            name = cmd.name
+            aliases = (
+                f" (or: {', '.join(cmd.aliases)})"
+                if getattr(cmd, "aliases", None)
+                else ""
+            )
+            desc = (cmd.help or cmd.description or "").strip()
+            if desc:
+                lines.append(f"`{prefix}jwapi {name}`{aliases} — {desc}")
+            else:
+                lines.append(f"`{prefix}jwapi {name}`{aliases}")
+
+        description = "\n".join(lines) if lines else "No subcommands available."
+
+        embed = discord.Embed(
+            title="JuiceWRLD API — Available Commands",
+            description=description,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Use {prefix}jwapi <subcommand> for details.")
+        await ctx.reply(embed=embed, mention_author=False)        
+
+    @juicewrld_api.command(name="np")
     async def juicewrld_now_playing(
         self, ctx: commands.Context, member: discord.Member = None
     ) -> None:
@@ -1663,7 +1695,7 @@ class Music(commands.Cog, name="Music"):
                 )
             )
 
-    @commands.command(name="jlink")
+    @juicewrld_api.command(name="link")
     async def juicewrld_link(self, ctx: commands.Context, code: str = None) -> None:
         """Link your Discord account to JuiceWRLD API using a pairing code."""
         prefix = await self.bot.database.get_prefix(ctx.guild.id) if ctx.guild else "!"

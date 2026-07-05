@@ -65,9 +65,11 @@ class CasinoMixin(BaseManager):
                 )
                 session.add(gs)
             return gs.id
+
     async def get_game_session(self, session_id: uuid.UUID) -> GameSession | None:
         async with self.async_sessionmaker() as session:
             return await session.get(GameSession, session_id)
+
     async def list_game_sessions(
         self,
         *,
@@ -90,6 +92,7 @@ class CasinoMixin(BaseManager):
                 stmt = stmt.limit(limit)
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
     async def update_game_session(
         self,
         session_id: uuid.UUID,
@@ -130,6 +133,7 @@ class CasinoMixin(BaseManager):
                     current.extend(errors)
                     gs.errors = current
             return True
+
     async def add_game_session_event(
         self, session_id: uuid.UUID, event_type: str, payload: dict | None = None
     ) -> None:
@@ -142,6 +146,7 @@ class CasinoMixin(BaseManager):
                         payload=payload or {},
                     )
                 )
+
     async def get_game_session_events(
         self, session_id: uuid.UUID, limit: int = 50
     ) -> list[GameSessionEvent]:
@@ -154,6 +159,7 @@ class CasinoMixin(BaseManager):
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
     async def add_game_session_refund(
         self,
         session_id: uuid.UUID,
@@ -182,6 +188,7 @@ class CasinoMixin(BaseManager):
                 state["refunds"] = refunds
                 gs.state = state
             return True
+
     async def remove_game_session_refund(
         self, session_id: uuid.UUID, *, user_id: int
     ) -> bool:
@@ -192,10 +199,13 @@ class CasinoMixin(BaseManager):
                 if not gs:
                     return False
                 state = gs.state or {}
-                refunds = [r for r in state.get("refunds", []) if r.get("user_id") != user_id]
+                refunds = [
+                    r for r in state.get("refunds", []) if r.get("user_id") != user_id
+                ]
                 state["refunds"] = refunds
                 gs.state = state
             return True
+
     async def end_game_session(
         self,
         session_id: uuid.UUID,
@@ -221,6 +231,7 @@ class CasinoMixin(BaseManager):
                 )
                 await session.delete(gs)
             return True
+
     async def get_client_seed(self, user_id: int) -> tuple[str, int]:
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
@@ -233,6 +244,7 @@ class CasinoMixin(BaseManager):
                 session.add(wallet)
                 await session.commit()
             return wallet.client_seed, wallet.nonce
+
     async def get_server_seed(self, user_id: int) -> str:
         """
         Return this user's server_seed, generating one if missing.
@@ -249,6 +261,7 @@ class CasinoMixin(BaseManager):
                 wallet.seed_rotated_at = discord.utils.utcnow()
                 await session.commit()
             return wallet.server_seed
+
     async def set_client_seed(self, user_id: int, seed: str) -> None:
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
@@ -261,11 +274,13 @@ class CasinoMixin(BaseManager):
                 )
                 wallet = result.scalar_one()
                 wallet.client_seed = seed
+
     async def reveal_and_rotate(self, user_id: int) -> tuple[Optional[str], str]:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 return await self._reveal_and_rotate_in_tx(session, user_id)
+
     async def _reveal_and_rotate_in_tx(
         self, session, user_id: int
     ) -> tuple[Optional[str], str]:
@@ -302,6 +317,7 @@ class CasinoMixin(BaseManager):
 
         new_hash = hashlib.sha256(new_seed.encode()).hexdigest()
         return old_seed, new_hash
+
     async def bump_and_get(self, user_id: int) -> tuple[str, str, int]:
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
@@ -336,6 +352,7 @@ class CasinoMixin(BaseManager):
                 nonce_before = w.nonce or 0
                 w.nonce = nonce_before + 1
                 return w.server_seed, w.client_seed, nonce_before
+
     async def get_previous_server_seed(self, user_id: int) -> Optional[str]:
         """
         Return this user's previous_server_seed, or None if unset.
@@ -349,6 +366,7 @@ class CasinoMixin(BaseManager):
             if not wallet:
                 return None
             return wallet.previous_server_seed
+
     async def increment_nonce(self, user_id: int) -> int:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -361,6 +379,7 @@ class CasinoMixin(BaseManager):
                 new_nonce = wallet.nonce  # keep to return
             # transaction auto-commits here
         return new_nonce
+
     async def set_mines_multi(self, data: list):
         """
         Insert a list of bomb_count, gem_count, and multiplier values into the database.
@@ -375,6 +394,7 @@ class CasinoMixin(BaseManager):
                     )
                     session.add(record)
                 await session.commit()
+
     async def get_mines_multiplier(self, bomb_count: int, gem_count: int):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -383,6 +403,7 @@ class CasinoMixin(BaseManager):
                 .where(MinesSettings.gem_count == gem_count)
             )
             return result.scalar_one_or_none()
+
     async def record_game(
         self,
         user_id: int,
@@ -479,9 +500,7 @@ class CasinoMixin(BaseManager):
                     except Exception:
                         pass
 
-    async def backfill_fairgate_seed(
-        self, hash_hex: str, revealed_seed: str
-    ) -> int:
+    async def backfill_fairgate_seed(self, hash_hex: str, revealed_seed: str) -> int:
         """Back-fill the revealed server seed for FairGate rows matching ``hash_hex``.
 
         Returns the number of rows updated.
@@ -527,6 +546,7 @@ class CasinoMixin(BaseManager):
         except Exception:
             pass
         return result
+
     async def increment_loss(
         self,
         user_id: int,
@@ -551,6 +571,7 @@ class CasinoMixin(BaseManager):
             nonce=nonce,
             hash_hex=hash_hex,
         )
+
     async def get_total_wins(self, user_id: int) -> int:
         """Count the total wins for a user based on game history."""
         user_id = self.hash_user_id(user_id)
@@ -561,6 +582,7 @@ class CasinoMixin(BaseManager):
                 .where(GameHistory.user_id == user_id, GameHistory.outcome == "win")
             )
             return result.scalar_one()
+
     async def get_global_wins(self) -> int:
         """Count total wins across all users and games."""
         async with self.async_sessionmaker() as session:
@@ -570,6 +592,7 @@ class CasinoMixin(BaseManager):
                 .where(GameHistory.outcome == "win")
             )
             return result.scalar_one()
+
     async def get_total_losses(self, user_id: int) -> int:
         """Count the total losses for a user based on game history."""
         user_id = self.hash_user_id(user_id)
@@ -580,6 +603,7 @@ class CasinoMixin(BaseManager):
                 .where(GameHistory.user_id == user_id, GameHistory.outcome == "loss")
             )
             return result.scalar_one()
+
     async def get_global_losses(self) -> int:
         """Count total losses across all users and games."""
         async with self.async_sessionmaker() as session:
@@ -589,6 +613,7 @@ class CasinoMixin(BaseManager):
                 .where(GameHistory.outcome == "loss")
             )
             return result.scalar_one()
+
     async def get_user_game_history(self, user_id: int, limit: int = 10) -> list:
         """Retrieve the game history for a specific user."""
         user_id = self.hash_user_id(user_id)
@@ -600,6 +625,7 @@ class CasinoMixin(BaseManager):
                 .limit(limit)
             )
             return result.scalars().all()
+
     async def get_top_game_winners(self, game_name: str, limit: int = 10) -> list:
         """Retrieve the top users with the most wins by game."""
         async with self.async_sessionmaker() as session:
@@ -614,6 +640,7 @@ class CasinoMixin(BaseManager):
         hashes = [row.user_id for row in rows]
         resolved = await self.resolve_user_hashes(hashes)
         return [(resolved.get(row.user_id, row.user_id), row.win_count) for row in rows]
+
     async def get_top_game_losers(self, game_name: str, limit: int = 10) -> list:
         """Retrieve the top users with the most losses by game."""
         async with self.async_sessionmaker() as session:
@@ -629,7 +656,10 @@ class CasinoMixin(BaseManager):
             rows = result.all()
         hashes = [row.user_id for row in rows]
         resolved = await self.resolve_user_hashes(hashes)
-        return [(resolved.get(row.user_id, row.user_id), row.loss_count) for row in rows]
+        return [
+            (resolved.get(row.user_id, row.user_id), row.loss_count) for row in rows
+        ]
+
     async def fetch_game_for_user(
         self, user_id: int, game_name: str, nonce: int
     ) -> GameHistory | None:
@@ -644,6 +674,7 @@ class CasinoMixin(BaseManager):
                 )
             )
             return result.scalar_one_or_none()
+
     async def fetch_mines_bomb_count(
         self, user_id: int, nonce: int, *, lookback: int = 200
     ) -> int | None:
@@ -750,6 +781,7 @@ class CasinoMixin(BaseManager):
             )
             total, win_total, loss_total = totals.one()
             return total, win_total, loss_total
+
     async def get_game_stats(self, user_id: int, game_name: str) -> tuple[int, int]:
         """Count wins and losses for a specific game and user."""
         user_id = self.hash_user_id(user_id)
@@ -768,15 +800,52 @@ class CasinoMixin(BaseManager):
             )
             wins, losses = result.first()
             return (wins or 0, losses or 0)
+
     async def ensure_default_vip_tiers(self) -> None:
         """Ensure default VIP tiers exist in the database."""
         default_tiers = [
-            {"name": "Unranked", "level": 0, "min_wagered": Decimal("0"), "rakeback_rate": Decimal("0"), "rtp_bonus": Decimal("0")},
-            {"name": "Bronze", "level": 1, "min_wagered": Decimal("100000000000"), "rakeback_rate": Decimal("0.0100"), "rtp_bonus": Decimal("0")},
-            {"name": "Silver", "level": 2, "min_wagered": Decimal("100000000000000"), "rakeback_rate": Decimal("0.0200"), "rtp_bonus": Decimal("0.0050")},
-            {"name": "Gold", "level": 3, "min_wagered": Decimal("100000000000000000"), "rakeback_rate": Decimal("0.0300"), "rtp_bonus": Decimal("0.0100")},
-            {"name": "Platinum", "level": 4, "min_wagered": Decimal("100000000000000000000"), "rakeback_rate": Decimal("0.0500"), "rtp_bonus": Decimal("0.0150")},
-            {"name": "Diamond", "level": 5, "min_wagered": Decimal("100000000000000000000000"), "rakeback_rate": Decimal("0.1000"), "rtp_bonus": Decimal("0.0200")},
+            {
+                "name": "Unranked",
+                "level": 0,
+                "min_wagered": Decimal("0"),
+                "rakeback_rate": Decimal("0"),
+                "rtp_bonus": Decimal("0"),
+            },
+            {
+                "name": "Bronze",
+                "level": 1,
+                "min_wagered": Decimal("100000000000"),
+                "rakeback_rate": Decimal("0.0100"),
+                "rtp_bonus": Decimal("0"),
+            },
+            {
+                "name": "Silver",
+                "level": 2,
+                "min_wagered": Decimal("100000000000000"),
+                "rakeback_rate": Decimal("0.0200"),
+                "rtp_bonus": Decimal("0.0050"),
+            },
+            {
+                "name": "Gold",
+                "level": 3,
+                "min_wagered": Decimal("100000000000000000"),
+                "rakeback_rate": Decimal("0.0300"),
+                "rtp_bonus": Decimal("0.0100"),
+            },
+            {
+                "name": "Platinum",
+                "level": 4,
+                "min_wagered": Decimal("100000000000000000000"),
+                "rakeback_rate": Decimal("0.0500"),
+                "rtp_bonus": Decimal("0.0150"),
+            },
+            {
+                "name": "Diamond",
+                "level": 5,
+                "min_wagered": Decimal("100000000000000000000000"),
+                "rakeback_rate": Decimal("0.1000"),
+                "rtp_bonus": Decimal("0.0200"),
+            },
         ]
 
         async with self.async_sessionmaker() as session:
@@ -813,6 +882,7 @@ class CasinoMixin(BaseManager):
                     # If both exist and are different, the level-based one is authoritative
                     # (tier_by_level exists and tier_by_name exists - they should be the same tier)
             await session.commit()
+
     async def upgrade_user_vip(self, user_id: int) -> UserVIP:
         """Upgrade user's VIP tier based on total wagered from GameHistory."""
         raw_user_id = user_id
@@ -837,6 +907,7 @@ class CasinoMixin(BaseManager):
             await session.commit()
             await session.refresh(user_vip)
             return user_vip
+
     async def upgrade_all_users_vip(self) -> None:
         """Upgrade VIP tiers for all users based on their total wagered."""
         async with self.async_sessionmaker() as session:
@@ -858,6 +929,7 @@ class CasinoMixin(BaseManager):
                         user_vip.tier_id = new_tier.id
 
             await session.commit()
+
     async def get_user_vip(self, user_id: int) -> UserVIP:
         """Get or create user VIP record with tier info."""
         await self.ensure_user_identity(user_id)
@@ -876,29 +948,30 @@ class CasinoMixin(BaseManager):
                 await session.refresh(user_vip)
 
             return user_vip
+
     async def get_vip_tier(self, tier_id: int) -> Optional[VIPTier]:
         """Get a specific VIP tier by ID."""
         async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(VIPTier).where(VIPTier.id == tier_id)
-            )
+            result = await session.execute(select(VIPTier).where(VIPTier.id == tier_id))
             return result.scalar_one_or_none()
+
     async def get_all_vip_tiers(self) -> List[VIPTier]:
         """Get all VIP tiers ordered by level."""
         async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(VIPTier).order_by(VIPTier.level)
-            )
+            result = await session.execute(select(VIPTier).order_by(VIPTier.level))
             return list(result.scalars().all())
+
     async def get_total_wagered_all_games(self, user_id: int) -> Decimal:
         """Calculate total wagered across all games from GameHistory."""
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
-                select(func.coalesce(func.sum(GameHistory.wagered), Decimal("0")))
-                .where(GameHistory.user_id == user_id)
+                select(
+                    func.coalesce(func.sum(GameHistory.wagered), Decimal("0"))
+                ).where(GameHistory.user_id == user_id)
             )
             return result.scalar() or Decimal("0")
+
     async def get_vip_tier_by_wagered(self, total_wagered: Decimal) -> VIPTier:
         """Determine VIP tier based on total wagered amount."""
         async with self.async_sessionmaker() as session:
@@ -916,13 +989,17 @@ class CasinoMixin(BaseManager):
                 )
                 tier = result.scalar_one_or_none()
             return tier
+
     async def get_vip_tier_by_user(self, user_id: int) -> VIPTier:
         """Determine VIP tier based on total wagered from GameHistory."""
         raw_user_id = user_id
         user_id = self.hash_user_id(user_id)
         total_wagered = await self.get_total_wagered_all_games(raw_user_id)
         return await self.get_vip_tier_by_wagered(total_wagered)
-    async def record_rakeback(self, user_id: int, wagered: Decimal, game_name: str) -> Decimal:
+
+    async def record_rakeback(
+        self, user_id: int, wagered: Decimal, game_name: str
+    ) -> Decimal:
         """
         Record rakeback after game. Returns rakeback amount.
         Does NOT update total_wagered (computed from GameHistory instead).
@@ -957,13 +1034,19 @@ class CasinoMixin(BaseManager):
                 rakeback_balance = rakeback_result.scalar_one_or_none()
 
                 if not rakeback_balance:
-                    rakeback_balance = RakebackBalance(user_id=user_id, accumulated=rakeback_amount)
+                    rakeback_balance = RakebackBalance(
+                        user_id=user_id, accumulated=rakeback_amount
+                    )
                     session.add(rakeback_balance)
                 else:
-                    rakeback_balance.accumulated = (rakeback_balance.accumulated or Decimal("0")) + rakeback_amount
+                    rakeback_balance.accumulated = (
+                        rakeback_balance.accumulated or Decimal("0")
+                    ) + rakeback_amount
 
                 # Update total rakeback earned
-                user_vip.total_rakeback_earned = (user_vip.total_rakeback_earned or Decimal("0")) + rakeback_amount
+                user_vip.total_rakeback_earned = (
+                    user_vip.total_rakeback_earned or Decimal("0")
+                ) + rakeback_amount
 
                 # Create rakeback transaction record
                 transaction = RakebackTransaction(
@@ -984,12 +1067,16 @@ class CasinoMixin(BaseManager):
 
             await session.commit()
             return rakeback_amount
-    async def update_user_wagered(self, user_id: int, amount: Decimal, game_name: str) -> Decimal:
+
+    async def update_user_wagered(
+        self, user_id: int, amount: Decimal, game_name: str
+    ) -> Decimal:
         """Alias for record_rakeback for backward compatibility."""
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
         user_id = self.hash_user_id(user_id)
         return await self.record_rakeback(raw_user_id, amount, game_name)
+
     async def recalculate_user_vip_tier(self, user_id: int) -> Optional[VIPTier]:
         """Recalculate and update user's VIP tier based on total wagered from GameHistory."""
         raw_user_id = user_id
@@ -1016,6 +1103,7 @@ class CasinoMixin(BaseManager):
                     select(VIPTier).where(VIPTier.id == user_vip.tier_id)
                 )
                 return current_tier.scalar_one_or_none()
+
     async def get_rakeback_balance(self, user_id: int) -> Decimal:
         """Get accumulated unclaimed rakeback."""
         user_id = self.hash_user_id(user_id)
@@ -1025,8 +1113,14 @@ class CasinoMixin(BaseManager):
             )
             balance = result.scalar_one_or_none()
             return balance.accumulated if balance else Decimal("0")
+
     async def add_rakeback(
-        self, user_id: int, amount: Decimal, game_name: str, wagered: Decimal, rate: Decimal
+        self,
+        user_id: int,
+        amount: Decimal,
+        game_name: str,
+        wagered: Decimal,
+        rate: Decimal,
     ) -> None:
         """Add rakeback to user's accumulated balance."""
         await self.ensure_user_identity(user_id)
@@ -1055,6 +1149,7 @@ class CasinoMixin(BaseManager):
                 session.add(transaction)
 
             await session.commit()
+
     async def claim_rakeback(self, user_id: int) -> Decimal:
         """Claim all accumulated rakeback. Returns amount claimed."""
         raw_user_id = user_id
@@ -1073,7 +1168,9 @@ class CasinoMixin(BaseManager):
                 claim_amount = balance.accumulated
                 balance.accumulated = Decimal("0")
                 balance.last_claim = discord.utils.utcnow()
-                balance.total_claimed = (balance.total_claimed or Decimal("0")) + claim_amount
+                balance.total_claimed = (
+                    balance.total_claimed or Decimal("0")
+                ) + claim_amount
 
                 # Credit to wallet
                 wallet_id = await self.get_wallet_id_for_user(raw_user_id)
@@ -1083,7 +1180,10 @@ class CasinoMixin(BaseManager):
 
             await session.commit()
             return claim_amount
-    async def get_rakeback_history(self, user_id: int, limit: int = 50) -> List[RakebackTransaction]:
+
+    async def get_rakeback_history(
+        self, user_id: int, limit: int = 50
+    ) -> List[RakebackTransaction]:
         """Get rakeback transaction history for a user."""
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -1094,6 +1194,7 @@ class CasinoMixin(BaseManager):
                 .limit(limit)
             )
             return list(result.scalars().all())
+
     async def get_rakeback_info(self, user_id: int) -> dict:
         """Get complete rakeback information for a user."""
         raw_user_id = user_id
@@ -1132,7 +1233,9 @@ class CasinoMixin(BaseManager):
 
             return {
                 "total_wagered": total_wagered,
-                "total_rakeback_earned": user_vip.total_rakeback_earned if user_vip else Decimal("0"),
+                "total_rakeback_earned": user_vip.total_rakeback_earned
+                if user_vip
+                else Decimal("0"),
                 "accumulated": balance.accumulated if balance else Decimal("0"),
                 "total_claimed": balance.total_claimed if balance else Decimal("0"),
                 "last_claim": balance.last_claim if balance else None,
@@ -1140,6 +1243,7 @@ class CasinoMixin(BaseManager):
                 "next_tier": next_tier,
                 "rakeback_rate": tier.rakeback_rate if tier else Decimal("0.01"),
             }
+
     async def get_effective_rtp(self, user_id: int) -> Decimal:
         """
         Calculate effective RTP adjustment from VIP tier and active RTP boosts.
@@ -1165,8 +1269,7 @@ class CasinoMixin(BaseManager):
             # Get active RTP boost effects
             now = discord.utils.utcnow()
             effects_result = await session.execute(
-                select(ActiveEffect)
-                .where(
+                select(ActiveEffect).where(
                     ActiveEffect.user_id == user_id,
                     ActiveEffect.effect_type == "rtp_boost",
                     ActiveEffect.expires_at > now,
@@ -1177,7 +1280,10 @@ class CasinoMixin(BaseManager):
             boost_rtp = sum(effect.effect_value for effect in active_effects)
 
             return vip_rtp_bonus + boost_rtp
-    async def get_adjusted_house_edge(self, user_id: int, base_edge: Decimal = Decimal("0.04")) -> Decimal:
+
+    async def get_adjusted_house_edge(
+        self, user_id: int, base_edge: Decimal = Decimal("0.04")
+    ) -> Decimal:
         """
         Get house edge adjusted for VIP tier and active RTP boosts.
         Minimum 1% house edge to ensure sustainability.
@@ -1192,6 +1298,7 @@ class CasinoMixin(BaseManager):
         # Ensure minimum 1% house edge
         MIN_HOUSE_EDGE = Decimal("0.01")
         return max(MIN_HOUSE_EDGE, adjusted)
+
     async def get_vip_leaderboard(self, limit: int = 10) -> List[dict]:
         """Get top users by total wagered (aggregated from GameHistory)."""
         async with self.async_sessionmaker() as session:
@@ -1199,7 +1306,9 @@ class CasinoMixin(BaseManager):
             stmt = (
                 select(
                     GameHistory.user_id,
-                    func.coalesce(func.sum(GameHistory.wagered), Decimal("0")).label("total_wagered")
+                    func.coalesce(func.sum(GameHistory.wagered), Decimal("0")).label(
+                        "total_wagered"
+                    ),
                 )
                 .group_by(GameHistory.user_id)
                 .order_by(func.sum(GameHistory.wagered).desc())
@@ -1227,13 +1336,16 @@ class CasinoMixin(BaseManager):
                     )
                     tier = tier_result.scalar_one_or_none()
 
-                leaderboard.append({
-                    "user_id": resolved.get(user_hash, user_hash),
-                    "total_wagered": total_wagered,
-                    "tier": tier,
-                })
+                leaderboard.append(
+                    {
+                        "user_id": resolved.get(user_hash, user_hash),
+                        "total_wagered": total_wagered,
+                        "tier": tier,
+                    }
+                )
 
             return leaderboard
+
     async def set_user_vip_tier(self, user_id: int, tier_id: int) -> bool:
         """Manually set a user's VIP tier (admin only)."""
         await self.ensure_user_identity(user_id)
@@ -1261,6 +1373,7 @@ class CasinoMixin(BaseManager):
 
             await session.commit()
             return True
+
     async def reset_user_vip(self, user_id: int) -> bool:
         """Reset user's VIP progress to default (admin only)."""
         await self.ensure_user_identity(user_id)

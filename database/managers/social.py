@@ -31,6 +31,7 @@ class SocialMixin(BaseManager):
                 return rep if rep is not None else 0
         except SQLAlchemyError as e:
             return 0
+
     async def increment_reputation(self, discord_id: int, amount: int) -> int:
         raw_discord_id = discord_id
         await self.ensure_user_identity(raw_discord_id)
@@ -42,7 +43,9 @@ class SocialMixin(BaseManager):
                     stmt = (
                         update(Reputation)
                         .where(Reputation.discord_id == discord_id)
-                        .values(reputation=func.coalesce(Reputation.reputation, 0) + amount)
+                        .values(
+                            reputation=func.coalesce(Reputation.reputation, 0) + amount
+                        )
                     )
                     result = await session.execute(stmt)
 
@@ -55,6 +58,7 @@ class SocialMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error incrementing reputation: {str(e)}")
             return 0
+
     async def get_top_reputation_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -65,7 +69,10 @@ class SocialMixin(BaseManager):
             rows = result.all()
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
-        return [(mapping.get(discord_id), reputation) for discord_id, reputation in rows]
+        return [
+            (mapping.get(discord_id), reputation) for discord_id, reputation in rows
+        ]
+
     async def get_bottom_reputation_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -76,7 +83,10 @@ class SocialMixin(BaseManager):
             rows = result.all()
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
-        return [(mapping.get(discord_id), reputation) for discord_id, reputation in rows]
+        return [
+            (mapping.get(discord_id), reputation) for discord_id, reputation in rows
+        ]
+
     async def get_reputation_user_rank(self, discord_id: int) -> int:
         discord_id = self.hash_user_id(discord_id)
         async with self.async_sessionmaker() as session:
@@ -205,11 +215,14 @@ class SocialMixin(BaseManager):
                     }
         except SQLAlchemyError as e:
             logger.error(f"Error adding reputation for {raw_discord_id}: {e}")
-            return {"reputation": 0, "rep_earned_today": 0, "applied": 0, "capped": False}
+            return {
+                "reputation": 0,
+                "rep_earned_today": 0,
+                "applied": 0,
+                "capped": False,
+            }
 
-    async def give_rep(
-        self, from_id: int, to_id: int, amount: int
-    ) -> dict:
+    async def give_rep(self, from_id: int, to_id: int, amount: int) -> dict:
         """
         Give reputation to another user. Enforces anti-abuse rules:
         - no self/bot votes
@@ -284,7 +297,8 @@ class SocialMixin(BaseManager):
                     return {
                         "ok": True,
                         "reputation": to_rep.reputation,
-                        "reps_remaining": self.DAILY_REPS_GIVEN_CAP - from_rep.reps_given_today,
+                        "reps_remaining": self.DAILY_REPS_GIVEN_CAP
+                        - from_rep.reps_given_today,
                     }
         except SQLAlchemyError as e:
             logger.error(f"Error giving rep from {raw_from} to {raw_to}: {e}")
@@ -317,6 +331,7 @@ class SocialMixin(BaseManager):
                     await session.commit()
         except SQLAlchemyError as e:
             return 0
+
     async def update_skulls(
         self, discord_id: int, skulls_rx_delta: int = 0, skulls_tx_delta: int = 0
     ):
@@ -344,6 +359,7 @@ class SocialMixin(BaseManager):
                     await session.commit()
         except SQLAlchemyError as e:
             return 0
+
     async def update_flames(
         self, discord_id: int, flames_rx_delta: int = 0, flames_tx_delta: int = 0
     ):
@@ -371,6 +387,7 @@ class SocialMixin(BaseManager):
                     await session.commit()
         except SQLAlchemyError as e:
             return 0
+
     async def update_hearts(
         self, discord_id: int, hearts_rx_delta: int = 0, hearts_tx_delta: int = 0
     ):
@@ -398,6 +415,7 @@ class SocialMixin(BaseManager):
                     await session.commit()
         except SQLAlchemyError as e:
             return 0
+
     async def update_clowns(
         self, discord_id: int, clowns_rx_delta: int = 0, clowns_tx_delta: int = 0
     ):
@@ -425,6 +443,7 @@ class SocialMixin(BaseManager):
                     await session.commit()
         except SQLAlchemyError as e:
             return 0
+
     async def get_reaction_stats(
         self, discord_id: int, reaction_type: str
     ) -> tuple[int, int]:
@@ -469,6 +488,7 @@ class SocialMixin(BaseManager):
                     return 0, 0
         except SQLAlchemyError as e:
             return 0, 0
+
     async def get_top_sobs_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -480,6 +500,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), sobs_rx) for discord_id, sobs_rx in rows]
+
     async def get_bottom_sobs_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -491,6 +512,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), sobs_tx) for discord_id, sobs_tx in rows]
+
     async def get_sobs_user_rank(self, discord_id: int) -> int:
         discord_id = self.hash_user_id(discord_id)
         async with self.async_sessionmaker() as session:
@@ -500,6 +522,7 @@ class SocialMixin(BaseManager):
                 if sobs.discord_id == discord_id:
                     return rank
             return -1
+
     async def get_top_skulls_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -511,6 +534,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), skulls_rx) for discord_id, skulls_rx in rows]
+
     async def get_bottom_skulls_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -522,6 +546,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), skulls_tx) for discord_id, skulls_tx in rows]
+
     async def get_skulls_user_rank(self, discord_id: int) -> int:
         discord_id = self.hash_user_id(discord_id)
         async with self.async_sessionmaker() as session:
@@ -533,6 +558,7 @@ class SocialMixin(BaseManager):
                 if skulls.discord_id == discord_id:
                     return rank
             return -1
+
     async def get_top_flames_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -544,6 +570,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), flames_rx) for discord_id, flames_rx in rows]
+
     async def get_bottom_flames_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -555,6 +582,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), flames_tx) for discord_id, flames_tx in rows]
+
     async def get_flames_user_rank(self, discord_id: int) -> int:
         discord_id = self.hash_user_id(discord_id)
         async with self.async_sessionmaker() as session:
@@ -566,6 +594,7 @@ class SocialMixin(BaseManager):
                 if flames.discord_id == discord_id:
                     return rank
             return -1
+
     async def get_top_hearts_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -577,6 +606,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), hearts_rx) for discord_id, hearts_rx in rows]
+
     async def get_bottom_hearts_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -588,6 +618,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), hearts_tx) for discord_id, hearts_tx in rows]
+
     async def get_hearts_user_rank(self, discord_id: int) -> int:
         discord_id = self.hash_user_id(discord_id)
         async with self.async_sessionmaker() as session:
@@ -599,6 +630,7 @@ class SocialMixin(BaseManager):
                 if hearts.discord_id == discord_id:
                     return rank
             return -1
+
     async def get_top_clowns_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -610,6 +642,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), clowns_rx) for discord_id, clowns_rx in rows]
+
     async def get_bottom_clowns_users(self, limit=10):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -621,6 +654,7 @@ class SocialMixin(BaseManager):
         hashes = [discord_id for discord_id, _ in rows]
         mapping = await self.resolve_user_hashes(hashes)
         return [(mapping.get(discord_id), clowns_tx) for discord_id, clowns_tx in rows]
+
     async def get_clowns_user_rank(self, discord_id: int) -> int:
         discord_id = self.hash_user_id(discord_id)
         async with self.async_sessionmaker() as session:
@@ -632,6 +666,7 @@ class SocialMixin(BaseManager):
                 if clowns.discord_id == discord_id:
                     return rank
             return -1
+
     async def toggle_self_reactions(self, guild_id: int) -> bool:
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -650,6 +685,7 @@ class SocialMixin(BaseManager):
                         not settings.self_reactions_enabled
                     )
                     return settings.self_reactions_enabled
+
     async def is_self_reactions_enabled(self, guild_id: int) -> bool:
         async with self.async_sessionmaker() as session:
             result = await session.execute(

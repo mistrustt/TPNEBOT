@@ -30,6 +30,7 @@ class CoreMixin(BaseManager):
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(BotConfig))
             return result.scalar_one_or_none()
+
     async def is_initial_setup_complete(self) -> bool:
         """
         Check if the bot's initial setup has been completed.
@@ -45,6 +46,7 @@ class CoreMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Error checking setup status: {e}")
             return False
+
     async def set_bot_id(self, bot_id: int):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -56,6 +58,7 @@ class CoreMixin(BaseManager):
                     config = BotConfig(bot_id=bot_id)
                     session.add(config)
                 await session.commit()
+
     async def get_bot_id(self) -> int:
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(BotConfig))
@@ -70,11 +73,13 @@ class CoreMixin(BaseManager):
                 return None
 
             return config.bot_id
+
     async def get_loaded_cogs(self) -> List[str]:
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(BotConfig))
             bot_config = result.scalar_one_or_none()
             return bot_config.loaded_cogs if bot_config else []
+
     async def load_cog(self, cog_name: str):
         """Mark a cog as loaded in the database."""
         async with self.async_sessionmaker() as session:
@@ -94,11 +99,13 @@ class CoreMixin(BaseManager):
                     bot_config = BotConfig(loaded_cogs=[cog_name], unloaded_cogs=[])
                     session.add(bot_config)
                 await session.commit()
+
     async def get_unloaded_cogs(self) -> List[str]:
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(BotConfig))
             bot_config = result.scalar_one_or_none()
             return bot_config.unloaded_cogs if bot_config else []
+
     async def unload_cog(self, cog_name: str):
         """Mark a cog as unloaded in the database."""
         async with self.async_sessionmaker() as session:
@@ -118,6 +125,7 @@ class CoreMixin(BaseManager):
                     bot_config = BotConfig(loaded_cogs=[], unloaded_cogs=[cog_name])
                     session.add(bot_config)
                 await session.commit()
+
     async def record_command_usage(
         self,
         *,
@@ -160,6 +168,7 @@ class CoreMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error recording command usage: {str(e)}")
+
     async def record_command_latency(
         self,
         *,
@@ -202,6 +211,7 @@ class CoreMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error recording command latency: {str(e)}")
+
     async def record_command_error(
         self,
         *,
@@ -244,6 +254,7 @@ class CoreMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error recording command error: {str(e)}")
+
     async def record_user_exposure(
         self,
         *,
@@ -343,9 +354,8 @@ class CoreMixin(BaseManager):
                     stmt = stmt.where(OwnerAuditLog.created_at < before)
                 if after is not None:
                     stmt = stmt.where(OwnerAuditLog.created_at > after)
-                stmt = (
-                    stmt.order_by(OwnerAuditLog.created_at.desc())
-                    .limit(max(1, min(limit, 500)))
+                stmt = stmt.order_by(OwnerAuditLog.created_at.desc()).limit(
+                    max(1, min(limit, 500))
                 )
                 result = await session.execute(stmt)
                 return list(result.scalars().all())
@@ -379,6 +389,7 @@ class CoreMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error purging stats before {cutoff_date}: {str(e)}")
+
     async def set_prefix(self, guild_id: int, prefix: str):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -392,6 +403,7 @@ class CoreMixin(BaseManager):
                     settings = ServerSettings(guild_id=guild_id, prefix=prefix)
                     session.add(settings)
                 await session.commit()
+
     async def get_prefix(self, guild_id: int) -> str:
         """Retrieve the prefix for a specific guild from the database."""
         async with self.async_sessionmaker() as session:
@@ -401,6 +413,7 @@ class CoreMixin(BaseManager):
             prefix = result.scalar_one_or_none()
 
         return prefix if prefix else "!"
+
     async def fetch_command_data(
         self, user_id: int, command_name: str, channel_id: int = None
     ):
@@ -454,6 +467,7 @@ class CoreMixin(BaseManager):
                 "is_command_enabled_globally": row.is_command_enabled_globally,
                 "is_command_enabled_channel": row.is_command_enabled_channel,
             }
+
     async def add_task(self, user_id: int, task: str) -> Task:
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
@@ -470,6 +484,7 @@ class CoreMixin(BaseManager):
             session.add(new_task)
             await session.commit()
             return new_task
+
     async def get_tasks(self, user_id: int) -> list[Task]:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -477,6 +492,7 @@ class CoreMixin(BaseManager):
                 select(Task).where(Task.user_id == user_id).order_by(Task.order_index)
             )
             return result.scalars().all()
+
     async def complete_task(self, user_id: int, task_order: int) -> bool:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -488,6 +504,7 @@ class CoreMixin(BaseManager):
             result = await session.execute(stmt)
             await session.commit()
             return result.rowcount > 0
+
     async def delete_task(self, user_id: int, task_order: int) -> bool:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -511,6 +528,7 @@ class CoreMixin(BaseManager):
             await session.execute(stmt)
             await session.commit()
             return True
+
     async def edit_task(self, user_id: int, task_order: int, new_task: str) -> bool:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -522,6 +540,7 @@ class CoreMixin(BaseManager):
             result = await session.execute(stmt)
             await session.commit()
             return result.rowcount > 0
+
     async def clear_tasks(self, user_id: int) -> int:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:

@@ -71,7 +71,9 @@ class UserMixin(BaseManager):
                 await session.execute(
                     delete(Blacklist).where(Blacklist.user_id == user_id)
                 )
-                blacklist_entry = Blacklist(user_id=user_id, admin_id=admin_id, reason=reason)
+                blacklist_entry = Blacklist(
+                    user_id=user_id, admin_id=admin_id, reason=reason
+                )
                 session.add(blacklist_entry)
                 await session.commit()
         except SQLAlchemyError as e:
@@ -189,7 +191,9 @@ class UserMixin(BaseManager):
                 )
 
                 encrypted = encrypt_location(location) if location is not None else None
-                user_location = UserLocation(user_id=user_id, location_encrypted=encrypted)
+                user_location = UserLocation(
+                    user_id=user_id, location_encrypted=encrypted
+                )
                 session.add(user_location)
             await session.commit()
 
@@ -409,14 +413,16 @@ class UserMixin(BaseManager):
                 # Find direct alts where current is main
                 result_alt = await session.execute(
                     select(UserAlt.alt_user_id).where(
-                        UserAlt.main_user_id == current_hash, UserAlt.guild_id == guild_id
+                        UserAlt.main_user_id == current_hash,
+                        UserAlt.guild_id == guild_id,
                     )
                 )
                 alt_hashes = [row[0] for row in result_alt]
                 # Find mains where current is an alt
                 result_main = await session.execute(
                     select(UserAlt.main_user_id).where(
-                        UserAlt.alt_user_id == current_hash, UserAlt.guild_id == guild_id
+                        UserAlt.alt_user_id == current_hash,
+                        UserAlt.guild_id == guild_id,
                     )
                 )
                 main_hashes = [row[0] for row in result_main]
@@ -476,14 +482,22 @@ class UserMixin(BaseManager):
                     delete(ForceRole).where(ForceRole.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(ImageMuteSetting).where(ImageMuteSetting.user_id == user_hash)
+                    delete(ImageMuteSetting).where(
+                        ImageMuteSetting.user_id == user_hash
+                    )
                 )
 
                 # Reaction counters
                 await session.execute(delete(Sobs).where(Sobs.discord_id == user_hash))
-                await session.execute(delete(Skulls).where(Skulls.discord_id == user_hash))
-                await session.execute(delete(Flames).where(Flames.discord_id == user_hash))
-                await session.execute(delete(Hearts).where(Hearts.discord_id == user_hash))
+                await session.execute(
+                    delete(Skulls).where(Skulls.discord_id == user_hash)
+                )
+                await session.execute(
+                    delete(Flames).where(Flames.discord_id == user_hash)
+                )
+                await session.execute(
+                    delete(Hearts).where(Hearts.discord_id == user_hash)
+                )
                 await session.execute(
                     delete(Clowns).where(Clowns.discord_id == user_hash)
                 )
@@ -499,9 +513,7 @@ class UserMixin(BaseManager):
                 await session.execute(
                     delete(ActiveEffect).where(ActiveEffect.user_id == user_hash)
                 )
-                await session.execute(
-                    delete(Wallet).where(Wallet.user_id == user_hash)
-                )
+                await session.execute(delete(Wallet).where(Wallet.user_id == user_hash))
                 await session.execute(delete(Job).where(Job.user_id == user_hash))
                 await session.execute(
                     delete(UserVIP).where(UserVIP.user_id == user_hash)
@@ -530,7 +542,9 @@ class UserMixin(BaseManager):
                     delete(Transaction).where(Transaction.to_user_id == user_hash)
                 )
                 await session.execute(
-                    delete(TransferHistory).where(TransferHistory.sender_id == user_hash)
+                    delete(TransferHistory).where(
+                        TransferHistory.sender_id == user_hash
+                    )
                 )
                 await session.execute(
                     delete(TransferHistory).where(
@@ -559,7 +573,9 @@ class UserMixin(BaseManager):
 
                 # Games
                 await session.execute(
-                    delete(HeardleGameStats).where(HeardleGameStats.user_id == user_hash)
+                    delete(HeardleGameStats).where(
+                        HeardleGameStats.user_id == user_hash
+                    )
                 )
                 await session.execute(
                     delete(GameHistory).where(GameHistory.user_id == user_hash)
@@ -573,7 +589,11 @@ class UserMixin(BaseManager):
                     update(GameSession)
                     .where(GameSession.owner_id != user_hash)
                     .where(GameSession.participants.any(user_hash))
-                    .values(participants=func.array_remove(GameSession.participants, user_hash))
+                    .values(
+                        participants=func.array_remove(
+                            GameSession.participants, user_hash
+                        )
+                    )
                 )
 
                 # Tasks / cooldowns / utility state
@@ -582,7 +602,9 @@ class UserMixin(BaseManager):
                     delete(CommandCooldown).where(CommandCooldown.user_id == user_hash)
                 )
                 await session.execute(
-                    delete(TempVoiceChannel).where(TempVoiceChannel.owner_id == user_hash)
+                    delete(TempVoiceChannel).where(
+                        TempVoiceChannel.owner_id == user_hash
+                    )
                 )
 
                 # Alt relationships

@@ -86,7 +86,9 @@ class BaseManager:
             row = await session.get(UserIdentity, user_hash)
             return row.user_id if row else None
 
-    async def resolve_user_hashes(self, user_hashes: list[str]) -> dict[str, int | None]:
+    async def resolve_user_hashes(
+        self, user_hashes: list[str]
+    ) -> dict[str, int | None]:
         """Batch-resolve hashes to raw Discord IDs."""
         if not user_hashes:
             return {}
@@ -183,7 +185,7 @@ class BaseManager:
                     raise
                 if attempt == retries - 1:
                     break
-                delay = min(base_delay * (2 ** attempt), self._db_retry_max_delay)
+                delay = min(base_delay * (2**attempt), self._db_retry_max_delay)
                 logger.warning(
                     f"Database operation failed (attempt {attempt + 1}/{retries}): {exc}. "
                     f"Retrying in {delay:.1f}s..."

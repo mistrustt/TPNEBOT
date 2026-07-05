@@ -58,8 +58,6 @@ from .models import (
     LockdownChannel,
     Juul,
     UserAlt,
-    SuspiciousActivityLog,
-    SuspiciousActivityType,
     TransferHistory,
     OwnerAuditLog,
     Job,

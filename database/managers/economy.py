@@ -16,8 +16,6 @@ from ..models import (
     Wallet,
     Loan,
     LoanPayment,
-    SuspiciousActivityLog,
-    SuspiciousActivityType,
     TransferHistory,
     Job,
 )
@@ -37,9 +35,12 @@ ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owne
 # column stays uniformly VARCHAR(64).
 TREASURY_USER_ID = 0
 
+
 def _treasury_hash() -> str:
     from utils.security import hash_user_id
+
     return hash_user_id(TREASURY_USER_ID)
+
 
 _LAST_REBALANCE_AT: Optional[datetime] = None  # module-level memo
 _DAILY_MINT_TOTAL: Decimal = Decimal("0")
@@ -52,19 +53,44 @@ TREASURY_FLOOR_RATIO = Decimal("0.10")
 
 # Wealth tier thresholds (percentage of total supply)
 WEALTH_TIERS = {
-    "tier_1": {"threshold": Decimal("0.005"), "label": "mild"},       # 0.5%
-    "tier_2": {"threshold": Decimal("0.01"), "label": "moderate"},    # 1%
-    "tier_3": {"threshold": Decimal("0.02"), "label": "severe"},     # 2%
-    "tier_4": {"threshold": Decimal("0.05"), "label": "extreme"},    # 5%
+    "tier_1": {"threshold": Decimal("0.005"), "label": "mild"},  # 0.5%
+    "tier_2": {"threshold": Decimal("0.01"), "label": "moderate"},  # 1%
+    "tier_3": {"threshold": Decimal("0.02"), "label": "severe"},  # 2%
+    "tier_4": {"threshold": Decimal("0.05"), "label": "extreme"},  # 5%
 }
 
 # Penalty multipliers per tier (applied to different transaction types)
 TIER_PENALTIES = {
-    0: {"bet": Decimal("1.0"), "loan": Decimal("1.0"), "fee": Decimal("1.0"), "transfer": Decimal("1.0")},
-    1: {"bet": Decimal("0.8"), "loan": Decimal("0.7"), "fee": Decimal("1.5"), "transfer": Decimal("0.8")},
-    2: {"bet": Decimal("0.5"), "loan": Decimal("0.4"), "fee": Decimal("2.0"), "transfer": Decimal("0.5")},
-    3: {"bet": Decimal("0.25"), "loan": Decimal("0.2"), "fee": Decimal("3.0"), "transfer": Decimal("0.3")},
-    4: {"bet": Decimal("0.1"), "loan": Decimal("0.05"), "fee": Decimal("5.0"), "transfer": Decimal("0.1")},
+    0: {
+        "bet": Decimal("1.0"),
+        "loan": Decimal("1.0"),
+        "fee": Decimal("1.0"),
+        "transfer": Decimal("1.0"),
+    },
+    1: {
+        "bet": Decimal("0.8"),
+        "loan": Decimal("0.7"),
+        "fee": Decimal("1.5"),
+        "transfer": Decimal("0.8"),
+    },
+    2: {
+        "bet": Decimal("0.5"),
+        "loan": Decimal("0.4"),
+        "fee": Decimal("2.0"),
+        "transfer": Decimal("0.5"),
+    },
+    3: {
+        "bet": Decimal("0.25"),
+        "loan": Decimal("0.2"),
+        "fee": Decimal("3.0"),
+        "transfer": Decimal("0.3"),
+    },
+    4: {
+        "bet": Decimal("0.1"),
+        "loan": Decimal("0.05"),
+        "fee": Decimal("5.0"),
+        "transfer": Decimal("0.1"),
+    },
 }
 
 
@@ -87,6 +113,7 @@ class EconomyMixin(BaseManager):
                     )
                     session.add(supply)
                     logging.info("Created default supply record.")
+
     async def _atomic_balance_change(
         self,
         session,
@@ -105,14 +132,16 @@ class EconomyMixin(BaseManager):
         params = {"pk_val": pk_value, "delta": delta}
 
         frozen_sql = f"AND {frozen_field} IS NOT TRUE" if frozen_field else ""
-        stmt = text(f"""
+        stmt = text(
+            f"""
             UPDATE {table}
             SET    {balance_col} = {balance_col} + :delta
             WHERE  {pk_field} = :pk_val
             {frozen_sql}
             AND   {balance_col} + :delta >= 0
             RETURNING {balance_col}
-        """)
+        """
+        )
 
         result = await session.execute(stmt, params)
         if result.rowcount == 0:
@@ -120,10 +149,13 @@ class EconomyMixin(BaseManager):
                 f"Race or insufficient funds on {table}.{pk_field}={pk_value}"
             )
         return result.scalar_one()
-    async def wipe_economy(self, caller_id: int, *, confirm: bool = False, dry_run: bool = False) -> dict:
+
+    async def wipe_economy(
+        self, caller_id: int, *, confirm: bool = False, dry_run: bool = False
+    ) -> dict:
         """
         Comprehensive economy wipe - resets ALL economy-related tables.
-        
+
         This completely wipes the economy and starts fresh:
         - All wallets, transactions, and supply reset
         - All items, shops, and trade logs cleared
@@ -133,7 +165,7 @@ class EconomyMixin(BaseManager):
         - All social currency (reputation, sobs, etc.) cleared
         - All crypto assets and prices cleared
         - All transfer tracking and suspicious activity cleared
-        
+
         Preserved (NOT wiped):
         - Bot configuration and server settings
         - Moderation data (punishments, jails, watchdog)
@@ -141,12 +173,12 @@ class EconomyMixin(BaseManager):
         - User preferences (timezones, locations)
         - Music/LastFM data
         - Role management data
-        
+
         Args:
             caller_id: Discord ID of the caller (must be in ADMIN_IDS)
             confirm: Safety flag - must be True to execute
             dry_run: If True, returns what would be wiped without actually wiping
-            
+
         Returns:
             dict with 'wiped_tables' list and 'dry_run' boolean
         """
@@ -161,42 +193,33 @@ class EconomyMixin(BaseManager):
         economy_tables = [
             # Core economy
             "wallets",
-            "transactions", 
+            "transactions",
             "supply",
-            
             # Items and trading
             "item_cooldowns",
             "active_effects",
             "trade_logs",
-            
             # Loans and bounties
             "bounties",
             "loans",
             "loan_payments",
-            
             # Jobs system
             "jobs",
-            
             # Games and gambling
             "game_history",
             "game_sessions",
             "game_session_events",
-            
             # Crypto
             "crypto_assets",
-            
             # Transfer tracking
             "transfer_history",
             "suspicious_activity_log",
-            
             # User economy data
             "user_economic_preferences",
-            
             # VIP system
             "user_vip",
             "rakeback_balances",
             "rakeback_transactions",
-            
             # Economic metrics
             "economic_metrics_history",
         ]
@@ -205,7 +228,7 @@ class EconomyMixin(BaseManager):
             return {
                 "dry_run": True,
                 "wiped_tables": economy_tables,
-                "message": f"Would wipe {len(economy_tables)} economy tables"
+                "message": f"Would wipe {len(economy_tables)} economy tables",
             }
 
         async with self.async_sessionmaker() as session:
@@ -215,15 +238,16 @@ class EconomyMixin(BaseManager):
                 await session.execute(
                     text(f"TRUNCATE TABLE {tables_str} RESTART IDENTITY CASCADE")
                 )
-            
+
             # Re-initialize supply record
             await self.initialize_supply_record()
 
         return {
             "dry_run": False,
             "wiped_tables": economy_tables,
-            "message": f"Successfully wiped {len(economy_tables)} economy tables"
+            "message": f"Successfully wiped {len(economy_tables)} economy tables",
         }
+
     async def get_supply_record(self) -> Supply:
         """
         Retrieve the supply record from the database or create one if it does not exist.
@@ -234,12 +258,14 @@ class EconomyMixin(BaseManager):
                 await self.initialize_supply_record()
                 supply = await session.get(Supply, 1)
             return supply
+
     async def get_treasury_balance(self) -> Decimal:
         """
         Retrieve the current balance of the treasury.
         """
         supply = await self.get_supply_record()
         return supply.treasury
+
     async def create_wallet(self, user_id: int) -> None:
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
@@ -263,6 +289,7 @@ class EconomyMixin(BaseManager):
                 await session.flush()
 
                 logging.info(f"Created wallet for user {user_id}.")
+
     async def get_wallet_by_user_id(self, user_id: int) -> Wallet:
         """
         Return the Wallet row for the given user_id, creating one if needed.
@@ -284,6 +311,7 @@ class EconomyMixin(BaseManager):
                 wallet = result.scalar_one_or_none()
 
             return wallet
+
     async def get_wallet_id_for_user(self, user_id: int) -> uuid.UUID:
         """
         Return just the wallet_id (the UUID primary key) for the given user_id,
@@ -293,6 +321,7 @@ class EconomyMixin(BaseManager):
         user_id = self.hash_user_id(raw_user_id)
         wallet = await self.get_wallet_by_user_id(raw_user_id)
         return f"{wallet.wallet_id}"
+
     async def freeze_wallet(self, wallet_id: str):
         """Freeze a wallet to block outgoing transactions."""
         async with self.async_sessionmaker() as session:
@@ -301,6 +330,7 @@ class EconomyMixin(BaseManager):
                 if not wallet:
                     raise ValueError(f"Wallet {wallet_id} not found.")
                 wallet.wallet_frozen = True
+
     async def unfreeze_wallet(self, wallet_id: str):
         """Unfreeze a wallet, allowing transactions again."""
         async with self.async_sessionmaker() as session:
@@ -309,10 +339,12 @@ class EconomyMixin(BaseManager):
                 if not wallet:
                     raise ValueError(f"Wallet {wallet_id} not found.")
                 wallet.wallet_frozen = False
+
     async def get_wallet_balance(self, wallet_id: str) -> Decimal:
         async with self.async_sessionmaker() as session:
             wallet = await session.get(Wallet, wallet_id)
             return wallet.balance if wallet else Decimal("0.00")
+
     async def get_wallet_balance_by_user_id(self, user_id: int) -> Decimal:
         """
         Return the wallet balance for a given user, creating wallet if it doesn't exist.
@@ -321,10 +353,12 @@ class EconomyMixin(BaseManager):
         user_id = self.hash_user_id(raw_user_id)
         wallet = await self.get_wallet_by_user_id(raw_user_id)
         return wallet.balance
+
     async def get_bank_balance(self, wallet_id: str) -> Decimal:
         async with self.async_sessionmaker() as session:
             wallet = await session.get(Wallet, wallet_id)
             return wallet.bank_balance if wallet else Decimal("0.00")
+
     async def deposit_to_bank(self, wallet_id: str, amount: Decimal, description: str):
         """Transfer funds from wallet to bank without affecting treasury."""
         async with self.async_sessionmaker() as session:
@@ -354,7 +388,12 @@ class EconomyMixin(BaseManager):
                     frozen_field="wallet_frozen",
                 )
                 await self._atomic_balance_change(
-                    session, "wallets", "wallet_id", wallet_id, +amount, balance_col="bank_balance"
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    wallet_id,
+                    +amount,
+                    balance_col="bank_balance",
                 )
 
                 # 4) record TX
@@ -371,6 +410,7 @@ class EconomyMixin(BaseManager):
                 )
 
             return txid
+
     async def withdraw_from_bank(
         self, wallet_id: str, amount: Decimal, description: str
     ):
@@ -390,7 +430,12 @@ class EconomyMixin(BaseManager):
                     raise ValueError("Bank account missing.")
 
                 await self._atomic_balance_change(
-                    session, "wallets", "wallet_id", wallet_id, -amount, balance_col="bank_balance"
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    wallet_id,
+                    -amount,
+                    balance_col="bank_balance",
                 )
                 await self._atomic_balance_change(
                     session,
@@ -414,6 +459,7 @@ class EconomyMixin(BaseManager):
                 )
 
             return txid
+
     async def process_p2p_transaction(
         self,
         sender_wallet_id: str,
@@ -433,7 +479,7 @@ class EconomyMixin(BaseManager):
         # Base fee rate from dynamic economic factors
         base_fee_rate = await self.get_enhanced_fee_rate("standard")
         base_fee = AmountUtils.round_currency(amount * base_fee_rate)
-        
+
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 sender = await session.get(Wallet, sender_wallet_id)
@@ -450,7 +496,9 @@ class EconomyMixin(BaseManager):
                 raw_receiver_id = await self.resolve_user_hash(receiver.user_id)
 
                 # Apply wealth-adjusted fee based on sender's tier
-                adjusted_fee = await self.calculate_wealth_adjusted_fee(raw_sender_id, base_fee)
+                adjusted_fee = await self.calculate_wealth_adjusted_fee(
+                    raw_sender_id, base_fee
+                )
                 net_amt = AmountUtils.round_currency(amount)
 
                 if fee_from_amount:
@@ -578,8 +626,13 @@ class EconomyMixin(BaseManager):
                     logging.warning(f"Failed to detect circular transfers: {e}")
 
         return txid_main
+
     async def process_treasury_transaction(
-        self, wallet_id: str, amount: Decimal, description: str, transaction_type: str = "standard",
+        self,
+        wallet_id: str,
+        amount: Decimal,
+        description: str,
+        transaction_type: str = "standard",
         guild_id: int = None,
     ):
         # Check economic circuit breaker before processing
@@ -623,16 +676,22 @@ class EconomyMixin(BaseManager):
                     # Enforce treasury floor: cap payout to protect reserves
                     supply = await session.get(Supply, 1)
                     if supply and supply.total_supply > 0:
-                        treasury_floor = AmountUtils.round_currency(supply.total_supply * TREASURY_FLOOR_RATIO)
+                        treasury_floor = AmountUtils.round_currency(
+                            supply.total_supply * TREASURY_FLOOR_RATIO
+                        )
                         max_payout = supply.treasury - treasury_floor
                         if max_payout < gross:
                             if max_payout <= 0:
-                                raise ValueError("Treasury reserves are protected — payout unavailable.")
+                                raise ValueError(
+                                    "Treasury reserves are protected — payout unavailable."
+                                )
                             # Cap the payout to stay above floor
                             gross = AmountUtils.round_currency(max_payout)
                             net = gross - fee
                             if net <= 0:
-                                raise ValueError("Treasury reserves are too low for this payout after fees.")
+                                raise ValueError(
+                                    "Treasury reserves are too low for this payout after fees."
+                                )
                             logger.warning(
                                 f"[TREASURY FLOOR] Payout capped from {abs(amount)} to {gross} "
                                 f"(floor={treasury_floor}, treasury={supply.treasury})"
@@ -738,7 +797,10 @@ class EconomyMixin(BaseManager):
                     )
 
         return tid_main
-    async def refund_transaction(self, txid: str, reason: str, treasury_fallback: bool = True):
+
+    async def refund_transaction(
+        self, txid: str, reason: str, treasury_fallback: bool = True
+    ):
         """
         Refund a transaction.
 
@@ -818,6 +880,7 @@ class EconomyMixin(BaseManager):
 
             await self.update_supply()
         return refund_txid
+
     async def get_transaction_by_id(self, txid: str) -> Transaction:
         """
         Fetch a single transaction record by its Transaction ID (UUID).
@@ -835,6 +898,7 @@ class EconomyMixin(BaseManager):
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving transaction by id {txid}: {str(e)}")
                 return None
+
     async def get_transactions_by_user_id(self, user_id: int, limit: int = 10) -> list:
         """
         Retrieve the latest transactions for a specific user.
@@ -862,6 +926,7 @@ class EconomyMixin(BaseManager):
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving user {user_id} transactions: {str(e)}")
                 return []
+
     async def update_supply(self):
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -883,19 +948,26 @@ class EconomyMixin(BaseManager):
                 wallet_total = wallet_total_result.scalar() or Decimal("0.00")
 
                 cryptocurrency_total_result = await session.execute(
-                    select(func.sum(CryptoAsset.amount * CryptoPrice.price))
-                    .join(CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol)
+                    select(func.sum(CryptoAsset.amount * CryptoPrice.price)).join(
+                        CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol
+                    )
                 )
-                cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal("0.00")
+                cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal(
+                    "0.00"
+                )
 
                 bank_total_result = await session.execute(
                     select(func.sum(Wallet.bank_balance))
                 )
                 bank_total = bank_total_result.scalar() or Decimal("0.00")
 
-                circulating_supply = AmountUtils.round_currency(wallet_total + bank_total + cryptocurrency_total)
+                circulating_supply = AmountUtils.round_currency(
+                    wallet_total + bank_total + cryptocurrency_total
+                )
 
-                total_supply = AmountUtils.round_currency(circulating_supply + supply.treasury)
+                total_supply = AmountUtils.round_currency(
+                    circulating_supply + supply.treasury
+                )
 
                 treasury_health = (
                     supply.treasury / total_supply
@@ -912,6 +984,7 @@ class EconomyMixin(BaseManager):
                 supply.total_supply = total_supply
 
             await session.commit()
+
     async def get_top_balance_users(self, limit: int = 10) -> list[tuple[int, Decimal]]:
         """
         Retrieve the top users by total balance (wallet + bank + crypto holdings at current prices).
@@ -926,10 +999,7 @@ class EconomyMixin(BaseManager):
             try:
                 # Subquery to get the latest price for each crypto symbol
                 latest_prices = (
-                    select(
-                        CryptoPrice.symbol,
-                        CryptoPrice.price
-                    )
+                    select(CryptoPrice.symbol, CryptoPrice.price)
                     .distinct(CryptoPrice.symbol)
                     .order_by(CryptoPrice.symbol, CryptoPrice.timestamp.desc())
                 ).subquery()
@@ -942,19 +1012,23 @@ class EconomyMixin(BaseManager):
                             Wallet.balance
                             + func.coalesce(Wallet.bank_balance, Decimal("0"))
                             + func.coalesce(
-                                func.sum(CryptoAsset.amount * latest_prices.c.price), Decimal("0")
+                                func.sum(CryptoAsset.amount * latest_prices.c.price),
+                                Decimal("0"),
                             )
-                        ).label("total_balance")
+                        ).label("total_balance"),
                     )
                     .outerjoin(CryptoAsset, CryptoAsset.user_id == Wallet.user_id)
-                    .outerjoin(latest_prices, latest_prices.c.symbol == CryptoAsset.symbol)
+                    .outerjoin(
+                        latest_prices, latest_prices.c.symbol == CryptoAsset.symbol
+                    )
                     .group_by(Wallet.user_id, Wallet.balance, Wallet.bank_balance)
                     .order_by(
                         (
                             Wallet.balance
                             + func.coalesce(Wallet.bank_balance, Decimal("0"))
                             + func.coalesce(
-                                func.sum(CryptoAsset.amount * latest_prices.c.price), Decimal("0")
+                                func.sum(CryptoAsset.amount * latest_prices.c.price),
+                                Decimal("0"),
                             )
                         ).desc()
                     )
@@ -967,6 +1041,7 @@ class EconomyMixin(BaseManager):
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving top balance users: {str(e)}")
                 return []
+
     async def get_balance_user_rank(self, user_id: int) -> Optional[int]:
         """
         Retrieve the supplied users leaderboard position by total balance (wallet + bank combined).
@@ -1006,6 +1081,7 @@ class EconomyMixin(BaseManager):
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving user {user_id} rank: {str(e)}")
                 return None
+
     async def get_top_wallet_users(self, limit: int = 10) -> list[tuple[int, Decimal]]:
         """
         Retrieve the top users by wallet balance.
@@ -1030,6 +1106,7 @@ class EconomyMixin(BaseManager):
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving top wallet users: {str(e)}")
                 return []
+
     async def get_top_bank_users(self, limit: int = 10) -> list[tuple[int, Decimal]]:
         """
         Retrieve the top users by bank balance.
@@ -1054,6 +1131,7 @@ class EconomyMixin(BaseManager):
             except SQLAlchemyError as e:
                 logging.error(f"Error retrieving top bank users: {str(e)}")
                 return []
+
     async def mint_currency(self, amount: Decimal, description: str):
         """
         Mint new currency and add it to the treasury balance.
@@ -1079,6 +1157,7 @@ class EconomyMixin(BaseManager):
                 session.add(transaction_db)
 
             await self.update_supply()
+
     async def burn_currency(self, amount: Decimal, description: str):
         """
         Burns currency by removing it from treasury, effectively reducing total supply.
@@ -1096,7 +1175,9 @@ class EconomyMixin(BaseManager):
 
                 # Enforce treasury floor
                 total_after_burn = supply.circulating + (supply.treasury - amount)
-                floor = AmountUtils.round_currency(total_after_burn * TREASURY_FLOOR_RATIO)
+                floor = AmountUtils.round_currency(
+                    total_after_burn * TREASURY_FLOOR_RATIO
+                )
                 if (supply.treasury - amount) < floor:
                     # Cap the burn to stay above floor
                     max_burnable = supply.treasury - floor
@@ -1118,6 +1199,7 @@ class EconomyMixin(BaseManager):
                 session.add(transaction_db)
 
             await self.update_supply()
+
     async def validate_economy(self):
         """
         Cross-check that:
@@ -1147,20 +1229,27 @@ class EconomyMixin(BaseManager):
                 result_wallet = await session.execute(select(func.sum(Wallet.balance)))
                 total_wallet = result_wallet.scalar() or Decimal("0.00")
 
-                result_bank = await session.execute(select(func.sum(Wallet.bank_balance)))
+                result_bank = await session.execute(
+                    select(func.sum(Wallet.bank_balance))
+                )
                 total_bank = result_bank.scalar() or Decimal("0.00")
 
                 cryptocurrency_total_result = await session.execute(
-                    select(func.sum(CryptoAsset.amount * CryptoPrice.price))
-                    .join(CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol)
+                    select(func.sum(CryptoAsset.amount * CryptoPrice.price)).join(
+                        CryptoPrice, CryptoAsset.symbol == CryptoPrice.symbol
+                    )
                 )
-                cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal("0.00")
+                cryptocurrency_total = cryptocurrency_total_result.scalar() or Decimal(
+                    "0.00"
+                )
 
                 actual_circulating = AmountUtils.round_currency(
                     total_wallet + total_bank + cryptocurrency_total
                 )
                 expected_circulating = supply.circulating
-                circulating_diff = (actual_circulating - expected_circulating).copy_abs()
+                circulating_diff = (
+                    actual_circulating - expected_circulating
+                ).copy_abs()
 
                 actual_total = AmountUtils.round_currency(
                     actual_circulating + supply.treasury
@@ -1195,6 +1284,7 @@ class EconomyMixin(BaseManager):
                     supply.total_supply = actual_total
 
         return ok
+
     def _calculate_dynamic_target(self, supply) -> tuple[Decimal, Decimal, Decimal]:
         """
         Calculate the dynamic treasury target and thresholds based on economy maturity.
@@ -1215,7 +1305,9 @@ class EconomyMixin(BaseManager):
 
         # Young economy (<20% circulating) → target ~0.75
         # Mature economy (>50% circulating) → target 0.50
-        target = max(Decimal("0.50"), Decimal("0.75") - (circulation_ratio * Decimal("0.50")))
+        target = max(
+            Decimal("0.50"), Decimal("0.75") - (circulation_ratio * Decimal("0.50"))
+        )
         target = target.quantize(Decimal("0.0001"))
 
         # Thresholds are ±15 points from target, clamped to safe range
@@ -1223,6 +1315,7 @@ class EconomyMixin(BaseManager):
         min_hw = max(Decimal("0.20"), target - Decimal("0.15"))
 
         return target, min_hw, max_hw
+
     async def perform_economic_rebalance(self) -> dict:
         """
         Perform a single economic rebalance cycle with dynamic maturity-aware targets.
@@ -1260,7 +1353,10 @@ class EconomyMixin(BaseManager):
         # Enforce cooldown
         if _LAST_REBALANCE_AT is not None and now - _LAST_REBALANCE_AT < COOLDOWN:
             remaining = COOLDOWN - (now - _LAST_REBALANCE_AT)
-            return {"action": "skipped", "reason": f"Cooldown active ({remaining.seconds}s remaining)"}
+            return {
+                "action": "skipped",
+                "reason": f"Cooldown active ({remaining.seconds}s remaining)",
+            }
 
         supply = await self.get_supply_record()
         treasury, total_supply = supply.treasury, supply.total_supply
@@ -1314,8 +1410,13 @@ class EconomyMixin(BaseManager):
                         "target": target,
                     }
                 adj = min(adj, max_burnable)
-                await self.burn_currency(adj, f"Auto-burn {adj} (health {treasury_health:.2%}, target {target:.2%})")
-                logger.info(f"[AUTO-REBALANCE] Burned {adj} (health {treasury_health:.2%} → target {target:.2%})")
+                await self.burn_currency(
+                    adj,
+                    f"Auto-burn {adj} (health {treasury_health:.2%}, target {target:.2%})",
+                )
+                logger.info(
+                    f"[AUTO-REBALANCE] Burned {adj} (health {treasury_health:.2%} → target {target:.2%})"
+                )
                 _DAILY_BURN_TOTAL += adj
                 action_taken = "burn"
                 amount_adjusted = adj
@@ -1326,7 +1427,9 @@ class EconomyMixin(BaseManager):
                 mint_adj = AmountUtils.round_currency(adj * MINT_DAMPENER)
 
                 # Enforce daily mint cap
-                daily_mint_cap = AmountUtils.round_currency(total_supply * DAILY_MINT_CAP_RATIO)
+                daily_mint_cap = AmountUtils.round_currency(
+                    total_supply * DAILY_MINT_CAP_RATIO
+                )
                 remaining_daily = daily_mint_cap - _DAILY_MINT_TOTAL
                 if remaining_daily <= 0:
                     return {
@@ -1338,10 +1441,17 @@ class EconomyMixin(BaseManager):
                 mint_adj = min(mint_adj, remaining_daily)
 
                 if mint_adj <= 0:
-                    return {"action": "skipped", "reason": "Mint adjustment too small after dampening"}
+                    return {
+                        "action": "skipped",
+                        "reason": "Mint adjustment too small after dampening",
+                    }
 
                 # Safety: don't mint if circulation is already >80% (too much in player hands)
-                circulation_ratio = supply.circulating / total_supply if total_supply > 0 else Decimal("0")
+                circulation_ratio = (
+                    supply.circulating / total_supply
+                    if total_supply > 0
+                    else Decimal("0")
+                )
                 if circulation_ratio > Decimal("0.80"):
                     return {
                         "action": "skipped",
@@ -1350,8 +1460,13 @@ class EconomyMixin(BaseManager):
                         "target": target,
                     }
 
-                await self.mint_currency(mint_adj, f"Auto-mint {mint_adj} (health {treasury_health:.2%}, target {target:.2%})")
-                logger.info(f"[AUTO-REBALANCE] Minted {mint_adj} (health {treasury_health:.2%} → target {target:.2%})")
+                await self.mint_currency(
+                    mint_adj,
+                    f"Auto-mint {mint_adj} (health {treasury_health:.2%}, target {target:.2%})",
+                )
+                logger.info(
+                    f"[AUTO-REBALANCE] Minted {mint_adj} (health {treasury_health:.2%} → target {target:.2%})"
+                )
                 _DAILY_MINT_TOTAL += mint_adj
                 action_taken = "mint"
                 amount_adjusted = mint_adj
@@ -1360,7 +1475,11 @@ class EconomyMixin(BaseManager):
 
             # Recalculate health after action
             supply = await self.get_supply_record()
-            health_after = (supply.treasury / supply.total_supply).quantize(Decimal("0.0001")) if supply.total_supply > 0 else Decimal("0")
+            health_after = (
+                (supply.treasury / supply.total_supply).quantize(Decimal("0.0001"))
+                if supply.total_supply > 0
+                else Decimal("0")
+            )
 
             return {
                 "action": action_taken,
@@ -1377,6 +1496,7 @@ class EconomyMixin(BaseManager):
         except Exception as e:
             logger.error(f"[AUTO-REBALANCE ERROR]: {e}")
             return {"action": "error", "reason": str(e)}
+
     async def get_economic_factors(self) -> dict:
         """
         Pure-read function: calculates and returns economic metrics and fee rates.
@@ -1407,7 +1527,11 @@ class EconomyMixin(BaseManager):
         metrics = getattr(self, "_latest_metrics", {})
 
         # Try to get pre-calculated metrics, fallback to direct calculation
-        if metrics and metrics.get("liquidity_ratio") is not None and metrics.get("velocity_of_money") is not None:
+        if (
+            metrics
+            and metrics.get("liquidity_ratio") is not None
+            and metrics.get("velocity_of_money") is not None
+        ):
             liquidity_ratio = metrics.get("liquidity_ratio", Decimal("0"))
             velocity_of_money = metrics.get("velocity_of_money", Decimal("0"))
             volatility_index = metrics.get("volatility_index", Decimal("0.02"))
@@ -1416,7 +1540,11 @@ class EconomyMixin(BaseManager):
             logger.debug("Using fallback calculations for economic metrics")
 
             # Calculate liquidity ratio
-            liquidity_ratio = (supply.circulating / total_supply).quantize(Decimal("0.0001")) if total_supply > 0 else Decimal("0")
+            liquidity_ratio = (
+                (supply.circulating / total_supply).quantize(Decimal("0.0001"))
+                if total_supply > 0
+                else Decimal("0")
+            )
 
             # Get volatility index from metrics or use default
             volatility_index = metrics.get("volatility_index", Decimal("0.02"))
@@ -1432,7 +1560,9 @@ class EconomyMixin(BaseManager):
                 transaction_volume = volume_result.scalar() or Decimal("0.00")
 
                 if supply.circulating > 0:
-                    velocity_of_money = (transaction_volume / supply.circulating).quantize(Decimal("0.0001"))
+                    velocity_of_money = (
+                        transaction_volume / supply.circulating
+                    ).quantize(Decimal("0.0001"))
                 else:
                     velocity_of_money = Decimal("0")
 
@@ -1452,7 +1582,9 @@ class EconomyMixin(BaseManager):
         else:
             fee_base = BASE_FEE
             passive = BASE_PASS
-            risk = (Decimal("1.0") + (treasury_health - TARGET)).quantize(Decimal("0.0001"))
+            risk = (Decimal("1.0") + (treasury_health - TARGET)).quantize(
+                Decimal("0.0001")
+            )
 
         # Adjust fee based on volatility
         fee = fee_base * (1 + volatility_index * Decimal("0.5"))
@@ -1472,6 +1604,7 @@ class EconomyMixin(BaseManager):
             "liquidity_ratio": liquidity_ratio,
             "volatility_index": volatility_index,
         }
+
     async def get_user_wealth_tier(self, user_id: int) -> int:
         """
         Calculate the user's wealth tier based on their percentage of total supply.
@@ -1484,19 +1617,21 @@ class EconomyMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             # Get user's wallet and bank
-            result = await session.execute(select(Wallet).where(Wallet.user_id == user_id))
+            result = await session.execute(
+                select(Wallet).where(Wallet.user_id == user_id)
+            )
             wallet = result.scalar_one_or_none()
             if not wallet:
                 return 0
-            
+
             user_wealth = wallet.balance + wallet.bank_balance
-            
+
             # Get user's crypto holdings at current prices
             crypto_result = await session.execute(
                 select(CryptoAsset).where(CryptoAsset.user_id == user_id)
             )
             crypto_holdings = crypto_result.scalars().all()
-            
+
             for holding in crypto_holdings:
                 # Get latest price for this symbol
                 price_result = await session.execute(
@@ -1508,17 +1643,17 @@ class EconomyMixin(BaseManager):
                 price_entry = price_result.scalar_one_or_none()
                 if price_entry:
                     user_wealth += holding.amount * price_entry.price
-            
+
             # Get total supply from economy snapshot
             snapshot = await self.get_economy_snapshot()
             total_supply = snapshot["total_supply"]
-            
+
             if total_supply <= 0:
                 return 0
-            
+
             # Calculate user's percentage of total supply
             user_ratio = user_wealth / total_supply
-            
+
             # Determine tier (check from highest to lowest)
             if user_ratio >= WEALTH_TIERS["tier_4"]["threshold"]:
                 return 4
@@ -1530,17 +1665,19 @@ class EconomyMixin(BaseManager):
                 return 1
             else:
                 return 0
+
     def get_wealth_penalty_multipliers(self, tier: int) -> dict:
         """
         Get penalty multipliers for a given wealth tier.
-        
+
         Args:
             tier: Wealth tier (0-4)
-            
+
         Returns:
             dict: Multipliers for 'bet', 'loan', 'fee', 'transfer'
         """
         return TIER_PENALTIES.get(tier, TIER_PENALTIES[0])
+
     async def get_wealth_tier_info(self, user_id: int) -> dict:
         """
         Get comprehensive wealth tier information for a user.
@@ -1564,15 +1701,15 @@ class EconomyMixin(BaseManager):
                     "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
                     "multipliers": TIER_PENALTIES[0],
                 }
-            
+
             user_wealth = wallet.balance + wallet.bank_balance
-            
+
             # Get user's crypto holdings at current prices
             crypto_result = await session.execute(
                 select(CryptoAsset).where(CryptoAsset.user_id == user_id)
             )
             crypto_holdings = crypto_result.scalars().all()
-            
+
             for holding in crypto_holdings:
                 # Get latest price for this symbol
                 price_result = await session.execute(
@@ -1584,11 +1721,11 @@ class EconomyMixin(BaseManager):
                 price_entry = price_result.scalar_one_or_none()
                 if price_entry:
                     user_wealth += holding.amount * price_entry.price
-            
+
             # Get total supply from economy snapshot
             snapshot = await self.get_economy_snapshot()
             total_supply = snapshot["total_supply"]
-            
+
             if total_supply <= 0:
                 return {
                     "tier": 0,
@@ -1597,13 +1734,13 @@ class EconomyMixin(BaseManager):
                     "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
                     "multipliers": TIER_PENALTIES[0],
                 }
-            
+
             # Calculate user's percentage of total supply
             user_ratio = user_wealth / total_supply
-            
+
             # Determine tier
             tier = await self.get_user_wealth_tier(raw_user_id)
-            
+
             # Determine next tier threshold
             next_tier_threshold = None
             if tier == 0:
@@ -1615,7 +1752,7 @@ class EconomyMixin(BaseManager):
             elif tier == 3:
                 next_tier_threshold = WEALTH_TIERS["tier_4"]["threshold"]
             # tier 4 has no next tier
-            
+
             return {
                 "tier": tier,
                 "wealth": user_wealth,
@@ -1623,7 +1760,10 @@ class EconomyMixin(BaseManager):
                 "next_tier_threshold": next_tier_threshold,
                 "multipliers": self.get_wealth_penalty_multipliers(tier),
             }
-    async def calculate_wealth_adjusted_fee(self, user_id: int, base_fee: Decimal) -> Decimal:
+
+    async def calculate_wealth_adjusted_fee(
+        self, user_id: int, base_fee: Decimal
+    ) -> Decimal:
         """
         Calculate a wealth-adjusted fee for high-wealth users.
 
@@ -1639,11 +1779,15 @@ class EconomyMixin(BaseManager):
         user_tier = await self.get_user_wealth_tier(raw_user_id)
         if user_tier == 0:
             return base_fee
-        
+
         multipliers = self.get_wealth_penalty_multipliers(user_tier)
         return AmountUtils.round_currency(base_fee * multipliers["fee"])
+
     async def get_max_gamble_amount(
-        self, user_id: int, raise_if_limited: bool = False, max_payout_multiplier: Decimal = Decimal("1.0")
+        self,
+        user_id: int,
+        raise_if_limited: bool = False,
+        max_payout_multiplier: Decimal = Decimal("1.0"),
     ) -> Decimal:
         """
         Calculates the maximum amount a user can gamble based on dynamic risk controls.
@@ -1670,14 +1814,14 @@ class EconomyMixin(BaseManager):
 
         # ---- constants -------------------------------------------------------
         MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2% of treasury
-        MIN_ABSOLUTE_FLOOR = Decimal("100.00")   # Floor value for small players
+        MIN_ABSOLUTE_FLOOR = Decimal("100.00")  # Floor value for small players
 
         # ---- fetch user data -------------------------------------------------
         wallet = await self.get_wallet_by_user_id(raw_user_id)
         wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
         bank_bal = await self.get_bank_balance(wallet.wallet_id)
         crypto_assets = await self.get_crypto_assets(raw_user_id)
-        
+
         # Calculate crypto value from assets
         crypto_bal = Decimal("0.00")
         if crypto_assets:
@@ -1689,13 +1833,15 @@ class EconomyMixin(BaseManager):
                         CryptoPrice.symbol.in_(symbols)
                     )
                 )
-                prices = {sym: Decimal(str(price)) for sym, price in price_result.fetchall()}
-            
+                prices = {
+                    sym: Decimal(str(price)) for sym, price in price_result.fetchall()
+                }
+
             # Sum up each asset's value (amount * current_price)
             for asset in crypto_assets:
                 price = prices.get(asset.symbol, Decimal("0.00"))
                 crypto_bal += Decimal(str(asset.amount)) * price
-        
+
         user_total = wallet_bal + bank_bal + crypto_bal
 
         # ---- economy snapshot -----------------------------------------------
@@ -1717,13 +1863,17 @@ class EconomyMixin(BaseManager):
         # ---- dynamic base coefficient ---------------------------------------
         # Scale base coefficient inversely with volatility
         VOLATILITY_SENSITIVITY = Decimal("0.5")
-        adjusted_health = max(Decimal("0.0"), health - (volatility_index * VOLATILITY_SENSITIVITY))
+        adjusted_health = max(
+            Decimal("0.0"), health - (volatility_index * VOLATILITY_SENSITIVITY)
+        )
 
         if adjusted_health >= Decimal("0.60"):
             base_coeff = Decimal("0.01")  # 1%
         elif adjusted_health >= Decimal("0.30"):
             t = (adjusted_health - Decimal("0.30")) / Decimal("0.30")
-            base_coeff = Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (t ** 2)
+            base_coeff = Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (
+                t**2
+            )
         else:
             base_coeff = Decimal("0.00125")  # 0.125%
 
@@ -1753,7 +1903,11 @@ class EconomyMixin(BaseManager):
         hard_cap = AmountUtils.round_currency(treasury * MAX_TREASURY_EXPOSURE)
         # Adjust hard cap by max payout multiplier to limit treasury exposure
         # For games with 50x max payout, this ensures max_bet * 50 <= hard_cap
-        adjusted_hard_cap = hard_cap / max_payout_multiplier if max_payout_multiplier > Decimal("1.0") else hard_cap
+        adjusted_hard_cap = (
+            hard_cap / max_payout_multiplier
+            if max_payout_multiplier > Decimal("1.0")
+            else hard_cap
+        )
         provisional = min(by_treasury, adjusted_hard_cap, user_total)
 
         # ---- enforce adaptive minimum floor ---------------------------------
@@ -1771,6 +1925,7 @@ class EconomyMixin(BaseManager):
             )
 
         return final_limit
+
     async def get_max_loan_amount(self, user_id: int) -> Decimal:
         """
         Calculate the maximum safe loan amount a user can take based on their balance and economic factors.
@@ -1796,7 +1951,7 @@ class EconomyMixin(BaseManager):
         if health < Decimal("0.25"):
             base_coeff = Decimal("0.0005")  # 0.05% of treasury
         elif health < Decimal("0.50"):
-            base_coeff = Decimal("0.001")  # 0.1% of treasury 
+            base_coeff = Decimal("0.001")  # 0.1% of treasury
         else:
             base_coeff = Decimal("0.002")  # 0.2% of treasury
 
@@ -1807,7 +1962,10 @@ class EconomyMixin(BaseManager):
             base_coeff *= multipliers["loan"]  # Apply tier-based loan multiplier
 
         max_loan = AmountUtils.round_currency(treasury * base_coeff)
-        return min(max_loan, user_total * Decimal("1.5"))  # Cap at 1.5x user's total balance
+        return min(
+            max_loan, user_total * Decimal("1.5")
+        )  # Cap at 1.5x user's total balance
+
     async def get_max_transfer_amount(self, user_id: int) -> Decimal:
         """
         Calculate the maximum amount a user can transfer in a single transaction.
@@ -1836,12 +1994,14 @@ class EconomyMixin(BaseManager):
                         CryptoPrice.symbol.in_(symbols)
                     )
                 )
-                prices = {sym: Decimal(str(price)) for sym, price in price_result.fetchall()}
-            
+                prices = {
+                    sym: Decimal(str(price)) for sym, price in price_result.fetchall()
+                }
+
             for asset in crypto_assets:
                 price = prices.get(asset.symbol, Decimal("0.00"))
                 crypto_bal += Decimal(str(asset.amount)) * price
-        
+
         user_total = wallet_bal + bank_bal + crypto_bal
 
         supply = await self.get_supply_record()
@@ -1868,15 +2028,18 @@ class EconomyMixin(BaseManager):
         user_tier = await self.get_user_wealth_tier(raw_user_id)
         if user_tier > 0:
             multipliers = self.get_wealth_penalty_multipliers(user_tier)
-            base_coeff *= multipliers["transfer"]  # Apply tier-based transfer multiplier
+            base_coeff *= multipliers[
+                "transfer"
+            ]  # Apply tier-based transfer multiplier
 
         # Calculate max transfer as percentage of user's wealth
         max_transfer = AmountUtils.round_currency(user_total * base_coeff)
-        
+
         # Absolute cap based on treasury (max 5% of treasury in single transfer)
         treasury_cap = AmountUtils.round_currency(treasury * Decimal("0.05"))
-        
+
         return min(max_transfer, treasury_cap)
+
     async def collect_daily_economy_snapshot(self):
         """
         Collects a snapshot of key economy metrics using existing tables.
@@ -1897,30 +2060,36 @@ class EconomyMixin(BaseManager):
             wallet_sum_result = await session.execute(select(func.sum(Wallet.balance)))
             wallet_total = wallet_sum_result.scalar() or Decimal("0.00")
 
-            bank_sum_result = await session.execute(select(func.sum(Wallet.bank_balance)))
+            bank_sum_result = await session.execute(
+                select(func.sum(Wallet.bank_balance))
+            )
             bank_total = bank_sum_result.scalar() or Decimal("0.00")
 
             avg_wallet_balance = Decimal("0.00")
-            wallet_count_result = await session.execute(select(func.count(Wallet.wallet_id)))
+            wallet_count_result = await session.execute(
+                select(func.count(Wallet.wallet_id))
+            )
             wallet_count = wallet_count_result.scalar()
             if wallet_count and wallet_count > 0:
-                avg_wallet_balance = AmountUtils.round_currency(wallet_total / wallet_count)
+                avg_wallet_balance = AmountUtils.round_currency(
+                    wallet_total / wallet_count
+                )
 
             # Transaction volume (yesterday)
             volume_stmt = select(func.sum(Transaction.amount)).where(
                 Transaction.timestamp >= yesterday_start,
-                Transaction.timestamp < yesterday_end
+                Transaction.timestamp < yesterday_end,
             )
             volume_result = await session.execute(volume_stmt)
             transaction_volume = volume_result.scalar() or Decimal("0.00")
 
             # Active users (distinct senders/receivers yesterday)
             active_users_stmt = select(
-                func.count(distinct(Transaction.from_user_id)).label('senders'),
-                func.count(distinct(Transaction.to_user_id)).label('receivers')
+                func.count(distinct(Transaction.from_user_id)).label("senders"),
+                func.count(distinct(Transaction.to_user_id)).label("receivers"),
             ).where(
                 Transaction.timestamp >= yesterday_start,
-                Transaction.timestamp < yesterday_end
+                Transaction.timestamp < yesterday_end,
             )
             active_users_result = await session.execute(active_users_stmt)
             row = active_users_result.fetchone()
@@ -1929,7 +2098,9 @@ class EconomyMixin(BaseManager):
             # Volatility estimate using Gini coefficient (bounded 0-1)
             # Gini = 0 means perfect equality, Gini = 1 means maximum inequality
             # Exclude treasury wallet (user_id=0 sentinel) from wealth distribution check
-            balances_stmt = select(Wallet.balance).where(Wallet.user_id != _treasury_hash())
+            balances_stmt = select(Wallet.balance).where(
+                Wallet.user_id != _treasury_hash()
+            )
             balances_result = await session.execute(balances_stmt)
             balances = [float(r[0]) for r in balances_result.fetchall()]
 
@@ -1943,33 +2114,45 @@ class EconomyMixin(BaseManager):
                     # Gini formula: G = sum(|x_i - x_j|) / (2 * n^2 * mean)
                     # Efficient formula: G = (2 * sum(i * x_i)) / (n * sum(x_i)) - (n + 1) / n
                     # Simplified: G = cumsum / (n^2 * mean) where cumsum = sum((2i - n - 1) * x_i)
-                    cumsum = sum((2 * (i + 1) - n - 1) * x for i, x in enumerate(sorted_balances))
+                    cumsum = sum(
+                        (2 * (i + 1) - n - 1) * x for i, x in enumerate(sorted_balances)
+                    )
                     gini = cumsum / (n * n * mean)
                     # Clamp to [0, 1] for safety (floating point edge cases)
-                    volatility_index = Decimal(str(max(0.0, min(1.0, gini)))).quantize(Decimal("0.0001"))
+                    volatility_index = Decimal(str(max(0.0, min(1.0, gini)))).quantize(
+                        Decimal("0.0001")
+                    )
                 else:
                     volatility_index = Decimal("0.00")
             else:
                 volatility_index = Decimal("0.00")
 
             # Log or persist as needed
-            logger.info({
-                "date": str(today),
-                "treasury_balance": float(treasury_balance),
-                "total_supply": float(total_supply),
-                "circulating_supply": float(circulating_supply),
-                "avg_wallet_balance": float(avg_wallet_balance),
-                "transaction_volume": float(transaction_volume),
-                "active_users": active_users,
-                "volatility_index": float(volatility_index),
-            })
+            logger.info(
+                {
+                    "date": str(today),
+                    "treasury_balance": float(treasury_balance),
+                    "total_supply": float(total_supply),
+                    "circulating_supply": float(circulating_supply),
+                    "avg_wallet_balance": float(avg_wallet_balance),
+                    "transaction_volume": float(transaction_volume),
+                    "active_users": active_users,
+                    "volatility_index": float(volatility_index),
+                }
+            )
 
             # Calculate additional economic metrics
-            liquidity_ratio = (circulating_supply / total_supply).quantize(Decimal("0.0001")) if total_supply > 0 else Decimal("0")
+            liquidity_ratio = (
+                (circulating_supply / total_supply).quantize(Decimal("0.0001"))
+                if total_supply > 0
+                else Decimal("0")
+            )
 
             # Calculate velocity of money with protection against division by zero
             if circulating_supply > 0:
-                velocity_of_money = (transaction_volume / circulating_supply).quantize(Decimal("0.0001"))
+                velocity_of_money = (transaction_volume / circulating_supply).quantize(
+                    Decimal("0.0001")
+                )
             else:
                 velocity_of_money = Decimal("0")
 
@@ -1990,7 +2173,9 @@ class EconomyMixin(BaseManager):
                 active_users=active_users,
                 avg_wallet_balance=avg_wallet_balance,
                 fee_rate=economic_factors.get("fee_rate", Decimal("0")),
-                passive_income_rate=economic_factors.get("passive_income_rate", Decimal("0")),
+                passive_income_rate=economic_factors.get(
+                    "passive_income_rate", Decimal("0")
+                ),
                 auto_minted_today=_DAILY_MINT_TOTAL,
                 auto_burned_today=_DAILY_BURN_TOTAL,
                 rebalance_target=economic_factors.get("target_ratio", Decimal("0.50")),
@@ -2006,7 +2191,7 @@ class EconomyMixin(BaseManager):
             if existing_record:
                 # Update existing record
                 for key, value in historical_record.__dict__.items():
-                    if not key.startswith('_') and key != 'id':
+                    if not key.startswith("_") and key != "id":
                         setattr(existing_record, key, value)
             else:
                 # Insert new record
@@ -2029,6 +2214,7 @@ class EconomyMixin(BaseManager):
             }
 
         logger.info("[DAILY SNAPSHOT] Economy metrics collected.")
+
     async def get_economy_snapshot(self) -> dict:
         """
         Get the current economy snapshot.
@@ -2038,7 +2224,7 @@ class EconomyMixin(BaseManager):
             Dictionary with economy metrics including total_supply, circulating_supply, etc.
         """
         # Return cached metrics if available
-        if hasattr(self, '_latest_metrics') and self._latest_metrics:
+        if hasattr(self, "_latest_metrics") and self._latest_metrics:
             return self._latest_metrics
 
         # Otherwise calculate fresh snapshot
@@ -2057,7 +2243,10 @@ class EconomyMixin(BaseManager):
                 "circulating_supply": supply.circulating,
                 "treasury_balance": supply.treasury,
             }
-    async def get_or_create_user_economic_preferences(self, user_id: int) -> UserEconomicPreferences:
+
+    async def get_or_create_user_economic_preferences(
+        self, user_id: int
+    ) -> UserEconomicPreferences:
         """
         Get user economic preferences, creating default ones if they don't exist.
 
@@ -2071,7 +2260,9 @@ class EconomyMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             # Try to get existing preferences
-            stmt = select(UserEconomicPreferences).where(UserEconomicPreferences.user_id == user_id)
+            stmt = select(UserEconomicPreferences).where(
+                UserEconomicPreferences.user_id == user_id
+            )
             result = await session.execute(stmt)
             preferences = result.scalar_one_or_none()
 
@@ -2082,6 +2273,7 @@ class EconomyMixin(BaseManager):
                 await session.commit()
 
             return preferences
+
     async def update_user_economic_preferences(self, user_id: int, **kwargs) -> None:
         """
         Update user economic preferences.
@@ -2094,7 +2286,9 @@ class EconomyMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                stmt = select(UserEconomicPreferences).where(UserEconomicPreferences.user_id == user_id)
+                stmt = select(UserEconomicPreferences).where(
+                    UserEconomicPreferences.user_id == user_id
+                )
                 result = await session.execute(stmt)
                 preferences = result.scalar_one_or_none()
 
@@ -2108,6 +2302,7 @@ class EconomyMixin(BaseManager):
                         setattr(preferences, key, value)
 
                 await session.commit()
+
     async def get_users_for_economic_alerts(self) -> list:
         """
         Get all users who have economic alerts enabled.
@@ -2123,6 +2318,7 @@ class EconomyMixin(BaseManager):
             hashes = [row[0] for row in result.fetchall()]
             mapping = await self.resolve_user_hashes(hashes)
             return [mapping.get(h) for h in hashes]
+
     async def check_and_send_economic_alerts(self) -> dict:
         """
         Check economic conditions and send alerts to users who have them enabled.
@@ -2143,13 +2339,14 @@ class EconomyMixin(BaseManager):
             "velocity": 0,
             "liquidity": 0,
             "volatility": 0,
-            "total_users": len(user_ids)
+            "total_users": len(user_ids),
         }
 
         # For now, we'll just return the stats without actually sending DMs
         # In a real implementation, we would send DMs to users through the bot
 
         return alerts_sent
+
     async def get_personalized_economic_recommendations(self, user_id: int) -> dict:
         """
         Get personalized economic recommendations based on user preferences and current conditions.
@@ -2180,9 +2377,9 @@ class EconomyMixin(BaseManager):
                 "liquidity_ratio": float(factors.get("liquidity_ratio", 0)),
                 "velocity_of_money": float(factors.get("velocity_of_money", 0)),
                 "volatility_index": float(factors.get("volatility_index", 0)),
-                "fee_rate": float(factors.get("fee_rate", 0))
+                "fee_rate": float(factors.get("fee_rate", 0)),
             },
-            "recommendations": []
+            "recommendations": [],
         }
 
         # Generate recommendations based on conditions
@@ -2194,86 +2391,107 @@ class EconomyMixin(BaseManager):
         # Scoring: 0.3-0.8 = 25pts (perfect), <0.3 scales down: 25 * (ratio/0.3)
         # So: 0.25 → 21pts (yellow), 0.15 → 12.5pts (orange), <0.15 → red
         if liquidity_ratio < 0.15:
-            recommendations["recommendations"].append({
-                "type": "liquidity",
-                "priority": "high",
-                "message": "Critical liquidity shortage. Economy is tight - cash is valuable.",
-                "action": "hold_cash"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "liquidity",
+                    "priority": "high",
+                    "message": "Critical liquidity shortage. Economy is tight - cash is valuable.",
+                    "action": "hold_cash",
+                }
+            )
         elif liquidity_ratio < 0.3:
-            recommendations["recommendations"].append({
-                "type": "liquidity",
-                "priority": "medium",
-                "message": "Low liquidity detected. Consider holding cash as opportunities may arise.",
-                "action": "hold_cash"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "liquidity",
+                    "priority": "medium",
+                    "message": "Low liquidity detected. Consider holding cash as opportunities may arise.",
+                    "action": "hold_cash",
+                }
+            )
         elif liquidity_ratio > 0.85:
-            recommendations["recommendations"].append({
-                "type": "liquidity",
-                "priority": "medium",
-                "message": "Very high liquidity. Consider investments or large transactions.",
-                "action": "consider_investing"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "liquidity",
+                    "priority": "medium",
+                    "message": "Very high liquidity. Consider investments or large transactions.",
+                    "action": "consider_investing",
+                }
+            )
 
         # Velocity-based recommendations (tiered to match scoring)
         # Scoring: velocity * 50, capped at 25 points
         # So: 0.5 → 25pts, 0.3 → 15pts, 0.1 → 5pts
         if velocity_of_money < 0.1:
-            recommendations["recommendations"].append({
-                "type": "velocity",
-                "priority": "high",
-                "message": "Very low economic activity. Transaction volumes are critically low.",
-                "action": "reduce_trading_activity"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "velocity",
+                    "priority": "high",
+                    "message": "Very low economic activity. Transaction volumes are critically low.",
+                    "action": "reduce_trading_activity",
+                }
+            )
         elif velocity_of_money < 0.2:
-            recommendations["recommendations"].append({
-                "type": "velocity",
-                "priority": "medium",
-                "message": "Low economic activity. Transaction volumes are below normal.",
-                "action": "reduce_trading_activity"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "velocity",
+                    "priority": "medium",
+                    "message": "Low economic activity. Transaction volumes are below normal.",
+                    "action": "reduce_trading_activity",
+                }
+            )
         elif velocity_of_money > 0.6:
-            recommendations["recommendations"].append({
-                "type": "velocity",
-                "priority": "info",
-                "message": "High economic activity. Markets are very active.",
-                "action": "increase_activity"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "velocity",
+                    "priority": "info",
+                    "message": "High economic activity. Markets are very active.",
+                    "action": "increase_activity",
+                }
+            )
 
         # Volatility-based recommendations using Gini (0-1 scale)
         # Gini > 0.6 = high inequality, > 0.4 = moderate
         if volatility_index > 0.6:
-            recommendations["recommendations"].append({
-                "type": "volatility",
-                "priority": "high",
-                "message": "High wealth inequality detected. Consider economic balancing.",
-                "action": "monitor_distribution"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "volatility",
+                    "priority": "high",
+                    "message": "High wealth inequality detected. Consider economic balancing.",
+                    "action": "monitor_distribution",
+                }
+            )
         elif volatility_index > 0.4:
-            recommendations["recommendations"].append({
-                "type": "volatility",
-                "priority": "medium",
-                "message": "Moderate wealth inequality present.",
-                "action": "track_distribution"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "volatility",
+                    "priority": "medium",
+                    "message": "Moderate wealth inequality present.",
+                    "action": "track_distribution",
+                }
+            )
 
         # Risk tolerance based recommendations
         if preferences.risk_tolerance == "low":
-            recommendations["recommendations"].append({
-                "type": "risk",
-                "priority": "info",
-                "message": "Conservative risk profile detected. Focus on stable assets and avoid speculative trades.",
-                "action": "focus_stable_assets"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "risk",
+                    "priority": "info",
+                    "message": "Conservative risk profile detected. Focus on stable assets and avoid speculative trades.",
+                    "action": "focus_stable_assets",
+                }
+            )
         elif preferences.risk_tolerance == "high":
-            recommendations["recommendations"].append({
-                "type": "risk",
-                "priority": "info",
-                "message": "Aggressive risk profile detected. You may consider higher-risk opportunities.",
-                "action": "consider_opportunities"
-            })
+            recommendations["recommendations"].append(
+                {
+                    "type": "risk",
+                    "priority": "info",
+                    "message": "Aggressive risk profile detected. You may consider higher-risk opportunities.",
+                    "action": "consider_opportunities",
+                }
+            )
 
         return recommendations
+
     async def get_economic_trends(self, days: int = 30) -> dict:
         """
         Get economic trends over the specified number of days.
@@ -2287,9 +2505,11 @@ class EconomyMixin(BaseManager):
         cutoff_date = discord.utils.utcnow().date() - timedelta(days=days)
 
         async with self.async_sessionmaker() as session:
-            stmt = select(EconomicMetricsHistory).where(
-                EconomicMetricsHistory.date >= cutoff_date
-            ).order_by(EconomicMetricsHistory.date)
+            stmt = (
+                select(EconomicMetricsHistory)
+                .where(EconomicMetricsHistory.date >= cutoff_date)
+                .order_by(EconomicMetricsHistory.date)
+            )
 
             result = await session.execute(stmt)
             records = result.scalars().all()
@@ -2298,21 +2518,26 @@ class EconomyMixin(BaseManager):
                 return {"error": "No historical data available"}
 
             # Calculate trends
-            trends = {
-                "period_days": days,
-                "data_points": len(records),
-                "metrics": {}
-            }
+            trends = {"period_days": days, "data_points": len(records), "metrics": {}}
 
             # Define metrics to analyze
             metrics_to_analyze = [
-                "treasury_health", "liquidity_ratio", "velocity_of_money",
-                "volatility_index", "transaction_volume", "active_users",
-                "fee_rate", "passive_income_rate"
+                "treasury_health",
+                "liquidity_ratio",
+                "velocity_of_money",
+                "volatility_index",
+                "transaction_volume",
+                "active_users",
+                "fee_rate",
+                "passive_income_rate",
             ]
 
             for metric in metrics_to_analyze:
-                values = [getattr(record, metric) for record in records if getattr(record, metric) is not None]
+                values = [
+                    getattr(record, metric)
+                    for record in records
+                    if getattr(record, metric) is not None
+                ]
                 if values:
                     # Calculate basic statistics
                     current = values[-1] if values else Decimal("0")
@@ -2326,11 +2551,17 @@ class EconomyMixin(BaseManager):
                         trends["metrics"][metric] = {
                             "current": float(current),
                             "average": float(avg),
-                            "change_from_previous": float(current - previous) if previous != 0 else 0,
-                            "change_percent": float(((current - previous) / previous) * 100) if previous != 0 else 0,
+                            "change_from_previous": float(current - previous)
+                            if previous != 0
+                            else 0,
+                            "change_percent": float(
+                                ((current - previous) / previous) * 100
+                            )
+                            if previous != 0
+                            else 0,
                             "trend_slope": float(trend_slope),
                             "min": float(min(values)),
-                            "max": float(max(values))
+                            "max": float(max(values)),
                         }
                     else:
                         trends["metrics"][metric] = {
@@ -2340,10 +2571,11 @@ class EconomyMixin(BaseManager):
                             "change_percent": 0,
                             "trend_slope": 0,
                             "min": float(current),
-                            "max": float(current)
+                            "max": float(current),
                         }
 
             return trends
+
     async def get_economic_health_score(self) -> dict:
         """
         Calculate an overall economic health score based on multiple factors.
@@ -2367,9 +2599,13 @@ class EconomyMixin(BaseManager):
         if 0.3 <= liquidity_ratio <= 0.8:
             liquidity_score = 25  # Perfect score for healthy liquidity
         elif liquidity_ratio > 0.8:
-            liquidity_score = 25 * (0.8 / liquidity_ratio)  # Decrease score for too much liquidity
+            liquidity_score = 25 * (
+                0.8 / liquidity_ratio
+            )  # Decrease score for too much liquidity
         else:
-            liquidity_score = 25 * (liquidity_ratio / 0.3)  # Decrease score for too little liquidity
+            liquidity_score = 25 * (
+                liquidity_ratio / 0.3
+            )  # Decrease score for too little liquidity
 
         # Velocity of money (25% weight) - higher is generally better
         velocity_score = min(25, velocity_of_money * 50)  # Cap at 25 points
@@ -2379,7 +2615,9 @@ class EconomyMixin(BaseManager):
         volatility_score = 20 * (1 - volatility_index)
 
         # Calculate total score (0-100)
-        total_score = treasury_score + liquidity_score + velocity_score + volatility_score
+        total_score = (
+            treasury_score + liquidity_score + velocity_score + volatility_score
+        )
 
         # Normalize to 0-100 range
         health_score = max(0, min(100, total_score))
@@ -2403,25 +2641,26 @@ class EconomyMixin(BaseManager):
                 "treasury_health": {
                     "value": round(treasury_health * 100, 2),
                     "score": round(treasury_score, 2),
-                    "weight": 30
+                    "weight": 30,
                 },
                 "liquidity_ratio": {
                     "value": round(liquidity_ratio * 100, 2),
                     "score": round(liquidity_score, 2),
-                    "weight": 25
+                    "weight": 25,
                 },
                 "velocity_of_money": {
                     "value": round(velocity_of_money, 4),
                     "score": round(velocity_score, 2),
-                    "weight": 25
+                    "weight": 25,
                 },
                 "volatility_index": {
                     "value": round(volatility_index * 100, 2),
                     "score": round(volatility_score, 2),
-                    "weight": 20
-                }
-            }
+                    "weight": 20,
+                },
+            },
         }
+
     async def get_historical_economic_metrics(self, days: int = 30) -> list:
         """
         Get raw historical economic metrics for the specified number of days.
@@ -2435,9 +2674,11 @@ class EconomyMixin(BaseManager):
         cutoff_date = discord.utils.utcnow().date() - timedelta(days=days)
 
         async with self.async_sessionmaker() as session:
-            stmt = select(EconomicMetricsHistory).where(
-                EconomicMetricsHistory.date >= cutoff_date
-            ).order_by(EconomicMetricsHistory.date.desc())
+            stmt = (
+                select(EconomicMetricsHistory)
+                .where(EconomicMetricsHistory.date >= cutoff_date)
+                .order_by(EconomicMetricsHistory.date.desc())
+            )
 
             result = await session.execute(stmt)
             records = result.scalars().all()
@@ -2445,21 +2686,30 @@ class EconomyMixin(BaseManager):
             # Convert to dictionary format for easy consumption
             metrics_list = []
             for record in records:
-                metrics_list.append({
-                    "date": record.date.isoformat(),
-                    "treasury_health": float(record.treasury_health),
-                    "liquidity_ratio": float(record.liquidity_ratio),
-                    "velocity_of_money": float(record.velocity_of_money),
-                    "volatility_index": float(record.volatility_index),
-                    "transaction_volume": float(record.transaction_volume),
-                    "active_users": record.active_users,
-                    "fee_rate": float(record.fee_rate),
-                    "passive_income_rate": float(record.passive_income_rate)
-                })
+                metrics_list.append(
+                    {
+                        "date": record.date.isoformat(),
+                        "treasury_health": float(record.treasury_health),
+                        "liquidity_ratio": float(record.liquidity_ratio),
+                        "velocity_of_money": float(record.velocity_of_money),
+                        "volatility_index": float(record.volatility_index),
+                        "transaction_volume": float(record.transaction_volume),
+                        "active_users": record.active_users,
+                        "fee_rate": float(record.fee_rate),
+                        "passive_income_rate": float(record.passive_income_rate),
+                    }
+                )
 
             return metrics_list
+
     async def add_loan_record(
-        self, user_id: int, principal: Decimal, interest_rate: Decimal, total_repay: Decimal, due_date: datetime, status: str = "active"
+        self,
+        user_id: int,
+        principal: Decimal,
+        interest_rate: Decimal,
+        total_repay: Decimal,
+        due_date: datetime,
+        status: str = "active",
     ):
         """
         Add a new loan record to the database for a user. Ensure one loan per user for simplicity.
@@ -2484,14 +2734,27 @@ class EconomyMixin(BaseManager):
                 )
                 session.add(new_loan)
             await session.commit()
+
     async def get_active_loans_for_user(self, user_id: int) -> list[Loan]:
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
-                select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue", "defaulted"]))
+                select(Loan).where(
+                    Loan.user_id == user_id,
+                    Loan.status.in_(["active", "overdue", "defaulted"]),
+                )
             )
             return result.scalars().all()
-    async def update_loan_for_user(self, user_id: int, new_status: str, new_principal: Decimal = None, new_interest_rate: Decimal = None, new_total_repay: Decimal = None, new_due_date: datetime = None):
+
+    async def update_loan_for_user(
+        self,
+        user_id: int,
+        new_status: str,
+        new_principal: Decimal = None,
+        new_interest_rate: Decimal = None,
+        new_total_repay: Decimal = None,
+        new_due_date: datetime = None,
+    ):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
@@ -2511,24 +2774,22 @@ class EconomyMixin(BaseManager):
                 if new_due_date is not None:
                     active_loan.due_date = new_due_date
             await session.commit()
+
     async def make_loan_payment(
-        self, 
-        user_id: int, 
-        payment_amount: Decimal, 
-        notes: str = None
+        self, user_id: int, payment_amount: Decimal, notes: str = None
     ):
         """
         Record a partial or full loan payment. Updates the loan's amount_paid field
         and creates a LoanPayment record. Automatically marks loan as 'paid' if fully repaid.
-        
+
         Args:
             user_id: Discord user ID
             payment_amount: Amount to pay (must be > 0 and <= remaining balance)
             notes: Optional notes about the payment
-            
+
         Returns:
             dict with payment details and new balance
-            
+
         Raises:
             ValueError: If no active loan exists or payment amount is invalid
         """
@@ -2541,43 +2802,50 @@ class EconomyMixin(BaseManager):
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
-                    select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue"]))
+                    select(Loan).where(
+                        Loan.user_id == user_id, Loan.status.in_(["active", "overdue"])
+                    )
                 )
                 active_loan = result.scalar_one_or_none()
                 if not active_loan:
                     raise ValueError("No active loan found for user.")
-                
+
                 remaining_balance = active_loan.total_repay - active_loan.amount_paid
                 if payment_amount > remaining_balance:
-                    raise ValueError(f"Payment amount exceeds remaining balance of {remaining_balance}.")
-                
+                    raise ValueError(
+                        f"Payment amount exceeds remaining balance of {remaining_balance}."
+                    )
+
                 # Create payment record
                 payment = LoanPayment(
                     loan_id=active_loan.id,
                     user_id=user_id,
                     payment_method="manual",  # Could be extended to support different methods
                     payment_amount=payment_amount,
-                    notes=notes
+                    notes=notes,
                 )
                 session.add(payment)
-                
+
                 # Update loan amount paid
                 active_loan.amount_paid += payment_amount
-                
+
                 # Check if fully paid
                 if active_loan.amount_paid >= active_loan.total_repay:
                     active_loan.status = "paid"
-                    active_loan.amount_paid = active_loan.total_repay  # Ensure exact match
-                    
+                    active_loan.amount_paid = (
+                        active_loan.total_repay
+                    )  # Ensure exact match
+
             await session.commit()
-            
+
             return {
                 "payment_amount": payment_amount,
                 "previous_paid": active_loan.amount_paid - payment_amount,
                 "new_amount_paid": active_loan.amount_paid,
                 "remaining_balance": active_loan.total_repay - active_loan.amount_paid,
-                "loan_status": active_loan.status
+                "loan_status": active_loan.status,
             }
+
     async def get_loan_payment_history(self, user_id: int) -> list[LoanPayment]:
         """
         Retrieve all payment records for a user's loans.
@@ -2597,6 +2865,7 @@ class EconomyMixin(BaseManager):
                 .order_by(LoanPayment.payment_date.desc())
             )
             return result.scalars().all()
+
     async def get_loan_remaining_balance(self, user_id: int) -> Decimal:
         """
         Calculate the remaining balance on a user's active loan.
@@ -2613,13 +2882,16 @@ class EconomyMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
-                select(Loan).where(Loan.user_id == user_id, Loan.status.in_(["active", "overdue"]))
+                select(Loan).where(
+                    Loan.user_id == user_id, Loan.status.in_(["active", "overdue"])
+                )
             )
             active_loan = result.scalar_one_or_none()
             if not active_loan:
                 raise ValueError("No active loan found for user.")
-            
+
             return active_loan.total_repay - active_loan.amount_paid
+
     async def date_check_loans(self):
         """
         Check all active loans and mark those past due as 'defaulted'.
@@ -2631,7 +2903,7 @@ class EconomyMixin(BaseManager):
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 now = discord.utils.utcnow()
-                
+
                 # Process overdue loans
                 result = await session.execute(
                     select(Loan).where(Loan.status == "active", Loan.due_date < now)
@@ -2641,7 +2913,9 @@ class EconomyMixin(BaseManager):
                     days_overdue = (now - loan.due_date).days
                     if days_overdue > 0:
                         loan.status = "overdue"
-                        loan.total_repay += (loan.principal * Decimal("0.1") * days_overdue).quantize(Decimal("0.1"))
+                        loan.total_repay += (
+                            loan.principal * Decimal("0.1") * days_overdue
+                        ).quantize(Decimal("0.1"))
                     if days_overdue >= 7:
                         loan.status = "defaulted"
                         loan.defaulted_date = now
@@ -2649,10 +2923,12 @@ class EconomyMixin(BaseManager):
                         wallet = await self.get_wallet_by_user_id(raw_uid)
                         if wallet and not wallet.wallet_frozen:
                             await self.freeze_wallet(wallet.wallet_id)
-                
+
                 # Unfreeze wallets 7 days after defaulting
                 result = await session.execute(
-                    select(Loan).join(Wallet, Loan.user_id == Wallet.user_id).where(
+                    select(Loan)
+                    .join(Wallet, Loan.user_id == Wallet.user_id)
+                    .where(
                         Loan.status == "defaulted",
                         Loan.defaulted_date != None,
                         Wallet.wallet_frozen == True,
@@ -2666,6 +2942,7 @@ class EconomyMixin(BaseManager):
                         wallet = await self.get_wallet_by_user_id(raw_uid)
                         if wallet and wallet.wallet_frozen:
                             await self.unfreeze_wallet(wallet.wallet_id)
+
     async def get_dynamic_reward_multiplier(self) -> Decimal:
         """
         Calculate dynamic reward multiplier based on economic conditions.
@@ -2709,6 +2986,7 @@ class EconomyMixin(BaseManager):
 
         # Clamp to safe range
         return max(Decimal("0.80"), min(Decimal("1.60"), multiplier))
+
     async def check_economic_circuit_breaker(self) -> dict:
         """
         Check if economic circuit breakers should be triggered based on velocity and other metrics.
@@ -2718,7 +2996,7 @@ class EconomyMixin(BaseManager):
         factors = await self.get_economic_factors()
         velocity = factors.get("velocity_of_money", Decimal("0"))
         liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
-        #volatility = factors.get("volatility_index", Decimal("0.02"))
+        # volatility = factors.get("volatility_index", Decimal("0.02"))
 
         # Define thresholds
         VELOCITY_CRISIS_THRESHOLD = Decimal("0.001")  # Near-zero money velocity
@@ -2744,7 +3022,10 @@ class EconomyMixin(BaseManager):
             "velocity": velocity,
             "liquidity_ratio": liquidity_ratio,
         }
-    async def get_enhanced_fee_rate(self, transaction_type: str = "standard") -> Decimal:
+
+    async def get_enhanced_fee_rate(
+        self, transaction_type: str = "standard"
+    ) -> Decimal:
         """
         Calculate enhanced fee rate based on multiple economic factors.
 
@@ -2781,6 +3062,7 @@ class EconomyMixin(BaseManager):
         MIN_FEE = Decimal("0.001")  # 0.1%
 
         return max(MIN_FEE, min(MAX_FEE, fee))
+
     async def log_transfer(
         self,
         transaction_id: str,
@@ -2807,99 +3089,13 @@ class EconomyMixin(BaseManager):
                         guild_id=guild_id,
                     )
                 )
-    async def check_alt_transfer(
-        self, sender_id: int, receiver_id: int, guild_id: int
-    ) -> bool:
-        """
-        Check if a transfer is between linked alternate accounts.
-        Returns True if the users are linked alts, False otherwise.
-        """
-        raw_sender_id = sender_id
-        raw_receiver_id = receiver_id
-        sender_id = self.hash_user_id(raw_sender_id)
-        receiver_id = self.hash_user_id(raw_receiver_id)
-        linked_raw_ids = await self.get_all_linked_user_ids(raw_sender_id, guild_id)
-        return raw_receiver_id in linked_raw_ids
-    async def log_suspicious_activity(
-        self,
-        activity_type: SuspiciousActivityType,
-        user_id: int,
-        guild_id: int,
-        related_user_ids: List[int] = None,
-        amount: Decimal = None,
-        details: dict = None,
-    ) -> int:
-        """
-        Log a suspicious activity for owner review.
-        Returns the ID of the created log entry.
-        """
-        if user_id not in (0, None):
-            await self.ensure_user_identity(user_id)
-            user_id = self.hash_user_id(user_id)
-        if related_user_ids:
-            hashed_related = []
-            for uid in related_user_ids:
-                if uid in (0, None):
-                    continue
-                await self.ensure_user_identity(uid)
-                hashed_related.append(self.hash_user_id(uid))
-            related_user_ids = hashed_related
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                log = SuspiciousActivityLog(
-                    activity_type=activity_type,
-                    user_id=user_id,
-                    guild_id=guild_id,
-                    related_user_ids=related_user_ids or [],
-                    amount=amount,
-                    details=details or {},
-                )
-                session.add(log)
-                await session.flush()
-                return log.id
-    async def get_suspicious_activities(
-        self,
-        activity_type: SuspiciousActivityType = None,
-        reviewed: bool = None,
-        guild_id: int = None,
-        user_id: int = None,
-        limit: int = 50,
-    ) -> List[SuspiciousActivityLog]:
-        """Query suspicious activity logs with filters."""
-        if user_id is not None:
-            user_id = self.hash_user_id(user_id)
-        async with self.async_sessionmaker() as session:
-            stmt = select(SuspiciousActivityLog).order_by(
-                SuspiciousActivityLog.created_at.desc()
-            )
-            if activity_type is not None:
-                stmt = stmt.where(SuspiciousActivityLog.activity_type == activity_type)
-            if reviewed is not None:
-                stmt = stmt.where(SuspiciousActivityLog.reviewed == reviewed)
-            if guild_id is not None:
-                stmt = stmt.where(SuspiciousActivityLog.guild_id == guild_id)
-            if user_id is not None:
-                stmt = stmt.where(SuspiciousActivityLog.user_id == user_id)
-            if limit:
-                stmt = stmt.limit(limit)
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
-    async def review_suspicious_activity(
-        self, log_id: int, reviewed_by: int, notes: str = None
-    ) -> bool:
-        """Mark a suspicious activity log as reviewed."""
-        reviewed_by = self.hash_user_id(reviewed_by)
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                log = await session.get(SuspiciousActivityLog, log_id)
-                if not log:
-                    return False
-                log.reviewed = True
-                log.reviewed_by = reviewed_by
-                log.review_notes = notes
-                return True
+
     async def get_recent_large_treasury_receipts(
-        self, user_id: int, hours: int = 1, min_amount: Decimal = None, guild_id: int = None
+        self,
+        user_id: int,
+        hours: int = 1,
+        min_amount: Decimal = None,
+        guild_id: int = None,
     ) -> List[TransferHistory]:
         """
         Get recent large treasury receipts for a user.
@@ -2923,9 +3119,8 @@ class EconomyMixin(BaseManager):
             stmt = stmt.order_by(TransferHistory.created_at.desc())
             result = await session.execute(stmt)
             return list(result.scalars().all())
-    async def get_aggregated_balance(
-        self, user_id: int, guild_id: int = None
-    ) -> dict:
+
+    async def get_aggregated_balance(self, user_id: int, guild_id: int = None) -> dict:
         """
         Get aggregated balance across all linked alt accounts (wallet + bank + crypto).
 
@@ -2942,7 +3137,11 @@ class EconomyMixin(BaseManager):
         raw_user_id = user_id
         user_id = self.hash_user_id(raw_user_id)
         # Get all linked users
-        linked_raw_ids = await self.get_all_linked_user_ids(raw_user_id, guild_id) if guild_id else []
+        linked_raw_ids = (
+            await self.get_all_linked_user_ids(raw_user_id, guild_id)
+            if guild_id
+            else []
+        )
         linked_ids = [self.hash_user_id(uid) for uid in linked_raw_ids]
         all_user_ids = [user_id] + linked_ids
 
@@ -2958,7 +3157,12 @@ class EconomyMixin(BaseManager):
             # Build wallet_id to user_id mapping and get wallet balances
             wallet_to_user = {}
             individual_balances = {
-                uid: {"wallet": Decimal("0"), "bank": Decimal("0"), "crypto": Decimal("0"), "total": Decimal("0")}
+                uid: {
+                    "wallet": Decimal("0"),
+                    "bank": Decimal("0"),
+                    "crypto": Decimal("0"),
+                    "total": Decimal("0"),
+                }
                 for uid in all_user_ids
             }
 
@@ -2984,9 +3188,9 @@ class EconomyMixin(BaseManager):
 
             # Query crypto assets for all users
             crypto_result = await session.execute(
-                select(CryptoAsset.user_id, CryptoAsset.symbol, CryptoAsset.amount).where(
-                    CryptoAsset.user_id.in_(all_user_ids)
-                )
+                select(
+                    CryptoAsset.user_id, CryptoAsset.symbol, CryptoAsset.amount
+                ).where(CryptoAsset.user_id.in_(all_user_ids))
             )
             crypto_rows = crypto_result.fetchall()
 
@@ -3026,13 +3230,16 @@ class EconomyMixin(BaseManager):
         return {
             "main_user_id": mapping.get(user_id),
             "linked_user_ids": [mapping.get(h) for h in linked_ids],
-            "individual_balances": {mapping.get(h): bal for h, bal in individual_balances.items()},
+            "individual_balances": {
+                mapping.get(h): bal for h, bal in individual_balances.items()
+            },
             "total_balance": total_balance,
             "total_wallet": total_wallet,
             "total_bank": total_bank,
             "total_crypto": total_crypto,
             "account_count": len(all_user_ids),
         }
+
     async def get_net_flow(
         self, user_id: int, days: int = 30, guild_id: int = None
     ) -> dict:
@@ -3099,6 +3306,7 @@ class EconomyMixin(BaseManager):
             "transaction_count_out": transaction_count_out,
             "ratio": ratio,
         }
+
     async def calculate_hoarding_score(
         self, user_id: int, guild_id: int = None, days: int = 30
     ) -> dict:
@@ -3128,10 +3336,26 @@ class EconomyMixin(BaseManager):
         flow_data = await self.get_net_flow(raw_user_id, days, guild_id)
 
         # Get main user's total balance (wallet + bank + crypto)
-        main_balance = balance_data["individual_balances"].get(raw_user_id, {}).get("total", Decimal("0"))
-        main_wallet = balance_data["individual_balances"].get(raw_user_id, {}).get("wallet", Decimal("0"))
-        main_bank = balance_data["individual_balances"].get(raw_user_id, {}).get("bank", Decimal("0"))
-        main_crypto = balance_data["individual_balances"].get(raw_user_id, {}).get("crypto", Decimal("0"))
+        main_balance = (
+            balance_data["individual_balances"]
+            .get(raw_user_id, {})
+            .get("total", Decimal("0"))
+        )
+        main_wallet = (
+            balance_data["individual_balances"]
+            .get(raw_user_id, {})
+            .get("wallet", Decimal("0"))
+        )
+        main_bank = (
+            balance_data["individual_balances"]
+            .get(raw_user_id, {})
+            .get("bank", Decimal("0"))
+        )
+        main_crypto = (
+            balance_data["individual_balances"]
+            .get(raw_user_id, {})
+            .get("crypto", Decimal("0"))
+        )
 
         factors = {}
         details = {
@@ -3237,6 +3461,7 @@ class EconomyMixin(BaseManager):
             "risk_level": risk_level,
             "details": details,
         }
+
     async def scan_for_hoarding(
         self,
         guild_id: int = None,
@@ -3274,14 +3499,21 @@ class EconomyMixin(BaseManager):
             )
 
             if score_data["score"] >= min_score:
-                hoarding_candidates.append({
-                    "user_id": raw_user_id,
-                    "score": score_data["score"],
-                    "risk_level": score_data["risk_level"],
-                    "total_balance": score_data["details"]["aggregated_balance"]["total_balance"],
-                    "alt_count": score_data["details"]["aggregated_balance"]["account_count"] - 1,
-                    "factors": score_data["factors"],
-                })
+                hoarding_candidates.append(
+                    {
+                        "user_id": raw_user_id,
+                        "score": score_data["score"],
+                        "risk_level": score_data["risk_level"],
+                        "total_balance": score_data["details"]["aggregated_balance"][
+                            "total_balance"
+                        ],
+                        "alt_count": score_data["details"]["aggregated_balance"][
+                            "account_count"
+                        ]
+                        - 1,
+                        "factors": score_data["factors"],
+                    }
+                )
 
             if len(hoarding_candidates) >= limit:
                 break
@@ -3289,6 +3521,7 @@ class EconomyMixin(BaseManager):
         # Sort by score descending
         hoarding_candidates.sort(key=lambda x: x["score"], reverse=True)
         return hoarding_candidates
+
     async def get_recent_transfers(
         self,
         user_id: int,
@@ -3315,6 +3548,7 @@ class EconomyMixin(BaseManager):
                 stmt = stmt.limit(limit)
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
     async def detect_circular_transfers(
         self,
         user_id: int,
@@ -3400,18 +3634,24 @@ class EconomyMixin(BaseManager):
                         total_sent_out = amounts_out[0]  # What originator sent
 
                         # Amount similarity check
-                        ratio = float(amt_sent / total_sent_out) if total_sent_out > 0 else 0
+                        ratio = (
+                            float(amt_sent / total_sent_out)
+                            if total_sent_out > 0
+                            else 0
+                        )
 
                         if ratio >= amount_similarity_threshold:
                             cycle_key = tuple(path)
                             if cycle_key not in visited_cycles:
-                                suspicious_cycles.append({
-                                    "path": path + [start],
-                                    "amounts_sent": amounts_out,
-                                    "amount_returned": amt_sent,
-                                    "similarity": round(ratio, 3),
-                                    "total_sent": total_sent_out,
-                                })
+                                suspicious_cycles.append(
+                                    {
+                                        "path": path + [start],
+                                        "amounts_sent": amounts_out,
+                                        "amount_returned": amt_sent,
+                                        "similarity": round(ratio, 3),
+                                        "total_sent": total_sent_out,
+                                    }
+                                )
                                 visited_cycles.add(cycle_key)
 
                     elif neighbor not in visited and len(path) <= depth:
@@ -3428,7 +3668,13 @@ class EconomyMixin(BaseManager):
         for first_hop, txns in graph[user_id].items():
             for amt_sent, ts_sent in txns:
                 # Only trace this specific amount pattern
-                find_cycles_dfs(user_id, first_hop, [user_id, first_hop], [amt_sent], {user_id, first_hop})
+                find_cycles_dfs(
+                    user_id,
+                    first_hop,
+                    [user_id, first_hop],
+                    [amt_sent],
+                    {user_id, first_hop},
+                )
 
         if suspicious_cycles:
             all_hashes = {h for cycle in suspicious_cycles for h in cycle["path"]}
@@ -3437,14 +3683,14 @@ class EconomyMixin(BaseManager):
                 cycle["path"] = [mapping.get(h) for h in cycle["path"]]
 
         return suspicious_cycles
+
     async def get_job(self, user_id: int) -> Optional[Job]:
         """Get a user's current job, if any."""
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(Job).where(Job.user_id == user_id)
-            )
+            result = await session.execute(select(Job).where(Job.user_id == user_id))
             return result.scalar_one_or_none()
+
     async def apply_for_job(
         self, user_id: int, job_title: str, base_salary: Decimal
     ) -> Job:
@@ -3458,7 +3704,9 @@ class EconomyMixin(BaseManager):
                     select(Job).where(Job.user_id == user_id)
                 )
                 if existing.scalar_one_or_none():
-                    raise ValueError("You already have a job. Quit your current job first.")
+                    raise ValueError(
+                        "You already have a job. Quit your current job first."
+                    )
 
                 job = Job(
                     user_id=user_id,
@@ -3471,6 +3719,7 @@ class EconomyMixin(BaseManager):
                 session.add(job)
             await session.commit()
             return job
+
     async def quit_job(self, user_id: int) -> bool:
         """Remove a user's job record."""
         user_id = self.hash_user_id(user_id)
@@ -3485,6 +3734,7 @@ class EconomyMixin(BaseManager):
                 await session.delete(job)
             await session.commit()
             return True
+
     async def work_job(self, user_id: int) -> Tuple[Job, Decimal]:
         """
         Process a user's work action.
@@ -3517,7 +3767,9 @@ class EconomyMixin(BaseManager):
                         )
 
                     # Check if 24 hours have passed since last work (normal cooldown)
-                    cooldown_remaining = 86400 - time_since_last  # 24 hours = 86400 seconds
+                    cooldown_remaining = (
+                        86400 - time_since_last
+                    )  # 24 hours = 86400 seconds
                     if cooldown_remaining > 0:
                         hours = int(cooldown_remaining // 3600)
                         minutes = int((cooldown_remaining % 3600) // 60)
@@ -3529,7 +3781,9 @@ class EconomyMixin(BaseManager):
                 weeks_employed = job.days_employed / 7
                 salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
                 current_salary = job.base_salary * Decimal(str(salary_multiplier))
-                current_salary = current_salary.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                current_salary = current_salary.quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
 
                 # Update job record
                 job.last_worked = now
@@ -3538,12 +3792,14 @@ class EconomyMixin(BaseManager):
 
             await session.commit()
             return job, current_salary
+
     async def calculate_salary(self, job: Job) -> Decimal:
         """Calculate current salary based on tenure."""
         weeks_employed = job.days_employed / 7
         salary_multiplier = min(2.0, 1.0 + (weeks_employed * 0.05))
         current_salary = job.base_salary * Decimal(str(salary_multiplier))
         return current_salary.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
     async def get_employees_for_firing(self) -> List[Job]:
         """
         Get employees who haven't worked in 48+ hours.
@@ -3557,6 +3813,7 @@ class EconomyMixin(BaseManager):
                 )
             )
             return result.scalars().all()
+
     async def fire_employee(self, user_id: int) -> bool:
         """Remove a job record for an inactive employee."""
         user_id = self.hash_user_id(user_id)
@@ -3570,6 +3827,7 @@ class EconomyMixin(BaseManager):
                     await session.delete(job)
             await session.commit()
             return True
+
     async def get_all_jobs(self) -> List[Job]:
         """Get all job records (for admin purposes)."""
         async with self.async_sessionmaker() as session:

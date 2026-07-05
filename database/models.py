@@ -38,7 +38,6 @@ class UserIdentity(Base):
     user_id = Column(BigInteger, nullable=False, unique=True)
 
 
-
 class PunishmentType(enum.Enum):
     BAN = "ban"
     UNBAN = "unban"
@@ -317,6 +316,7 @@ class Wallet(Base):
         UniqueConstraint("user_id"),
     )
 
+
 class Transaction(Base):
     __tablename__ = "transactions"
 
@@ -336,10 +336,12 @@ class Transaction(Base):
             f"description='{self.description}', timestamp={self.timestamp}, "
         )
 
+
 class ItemType(enum.Enum):
     COLLECTIBLE = "collectible"
     REDEEMABLE = "redeemable"
     CONSUMABLE = "consumable"
+
 
 class EffectType(enum.Enum):
     CURRENCY = "currency"  # Direct currency grant
@@ -348,6 +350,7 @@ class EffectType(enum.Enum):
     EARNING_BOOST = "earning_boost"  # General earning multiplier
     COOLDOWN_REDUCTION = "cooldown_reduction"  # Reduce cooldown times
     RTP_BOOST = "rtp_boost"  # Temporary RTP percentage boost
+
 
 class Item(Base):
     __tablename__ = "items"
@@ -392,6 +395,7 @@ class ShopItem(Base):
 
 class ItemCooldown(Base):
     """Track per-user, per-item cooldowns."""
+
     __tablename__ = "item_cooldowns"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -409,6 +413,7 @@ class ItemCooldown(Base):
 
 class ActiveEffect(Base):
     """Track timed effects applied to users."""
+
     __tablename__ = "active_effects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -419,9 +424,7 @@ class ActiveEffect(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
-    __table_args__ = (
-        Index("ix_active_effects_user_expires", "user_id", "expires_at"),
-    )
+    __table_args__ = (Index("ix_active_effects_user_expires", "user_id", "expires_at"),)
 
     def __repr__(self):
         return f"<ActiveEffect(user_id={self.user_id}, effect_type='{self.effect_type}', effect_value={self.effect_value}, expires_at={self.expires_at})>"
@@ -429,6 +432,7 @@ class ActiveEffect(Base):
 
 class TradeLog(Base):
     """Audit trail for item trades."""
+
     __tablename__ = "trade_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -437,7 +441,9 @@ class TradeLog(Base):
     item_id = Column(Integer, nullable=False)
     item_name = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
-    status = Column(String, nullable=False, default="pending")  # pending, completed, cancelled
+    status = Column(
+        String, nullable=False, default="pending"
+    )  # pending, completed, cancelled
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -464,6 +470,7 @@ class Bounty(Base):
             f"reward={self.reward} active={self.active}>"
         )
 
+
 class Loan(Base):
     __tablename__ = "loans"
 
@@ -472,7 +479,9 @@ class Loan(Base):
     principal = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
-    interest_rate = Column(Numeric(precision=5, scale=2), nullable=False, default=Decimal("0.00"))
+    interest_rate = Column(
+        Numeric(precision=5, scale=2), nullable=False, default=Decimal("0.00")
+    )
     total_repay = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
@@ -483,7 +492,9 @@ class Loan(Base):
     due_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(String, nullable=False, default="active")
 
-    payments = relationship("LoanPayment", back_populates="loan", cascade="all, delete-orphan")
+    payments = relationship(
+        "LoanPayment", back_populates="loan", cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return (
@@ -491,16 +502,21 @@ class Loan(Base):
             f"principal={self.principal} interest_rate={self.interest_rate} due_date={self.due_date} total_repay={self.total_repay} amount_paid={self.amount_paid} status={self.status}>"
         )
 
+
 class LoanPayment(Base):
     __tablename__ = "loan_payments"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    loan_id = Column(Integer, ForeignKey("loans.id", ondelete="CASCADE"), nullable=False)
+    loan_id = Column(
+        Integer, ForeignKey("loans.id", ondelete="CASCADE"), nullable=False
+    )
     user_id = Column(String(64), nullable=False)
     payment_amount = Column(
         Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
     )
-    payment_date = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
+    payment_date = Column(
+        DateTime(timezone=True), default=discord.utils.utcnow, nullable=False
+    )
     payment_method = Column(String, nullable=True)
     notes = Column(String, nullable=True)
 
@@ -509,20 +525,26 @@ class LoanPayment(Base):
     def __repr__(self):
         return f"<LoanPayment id={self.id} loan_id={self.loan_id} user_id={self.user_id} amount={self.payment_amount} date={self.payment_date}>"
 
+
 class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(64), nullable=False, unique=True)
     title = Column(String, nullable=False)
-    base_salary = Column(Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00"))
+    base_salary = Column(
+        Numeric(precision=38, scale=2), nullable=False, default=Decimal("0.00")
+    )
     days_employed = Column(Integer, default=1, nullable=False)
     streak = Column(Integer, default=0, nullable=False)
     last_worked = Column(DateTime(timezone=True), nullable=True)
-    hired_at = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
+    hired_at = Column(
+        DateTime(timezone=True), default=discord.utils.utcnow, nullable=False
+    )
 
     def __repr__(self):
         return f"<Job user_id={self.user_id} title='{self.title}' base_salary={self.base_salary} days_employed={self.days_employed} streak={self.streak}>"
+
 
 class UserRoleHistory(Base):
     __tablename__ = "user_role_history"
@@ -530,10 +552,13 @@ class UserRoleHistory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(64), nullable=False)
     roles = Column(ARRAY(BigInteger), nullable=False)
-    timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
+    timestamp = Column(
+        DateTime(timezone=True), default=discord.utils.utcnow, nullable=False
+    )
 
     def __repr__(self):
         return f"<UserRoleHistory user_id={self.user_id} roles={self.roles}>"
+
 
 class Reputation(Base):
     __tablename__ = "reputation"
@@ -552,12 +577,14 @@ class Reputation(Base):
     last_rep_date = Column(Date, nullable=True)
     last_rep_targets = Column(JSON, nullable=False, default=list, server_default="[]")
 
+
 class Sobs(Base):
     __tablename__ = "sobs"
 
     discord_id = Column(String(64), primary_key=True)
     sobs_tx = Column(Integer, default=0, nullable=False)
     sobs_rx = Column(Integer, default=0, nullable=False)
+
 
 class Skulls(Base):
     __tablename__ = "skulls"
@@ -566,12 +593,14 @@ class Skulls(Base):
     skulls_tx = Column(Integer, default=0, nullable=False)
     skulls_rx = Column(Integer, default=0, nullable=False)
 
+
 class Flames(Base):
     __tablename__ = "flames"
 
     discord_id = Column(String(64), primary_key=True)
     flames_tx = Column(Integer, default=0, nullable=False)
     flames_rx = Column(Integer, default=0, nullable=False)
+
 
 class Hearts(Base):
     __tablename__ = "hearts"
@@ -580,6 +609,7 @@ class Hearts(Base):
     hearts_tx = Column(Integer, default=0, nullable=False)
     hearts_rx = Column(Integer, default=0, nullable=False)
 
+
 class Clowns(Base):
     __tablename__ = "clowns"
 
@@ -587,11 +617,13 @@ class Clowns(Base):
     clowns_tx = Column(Integer, default=0, nullable=False)
     clowns_rx = Column(Integer, default=0, nullable=False)
 
+
 class ReactionSettings(Base):
     __tablename__ = "reaction_settings"
 
     guild_id = Column(BigInteger, primary_key=True)
     self_reactions_enabled = Column(Boolean, default=False)
+
 
 class Blacklist(Base):
     __tablename__ = "blacklist"
@@ -600,7 +632,10 @@ class Blacklist(Base):
     user_id = Column(String(64), nullable=False, unique=True)
     admin_id = Column(String(64), nullable=False)
     reason = Column(String, nullable=False, default="No reason provided")
-    added_at = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
+    added_at = Column(
+        DateTime(timezone=True), default=discord.utils.utcnow, nullable=False
+    )
+
 
 class FavoriteSongs(Base):
     __tablename__ = "favorite_songs"
@@ -608,6 +643,7 @@ class FavoriteSongs(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(64), nullable=False)
     song_title = Column(String, nullable=False)
+
 
 class UserTimezone(Base):
     __tablename__ = "user_timezones"
@@ -621,6 +657,7 @@ class UserLocation(Base):
 
     user_id = Column(String(64), primary_key=True)
     location_encrypted = Column(Text, nullable=True)
+
 
 class Block(Base):
     __tablename__ = "blocks"
@@ -678,7 +715,9 @@ class EconomicMetricsHistory(Base):
     # Economic ratios
     treasury_health = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
     liquidity_ratio = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
-    velocity_of_money = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+    velocity_of_money = Column(
+        Numeric(precision=10, scale=4), default=Decimal("0.0000")
+    )
     volatility_index = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
 
     # Activity metrics
@@ -688,16 +727,22 @@ class EconomicMetricsHistory(Base):
 
     # Rates
     fee_rate = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
-    passive_income_rate = Column(Numeric(precision=10, scale=4), default=Decimal("0.0000"))
+    passive_income_rate = Column(
+        Numeric(precision=10, scale=4), default=Decimal("0.0000")
+    )
 
     # Auto-rebalance tracking
-    auto_minted_today = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"), nullable=True)
-    auto_burned_today = Column(Numeric(precision=38, scale=2), default=Decimal("0.00"), nullable=True)
-    rebalance_target = Column(Numeric(precision=10, scale=4), default=Decimal("0.5000"), nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint('date', name='uq_economic_metrics_date'),
+    auto_minted_today = Column(
+        Numeric(precision=38, scale=2), default=Decimal("0.00"), nullable=True
     )
+    auto_burned_today = Column(
+        Numeric(precision=38, scale=2), default=Decimal("0.00"), nullable=True
+    )
+    rebalance_target = Column(
+        Numeric(precision=10, scale=4), default=Decimal("0.5000"), nullable=True
+    )
+
+    __table_args__ = (UniqueConstraint("date", name="uq_economic_metrics_date"),)
 
 
 class UserEconomicPreferences(Base):
@@ -711,13 +756,21 @@ class UserEconomicPreferences(Base):
     volatility_alerts_enabled = Column(Boolean, default=True)
 
     # Alert thresholds
-    velocity_low_threshold = Column(Numeric(precision=10, scale=4), default=Decimal("0.1"))
-    liquidity_low_threshold = Column(Numeric(precision=10, scale=4), default=Decimal("0.2"))
-    volatility_high_threshold = Column(Numeric(precision=10, scale=4), default=Decimal("0.05"))
+    velocity_low_threshold = Column(
+        Numeric(precision=10, scale=4), default=Decimal("0.1")
+    )
+    liquidity_low_threshold = Column(
+        Numeric(precision=10, scale=4), default=Decimal("0.2")
+    )
+    volatility_high_threshold = Column(
+        Numeric(precision=10, scale=4), default=Decimal("0.05")
+    )
 
     # Personalized recommendations
     risk_tolerance = Column(String, default="moderate")  # "low", "moderate", "high"
-    investment_style = Column(String, default="balanced")  # "conservative", "balanced", "aggressive"
+    investment_style = Column(
+        String, default="balanced"
+    )  # "conservative", "balanced", "aggressive"
 
     # Last notification timestamps
     last_velocity_alert = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -838,7 +891,9 @@ class UserNameHistory(Base):
     old_name = Column(String, nullable=False)
     new_name = Column(String, nullable=False)
     change_type = Column(String, nullable=False)
-    timestamp = Column(DateTime(timezone=True), default=discord.utils.utcnow, nullable=False)
+    timestamp = Column(
+        DateTime(timezone=True), default=discord.utils.utcnow, nullable=False
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -1006,6 +1061,7 @@ class ForceRole(Base):
 
 class VIPTier(Base):
     """VIP tier levels with escalating benefits."""
+
     __tablename__ = "vip_tiers"
 
     id = Column(Integer, primary_key=True)
@@ -1023,6 +1079,7 @@ class VIPTier(Base):
 
 class UserVIP(Base):
     """Track user VIP status. Total wagered is computed from GameHistory."""
+
     __tablename__ = "user_vip"
 
     user_id = Column(String(64), primary_key=True)
@@ -1037,6 +1094,7 @@ class UserVIP(Base):
 
 class RakebackBalance(Base):
     """Track accumulated unclaimed rakeback."""
+
     __tablename__ = "rakeback_balances"
 
     user_id = Column(String(64), primary_key=True)
@@ -1045,11 +1103,14 @@ class RakebackBalance(Base):
     total_claimed = Column(Numeric(38, 2), default=Decimal("0.00"))
 
     def __repr__(self):
-        return f"<RakebackBalance(user_id={self.user_id}, accumulated={self.accumulated})>"
+        return (
+            f"<RakebackBalance(user_id={self.user_id}, accumulated={self.accumulated})>"
+        )
 
 
 class RakebackTransaction(Base):
     """Audit trail for rakeback accumulation."""
+
     __tablename__ = "rakeback_transactions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -1061,9 +1122,7 @@ class RakebackTransaction(Base):
     vip_tier_id = Column(Integer, ForeignKey("vip_tiers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=discord.utils.utcnow)
 
-    __table_args__ = (
-        Index("ix_rakeback_user_created", "user_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_rakeback_user_created", "user_id", "created_at"),)
 
     def __repr__(self):
         return f"<RakebackTransaction(user_id={self.user_id}, game='{self.game_name}', amount={self.rakeback_amount})>"

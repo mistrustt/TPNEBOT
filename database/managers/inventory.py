@@ -44,10 +44,12 @@ class InventoryMixin(BaseManager):
             async with self.async_sessionmaker() as session:
                 async with session.begin():
                     result = await session.execute(
-                        select(CryptoAsset).where(
+                        select(CryptoAsset)
+                        .where(
                             CryptoAsset.user_id == user_id,
                             CryptoAsset.symbol == symbol.upper(),
-                        ).order_by(CryptoAsset.purchase_date.desc())
+                        )
+                        .order_by(CryptoAsset.purchase_date.desc())
                     )
                     assets = result.scalars().all()
 
@@ -89,6 +91,7 @@ class InventoryMixin(BaseManager):
         except SQLAlchemyError as e:
             logging.error(f"Database error adding crypto asset: {str(e)}")
             raise
+
     async def get_crypto_assets(self, user_id: int) -> List[CryptoAsset]:
         """Get all crypto assets for a user."""
 
@@ -98,6 +101,7 @@ class InventoryMixin(BaseManager):
                 select(CryptoAsset).where(CryptoAsset.user_id == user_id)
             )
             return result.scalars().all()
+
     async def get_crypto_asset(self, user_id: int, symbol: str) -> CryptoAsset:
         """Get specific crypto asset for a user."""
 
@@ -109,6 +113,7 @@ class InventoryMixin(BaseManager):
                 )
             )
             return result.scalar_one_or_none()
+
     async def update_crypto_amount(self, user_id: int, symbol: str, amount: Decimal):
         """Update amount of a crypto asset."""
 
@@ -135,6 +140,7 @@ class InventoryMixin(BaseManager):
 
                 await session.commit()
                 return asset
+
     async def transfer_crypto_asset(
         self,
         sender_user_id: int,
@@ -208,6 +214,7 @@ class InventoryMixin(BaseManager):
 
             await self.update_supply()
         return txid
+
     async def delete_crypto_asset(self, user_id: int, symbol: str):
         """Delete a crypto asset entry."""
 
@@ -221,6 +228,7 @@ class InventoryMixin(BaseManager):
                     )
                 )
                 await session.commit()
+
     async def get_total_crypto_value(self, user_id: int) -> Decimal:
         """Get total value of all crypto assets at purchase price."""
 
@@ -233,6 +241,7 @@ class InventoryMixin(BaseManager):
             )
             total = result.scalar_one_or_none()
             return total if total else Decimal("0")
+
     async def set_crypto_price(self, symbol: str, price: Decimal):
         """Set the price of a crypto asset."""
         async with self.async_sessionmaker() as session:
@@ -248,6 +257,7 @@ class InventoryMixin(BaseManager):
                     crypto_price = CryptoPrice(symbol=symbol.upper(), price=price)
                     session.add(crypto_price)
                 await session.commit()
+
     async def get_crypto_price(self, symbol: str) -> Decimal:
         """Get the price of a crypto asset using FreeCryptoAPI."""
         async with self.async_sessionmaker() as session:
@@ -267,7 +277,9 @@ class InventoryMixin(BaseManager):
             try:
                 async with aiohttp.ClientSession() as api_session:
                     params = {"symbol": symbol.upper()}
-                    headers = {"Authorization": f"Bearer {os.getenv('FREECRYPTOAPI_API_KEY')}"}
+                    headers = {
+                        "Authorization": f"Bearer {os.getenv('FREECRYPTOAPI_API_KEY')}"
+                    }
 
                     async with api_session.get(
                         "https://api.freecryptoapi.com/v1/getData",
@@ -306,6 +318,7 @@ class InventoryMixin(BaseManager):
                 if price_record:
                     return price_record.price
                 return None
+
     async def get_user_inventory(self, user_id: int) -> List[Item]:
         """
         Retrieve all items owned by a user.
@@ -321,6 +334,7 @@ class InventoryMixin(BaseManager):
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(Item).where(Item.user_id == user_id))
             return result.scalars().all()
+
     async def get_user_inventory_grouped(self, user_id: int) -> List[dict]:
         """Return inventory items grouped by name with aggregated quantity."""
 
@@ -333,6 +347,7 @@ class InventoryMixin(BaseManager):
             )
             rows = result.all()
             return [{"name": r[0], "description": r[1], "quantity": r[2]} for r in rows]
+
     async def get_user_item(self, user_id: int, item_id: int) -> Item:
         """
         Retrieve a specific item from user's inventory.
@@ -351,6 +366,7 @@ class InventoryMixin(BaseManager):
                 select(Item).where(Item.user_id == user_id, Item.id == item_id)
             )
             return result.scalar_one_or_none()
+
     async def get_user_items_by_name(self, user_id: int, item_name: str) -> List[Item]:
         """
         Retrieve all items with a specific name from user's inventory.
@@ -369,6 +385,7 @@ class InventoryMixin(BaseManager):
                 select(Item).where(Item.user_id == user_id, Item.name == item_name)
             )
             return result.scalars().all()
+
     async def get_user_items_by_type(
         self, user_id: int, item_type: ItemType
     ) -> List[Item]:
@@ -389,6 +406,7 @@ class InventoryMixin(BaseManager):
                 select(Item).where(Item.user_id == user_id, Item.item_type == item_type)
             )
             return result.scalars().all()
+
     async def transfer_item(
         self, from_user_id: int, to_user_id: int, item_id: int, quantity: int = 1
     ) -> bool:
@@ -440,6 +458,7 @@ class InventoryMixin(BaseManager):
 
                 await session.commit()
                 return True
+
     async def update_user_item(self, user_id: int, item_id: int, **kwargs) -> bool:
         """
         Update properties of an item in a user's inventory.
@@ -471,6 +490,7 @@ class InventoryMixin(BaseManager):
 
                 await session.commit()
                 return True
+
     async def remove_user_item(
         self, user_id: int, item_id: int, quantity: int = None
     ) -> bool:
@@ -504,6 +524,7 @@ class InventoryMixin(BaseManager):
 
                 await session.commit()
                 return True
+
     async def generate_item_serial_number(self) -> str:
         """
         Generate a unique serial number for a new item.
@@ -518,6 +539,7 @@ class InventoryMixin(BaseManager):
         hashed_serial = hash_object.hexdigest()
         serial_number = f"{hashed_serial[:8]}-{hashed_serial[8:12]}-{hashed_serial[12:16]}-{hashed_serial[16:20]}-{hashed_serial[20:32]}"
         return serial_number
+
     async def create_user_item(
         self,
         user_id: int,
@@ -555,6 +577,7 @@ class InventoryMixin(BaseManager):
             session.add(item)
             await session.commit()
             return item
+
     async def merge_duplicate_items(self, user_id: int) -> int:
         """
         Consolidate duplicate items in a user's inventory.
@@ -594,6 +617,7 @@ class InventoryMixin(BaseManager):
 
                 await session.commit()
                 return merged_count
+
     async def add_shop_item(
         self,
         name: str,
@@ -625,6 +649,7 @@ class InventoryMixin(BaseManager):
                 session.add(new_shop_item)
             await session.commit()
             return new_shop_item
+
     async def update_shop_item_quantity(
         self, item_id: int, quantity_change: int
     ) -> bool:
@@ -649,6 +674,7 @@ class InventoryMixin(BaseManager):
                 shop_item.quantity = new_quantity
             await session.commit()
             return True
+
     async def remove_shop_item(self, item_id: int) -> bool:
         """
         Remove a shop item completely from the shop by its ID.
@@ -663,6 +689,7 @@ class InventoryMixin(BaseManager):
                     await session.commit()
                     return True
                 return False
+
     async def list_shop_items(self) -> List[ShopItem]:
         """
         Retrieve all available shop items that have a positive stock level.
@@ -674,6 +701,7 @@ class InventoryMixin(BaseManager):
                 )
             )
             return result.scalars().all()
+
     async def get_shop_item_by_id(self, item_id: int) -> ShopItem:
         """
         Retrieve a specific shop item using its unique ID.
@@ -683,6 +711,7 @@ class InventoryMixin(BaseManager):
                 select(ShopItem).where(ShopItem.id == item_id)
             )
             return result.scalar_one_or_none()
+
     async def purchase_shop_item(
         self, user_id: int, shop_item_id: int, quantity: int = 1
     ) -> dict:
@@ -724,7 +753,10 @@ class InventoryMixin(BaseManager):
                     raise ValueError("Wallet is frozen.")
 
                 await self.process_treasury_transaction(
-                    wallet_id, -total_cost, f"Purchased {quantity}x {shop_item.name}", "standard"
+                    wallet_id,
+                    -total_cost,
+                    f"Purchased {quantity}x {shop_item.name}",
+                    "standard",
                 )
 
                 if not shop_item.unlimited:
@@ -751,6 +783,7 @@ class InventoryMixin(BaseManager):
                 "quantity": quantity,
                 "cost": total_cost,
             }
+
     async def use_inventory_item(self, user_id: int, item_id: int) -> str:
         """
         Use an item from the user's inventory according to its type.
@@ -776,7 +809,10 @@ class InventoryMixin(BaseManager):
                 if item.effect == "currency" and item.effect_value:
                     wallet_id = await self.get_wallet_id_for_user(raw_user_id)
                     await self.process_treasury_transaction(
-                        wallet_id, Decimal(item.effect_value), f"Used {item.name}", "standard"
+                        wallet_id,
+                        Decimal(item.effect_value),
+                        f"Used {item.name}",
+                        "standard",
                     )
                 async with session.begin():
                     item.quantity -= 1
@@ -789,7 +825,10 @@ class InventoryMixin(BaseManager):
                 if item.effect == "currency" and item.effect_value:
                     wallet_id = await self.get_wallet_id_for_user(raw_user_id)
                     await self.process_treasury_transaction(
-                        wallet_id, Decimal(item.effect_value), f"Redeemed {item.name}", "standard"
+                        wallet_id,
+                        Decimal(item.effect_value),
+                        f"Redeemed {item.name}",
+                        "standard",
                     )
                 async with session.begin():
                     await session.delete(item)
@@ -799,6 +838,7 @@ class InventoryMixin(BaseManager):
                 return f"You are now showcasing your collectible {item.name}."
             else:
                 raise ValueError("Unknown item type.")
+
     async def set_item_cooldown(
         self, user_id: int, item_name: str, cooldown_seconds: int
     ) -> None:
@@ -823,6 +863,7 @@ class InventoryMixin(BaseManager):
                 session.add(cooldown)
 
             await session.commit()
+
     async def get_item_cooldown(self, user_id: int, item_name: str) -> int:
         """
         Get remaining cooldown seconds for a user's item.
@@ -845,6 +886,7 @@ class InventoryMixin(BaseManager):
                 return 0
             remaining = (cooldown.cooldown_expiry - now).total_seconds()
             return int(remaining)
+
     async def is_item_on_cooldown(self, user_id: int, item_name: str) -> bool:
         """Check if an item is on cooldown for a user."""
 
@@ -852,6 +894,7 @@ class InventoryMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         remaining = await self.get_item_cooldown(raw_user_id, item_name)
         return remaining > 0
+
     async def clear_item_cooldown(self, user_id: int, item_name: str) -> bool:
         """Clear a cooldown for a user's item. Returns True if cooldown was cleared."""
 
@@ -867,6 +910,7 @@ class InventoryMixin(BaseManager):
                     await session.commit()
                     return True
             return False
+
     async def create_active_effect(
         self,
         user_id: int,
@@ -881,7 +925,9 @@ class InventoryMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                expires_at = discord.utils.utcnow() + timedelta(seconds=duration_seconds)
+                expires_at = discord.utils.utcnow() + timedelta(
+                    seconds=duration_seconds
+                )
                 effect = ActiveEffect(
                     user_id=user_id,
                     effect_type=effect_type,
@@ -892,6 +938,7 @@ class InventoryMixin(BaseManager):
                 session.add(effect)
             await session.commit()
             return effect
+
     async def get_user_active_effects(self, user_id: int) -> List[ActiveEffect]:
         """Get all non-expired effects for a user."""
 
@@ -905,6 +952,7 @@ class InventoryMixin(BaseManager):
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
     async def get_active_effects_by_type(
         self, user_id: int, effect_type: str
     ) -> List[ActiveEffect]:
@@ -924,6 +972,7 @@ class InventoryMixin(BaseManager):
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
     async def cleanup_expired_effects(self) -> int:
         """Remove all expired effects. Returns count of removed effects."""
         async with self.async_sessionmaker() as session:
@@ -933,9 +982,8 @@ class InventoryMixin(BaseManager):
                 result = await session.execute(stmt)
             await session.commit()
             return result.rowcount
-    async def get_effect_multiplier(
-        self, user_id: int, effect_type: str
-    ) -> Decimal:
+
+    async def get_effect_multiplier(self, user_id: int, effect_type: str) -> Decimal:
         """
         Get the combined multiplier value for a specific effect type.
         Returns Decimal('1.0') if no active effects.
@@ -951,6 +999,7 @@ class InventoryMixin(BaseManager):
         for effect in effects:
             combined *= effect.effect_value
         return combined
+
     async def remove_active_effect(self, effect_id: int) -> bool:
         """Remove a specific active effect by ID. Returns True if removed."""
         async with self.async_sessionmaker() as session:
@@ -962,6 +1011,7 @@ class InventoryMixin(BaseManager):
                     await session.commit()
                     return True
             return False
+
     async def create_trade_request(
         self, from_user_id: int, to_user_id: int, item_id: int, quantity: int = 1
     ) -> TradeLog:
@@ -999,6 +1049,7 @@ class InventoryMixin(BaseManager):
                 session.add(trade)
             await session.commit()
             return trade
+
     async def accept_trade_request(self, trade_id: int) -> TradeLog:
         """
         Accept a pending trade request.
@@ -1049,6 +1100,7 @@ class InventoryMixin(BaseManager):
                 trade.completed_at = discord.utils.utcnow()
             await session.commit()
             return trade
+
     async def decline_trade_request(self, trade_id: int) -> TradeLog:
         """Decline a pending trade request."""
         async with self.async_sessionmaker() as session:
@@ -1062,6 +1114,7 @@ class InventoryMixin(BaseManager):
                 trade.status = "cancelled"
             await session.commit()
             return trade
+
     async def get_pending_trades(self, user_id: int) -> List[TradeLog]:
         """Get all pending trades where the user is either sender or recipient."""
 
@@ -1078,12 +1131,14 @@ class InventoryMixin(BaseManager):
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
     async def get_trade_by_id(self, trade_id: int) -> Optional[TradeLog]:
         """Get a trade by its ID."""
         async with self.async_sessionmaker() as session:
             stmt = select(TradeLog).where(TradeLog.id == trade_id)
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
+
     async def get_pending_trades_for_user(self, user_id: int) -> List[TradeLog]:
         """Get all pending trades where the user is the recipient."""
 
@@ -1096,9 +1151,8 @@ class InventoryMixin(BaseManager):
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
-    async def use_inventory_item_with_effects(
-        self, user_id: int, item_id: int
-    ) -> dict:
+
+    async def use_inventory_item_with_effects(self, user_id: int, item_id: int) -> dict:
         """
         Enhanced version of use_inventory_item that handles cooldowns,
         effect types, and effect durations.
@@ -1142,7 +1196,9 @@ class InventoryMixin(BaseManager):
                 await self.process_treasury_transaction(
                     wallet_id, Decimal(effect_value), f"Used {item.name}", "standard"
                 )
-                response["message"] = f"You received {effect_value} coins from {item.name}!"
+                response[
+                    "message"
+                ] = f"You received {effect_value} coins from {item.name}!"
                 response["effect_applied"] = True
 
             elif effect in (
@@ -1163,7 +1219,11 @@ class InventoryMixin(BaseManager):
                     )
                     duration_mins = effect_duration // 60
                     duration_secs = effect_duration % 60
-                    duration_str = f"{duration_mins}m {duration_secs}s" if duration_mins else f"{duration_secs}s"
+                    duration_str = (
+                        f"{duration_mins}m {duration_secs}s"
+                        if duration_mins
+                        else f"{duration_secs}s"
+                    )
 
                     effect_names = {
                         "gambling_multiplier": f"{effect_value}x gambling multiplier",
@@ -1172,21 +1232,27 @@ class InventoryMixin(BaseManager):
                         "cooldown_reduction": f"{effect_value}% cooldown reduction",
                         "rtp_boost": f"{effect_value}% RTP boost",
                     }
-                    response["message"] = (
-                        f"Activated {effect_names.get(effect, effect)} for {duration_str}!"
-                    )
+                    response[
+                        "message"
+                    ] = f"Activated {effect_names.get(effect, effect)} for {duration_str}!"
                     response["effect_applied"] = True
                 else:
-                    response["message"] = f"Used {item.name} but no duration was specified."
+                    response[
+                        "message"
+                    ] = f"Used {item.name} but no duration was specified."
 
             elif item.item_type == ItemType.COLLECTIBLE:
-                response["message"] = f"You are showcasing your collectible {item.name}."
+                response[
+                    "message"
+                ] = f"You are showcasing your collectible {item.name}."
             else:
                 response["message"] = f"You used {item.name}."
 
             # Set cooldown if applicable
             if item.cooldown_seconds and item.item_type != ItemType.COLLECTIBLE:
-                await self.set_item_cooldown(raw_user_id, item.name, item.cooldown_seconds)
+                await self.set_item_cooldown(
+                    raw_user_id, item.name, item.cooldown_seconds
+                )
                 response["cooldown_seconds"] = item.cooldown_seconds
 
             # Handle quantity reduction based on item type
@@ -1202,6 +1268,7 @@ class InventoryMixin(BaseManager):
                 await session.commit()
 
             return response
+
     async def place_bounty(
         self, issuer_id: int, target_id: int, reward: Decimal
     ) -> Bounty:
@@ -1227,7 +1294,10 @@ class InventoryMixin(BaseManager):
                     raise ValueError("Insufficient balance to place bounty.")
 
                 await self.process_treasury_transaction(
-                    wallet_id, -reward, f"Placed bounty on {raw_target_id}", "high_value"
+                    wallet_id,
+                    -reward,
+                    f"Placed bounty on {raw_target_id}",
+                    "high_value",
                 )
 
                 stmt = select(Bounty).where(
@@ -1248,6 +1318,7 @@ class InventoryMixin(BaseManager):
 
             await session.commit()
             return bounty
+
     async def user_has_bounty(self, target_id: int) -> bool:
         """
         Return True if there is at least one active bounty on target_id.
@@ -1261,6 +1332,7 @@ class InventoryMixin(BaseManager):
             )
             result = await session.execute(stmt)
             return result.scalar()
+
     async def get_bounty_amount(self, target_id: int) -> Decimal:
         """
         Returns the total sum of all active bounties for target_id.
@@ -1275,6 +1347,7 @@ class InventoryMixin(BaseManager):
             result = await session.execute(stmt)
             total = result.scalar_one()
             return total if total is not None else Decimal("0")
+
     async def get_top_bounty_users(self, limit=10) -> List[Tuple[int, Decimal]]:
         """
         Returns a list of (target_id, total_reward) for active bounties,
@@ -1295,11 +1368,13 @@ class InventoryMixin(BaseManager):
                 raw_target_id = await self.resolve_user_hash(target_id)
                 resolved.append((raw_target_id, total_reward))
             return resolved
+
     async def get_active_bounties(self) -> List[Bounty]:
         """Get all active bounties."""
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(Bounty).where(Bounty.active == True))
             return result.scalars().all()
+
     async def claim_bounty(self, claimer_id: int, target_id: int) -> Bounty:
         """
         Claim and remove the active bounty on target_id.
@@ -1333,7 +1408,10 @@ class InventoryMixin(BaseManager):
 
                 claimer_wallet = await self.get_wallet_id_for_user(raw_claimer_id)
                 await self.process_treasury_transaction(
-                    claimer_wallet, reward_amount, f"Claimed bounty on {raw_target_id}", "high_value"
+                    claimer_wallet,
+                    reward_amount,
+                    f"Claimed bounty on {raw_target_id}",
+                    "high_value",
                 )
 
             await session.commit()
