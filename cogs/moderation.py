@@ -852,6 +852,14 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't kick them.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
         if member == ctx.guild.me:
             embed = discord.Embed(
                 description="stop.",
@@ -1002,7 +1010,7 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
-        try:
+        if isinstance(member, discord.Member):
             if member.top_role.position >= ctx.author.top_role.position:
                 embed = discord.Embed(
                     description="🚫 You cannot ban a user with a role higher than or equal to yours!",
@@ -1017,8 +1025,6 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
                 await ctx.send(embed=embed)
                 return
-        except Exception:
-            pass
 
         async def _do_ban() -> int:
             await self.bot.database.log_punishment_command(
@@ -1557,6 +1563,14 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
             )
 
+        if not isinstance(member, discord.Member):
+            return await ctx.send(
+                embed=discord.Embed(
+                    description="That user is not in this server, so I can't timeout them.",
+                    color=discord.Color.red(),
+                )
+            )
+
         if member.id == ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
@@ -1702,6 +1716,14 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
             )
 
+        if not isinstance(member, discord.Member):
+            return await ctx.send(
+                embed=discord.Embed(
+                    description="That user is not in this server, so I can't untimeout them.",
+                    color=discord.Color.red(),
+                )
+            )
+
         now = discord.utils.utcnow()
         if not member.timed_out_until or member.timed_out_until <= now:
             return await ctx.send(
@@ -1790,6 +1812,14 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't change their nickname.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
         if member.top_role >= ctx.author.top_role:
             embed = discord.Embed(
                 description="🚫 You cannot change the nickname of someone with a role higher than or equal to yours!",
@@ -1857,6 +1887,14 @@ class Moderation(commands.Cog, name="Moderation"):
         if not member:
             embed = discord.Embed(
                 description=f"No user found with the identifier: {identifier}. Please try again.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't force-nickname them.",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -1970,6 +2008,14 @@ class Moderation(commands.Cog, name="Moderation"):
         if not member:
             embed = discord.Embed(
                 description=f"No user found with the identifier: {identifier}. Please try again.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't warn them.",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -2130,6 +2176,14 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.send(
                 embed=discord.Embed(
                     description=f"No user found with `{identifier}`.",
+                    color=discord.Color.red(),
+                )
+            )
+
+        if not isinstance(member, discord.Member):
+            return await ctx.send(
+                embed=discord.Embed(
+                    description="That user is not in this server, so I can't jail them.",
                     color=discord.Color.red(),
                 )
             )
@@ -2348,6 +2402,14 @@ class Moderation(commands.Cog, name="Moderation"):
             return await ctx.send(
                 embed=discord.Embed(
                     description=f"No user found with the identifier: `{identifier}`.",
+                    color=discord.Color.red(),
+                )
+            )
+
+        if not isinstance(member, discord.Member):
+            return await ctx.send(
+                embed=discord.Embed(
+                    description="That user is not in this server, so I can't unjail them.",
                     color=discord.Color.red(),
                 )
             )
@@ -2654,23 +2716,21 @@ class Moderation(commands.Cog, name="Moderation"):
     async def _lookup_member(
         self, ctx: Context, identifier: str
     ) -> Optional[discord.Member]:
-        """Helper to resolve a member from various identifier formats."""
+        """Helper to resolve a guild member from various identifier formats.
+
+        Returns a discord.Member or None. This intentionally does not fall back
+        to fetch_user, because callers need guild-specific attributes such as
+        top_role and roles.
+        """
         member = None
 
         if re.match(r"^\d+$", identifier):
-            try:
-                member = ctx.guild.get_member(int(identifier))
-                if not member:
-                    member = await self.bot.fetch_user(int(identifier))
-            except discord.NotFound:
-                pass
+            member = ctx.guild.get_member(int(identifier))
 
         elif re.match(r"^<@!?(\d+)>$", identifier):
             mention_match = re.match(r"^<@!?(\d+)>$", identifier)
             mention_id = mention_match.group(1)
             member = ctx.guild.get_member(int(mention_id))
-            if not member:
-                member = await self.bot.fetch_user(int(mention_id))
 
         else:
             identifier = identifier.lower()
@@ -2825,6 +2885,14 @@ class Moderation(commands.Cog, name="Moderation"):
         if not member:
             embed = discord.Embed(
                 description=f"No user found with the identifier: {identifier}. Please try again.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't unmute them.",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -3018,6 +3086,14 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't react-unmute them.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
         if not mute_settings:
             await ctx.send(
                 "No mute settings found for this server. Use `!mutesetup` to configure."
@@ -3203,6 +3279,14 @@ class Moderation(commands.Cog, name="Moderation"):
         if not member:
             embed = discord.Embed(
                 description=f"No user found with the identifier: {identifier}. Please try again.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        if not isinstance(member, discord.Member):
+            embed = discord.Embed(
+                description="That user is not in this server, so I can't image-unmute them.",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
