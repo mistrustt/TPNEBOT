@@ -18,6 +18,7 @@ from ..models import (
     LoanPayment,
     TransferHistory,
     Job,
+    SuspiciousActivityType,
 )
 from datetime import datetime, timedelta, timezone
 import discord

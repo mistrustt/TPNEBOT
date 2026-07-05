@@ -1,7 +1,7 @@
 from .base import BaseManager
 
 from sqlalchemy.future import select
-from sqlalchemy import update
+from sqlalchemy import update, func
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import (
     Reputation,

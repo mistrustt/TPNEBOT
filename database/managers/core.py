@@ -3,7 +3,7 @@ from .base import BaseManager
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 from typing import List, Optional
 from ..models import (
     BotConfig,
