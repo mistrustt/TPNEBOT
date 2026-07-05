@@ -1415,45 +1415,33 @@ class EconomyMixin(BaseManager):
         # Load cached/latest metrics
         metrics = getattr(self, "_latest_metrics", {})
 
-        # Try to get pre-calculated metrics, fallback to direct calculation
-        if (
-            metrics
-            and metrics.get("liquidity_ratio") is not None
-            and metrics.get("velocity_of_money") is not None
-        ):
-            liquidity_ratio = metrics.get("liquidity_ratio", Decimal("0"))
-            velocity_of_money = metrics.get("velocity_of_money", Decimal("0"))
-            volatility_index = metrics.get("volatility_index", Decimal("0.02"))
-        else:
-            # Fallback calculations when metrics are not available
-            logger.debug("Using fallback calculations for economic metrics")
+        # Calculate liquidity ratio
+        liquidity_ratio = (
+            (supply.circulating / total_supply).quantize(Decimal("0.0001"))
+            if total_supply > 0
+            else Decimal("0")
+        )
 
-            # Calculate liquidity ratio
-            liquidity_ratio = (
-                (supply.circulating / total_supply).quantize(Decimal("0.0001"))
-                if total_supply > 0
-                else Decimal("0")
+        # Volatility should reflect current wealth inequality, not a stale default.
+        # Compute it fresh from total user wealth (wallet + bank + crypto).
+        volatility_index = await self._calculate_wealth_gini()
+
+        # Calculate velocity of money with protection against division by zero
+        async with self.async_sessionmaker() as session:
+            # Transaction volume (last 24 hours)
+            yesterday = discord.utils.utcnow() - timedelta(days=1)
+            volume_stmt = select(func.sum(Transaction.amount)).where(
+                Transaction.timestamp >= yesterday
             )
+            volume_result = await session.execute(volume_stmt)
+            transaction_volume = volume_result.scalar() or Decimal("0.00")
 
-            # Get volatility index from metrics or use default
-            volatility_index = metrics.get("volatility_index", Decimal("0.02"))
-
-            # Calculate velocity of money with protection against division by zero
-            async with self.async_sessionmaker() as session:
-                # Transaction volume (last 24 hours)
-                yesterday = discord.utils.utcnow() - timedelta(days=1)
-                volume_stmt = select(func.sum(Transaction.amount)).where(
-                    Transaction.timestamp >= yesterday
-                )
-                volume_result = await session.execute(volume_stmt)
-                transaction_volume = volume_result.scalar() or Decimal("0.00")
-
-                if supply.circulating > 0:
-                    velocity_of_money = (
-                        transaction_volume / supply.circulating
-                    ).quantize(Decimal("0.0001"))
-                else:
-                    velocity_of_money = Decimal("0")
+            if supply.circulating > 0:
+                velocity_of_money = (
+                    transaction_volume / supply.circulating
+                ).quantize(Decimal("0.0001"))
+            else:
+                velocity_of_money = Decimal("0")
 
         # Dynamic target based on economy maturity
         TARGET, MIN_HW, MAX_HW = self._calculate_dynamic_target(supply)
@@ -1493,6 +1481,60 @@ class EconomyMixin(BaseManager):
             "liquidity_ratio": liquidity_ratio,
             "volatility_index": volatility_index,
         }
+
+    async def _calculate_wealth_gini(self) -> Decimal:
+        """
+        Compute the Gini coefficient across all user wealth.
+
+        Wealth includes wallet balance, bank balance, and crypto holdings at the
+        latest known prices. The treasury wallet is excluded. Returns a value in
+        [0, 1] where 0 is perfect equality and 1 is maximum inequality.
+        """
+        async with self.async_sessionmaker() as session:
+            latest_prices = (
+                select(CryptoPrice.symbol, CryptoPrice.price)
+                .distinct(CryptoPrice.symbol)
+                .order_by(CryptoPrice.symbol, CryptoPrice.timestamp.desc())
+            ).subquery()
+
+            wealth_stmt = (
+                select(
+                    (
+                        Wallet.balance
+                        + func.coalesce(Wallet.bank_balance, Decimal("0"))
+                        + func.coalesce(
+                            func.sum(CryptoAsset.amount * latest_prices.c.price),
+                            Decimal("0"),
+                        )
+                    ).label("wealth")
+                )
+                .outerjoin(CryptoAsset, CryptoAsset.user_id == Wallet.user_id)
+                .outerjoin(
+                    latest_prices, latest_prices.c.symbol == CryptoAsset.symbol
+                )
+                .where(Wallet.user_id != _treasury_hash())
+                .group_by(Wallet.user_id, Wallet.balance, Wallet.bank_balance)
+            )
+
+            result = await session.execute(wealth_stmt)
+            balances = [float(r[0]) for r in result.fetchall()]
+
+        if len(balances) <= 1:
+            return Decimal("0.00")
+
+        sorted_balances = sorted(balances)
+        n = len(sorted_balances)
+        total = sum(sorted_balances)
+        if total <= 0:
+            return Decimal("0.00")
+
+        # Gini = sum((2i - n - 1) * x_i) / (n^2 * mean)
+        cumsum = sum(
+            (2 * (i + 1) - n - 1) * x for i, x in enumerate(sorted_balances)
+        )
+        gini = cumsum / (n * n * (total / n))
+        gini = max(0.0, min(1.0, gini))
+        return Decimal(str(gini)).quantize(Decimal("0.0001"))
 
     async def get_user_wealth_tier(self, user_id: int) -> int:
         """
@@ -1986,35 +2028,8 @@ class EconomyMixin(BaseManager):
 
             # Volatility estimate using Gini coefficient (bounded 0-1)
             # Gini = 0 means perfect equality, Gini = 1 means maximum inequality
-            # Exclude treasury wallet (user_id=0 sentinel) from wealth distribution check
-            balances_stmt = select(Wallet.balance).where(
-                Wallet.user_id != _treasury_hash()
-            )
-            balances_result = await session.execute(balances_stmt)
-            balances = [float(r[0]) for r in balances_result.fetchall()]
-
-            if len(balances) > 1:
-                # Calculate Gini coefficient for wealth distribution
-                sorted_balances = sorted(balances)
-                n = len(sorted_balances)
-                mean = sum(sorted_balances) / n
-
-                if mean > 0:
-                    # Gini formula: G = sum(|x_i - x_j|) / (2 * n^2 * mean)
-                    # Efficient formula: G = (2 * sum(i * x_i)) / (n * sum(x_i)) - (n + 1) / n
-                    # Simplified: G = cumsum / (n^2 * mean) where cumsum = sum((2i - n - 1) * x_i)
-                    cumsum = sum(
-                        (2 * (i + 1) - n - 1) * x for i, x in enumerate(sorted_balances)
-                    )
-                    gini = cumsum / (n * n * mean)
-                    # Clamp to [0, 1] for safety (floating point edge cases)
-                    volatility_index = Decimal(str(max(0.0, min(1.0, gini)))).quantize(
-                        Decimal("0.0001")
-                    )
-                else:
-                    volatility_index = Decimal("0.00")
-            else:
-                volatility_index = Decimal("0.00")
+            # Wealth includes wallet, bank, and crypto at latest prices; treasury excluded.
+            volatility_index = await self._calculate_wealth_gini()
 
             # Log or persist as needed
             logger.info(
@@ -2308,8 +2323,8 @@ class EconomyMixin(BaseManager):
             )
 
         # Velocity-based recommendations (tiered to match scoring)
-        # Scoring: velocity * 50, capped at 25 points
-        # So: 0.5 → 25pts, 0.3 → 15pts, 0.1 → 5pts
+        # Scoring: velocity * 250, capped at 25 points
+        # So: 0.1 → 25pts, 0.06 → 15pts, 0.02 → 5pts
         if velocity_of_money < 0.1:
             recommendations["recommendations"].append(
                 {
@@ -2496,8 +2511,10 @@ class EconomyMixin(BaseManager):
                 liquidity_ratio / 0.3
             )  # Decrease score for too little liquidity
 
-        # Velocity of money (25% weight) - higher is generally better
-        velocity_score = min(25, velocity_of_money * 50)  # Cap at 25 points
+        # Velocity of money (25% weight) - higher is generally better.
+        # Daily velocity of 0.1 (10% of circulating supply transacted per day)
+        # is a healthy, active Discord economy; scale so that reaches full points.
+        velocity_score = min(25, velocity_of_money * 250)  # Cap at 25 points
 
         # Volatility index (20% weight) - Gini coefficient (0-1), lower is better
         # Score decreases linearly from 20 to 0 as inequality increases from 0 to 1

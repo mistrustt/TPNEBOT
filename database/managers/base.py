@@ -229,30 +229,51 @@ class BaseManager:
 
     async def _repair_daily_user_hash_columns(self):
         """
-        Ensure the daily analytics tables have the user_hash column and related
-        constraints added by later model changes. Older deployments created these
-        tables before user_hash existed, so Base.metadata.create_all() skips them.
+        Ensure the daily analytics tables have the user_hash column and the
+        matching unique constraint that includes user_hash. Older deployments
+        created these tables before user_hash existed, so Base.metadata.create_all()
+        skips both the column and the constraint update.
         """
         repairs = [
             {
                 "table": "command_usage_daily",
                 "column_ddl": "ALTER TABLE command_usage_daily ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
                 "index_ddl": "CREATE INDEX IF NOT EXISTS ix_command_usage_daily_user_hash ON command_usage_daily(user_hash)",
+                "drop_uq": "ALTER TABLE command_usage_daily DROP CONSTRAINT IF EXISTS uq_command_usage_daily",
+                "create_uq": (
+                    "ALTER TABLE command_usage_daily ADD CONSTRAINT uq_command_usage_daily "
+                    "UNIQUE (bucket_date, command_name, guild_id, user_hash, is_slash)"
+                ),
             },
             {
                 "table": "command_latency_daily",
                 "column_ddl": "ALTER TABLE command_latency_daily ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
                 "index_ddl": "CREATE INDEX IF NOT EXISTS ix_command_latency_daily_user_hash ON command_latency_daily(user_hash)",
+                "drop_uq": "ALTER TABLE command_latency_daily DROP CONSTRAINT IF EXISTS uq_command_latency_daily",
+                "create_uq": (
+                    "ALTER TABLE command_latency_daily ADD CONSTRAINT uq_command_latency_daily "
+                    "UNIQUE (bucket_date, command_name, guild_id, user_hash, is_slash)"
+                ),
             },
             {
                 "table": "command_error_daily",
                 "column_ddl": "ALTER TABLE command_error_daily ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
                 "index_ddl": "CREATE INDEX IF NOT EXISTS ix_command_error_daily_user_hash ON command_error_daily(user_hash)",
+                "drop_uq": "ALTER TABLE command_error_daily DROP CONSTRAINT IF EXISTS uq_command_error_daily",
+                "create_uq": (
+                    "ALTER TABLE command_error_daily ADD CONSTRAINT uq_command_error_daily "
+                    "UNIQUE (bucket_date, command_name, guild_id, user_hash, is_slash, error_type)"
+                ),
             },
             {
                 "table": "daily_user_exposure",
                 "column_ddl": "ALTER TABLE daily_user_exposure ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64)",
                 "index_ddl": "CREATE INDEX IF NOT EXISTS ix_daily_user_exposure_user_hash ON daily_user_exposure(user_hash)",
+                "drop_uq": "ALTER TABLE daily_user_exposure DROP CONSTRAINT IF EXISTS uq_daily_user_exposure",
+                "create_uq": (
+                    "ALTER TABLE daily_user_exposure ADD CONSTRAINT uq_daily_user_exposure "
+                    "UNIQUE (bucket_date, guild_id, user_hash)"
+                ),
             },
         ]
 
@@ -262,6 +283,8 @@ class BaseManager:
                 try:
                     await conn.execute(text(repair["column_ddl"]))
                     await conn.execute(text(repair["index_ddl"]))
+                    await conn.execute(text(repair["drop_uq"]))
+                    await conn.execute(text(repair["create_uq"]))
                     logger.info(f"Repaired schema for table: {table}")
                 except SQLAlchemyError as e:
                     logger.warning(f"Schema repair for {table} failed (may be expected): {e}")
