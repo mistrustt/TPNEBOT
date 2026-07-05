@@ -20,7 +20,7 @@ from database.manager import DatabaseManager
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from utils.cache import Cache
-from utils.stats import hash_user_id
+from utils.security import hash_user_id_analytics as hash_user_id
 
 _DB_ERROR_TYPES: tuple[type[Exception], ...] = (SQLAlchemyError,)
 try:
@@ -623,6 +623,7 @@ class DiscordBot(commands.Bot):
                 await self.database.record_command_latency(
                     command_name=command_name,
                     guild_id=guild_id,
+                    user_hash=user_hash,
                     is_slash=False,
                     latency_ms=latency_ms,
                     used_at=used_at,
@@ -674,6 +675,7 @@ class DiscordBot(commands.Bot):
                 await self.database.record_command_latency(
                     command_name=command.qualified_name,
                     guild_id=guild_id,
+                    user_hash=user_hash,
                     is_slash=True,
                     latency_ms=latency_ms,
                     used_at=used_at,
@@ -710,9 +712,11 @@ class DiscordBot(commands.Bot):
                 if used_at.tzinfo is None:
                     used_at = used_at.replace(tzinfo=timezone.utc)
                 guild_id = interaction.guild.id if interaction.guild else None
+                user_hash = hash_user_id(interaction.user.id)
                 await self.database.record_command_error(
                     command_name=command_name,
                     guild_id=guild_id,
+                    user_hash=user_hash,
                     is_slash=True,
                     error_type=type(error).__name__,
                     used_at=used_at,
@@ -723,6 +727,7 @@ class DiscordBot(commands.Bot):
                     await self.database.record_command_latency(
                         command_name=command_name,
                         guild_id=guild_id,
+                        user_hash=user_hash,
                         is_slash=True,
                         latency_ms=latency_ms,
                         used_at=used_at,
@@ -797,9 +802,11 @@ class DiscordBot(commands.Bot):
                 if used_at.tzinfo is None:
                     used_at = used_at.replace(tzinfo=timezone.utc)
                 guild_id = ctx.guild.id if ctx.guild else None
+                user_hash = hash_user_id(ctx.author.id)
                 await self.database.record_command_error(
                     command_name=ctx.command.qualified_name,
                     guild_id=guild_id,
+                    user_hash=user_hash,
                     is_slash=False,
                     error_type=type(error).__name__,
                     used_at=used_at,
@@ -810,6 +817,7 @@ class DiscordBot(commands.Bot):
                     await self.database.record_command_latency(
                         command_name=ctx.command.qualified_name,
                         guild_id=guild_id,
+                        user_hash=user_hash,
                         is_slash=False,
                         latency_ms=latency_ms,
                         used_at=used_at,

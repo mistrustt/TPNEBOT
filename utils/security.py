@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet
 
 logger = logging.getLogger("discord_bot")
 _warned_missing_key = False
+_warned_missing_stats_salt = False
 
 
 def _get_hash_key() -> bytes:
@@ -42,6 +43,28 @@ def hash_user_id(user_id: int) -> str:
     to hashes.
     """
     key = _get_hash_key()
+    return hmac.new(key, str(int(user_id)).encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def hash_user_id_analytics(user_id: int) -> str:
+    """Return a deterministic HMAC-SHA256 hex hash for analytics user IDs.
+
+    This uses ``STATS_SALT`` as the HMAC key, which is intentionally separate
+    from ``USER_ID_HASH_KEY`` so analytics hashes cannot be joined back to
+    operational records or the ``user_identities`` mapping table. The result
+    is still deterministic within a deployment, allowing daily unique-user
+    counts without exposing the underlying Discord ID.
+    """
+    global _warned_missing_stats_salt
+    salt = os.getenv("STATS_SALT", "")
+    if not salt and not _warned_missing_stats_salt:
+        logger.warning(
+            "STATS_SALT not set; analytics user hashes are unsalted and easily "
+            "reversible by anyone who can guess the user ID. Set STATS_SALT in "
+            "production."
+        )
+        _warned_missing_stats_salt = True
+    key = salt.encode("utf-8")
     return hmac.new(key, str(int(user_id)).encode("utf-8"), hashlib.sha256).hexdigest()
 
 

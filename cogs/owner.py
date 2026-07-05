@@ -613,39 +613,148 @@ class Owner(commands.Cog, name="Owner"):
         hidden=True,
     )
     @commands.is_owner()
-    async def metrics(self, ctx: Context):
+    async def metrics(self, ctx: Context, days: int = 7):
+        """Display a metrics dashboard overview.
+
+        Args:
+            days: Number of days to look back (1-365, default 7)
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
         prefix = await self.bot.get_prefix(ctx.message)
         if isinstance(prefix, list):
             prefix = prefix[0]
 
-        subcmds = getattr(ctx.command, "commands", []) or []
-        lines = []
-        for cmd in sorted(subcmds, key=lambda c: c.name):
-            name = cmd.name
-            aliases = (
-                f" (or: {', '.join(cmd.aliases)})"
-                if getattr(cmd, "aliases", None)
-                else ""
-            )
-            desc = (cmd.help or cmd.description or "").strip()
-            if desc:
-                lines.append(f"`{prefix}metrics {name}`{aliases} — {desc}")
-            else:
-                lines.append(f"`{prefix}metrics {name}`{aliases}")
+        overview = await self.bot.database.get_metrics_overview(days=days)
+        if not overview:
+            overview = {
+                "total_usage": 0,
+                "slash_usage": 0,
+                "prefix_usage": 0,
+                "slash_pct": 0,
+                "avg_latency_ms": 0,
+                "latency_calls": 0,
+                "total_errors": 0,
+                "error_rate": 0,
+                "unique_users": 0,
+                "exposure_rows": 0,
+                "slowest_command": None,
+                "slowest_avg_ms": 0,
+                "worst_command": None,
+                "worst_errors": 0,
+            }
 
-        if not lines:
-            description = "No subcommands available."
-        else:
-            description = "\n".join(lines)
-
+        color = ctx.author.top_role.color if ctx.guild else discord.Color.blurple()
         embed = discord.Embed(
-            title="Metrics — Available Commands",
-            description=description,
-            color=discord.Color.blurple(),
+            title="📊 Bot Metrics Dashboard",
+            description=(
+                f"Aggregate bot health over the last **{days}** day(s).\n"
+                f"Use `{prefix}metrics <subcommand> [days]` for detailed views."
+            ),
+            color=color,
         )
-        embed.set_footer(text=f"Use {prefix}metrics <subcommand> for details.")
+        embed.set_thumbnail(url=self.bot.user.display_avatar.url if self.bot.user else None)
 
-        await ctx.reply(embed=embed, mention_author=False)
+        # Usage summary
+        total = overview["total_usage"]
+        slash_pct = overview["slash_pct"]
+        prefix_pct = 100 - slash_pct if total else 0
+        embed.add_field(
+            name="⚡ Usage",
+            value=(
+                f"**{_human_number(total)}** total calls\n"
+                f"⚡ {_human_number(overview['slash_usage'])} slash ({slash_pct:.1f}%)\n"
+                f"⌨️ {_human_number(overview['prefix_usage'])} prefix ({prefix_pct:.1f}%)"
+            ),
+            inline=True,
+        )
+
+        # Performance summary
+        slow_cmd = overview["slowest_command"]
+        slow_ms = overview["slowest_avg_ms"]
+        embed.add_field(
+            name="⏱️ Performance",
+            value=(
+                f"**{_human_number(overview['avg_latency_ms'])} ms** avg latency\n"
+                f"📞 {_human_number(overview['latency_calls'])} measured calls\n"
+                f"🐌 `{slow_cmd or 'n/a'}` @ {slow_ms} ms"
+            ),
+            inline=True,
+        )
+
+        # Reliability summary
+        worst = overview["worst_command"]
+        errors = overview["total_errors"]
+        err_rate = overview["error_rate"]
+        embed.add_field(
+            name="⚠️ Reliability",
+            value=(
+                f"**{_human_number(errors)}** errors ({err_rate:.2f}%)\n"
+                f"💥 `{worst or 'n/a'}` worst cmd ({_human_number(overview['worst_errors'])} errs)\n"
+                f"✅ {(100 - err_rate):.2f}% success rate"
+            ),
+            inline=True,
+        )
+
+        # Users summary
+        embed.add_field(
+            name="👤 Users",
+            value=(
+                f"**{_human_number(overview['unique_users'])}** unique users\n"
+                f"📝 {_human_number(overview['exposure_rows'])} exposure rows\n"
+                f"📅 ~{_human_number(overview['exposure_rows'] // days)} per day"
+            ),
+            inline=True,
+        )
+
+        # Subcommand category guide
+        embed.add_field(
+            name="📈 Usage Commands",
+            value=(
+                f"`{prefix}metrics usage` · `{prefix}metrics topguilds`\n"
+                f"`{prefix}metrics perday usage` · `{prefix}metrics trends <cmd>`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="🔍 Deep Dive",
+            value=(
+                f"`{prefix}metrics slash` · `{prefix}metrics reliability`\n"
+                f"`{prefix}metrics compare <a> <b>` · `{prefix}metrics latency`"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="👥 User Health",
+            value=(
+                f"`{prefix}metrics exposure` · `{prefix}metrics active`\n"
+                f"`{prefix}metrics users` · `{prefix}metrics errors`"
+            ),
+            inline=True,
+        )
+
+        # Gather data for an overview stacked chart (slash vs prefix per day)
+        slash_series = await self.bot.database.get_slash_adoption(days=days)
+        labels = []
+        slash_values = []
+        prefix_values = []
+        for date_label, slash, prefix in slash_series:
+            labels.append(date_label)
+            slash_values.append(slash)
+            prefix_values.append(prefix)
+
+        view = MetricsChartView(
+            self.bot,
+            ctx.author.id,
+            chart_type="stacked",
+            title="Usage per Day (Slash vs Prefix)",
+            labels=labels,
+            values=[],
+            ylabel="Calls",
+            datasets={"Slash": slash_values, "Prefix": prefix_values},
+        )
+        await ctx.reply(embed=embed, view=view, mention_author=False)
 
     @metrics.command(name="usage", hidden=True)
     @commands.is_owner()
@@ -1289,6 +1398,435 @@ class Owner(commands.Cog, name="Owner"):
                 labels=labels,
                 values=values,
                 ylabel=ylabel,
+            ),
+        )
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
+
+    @metrics.command(name="slash", hidden=True)
+    @commands.is_owner()
+    async def metrics_slash(
+        self,
+        ctx: Context,
+        days: int = 7,
+        *,
+        guild_id: Optional[int] = None,
+    ) -> None:
+        """Display slash vs prefix command adoption over time.
+
+        Args:
+            days: Number of days to look back (1-365, default 7)
+            guild_id: Optional guild ID to filter by
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
+        series = await self.bot.database.get_slash_adoption(days=days, guild_id=guild_id)
+        if not series:
+            return await ctx.send(
+                f"No usage data found for the last {days} day(s)."
+            )
+
+        total_slash = sum(s for _, s, _ in series)
+        total_prefix = sum(p for _, _, p in series)
+        grand_total = total_slash + total_prefix
+
+        labels = [label for label, _, _ in series]
+        slash_values = [s for _, s, _ in series]
+        prefix_values = [p for _, _, p in series]
+
+        summary = {
+            "Total": _human_number(grand_total),
+            "Slash": f"{_human_number(total_slash)} ({total_slash / grand_total * 100:.1f}%)",
+            "Prefix": f"{_human_number(total_prefix)} ({total_prefix / grand_total * 100:.1f}%)",
+        }
+
+        paginator = MetricsPaginator(
+            data=series,
+            title="⚡ Slash vs Prefix Adoption",
+            author_id=ctx.author.id,
+            format_func=lambda row, rank=None: (
+                f"`{row[0]}` ⚡ `{_human_number(row[1]):>8}` ⌨️ `{_human_number(row[2]):>8}`"
+            ),
+            footer_text=f"Days: {days}",
+            summary=summary,
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="stacked",
+                title="Slash vs Prefix Adoption",
+                labels=labels,
+                values=[],
+                ylabel="Calls",
+                datasets={"Slash": slash_values, "Prefix": prefix_values},
+            ),
+        )
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
+
+    @metrics.command(name="reliability", hidden=True)
+    @commands.is_owner()
+    async def metrics_reliability(
+        self,
+        ctx: Context,
+        days: int = 7,
+        *,
+        guild_id: Optional[int] = None,
+    ) -> None:
+        """Display command reliability (error rate per command).
+
+        Args:
+            days: Number of days to look back (1-365, default 7)
+            guild_id: Optional guild ID to filter by
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
+        rows = await self.bot.database.get_error_rate_by_command(
+            days=days, guild_id=guild_id, limit=15
+        )
+        if not rows:
+            return await ctx.send(
+                f"No reliability data found for the last {days} day(s)."
+            )
+
+        total_usage = sum(u for _, u, _, _ in rows)
+        total_errors = sum(e for _, _, e, _ in rows)
+
+        max_rate = max(r[3] for r in rows)
+
+        def format_row(row, rank):
+            name, usage, errors, rate = row
+            bar = _bar_visual(rate, max_rate)
+            color = "🟢" if rate < 1 else ("🟡" if rate < 5 else "🔴")
+            display_name = (name[:23] + "…") if len(name) > 24 else name
+            return (
+                f"`{rank:>2}.` `{display_name:<24}` {bar} "
+                f"`{rate:.2f}%` {color} ({_human_number(errors)} / {_human_number(usage)})"
+            )
+
+        summary = {
+            "Commands": str(len(rows)),
+            "Errors": _human_number(total_errors),
+            "Avg Rate": f"{(total_errors / total_usage * 100) if total_usage else 0:.2f}%",
+        }
+
+        paginator = MetricsPaginator(
+            data=rows,
+            title="🛡️ Command Reliability",
+            author_id=ctx.author.id,
+            format_func=format_row,
+            footer_text=f"Days: {days}",
+            summary=summary,
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="bar",
+                title="Command Error Rates",
+                labels=[r[0] for r in rows],
+                values=[r[3] for r in rows],
+                ylabel="Error rate %",
+                limit=15,
+            ),
+        )
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
+
+    @metrics.command(name="active", hidden=True)
+    @commands.is_owner()
+    async def metrics_active(
+        self,
+        ctx: Context,
+        days: int = 7,
+        *,
+        guild_id: Optional[int] = None,
+    ) -> None:
+        """Display daily active users (DAU) and aggregate exposure.
+
+        Args:
+            days: Number of days to look back (1-365, default 7)
+            guild_id: Optional guild ID to filter by
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
+        series = await self.bot.database.get_user_exposure_series(
+            days=days, guild_id=guild_id
+        )
+        if not series:
+            return await ctx.send(
+                f"No exposure data found for the last {days} day(s)."
+            )
+
+        labels = [label for label, _ in series]
+        values = [val for _, val in series]
+        total_unique = sum(values)
+        avg_dau = total_unique // days
+        peak_dau = max(values)
+
+        summary = {
+            "Avg DAU": _human_number(avg_dau),
+            "Peak DAU": _human_number(peak_dau),
+            "Total": _human_number(total_unique),
+            "Days": str(days),
+        }
+
+        paginator = MetricsPaginator(
+            data=series,
+            title="👤 Daily Active Users",
+            author_id=ctx.author.id,
+            format_func=lambda row, rank=None: (
+                f"`{row[0]}` {_bar_visual(row[1], peak_dau)} `{_human_number(row[1]):>10}` users"
+            ),
+            footer_text=f"Days: {days}",
+            summary=summary,
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="line",
+                title="DAU Trend",
+                labels=labels,
+                values=values,
+                ylabel="Unique users",
+            ),
+        )
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
+
+    @metrics.command(name="users", hidden=True)
+    @commands.is_owner()
+    async def metrics_users(
+        self,
+        ctx: Context,
+        days: int = 7,
+        *,
+        guild_id: Optional[int] = None,
+    ) -> None:
+        """Display top anonymous users by command usage and errors.
+
+        Args:
+            days: Number of days to look back (1-365, default 7)
+            guild_id: Optional guild ID to filter by
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
+        error_leaders = await self.bot.database.get_top_erroring_users(
+            days=days, guild_id=guild_id, limit=10
+        )
+        if not error_leaders:
+            return await ctx.send(
+                f"No user error data found for the last {days} day(s)."
+            )
+
+        total_errors = sum(e for _, e in error_leaders)
+        max_errors = max(e for _, e in error_leaders)
+
+        def format_row(row, rank):
+            short_hash, errors = row
+            bar = _bar_visual(errors, max_errors)
+            return (
+                f"`{rank:>2}.` `{short_hash:<12}` {bar} "
+                f"`{_human_number(errors):>8}` errors"
+            )
+
+        summary = {
+            "Users": str(len(error_leaders)),
+            "Errors": _human_number(total_errors),
+        }
+
+        paginator = MetricsPaginator(
+            data=error_leaders,
+            title="🎭 Top Anonymous Erroring Users",
+            author_id=ctx.author.id,
+            format_func=format_row,
+            footer_text=f"Days: {days}",
+            summary=summary,
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="bar",
+                title="Top Erroring Users",
+                labels=[h for h, _ in error_leaders],
+                values=[e for _, e in error_leaders],
+                ylabel="Errors",
+                limit=10,
+            ),
+        )
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
+
+    @metrics.command(name="trends", hidden=True)
+    @commands.is_owner()
+    async def metrics_trends(
+        self,
+        ctx: Context,
+        command_name: str,
+        days: int = 7,
+        *,
+        guild_id: Optional[int] = None,
+    ) -> None:
+        """Display usage and latency trends for a specific command.
+
+        Args:
+            command_name: Command to analyze
+            days: Number of days to look back (1-365, default 7)
+            guild_id: Optional guild ID to filter by
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
+        command_name = command_name.strip().lower()
+        if not command_name:
+            return await ctx.send("❌ Command name cannot be empty.")
+
+        usage_series = await self.bot.database.get_command_usage_trend(
+            command_name=command_name, days=days, guild_id=guild_id
+        )
+        latency_series = await self.bot.database.get_command_latency_trend(
+            command_name=command_name, days=days, guild_id=guild_id
+        )
+        if not usage_series and not latency_series:
+            return await ctx.send(
+                f"No trend data found for `{command_name}` in the last {days} day(s)."
+            )
+
+        # Align both series by date
+        all_dates = sorted({d for d, _ in usage_series} | {d for d, _, _ in latency_series})
+        usage_by_date = dict(usage_series)
+        latency_by_date = {d: avg for d, avg, _ in latency_series}
+        calls_by_date = {d: calls for d, _, calls in latency_series}
+        usage_values = [usage_by_date.get(d, 0) for d in all_dates]
+        latency_values = [latency_by_date.get(d, 0) for d in all_dates]
+        calls_values = [calls_by_date.get(d, 0) for d in all_dates]
+
+        total_calls = sum(usage_values)
+        total_measured = sum(calls_values)
+        avg_latency = (
+            sum(latency_values) // len(latency_values) if latency_values else 0
+        )
+        peak_latency = max(latency_values) if latency_values else 0
+
+        summary = {
+            "Command": f"`{command_name}`",
+            "Calls": _human_number(total_calls),
+            "Measured": _human_number(total_measured),
+            "Avg Latency": f"{avg_latency} ms",
+            "Peak": f"{peak_latency} ms",
+        }
+
+        rows = list(
+            zip(
+                all_dates,
+                usage_values,
+                latency_values,
+                calls_values,
+            )
+        )
+        max_calls = max(usage_values) if usage_values else 1
+
+        def format_row(row, rank=None):
+            date, calls, avg_ms, measured = row
+            bar = _bar_visual(calls, max_calls)
+            return (
+                f"`{date}` {bar} `{_human_number(calls):>8}` "
+                f"({_human_number(measured)} ms @ {avg_ms} avg)"
+            )
+
+        paginator = MetricsPaginator(
+            data=rows,
+            title=f"📈 Trends for `{command_name}`",
+            author_id=ctx.author.id,
+            format_func=format_row,
+            footer_text=f"Days: {days}",
+            summary=summary,
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="dual",
+                title=f"Usage + Latency for {command_name}",
+                labels=all_dates,
+                values=[],
+                ylabel="Calls / Avg ms",
+                datasets={"Calls": usage_values, "Avg ms": latency_values},
+            ),
+        )
+        await ctx.send(embed=paginator.get_page_embed(), view=paginator)
+
+    @metrics.command(name="compare", hidden=True)
+    @commands.is_owner()
+    async def metrics_compare(
+        self,
+        ctx: Context,
+        command_a: str,
+        command_b: str,
+        days: int = 7,
+        *,
+        guild_id: Optional[int] = None,
+    ) -> None:
+        """Compare usage trends of two commands.
+
+        Args:
+            command_a: First command to compare
+            command_b: Second command to compare
+            days: Number of days to look back (1-365, default 7)
+            guild_id: Optional guild ID to filter by
+        """
+        if days < 1 or days > 365:
+            return await ctx.send("❌ Days must be between 1 and 365.")
+
+        command_a = command_a.strip().lower()
+        command_b = command_b.strip().lower()
+        if not command_a or not command_b:
+            return await ctx.send("❌ Command names cannot be empty.")
+
+        series_a = await self.bot.database.get_command_usage_trend(
+            command_name=command_a, days=days, guild_id=guild_id
+        )
+        series_b = await self.bot.database.get_command_usage_trend(
+            command_name=command_b, days=days, guild_id=guild_id
+        )
+        if not series_a and not series_b:
+            return await ctx.send(
+                f"No usage data found for either command in the last {days} day(s)."
+            )
+
+        all_dates = sorted({d for d, _ in series_a} | {d for d, _ in series_b})
+        a_by_date = dict(series_a)
+        b_by_date = dict(series_b)
+        a_values = [a_by_date.get(d, 0) for d in all_dates]
+        b_values = [b_by_date.get(d, 0) for d in all_dates]
+
+        total_a = sum(a_values)
+        total_b = sum(b_values)
+
+        summary = {
+            f"`{command_a}`": _human_number(total_a),
+            f"`{command_b}`": _human_number(total_b),
+            "Combined": _human_number(total_a + total_b),
+        }
+
+        rows = list(zip(all_dates, a_values, b_values))
+        max_val = max(max(a_values, default=0), max(b_values, default=0))
+
+        def format_row(row, rank=None):
+            date, a, b = row
+            return (
+                f"`{date}` `{command_a[:12]:<12}` `{_human_number(a):>8}` · "
+                f"`{command_b[:12]:<12}` `{_human_number(b):>8}`"
+            )
+
+        paginator = MetricsPaginator(
+            data=rows,
+            title=f"📊 `{command_a}` vs `{command_b}`",
+            author_id=ctx.author.id,
+            format_func=format_row,
+            footer_text=f"Days: {days}",
+            summary=summary,
+            chart_view=MetricsChartView(
+                self.bot,
+                ctx.author.id,
+                chart_type="multi",
+                title=f"Usage Comparison: {command_a} vs {command_b}",
+                labels=all_dates,
+                values=[],
+                ylabel="Calls",
+                datasets={command_a: a_values, command_b: b_values},
             ),
         )
         await ctx.send(embed=paginator.get_page_embed(), view=paginator)

@@ -213,6 +213,7 @@ class CommandLatencyDaily(Base):
     bucket_date = Column(Date, nullable=False, index=True)
     command_name = Column(String, nullable=False, index=True)
     guild_id = Column(BigInteger, nullable=True, index=True)
+    user_hash = Column(String(64), nullable=True, index=True)
     is_slash = Column(Boolean, default=False, nullable=False)
     latency_ms_sum = Column(BigInteger, default=0, nullable=False)
     latency_count = Column(Integer, default=0, nullable=False)
@@ -223,6 +224,7 @@ class CommandLatencyDaily(Base):
             "bucket_date",
             "command_name",
             "guild_id",
+            "user_hash",
             "is_slash",
             name="uq_command_latency_daily",
         ),
@@ -236,6 +238,7 @@ class CommandErrorDaily(Base):
     bucket_date = Column(Date, nullable=False, index=True)
     command_name = Column(String, nullable=False, index=True)
     guild_id = Column(BigInteger, nullable=True, index=True)
+    user_hash = Column(String(64), nullable=True, index=True)
     is_slash = Column(Boolean, default=False, nullable=False)
     error_type = Column(String, nullable=False)
     count = Column(Integer, default=0, nullable=False)
@@ -246,6 +249,7 @@ class CommandErrorDaily(Base):
             "bucket_date",
             "command_name",
             "guild_id",
+            "user_hash",
             "is_slash",
             "error_type",
             name="uq_command_error_daily",

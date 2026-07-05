@@ -3,7 +3,7 @@ from .base import BaseManager
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func
+from sqlalchemy import func, case
 from typing import List, Optional
 from ..models import (
     BotConfig,
@@ -174,6 +174,7 @@ class CoreMixin(BaseManager):
         *,
         command_name: str,
         guild_id: Optional[int],
+        user_hash: Optional[str],
         is_slash: bool,
         latency_ms: int,
         used_at: Optional[datetime] = None,
@@ -188,6 +189,7 @@ class CoreMixin(BaseManager):
                     CommandLatencyDaily.bucket_date == bucket_date,
                     CommandLatencyDaily.command_name == command_name,
                     CommandLatencyDaily.guild_id == guild_id,
+                    CommandLatencyDaily.user_hash == user_hash,
                     CommandLatencyDaily.is_slash == is_slash,
                 )
                 result = await session.execute(stmt)
@@ -202,6 +204,7 @@ class CoreMixin(BaseManager):
                             bucket_date=bucket_date,
                             command_name=command_name,
                             guild_id=guild_id,
+                            user_hash=user_hash,
                             is_slash=is_slash,
                             latency_ms_sum=latency_ms,
                             latency_count=1,
@@ -217,6 +220,7 @@ class CoreMixin(BaseManager):
         *,
         command_name: str,
         guild_id: Optional[int],
+        user_hash: Optional[str],
         is_slash: bool,
         error_type: str,
         used_at: Optional[datetime] = None,
@@ -231,6 +235,7 @@ class CoreMixin(BaseManager):
                     CommandErrorDaily.bucket_date == bucket_date,
                     CommandErrorDaily.command_name == command_name,
                     CommandErrorDaily.guild_id == guild_id,
+                    CommandErrorDaily.user_hash == user_hash,
                     CommandErrorDaily.is_slash == is_slash,
                     CommandErrorDaily.error_type == error_type,
                 )
@@ -245,6 +250,7 @@ class CoreMixin(BaseManager):
                             bucket_date=bucket_date,
                             command_name=command_name,
                             guild_id=guild_id,
+                            user_hash=user_hash,
                             is_slash=is_slash,
                             error_type=error_type,
                             count=1,
@@ -389,6 +395,353 @@ class CoreMixin(BaseManager):
                 await session.commit()
         except SQLAlchemyError as e:
             logging.error(f"Error purging stats before {cutoff_date}: {str(e)}")
+
+    async def get_metrics_overview(
+        self, days: int, guild_id: Optional[int] = None
+    ) -> dict:
+        """Return aggregate metrics for the dashboard overview."""
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                usage_filters = [CommandUsageDaily.bucket_date >= cutoff]
+                latency_filters = [CommandLatencyDaily.bucket_date >= cutoff]
+                error_filters = [CommandErrorDaily.bucket_date >= cutoff]
+                exposure_filters = [DailyUserExposure.bucket_date >= cutoff]
+                if guild_id is not None:
+                    usage_filters.append(CommandUsageDaily.guild_id == guild_id)
+                    latency_filters.append(CommandLatencyDaily.guild_id == guild_id)
+                    error_filters.append(CommandErrorDaily.guild_id == guild_id)
+                    exposure_filters.append(DailyUserExposure.guild_id == guild_id)
+
+                usage_stmt = (
+                    select(
+                        func.sum(CommandUsageDaily.count).label("total"),
+                        func.sum(
+                            case((CommandUsageDaily.is_slash.is_(True), CommandUsageDaily.count), else_=0)
+                        ).label("slash"),
+                    )
+                    .where(*usage_filters)
+                )
+                latency_stmt = (
+                    select(
+                        func.sum(CommandLatencyDaily.latency_ms_sum).label("sum_ms"),
+                        func.sum(CommandLatencyDaily.latency_count).label("count"),
+                    )
+                    .where(*latency_filters)
+                )
+                error_stmt = (
+                    select(func.sum(CommandErrorDaily.count).label("total"))
+                    .where(*error_filters)
+                )
+                exposure_stmt = (
+                    select(
+                        func.count(func.distinct(DailyUserExposure.user_hash)).label(
+                            "unique"
+                        ),
+                        func.count().label("rows"),
+                    )
+                    .where(*exposure_filters)
+                )
+                slowest_stmt = (
+                    select(
+                        CommandLatencyDaily.command_name,
+                        (
+                            func.sum(CommandLatencyDaily.latency_ms_sum)
+                            / func.nullif(func.sum(CommandLatencyDaily.latency_count), 0)
+                        ).label("avg_ms"),
+                    )
+                    .where(*latency_filters)
+                    .group_by(CommandLatencyDaily.command_name)
+                    .order_by(text("avg_ms DESC"))
+                    .limit(1)
+                )
+                worst_cmd_stmt = (
+                    select(
+                        CommandErrorDaily.command_name,
+                        func.sum(CommandErrorDaily.count).label("err_total"),
+                    )
+                    .where(*error_filters)
+                    .group_by(CommandErrorDaily.command_name)
+                    .order_by(text("err_total DESC"))
+                    .limit(1)
+                )
+
+                usage_row = (await session.execute(usage_stmt)).first()
+                latency_row = (await session.execute(latency_stmt)).first()
+                error_row = (await session.execute(error_stmt)).first()
+                exposure_row = (await session.execute(exposure_stmt)).first()
+                slowest_row = (await session.execute(slowest_stmt)).first()
+                worst_row = (await session.execute(worst_cmd_stmt)).first()
+
+                total = int(usage_row.total or 0) if usage_row else 0
+                slash = int(usage_row.slash or 0) if usage_row else 0
+                prefix = total - slash
+                lat_sum = int(latency_row.sum_ms or 0) if latency_row else 0
+                lat_count = int(latency_row.count or 0) if latency_row else 0
+                avg_latency = int(lat_sum / lat_count) if lat_count else 0
+                errors = int(error_row.total or 0) if error_row else 0
+                unique = int(exposure_row.unique or 0) if exposure_row else 0
+                rows = int(exposure_row.rows or 0) if exposure_row else 0
+
+                return {
+                    "total_usage": total,
+                    "slash_usage": slash,
+                    "prefix_usage": prefix,
+                    "slash_pct": (slash / total * 100) if total else 0,
+                    "avg_latency_ms": avg_latency,
+                    "latency_calls": lat_count,
+                    "total_errors": errors,
+                    "error_rate": (errors / total * 100) if total else 0,
+                    "unique_users": unique,
+                    "exposure_rows": rows,
+                    "slowest_command": slowest_row.command_name if slowest_row else None,
+                    "slowest_avg_ms": int(slowest_row.avg_ms or 0) if slowest_row else 0,
+                    "worst_command": worst_row.command_name if worst_row else None,
+                    "worst_errors": int(worst_row.err_total or 0) if worst_row else 0,
+                }
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching metrics overview: {e}")
+            return {}
+
+    async def get_slash_adoption(
+        self, days: int, guild_id: Optional[int] = None
+    ) -> list[tuple[str, int, int]]:
+        """Return per-day slash vs prefix call counts.
+
+        Returns tuples of (date_label, slash_count, prefix_count).
+        """
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                filters = [CommandUsageDaily.bucket_date >= cutoff]
+                if guild_id is not None:
+                    filters.append(CommandUsageDaily.guild_id == guild_id)
+                stmt = (
+                    select(
+                        CommandUsageDaily.bucket_date,
+                        func.sum(
+                            case((CommandUsageDaily.is_slash.is_(True), CommandUsageDaily.count), else_=0)
+                        ).label("slash"),
+                        func.sum(
+                            case((CommandUsageDaily.is_slash.is_(False), CommandUsageDaily.count), else_=0)
+                        ).label("prefix"),
+                    )
+                    .where(*filters)
+                    .group_by(CommandUsageDaily.bucket_date)
+                    .order_by(CommandUsageDaily.bucket_date.asc())
+                )
+                result = await session.execute(stmt)
+                return [
+                    (row.bucket_date.strftime("%Y-%m-%d"), int(row.slash or 0), int(row.prefix or 0))
+                    for row in result.all()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching slash adoption: {e}")
+            return []
+
+    async def get_error_rate_by_command(
+        self, days: int, guild_id: Optional[int] = None, limit: int = 15
+    ) -> list[tuple[str, int, int, float]]:
+        """Return command reliability: (command_name, usage, errors, error_rate%)."""
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                usage_filters = [CommandUsageDaily.bucket_date >= cutoff]
+                error_filters = [CommandErrorDaily.bucket_date >= cutoff]
+                if guild_id is not None:
+                    usage_filters.append(CommandUsageDaily.guild_id == guild_id)
+                    error_filters.append(CommandErrorDaily.guild_id == guild_id)
+
+                usage_subq = (
+                    select(
+                        CommandUsageDaily.command_name,
+                        func.sum(CommandUsageDaily.count).label("total"),
+                    )
+                    .where(*usage_filters)
+                    .group_by(CommandUsageDaily.command_name)
+                    .subquery()
+                )
+                error_subq = (
+                    select(
+                        CommandErrorDaily.command_name,
+                        func.sum(CommandErrorDaily.count).label("err_total"),
+                    )
+                    .where(*error_filters)
+                    .group_by(CommandErrorDaily.command_name)
+                    .subquery()
+                )
+                stmt = (
+                    select(
+                        usage_subq.c.command_name,
+                        usage_subq.c.total,
+                        func.coalesce(error_subq.c.err_total, 0).label("errors"),
+                    )
+                    .join(
+                        error_subq,
+                        usage_subq.c.command_name == error_subq.c.command_name,
+                        isouter=True,
+                    )
+                    .order_by(text("errors DESC"))
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                rows = result.all()
+                return [
+                    (
+                        row.command_name,
+                        int(row.total or 0),
+                        int(row.errors or 0),
+                        (row.errors / row.total * 100) if row.total else 0,
+                    )
+                    for row in rows
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching error rates: {e}")
+            return []
+
+    async def get_top_erroring_users(
+        self, days: int, guild_id: Optional[int] = None, limit: int = 10
+    ) -> list[tuple[str, int]]:
+        """Return top users by anonymous error count.
+
+        Returns tuples of (short_user_hash, error_count).
+        """
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                filters = [CommandErrorDaily.bucket_date >= cutoff]
+                if guild_id is not None:
+                    filters.append(CommandErrorDaily.guild_id == guild_id)
+                stmt = (
+                    select(
+                        CommandErrorDaily.user_hash,
+                        func.sum(CommandErrorDaily.count).label("total"),
+                    )
+                    .where(*filters)
+                    .group_by(CommandErrorDaily.user_hash)
+                    .order_by(text("total DESC"))
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                return [
+                    ((row.user_hash or "unknown")[:12], int(row.total or 0))
+                    for row in result.all()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching top erroring users: {e}")
+            return []
+
+    async def get_user_exposure_series(
+        self, days: int, guild_id: Optional[int] = None
+    ) -> list[tuple[str, int]]:
+        """Return daily unique user counts (DAU).
+
+        Returns tuples of (date_label, unique_users).
+        """
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                filters = [DailyUserExposure.bucket_date >= cutoff]
+                if guild_id is not None:
+                    filters.append(DailyUserExposure.guild_id == guild_id)
+                stmt = (
+                    select(
+                        DailyUserExposure.bucket_date,
+                        func.count(func.distinct(DailyUserExposure.user_hash)).label(
+                            "unique"
+                        ),
+                    )
+                    .where(*filters)
+                    .group_by(DailyUserExposure.bucket_date)
+                    .order_by(DailyUserExposure.bucket_date.asc())
+                )
+                result = await session.execute(stmt)
+                return [
+                    (row.bucket_date.strftime("%Y-%m-%d"), int(row.unique or 0))
+                    for row in result.all()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching user exposure series: {e}")
+            return []
+
+    async def get_command_latency_trend(
+        self,
+        command_name: str,
+        days: int,
+        guild_id: Optional[int] = None,
+    ) -> list[tuple[str, int, int]]:
+        """Return per-day latency for a specific command.
+
+        Returns tuples of (date_label, avg_ms, call_count).
+        """
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                filters = [
+                    CommandLatencyDaily.bucket_date >= cutoff,
+                    CommandLatencyDaily.command_name == command_name,
+                ]
+                if guild_id is not None:
+                    filters.append(CommandLatencyDaily.guild_id == guild_id)
+                stmt = (
+                    select(
+                        CommandLatencyDaily.bucket_date,
+                        CommandLatencyDaily.latency_ms_sum,
+                        CommandLatencyDaily.latency_count,
+                    )
+                    .where(*filters)
+                    .group_by(CommandLatencyDaily.bucket_date)
+                    .order_by(CommandLatencyDaily.bucket_date.asc())
+                )
+                result = await session.execute(stmt)
+                return [
+                    (
+                        row.bucket_date.strftime("%Y-%m-%d"),
+                        int(row.latency_ms_sum / row.latency_count) if row.latency_count else 0,
+                        int(row.latency_count or 0),
+                    )
+                    for row in result.all()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching latency trend: {e}")
+            return []
+
+    async def get_command_usage_trend(
+        self,
+        command_name: str,
+        days: int,
+        guild_id: Optional[int] = None,
+    ) -> list[tuple[str, int]]:
+        """Return per-day usage for a specific command.
+
+        Returns tuples of (date_label, total_calls).
+        """
+        try:
+            cutoff = (discord.utils.utcnow().date() - timedelta(days=days))
+            async with self.async_sessionmaker() as session:
+                filters = [
+                    CommandUsageDaily.bucket_date >= cutoff,
+                    CommandUsageDaily.command_name == command_name,
+                ]
+                if guild_id is not None:
+                    filters.append(CommandUsageDaily.guild_id == guild_id)
+                stmt = (
+                    select(
+                        CommandUsageDaily.bucket_date,
+                        func.sum(CommandUsageDaily.count).label("total"),
+                    )
+                    .where(*filters)
+                    .group_by(CommandUsageDaily.bucket_date)
+                    .order_by(CommandUsageDaily.bucket_date.asc())
+                )
+                result = await session.execute(stmt)
+                return [
+                    (row.bucket_date.strftime("%Y-%m-%d"), int(row.total or 0))
+                    for row in result.all()
+                ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching usage trend: {e}")
+            return []
 
     async def set_prefix(self, guild_id: int, prefix: str):
         async with self.async_sessionmaker() as session:

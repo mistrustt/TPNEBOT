@@ -435,6 +435,79 @@ def render_stacked_bar_chart(
     return buffer
 
 
+def render_dual_axis_chart(
+    labels: list[str],
+    bar_values: list[int | float],
+    line_values: list[int | float],
+    title: str,
+    bar_label: str = "Calls",
+    line_label: str = "Avg ms",
+    bar_color: str = COLORS["primary"],
+    line_color: str = COLORS["warning"],
+) -> io.BytesIO:
+    """Render a dual-axis chart: bars for volume and line for latency.
+
+    Args:
+        labels: X-axis labels (dates).
+        bar_values: Values rendered as bars.
+        line_values: Values rendered as a line on the secondary axis.
+        title: Chart title.
+        bar_label: Legend label for the bar series.
+        line_label: Legend label for the line series.
+        bar_color: Bar fill color.
+        line_color: Line color.
+
+    Returns:
+        BytesIO buffer containing the PNG image.
+    """
+    fig, ax1 = create_figure(figsize=(10, 5))
+    x_values = range(len(labels))
+
+    bars = ax1.bar(x_values, bar_values, color=bar_color, alpha=0.7, label=bar_label)
+    ax1.set_xlabel("Date", color=CHART_STYLE["axes.labelcolor"])
+    ax1.set_ylabel(bar_label, color=bar_color)
+    ax1.tick_params(axis="y", labelcolor=bar_color)
+    ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: _format_number(x)))
+
+    ax2 = ax1.twinx()
+    ax2.plot(
+        x_values,
+        line_values,
+        color=line_color,
+        marker="o",
+        markersize=4,
+        linewidth=2.5,
+        label=line_label,
+    )
+    ax2.set_ylabel(line_label, color=line_color)
+    ax2.tick_params(axis="y", labelcolor=line_color)
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: _format_number(x)))
+
+    ax1.set_xticks(x_values)
+    step = max(1, len(labels) // 10)
+    ax1.set_xticklabels(
+        [label if i % step == 0 else "" for i, label in enumerate(labels)],
+        rotation=45,
+        ha="right",
+    )
+
+    ax1.set_title(title, fontsize=14, fontweight="bold", color=CHART_STYLE["text.color"], pad=10)
+    ax1.grid(True, alpha=CHART_STYLE["grid.alpha"], color=CHART_STYLE["grid.color"], axis="y")
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best", facecolor=CHART_STYLE["axes.facecolor"])
+
+    plt.tight_layout()
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=110, bbox_inches="tight")
+    buffer.seek(0)
+    plt.close(fig)
+
+    return buffer
+
+
 class MetricsChartView(discord.ui.View):
     """Discord UI View for metrics charts with interactive buttons."""
 
@@ -570,6 +643,20 @@ class MetricsChartView(discord.ui.View):
                 datasets=self.datasets,
                 title=self.title,
                 ylabel=self.ylabel,
+            )
+        elif self.chart_type == "dual":
+            if not self.datasets or len(self.datasets) < 2:
+                raise ValueError("Dual-axis chart requires at least two datasets")
+            names = list(self.datasets.keys())
+            bar_values = list(self.datasets.values())[0]
+            line_values = list(self.datasets.values())[1]
+            return render_dual_axis_chart(
+                labels=self.labels,
+                bar_values=bar_values,
+                line_values=line_values,
+                title=self.title,
+                bar_label=names[0],
+                line_label=names[1],
             )
         else:
             raise ValueError(f"Unknown chart type: {self.chart_type}")
