@@ -51,7 +51,6 @@ from ..models import (
     ForceRole,
     CryptoAsset,
     Juul,
-    TransferHistory,
 )
 from datetime import timezone
 import discord
@@ -443,9 +442,9 @@ class UserMixin(BaseManager):
         Delete all personal, economy, game, and social data for a user.
 
         Moderation records (Punishment, CaseNote, WatchdogLog, JailedUser,
-        Blacklist, SuspiciousActivityLog) are intentionally retained for
-        community safety and anti-abuse purposes. The UserIdentity mapping
-        row is also retained so those moderation records remain resolvable.
+        Blacklist) are intentionally retained for community safety and
+        anti-abuse purposes. The UserIdentity mapping row is also retained so
+        those moderation records remain resolvable.
         """
         user_hash = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -540,16 +539,6 @@ class UserMixin(BaseManager):
                 )
                 await session.execute(
                     delete(Transaction).where(Transaction.to_user_id == user_hash)
-                )
-                await session.execute(
-                    delete(TransferHistory).where(
-                        TransferHistory.sender_id == user_hash
-                    )
-                )
-                await session.execute(
-                    delete(TransferHistory).where(
-                        TransferHistory.receiver_id == user_hash
-                    )
                 )
                 await session.execute(
                     delete(TradeLog).where(TradeLog.from_user_id == user_hash)

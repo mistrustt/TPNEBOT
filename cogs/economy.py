@@ -3159,16 +3159,6 @@ class Economy(commands.Cog):
                 await ctx.reply(embed=embed, delete_after=10)
                 return
 
-            # Check for alt transfer and show warning (non-blocking)
-            guild_id = ctx.guild.id if ctx.guild else None
-            alt_warning = None
-            if guild_id:
-                is_alt = await self.bot.database.check_alt_transfer(
-                    sender.id, receiver.id, guild_id
-                )
-                if is_alt:
-                    alt_warning = "⚠️ **Warning:** This transfer is between linked alternate accounts."
-
             txid = await self.bot.database.process_p2p_transaction(
                 sender_wallet_id=sender_wallet_id,
                 receiver_wallet_id=receiver_wallet_id,
