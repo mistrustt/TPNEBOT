@@ -3164,7 +3164,7 @@ class Economy(commands.Cog):
                 receiver_wallet_id=receiver_wallet_id,
                 amount=amount,
                 description=f"Transfer from {sender.name} to {receiver.name}",
-                guild_id=guild_id,
+                guild_id=ctx.guild.id,
             )
             color = discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel):
@@ -3183,8 +3183,6 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
-            if alt_warning:
-                embed.add_field(name="⚠️ Notice", value=alt_warning, inline=False)
             embed.set_author(
                 name="Transfer", icon_url=self.utils.get_avatar_url(ctx.author)
             )
