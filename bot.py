@@ -14,7 +14,7 @@ from discord.ext.commands import Context
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from pathlib import Path
-from utils.cooldown import CooldownUtils
+from utils.cooldown import CooldownUtils, UnifiedCooldownManager
 from utils.infisical import InfisicalSecretsManager
 from database.manager import DatabaseManager
 from sqlalchemy import text
@@ -204,6 +204,7 @@ class DiscordBot(commands.Bot):
         self.database = DatabaseManager(
             f"postgresql+asyncpg://{self.db_user}:{self.db_pw}@{self.db_host}:{self.db_port}/{self.db_name}"
         )
+        self.cooldowns = UnifiedCooldownManager(self)
         self.config = self.database.load_config()
         self.debug_mode_active = False
         self.cool_guys = [
@@ -474,12 +475,6 @@ class DiscordBot(commands.Bot):
                     await ctx.send(embed=embed, delete_after=5)
                     return
 
-            remaining_cooldown = await self.database.get_cooldown(user_id, command_name)
-            if remaining_cooldown > 0:
-                embed = await CooldownUtils.get_cooldown_embed(remaining_cooldown)
-                await ctx.send(embed=embed, delete_after=5)
-                return
-
             if ctx.guild:
                 command_names_to_check = [ctx.command.name.lower()]
                 if hasattr(ctx.command, "aliases") and ctx.command.aliases:
@@ -508,7 +503,18 @@ class DiscordBot(commands.Bot):
                     return
 
             ctx._stats_started_at = time.perf_counter()
-            await super().invoke(ctx)
+            async with self.cooldowns.lock(user_id, command_name):
+                remaining_cooldown = await self.cooldowns.get_remaining(
+                    user_id, command_name
+                )
+                if remaining_cooldown > 0:
+                    embed = await self.cooldowns.get_cooldown_embed(
+                        remaining_cooldown
+                    )
+                    await ctx.send(embed=embed, delete_after=5)
+                    return
+
+                await super().invoke(ctx)
         except commands.CommandInvokeError as exc:
             if _root_cause_is_db_error(exc):
                 self.logger.warning(
@@ -771,15 +777,11 @@ class DiscordBot(commands.Bot):
             return
 
         if isinstance(error, app_commands.CommandOnCooldown):
-            retry = error.retry_after
+            embed = await self.cooldowns.get_cooldown_embed(error.retry_after)
             if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    f"⏳ Try again in {retry:.1f}s.", ephemeral=True
-                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
-                await interaction.followup.send(
-                    f"⏳ Try again in {retry:.1f}s.", ephemeral=True
-                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
         else:
             # fallback for any other errors
             if not interaction.response.is_done():

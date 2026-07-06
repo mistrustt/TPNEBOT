@@ -2,6 +2,7 @@ from .base import BaseManager
 
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import List, Optional
 from ..models import (
     ServerSettings,
@@ -270,31 +271,24 @@ class GuildMixin(BaseManager):
     ) -> None:
         """Sets a cooldown for both prefix and slash commands for a user."""
         await self.ensure_user_identity(user_id)
-        user_id = self.hash_user_id(user_id)
+        user_hash = self.hash_user_id(user_id)
         expiry_time = discord.utils.utcnow() + timedelta(seconds=cooldown_seconds)
 
         async with self.async_sessionmaker() as session:
-            # Try to update existing cooldown first
-            stmt = (
-                update(CommandCooldown)
-                .where(
-                    CommandCooldown.user_id == user_id,
-                    CommandCooldown.command_name == command_name,
+            async with session.begin():
+                stmt = (
+                    pg_insert(CommandCooldown)
+                    .values(
+                        user_id=user_hash,
+                        command_name=command_name,
+                        cooldown_expiry=expiry_time,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["user_id", "command_name"],
+                        set_=dict(cooldown_expiry=expiry_time),
+                    )
                 )
-                .values(cooldown_expiry=expiry_time)
-            )
-            result = await session.execute(stmt)
-
-            if result.rowcount == 0:
-                # No existing cooldown, create new one
-                cooldown = CommandCooldown(
-                    user_id=user_id,
-                    command_name=command_name,
-                    cooldown_expiry=expiry_time,
-                )
-                session.add(cooldown)
-
-            await session.commit()
+                await session.execute(stmt)
 
     async def get_cooldown(self, user_id: int, command_name: str) -> float:
         """Returns the remaining cooldown time in seconds. Returns 0 if expired or not found."""

@@ -17,6 +17,7 @@ from sqlalchemy import text
 from discord import ui, Interaction, SelectOption, ButtonStyle, app_commands
 from discord.ext import commands
 from utils.misc import MiscUtils
+from utils.cooldown import unified_cooldown
 from urllib.parse import urlparse
 from typing import List
 from discord.ext.commands import Context
@@ -2259,7 +2260,6 @@ class General(commands.Cog, name="General"):
     )
 
     @coinmarketcap.command(name="price", description="Get the price of a cryptocurrency.")
-    @app_commands.checks.cooldown(rate=1, per=5.0)
     @app_commands.choices(
         coin=[
             app_commands.Choice(name="Bitcoin", value="BTC"),
@@ -2292,6 +2292,7 @@ class General(commands.Cog, name="General"):
         coin="The cryptocurrency to check (e.g., BTC, ETH, LTC)",
         fiat="The fiat currency to convert to (e.g., USD, EUR, GBP)",
     )
+    @unified_cooldown(5)
     async def price(self, interaction: discord.Interaction, coin: str, fiat: str):
         blacklisted = await self.bot.database.is_user_blacklisted(interaction.user.id)
 

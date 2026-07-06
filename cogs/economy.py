@@ -13,6 +13,7 @@ from discord.ui import View, Button
 from discord.ext import commands, tasks
 from utils.misc import MiscUtils
 from utils.amount import AmountUtils
+from utils.cooldown import unified_cooldown
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -1883,6 +1884,7 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="daily", description="Claim your daily reward.")
+    @unified_cooldown(86400)
     async def daily(self, ctx: commands.Context):
         """Receive a daily reward."""
         try:
@@ -1916,9 +1918,6 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             await self.bot.database.add_reputation_score(ctx.author.id, 1)
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 86400
-            )
 
             # Build embed with multiplier info
             multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
@@ -1944,6 +1943,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(name="weekly", description="Claim your weekly reward.")
+    @unified_cooldown(604800)
     async def weekly(self, ctx: commands.Context):
         """Receive a weekly reward."""
         try:
@@ -1978,9 +1978,6 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             await self.bot.database.add_reputation_score(ctx.author.id, 2)
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 604800
-            )
 
             # Build embed with multiplier info
             multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
@@ -2006,6 +2003,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(name="monthly", description="Claim your monthly reward.")
+    @unified_cooldown(2592000)
     async def monthly(self, ctx: commands.Context):
         """Receive a monthly reward."""
         try:
@@ -2035,9 +2033,6 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             await self.bot.database.add_reputation_score(ctx.author.id, 5)
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 2592000
-            )
             multiplier_text = ""
             if multiplier != Decimal("1.0"):
                 multiplier_text = f" (Economic Multiplier: {multiplier}x)"
@@ -4113,8 +4108,8 @@ class Economy(commands.Cog):
         await msg.edit(embed=embed)
 
     @app_commands.command(name="shop", description="View the shop and buy items.")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    @unified_cooldown(10)
     async def shop(self, interaction: Interaction):
         shop_items = await self.bot.database.list_shop_items()
         if not shop_items:
@@ -4153,8 +4148,8 @@ class Economy(commands.Cog):
             )
 
     @app_commands.command(name="inventory", description="View your items")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    @unified_cooldown(10)
     async def inventory(self, interaction: Interaction, member: discord.Member = None):
         member = member or interaction.user
 
@@ -4179,8 +4174,8 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed, view=paginator)
 
     @app_commands.command(name="use", description="Browse and use items from your inventory")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    @unified_cooldown(10)
     async def use_item(self, interaction: Interaction):
         # Get usable items (CONSUMABLE and REDEEMABLE types)
         entries = await self.bot.database.get_user_inventory_grouped(
@@ -4213,8 +4208,8 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed, view=paginator)
 
     @app_commands.command(name="trade", description="Trade an item to another user")
-    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
+    @unified_cooldown(10)
     async def trade_item(
         self,
         interaction: Interaction,
@@ -4291,7 +4286,7 @@ class Economy(commands.Cog):
             )
 
     @app_commands.command(name="effects", description="View your active effects from items")
-    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
+    @unified_cooldown(30)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     async def view_effects(self, interaction: Interaction):
         effects = await self.bot.database.get_user_active_effects(interaction.user.id)
@@ -4341,7 +4336,7 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="trades", description="View your pending trade requests")
-    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
+    @unified_cooldown(30)
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     async def pending_trades(self, interaction: Interaction):
         trades = await self.bot.database.get_pending_trades(interaction.user.id)

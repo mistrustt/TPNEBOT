@@ -178,6 +178,10 @@ class CommandCooldown(Base):
     command_name = Column(String, nullable=False)
     cooldown_expiry = Column(DateTime(timezone=True), nullable=False)
 
+    __table_args__ = (
+        UniqueConstraint("user_id", "command_name", name="uq_command_cooldowns_user_command"),
+    )
+
     def __repr__(self):
         return f"<CommandCooldown(user_id={self.user_id}, command_name={self.command_name}, cooldown_expiry={self.cooldown_expiry})>"
 

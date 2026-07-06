@@ -221,6 +221,7 @@ class BaseManager:
                 await conn.run_sync(Base.metadata.create_all)
             await self.create_tables()
             await self._repair_daily_user_hash_columns()
+            await self._repair_command_cooldowns_constraint()
 
         try:
             await self._db_retry(_init, retries=self._db_retry_count, base_delay=2.0)
@@ -288,6 +289,38 @@ class BaseManager:
                     logger.info(f"Repaired schema for table: {table}")
                 except SQLAlchemyError as e:
                     logger.warning(f"Schema repair for {table} failed (may be expected): {e}")
+
+    async def _repair_command_cooldowns_constraint(self):
+        """
+        Ensure command_cooldowns has a unique constraint on (user_id, command_name).
+        Older code updated-then-inserted without a constraint, so duplicate rows
+        are possible. Keep the latest expiry per user/command and add the
+        constraint so set_cooldown() can use an atomic upsert.
+        """
+        async with self.engine.begin() as conn:
+            try:
+                await conn.execute(
+                    text(
+                        """
+                        DELETE FROM command_cooldowns
+                        WHERE id NOT IN (
+                            SELECT DISTINCT ON (user_id, command_name) id
+                            FROM command_cooldowns
+                            ORDER BY user_id, command_name, cooldown_expiry DESC, id DESC
+                        )
+                        """
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE command_cooldowns "
+                        "ADD CONSTRAINT IF NOT EXISTS uq_command_cooldowns_user_command "
+                        "UNIQUE (user_id, command_name)"
+                    )
+                )
+                logger.info("Repaired command_cooldowns unique constraint")
+            except SQLAlchemyError as e:
+                logger.warning(f"command_cooldowns constraint repair failed: {e}")
 
     def get_session(self):
         """Provide a transactional scope around a series of operations."""
