@@ -528,6 +528,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         self.num_bombs = num_bombs
         self.formatted_bet = formatted_bet
         self.currency_name = currency_name
+        self.casino: "Casino" = bot.get_cog("Casino")
 
         self.bomb_emoji = "<:bombs:1278849752301309994>"
         self.gem_emoji = "<:gems:1278849818025918497>"
