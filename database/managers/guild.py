@@ -276,19 +276,40 @@ class GuildMixin(BaseManager):
 
         async with self.async_sessionmaker() as session:
             async with session.begin():
-                stmt = (
-                    pg_insert(CommandCooldown)
-                    .values(
-                        user_id=user_hash,
-                        command_name=command_name,
-                        cooldown_expiry=expiry_time,
+                try:
+                    stmt = (
+                        pg_insert(CommandCooldown)
+                        .values(
+                            user_id=user_hash,
+                            command_name=command_name,
+                            cooldown_expiry=expiry_time,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["user_id", "command_name"],
+                            set_=dict(cooldown_expiry=expiry_time),
+                        )
                     )
-                    .on_conflict_do_update(
-                        index_elements=["user_id", "command_name"],
-                        set_=dict(cooldown_expiry=expiry_time),
+                    await session.execute(stmt)
+                except Exception as exc:
+                    # If the unique constraint/index is missing, fall back to a
+                    # read-modify-write so the command still works.
+                    await session.rollback()
+                    result = await session.execute(
+                        select(CommandCooldown).filter_by(
+                            user_id=user_hash, command_name=command_name
+                        )
                     )
-                )
-                await session.execute(stmt)
+                    existing = result.scalar_one_or_none()
+                    if existing:
+                        existing.cooldown_expiry = expiry_time
+                    else:
+                        session.add(
+                            CommandCooldown(
+                                user_id=user_hash,
+                                command_name=command_name,
+                                cooldown_expiry=expiry_time,
+                            )
+                        )
 
     async def get_cooldown(self, user_id: int, command_name: str) -> float:
         """Returns the remaining cooldown time in seconds. Returns 0 if expired or not found."""

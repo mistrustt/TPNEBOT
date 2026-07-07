@@ -292,33 +292,51 @@ class BaseManager:
 
     async def _repair_command_cooldowns_constraint(self):
         """
-        Ensure command_cooldowns has a unique constraint on (user_id, command_name).
+        Ensure command_cooldowns has a unique index on (user_id, command_name).
         Older code updated-then-inserted without a constraint, so duplicate rows
-        are possible. Keep the latest expiry per user/command and add the
-        constraint so set_cooldown() can use an atomic upsert.
+        are possible. Keep the latest expiry per user/command and add a unique
+        index so set_cooldown() can use an atomic upsert via ON CONFLICT.
         """
         async with self.engine.begin() as conn:
             try:
+                # 1. Keep only the latest expiry per user/command.
                 await conn.execute(
                     text(
                         """
-                        DELETE FROM command_cooldowns
-                        WHERE id NOT IN (
-                            SELECT DISTINCT ON (user_id, command_name) id
-                            FROM command_cooldowns
-                            ORDER BY user_id, command_name, cooldown_expiry DESC, id DESC
-                        )
+                        DELETE FROM command_cooldowns a
+                        USING command_cooldowns b
+                        WHERE a.id < b.id
+                          AND a.user_id = b.user_id
+                          AND a.command_name = b.command_name
                         """
+                    )
+                )
+
+                # 2. Create a unique index. PostgreSQL supports ON CONFLICT on a
+                #    unique index even when no named constraint exists.
+                await conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "ix_command_cooldowns_user_command "
+                        "ON command_cooldowns (user_id, command_name)"
+                    )
+                )
+
+                # 3. Also create the named constraint for completeness.
+                await conn.execute(
+                    text(
+                        "ALTER TABLE command_cooldowns "
+                        "DROP CONSTRAINT IF EXISTS uq_command_cooldowns_user_command"
                     )
                 )
                 await conn.execute(
                     text(
                         "ALTER TABLE command_cooldowns "
-                        "ADD CONSTRAINT IF NOT EXISTS uq_command_cooldowns_user_command "
+                        "ADD CONSTRAINT uq_command_cooldowns_user_command "
                         "UNIQUE (user_id, command_name)"
                     )
                 )
-                logger.info("Repaired command_cooldowns unique constraint")
+                logger.info("Repaired command_cooldowns unique constraint/index")
             except SQLAlchemyError as e:
                 logger.warning(f"command_cooldowns constraint repair failed: {e}")
 
