@@ -215,6 +215,7 @@ def slash_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
         except Exception:
             pass
 
+        wrapper._unified_cooldown = True
         return wrapper
 
     return decorator
@@ -265,6 +266,9 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                     if ctx_or_interaction.command
                     else None
                 )
+                # A hybrid command invoked via slash still passes a Context,
+                # but the underlying Interaction is exposed through ctx.interaction.
+                is_slash = ctx_or_interaction.interaction is not None
             else:
                 bot = ctx_or_interaction.client
                 user_id = ctx_or_interaction.user.id
@@ -272,6 +276,7 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                     getattr(ctx_or_interaction.command, "qualified_name", None)
                     or getattr(ctx_or_interaction.command, "name", None)
                 )
+                is_slash = True
 
             if not name:
                 return await func(*args, **kwargs)
@@ -279,11 +284,11 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
             async with bot.cooldowns.lock(user_id, name):
                 remaining = await bot.cooldowns.get_remaining(user_id, name)
                 if remaining > 0:
-                    if isinstance(ctx_or_interaction, commands.Context):
-                        raise commands.CommandOnCooldown(None, remaining)
-                    raise app_commands.CommandOnCooldown(
-                        app_commands.Cooldown(1, seconds), remaining
-                    )
+                    if is_slash:
+                        raise app_commands.CommandOnCooldown(
+                            app_commands.Cooldown(1, seconds), remaining
+                        )
+                    raise commands.CommandOnCooldown(None, remaining)
 
                 result = await func(*args, **kwargs)
                 await bot.cooldowns.set_cooldown(ctx_or_interaction, seconds, name)
@@ -294,6 +299,7 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
         except Exception:
             pass
 
+        wrapper._unified_cooldown = True
         return wrapper
 
     return decorator

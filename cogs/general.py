@@ -21,7 +21,7 @@ from utils.cooldown import unified_cooldown
 from urllib.parse import urlparse
 from typing import List
 from discord.ext.commands import Context
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from PIL import ImageFont, Image, ImageDraw, ImageFilter
 import random
 
@@ -322,6 +322,105 @@ class General(commands.Cog, name="General"):
             self.min_quote_size = default_font.size
         self.RESAMPLE = getattr(Image, "Resampling", Image).LANCZOS
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        Enforce the same guardrails used for prefix commands (blacklist, DM block,
+        account age, command status, role restrictions) on slash/app invocations
+        inside this cog. View callbacks are left to their own interaction_check.
+        """
+        if interaction.type != discord.InteractionType.application_command:
+            return True
+
+        user = interaction.user
+        if getattr(self.bot, "owner_ids", None) and user.id in self.bot.owner_ids:
+            return True
+
+        try:
+            if not interaction.response.is_done():
+                if await self.bot.database.is_user_blacklisted(user.id):
+                    await interaction.response.send_message(
+                        "You are blacklisted from using this bot.", ephemeral=True
+                    )
+                    return False
+        except Exception:
+            pass
+
+        if interaction.guild is None:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Commands can only be used in a server.", ephemeral=True
+                    )
+            except Exception:
+                pass
+            return False
+
+        account_age = discord.utils.utcnow() - user.created_at
+        if account_age < timedelta(days=30):
+            days_remaining = 30 - account_age.days
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"Your account must be at least 30 days old to use commands. "
+                        f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
+            return False
+
+        command = interaction.command
+        command_name = (
+            getattr(command, "qualified_name", None)
+            or getattr(command, "name", None)
+            or "unknown"
+        )
+
+        try:
+            channel_id = interaction.channel_id
+            enabled = await self.bot.database.get_command_status(command_name, channel_id)
+            if enabled is False:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"The `/{command_name}` command is disabled in this channel by staff.",
+                        ephemeral=True,
+                    )
+                return False
+            enabled_global = await self.bot.database.get_command_status(command_name)
+            if enabled_global is False:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"The `/{command_name}` command is currently disabled for maintenance.",
+                        ephemeral=True,
+                    )
+                return False
+        except Exception:
+            pass
+
+        try:
+            if interaction.guild and getattr(interaction.user, "roles", None):
+                command_names = [command_name]
+                aliases = getattr(command, "aliases", None) or []
+                command_names.extend(a.lower() for a in aliases)
+                has_permission = True
+                for cmd_name in command_names:
+                    if not await self.bot.database.check_command_role_restriction(
+                        interaction.guild.id, cmd_name, interaction.user.roles
+                    ):
+                        has_permission = False
+                        break
+                if not has_permission:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"You don't have the required role to use `/{command_name}`.",
+                            ephemeral=True,
+                        )
+                    return False
+        except Exception:
+            pass
+
+        return True
+
     def generate_password(self, length=16, use_digits=True, use_punctuation=True):
         if length < 4:
             raise ValueError(
@@ -445,9 +544,12 @@ class General(commands.Cog, name="General"):
                 )
                 await message.channel.send(embed=embed)
 
-    @commands.command(name="help", description="Displays a list of available commands.")
+    @commands.hybrid_command(
+        name="help", description="Displays a list of available commands."
+    )
+    @unified_cooldown(5)
     async def help(self, ctx: commands.Context, *, query: str = None):
-        prefix = await self.bot.database.get_prefix(ctx.guild.id) or ""
+        prefix = ctx.prefix or "/"
         color = (
             ctx.author.top_role.color
             if hasattr(ctx.author, "top_role")
@@ -581,9 +683,10 @@ class General(commands.Cog, name="General"):
         view.add_item(menu)
         await ctx.reply("Please select a command category:", view=view)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="membercount", description="Shows detailed member statistics."
     )
+    @unified_cooldown(5)
     async def member_count(self, ctx: commands.Context) -> None:
         """Shows detailed member statistics including online status and role distributions."""
 
@@ -671,7 +774,8 @@ class General(commands.Cog, name="General"):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(name="afk", description="Set your AFK status.")
+    @commands.hybrid_command(name="afk", description="Set your AFK status.")
+    @unified_cooldown(5)
     async def afk(
         self, ctx: commands.Context, *, reason: str = "No reason provided"
     ) -> None:
@@ -724,11 +828,12 @@ class General(commands.Cog, name="General"):
                 delete_after=5,
             )
 
-    @commands.command(name="snipe", aliases=["s"])
-    async def snipe(self, ctx: Context, index: str = "1") -> None:
+    @commands.hybrid_command(name="snipe", aliases=["s"])
+    @unified_cooldown(3)
+    async def snipe(self, ctx: Context, index: int = 1) -> None:
         """Retrieve deleted messages from the channel."""
         try:
-            index = max(1, min(int(index) if index.isdigit() else 1, 50))
+            index = max(1, min(index, 50))
             guild_id = ctx.guild.id
             channel_id = ctx.channel.id
 
@@ -811,7 +916,8 @@ class General(commands.Cog, name="General"):
                 "An error occurred while retrieving the message.", delete_after=5
             )
 
-    @commands.command(name="editsnipe", aliases=["es"])
+    @commands.hybrid_command(name="editsnipe", aliases=["es"])
+    @unified_cooldown(3)
     async def edit_snipe(self, ctx: Context) -> None:
         """Retrieve the last edited message in the channel."""
         try:
@@ -843,8 +949,10 @@ class General(commands.Cog, name="General"):
                 "An error occurred while retrieving the edited message.", delete_after=5
             )
 
-    @commands.command(name="clearsnipe", aliases=["cs"])
+    @commands.hybrid_command(name="clearsnipe", aliases=["cs"])
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(5)
     async def clear_snipe(self, ctx: Context) -> None:
         """Clear snipe history for the current channel."""
         guild_id = ctx.guild.id
@@ -860,7 +968,11 @@ class General(commands.Cog, name="General"):
             cleared = True
 
         if cleared:
-            await ctx.message.add_reaction("✅")
+            embed = discord.Embed(
+                description="Cleared snipe history for this channel.",
+                color=discord.Color.green(),
+            )
+            await ctx.reply(embed=embed)
         else:
             await ctx.send("No snipe history to clear!", delete_after=5)
 
@@ -929,7 +1041,10 @@ class General(commands.Cog, name="General"):
         except Exception:
             await ctx.send("An error occurred", delete_after=5)
 
-    @commands.command(name="listbots", description="List all bots in the server.")
+    @commands.hybrid_command(
+        name="listbots", description="List all bots in the server."
+    )
+    @unified_cooldown(5)
     async def list_bots(self, ctx: commands.Context) -> None:
         """List all bots in the server with their IDs."""
         bots = [member for member in ctx.guild.members if member.bot]
@@ -945,11 +1060,14 @@ class General(commands.Cog, name="General"):
         embed.set_footer(text=f"Total Bots: {len(bots)}")
         await ctx.send(embed=embed)
 
-    @commands.command(name="botinfo", description="Get information about the bot.")
+    @commands.hybrid_command(
+        name="botinfo", description="Get information about the bot."
+    )
+    @unified_cooldown(5)
     async def botinfo(self, ctx: commands.Context) -> None:
         logger.debug("Botinfo command called")
 
-        prefix = await self.bot.database.get_prefix(ctx.guild.id)
+        prefix = ctx.prefix or "/"
 
         app_info = await self.bot.application_info()
         owner_name = str(app_info.owner)
@@ -997,8 +1115,10 @@ class General(commands.Cog, name="General"):
         await ctx.reply(embed=embed)
         logger.debug("Botinfo message sent")
 
-    @commands.command(name="setprefix")
+    @commands.hybrid_command(name="setprefix")
     @commands.has_permissions(administrator=True)
+    @app_commands.default_permissions(administrator=True)
+    @unified_cooldown(5)
     async def set_prefix(self, ctx: Context, prefix: str):
         try:
             await self.bot.database.set_prefix(ctx.guild.id, prefix)
@@ -1012,11 +1132,12 @@ class General(commands.Cog, name="General"):
             )
             logger.error(f"Error setting prefix: {e}")
 
-    @commands.command(
+    @commands.hybrid_command(
         name="userinfo",
         aliases=["ui"],
         description="Displays information about a user.",
     )
+    @unified_cooldown(5)
     async def userinfo(self, ctx: commands.Context, identifier: str):
         member = None
 
@@ -1158,9 +1279,10 @@ class General(commands.Cog, name="General"):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="names", description="View the username/nickname history of a user."
     )
+    @unified_cooldown(5)
     async def names(
         self, ctx: commands.Context, user: discord.User = None, per_page: int = 10
     ):
@@ -1191,9 +1313,10 @@ class General(commands.Cog, name="General"):
         embed = view.get_current_embed()
         await ctx.send(embed=embed, view=view)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="clearnames", description="Clear your username/nickname history"
     )
+    @unified_cooldown(30)
     async def clearnames(self, ctx: commands.Context):
         """Clears the username and nickname history of the command invoker."""
 
@@ -1214,9 +1337,10 @@ class General(commands.Cog, name="General"):
         )
         await ctx.send(embed=embed, delete_after=10)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="serverinfo", aliases=["si"], description="View information about the server."
     )
+    @unified_cooldown(5)
     async def serverinfo(self, ctx: commands.Context) -> None:
         def EmojiBool(bool: bool):
             switch = {
@@ -1299,9 +1423,10 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="ping", description="Check the bot's latency and performance."
     )
+    @unified_cooldown(5)
     async def ping(self, ctx: commands.Context) -> None:
         websocket_latency = round(self.bot.latency * 1000, 2)
 
@@ -1335,9 +1460,10 @@ class General(commands.Cog, name="General"):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="avatar", aliases=["av"], description="View the avatar of a user."
     )
+    @unified_cooldown(3)
     async def avatar(
         self, ctx: commands.Context, member: discord.Member = None
     ) -> None:
@@ -1348,11 +1474,12 @@ class General(commands.Cog, name="General"):
         embed.set_image(url=self.utils.get_avatar_url(member))
         await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="serveravatar",
         aliases=["sav"],
         description="View the server-specific avatar of a user (if they have one). Defaults to your own avatar.",
     )
+    @unified_cooldown(3)
     async def server_avatar(self, ctx: commands.Context, member: discord.Member = None):
         member = member or ctx.author
 
@@ -1371,10 +1498,11 @@ class General(commands.Cog, name="General"):
             )
             await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="invite",
         description="Get the invite link of the bot to be able to invite it.",
     )
+    @unified_cooldown(30)
     async def invite(self, ctx: commands.Context) -> None:
         logger.debug("Invite command called")
         embed = discord.Embed(
@@ -1400,10 +1528,11 @@ class General(commands.Cog, name="General"):
             await ctx.reply(embed=embed, view=view)
             logger.warning("Failed to send invite link via DMs, sending in channel")
 
-    @commands.command(
+    @commands.hybrid_command(
         name="8ball",
         description="Ask the magic 8-ball a question and get a cryptic answer. Your question is sent to OpenRouter AI.",
     )
+    @unified_cooldown(15)
     async def eight_ball(self, ctx: commands.Context, *, question: str) -> None:
         # Disallow questions longer than 100 characters (admins bypass)
         if len(question) > 100 and not ctx.author.guild_permissions.administrator:
@@ -1497,15 +1626,13 @@ class General(commands.Cog, name="General"):
                 name="8Ball Answer:", icon_url=self.utils.get_avatar_url(ctx.author)
             )
             embed.set_footer(text="Powered by OpenRouter AI")
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 15
-            )
             await ctx.reply(embed=embed)
             logger.debug("8ball response sent")
 
-    @commands.command(
+    @commands.hybrid_command(
         name="ai", description="Ask the AI a question and get a response. Your question is sent to OpenRouter AI."
     )
+    @unified_cooldown(15)
     async def ai(self, ctx: commands.Context, *, question: str):
         """Ask the AI a question and get a response."""
         # Disallow questions longer than 100 characters (admins bypass)
@@ -1605,13 +1732,13 @@ class General(commands.Cog, name="General"):
             name="AI Response:", icon_url=self.utils.get_avatar_url(ctx.author)
         )
         embed.set_footer(text="Powered by OpenRouter AI")
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 15
-        )
         allowed = discord.AllowedMentions(everyone=False, users=False, roles=False)
         await ctx.reply(embed=embed, allowed_mentions=allowed)
 
-    @commands.command(name="emojisteal", description="Steal a custom server emoji")
+    @commands.hybrid_command(
+        name="emojisteal", description="Steal a custom server emoji"
+    )
+    @unified_cooldown(10)
     async def steal(self, ctx: commands.Context, emoji: str):
         """Steal a custom emoji without writing to disk."""
         try:
@@ -1643,9 +1770,10 @@ class General(commands.Cog, name="General"):
                 delete_after=5,
             )
 
-    @commands.command(
+    @commands.hybrid_command(
         name="convert", description="Convert currency from one type to another."
     )
+    @unified_cooldown(10)
     async def convert_currency(
         self, ctx: commands.Context, amount: float, from_currency: str, to_currency: str
     ):
@@ -1700,7 +1828,10 @@ class General(commands.Cog, name="General"):
                 logger.error(error_msg)
                 await ctx.reply(error_msg)
 
-    @commands.command(name="password", description="Generate a random password")
+    @commands.hybrid_command(
+        name="password", description="Generate a random password"
+    )
+    @unified_cooldown(30)
     async def generate_password_command(
         self,
         ctx: commands.Context,
@@ -1733,7 +1864,10 @@ class General(commands.Cog, name="General"):
                 delete_after=10,
             )
 
-    @commands.command(name="uptime", description="Check the bot's uptime.")
+    @commands.hybrid_command(
+        name="uptime", description="Check the bot's uptime."
+    )
+    @unified_cooldown(5)
     async def uptime(self, ctx: commands.Context):
         """Shows the bot's uptime."""
         current_time = discord.utils.utcnow()
@@ -1808,13 +1942,12 @@ class General(commands.Cog, name="General"):
         s = s.strip("` \n\r\t")
         return s.strip()
 
-    @commands.group(
+    @commands.hybrid_group(
         name="encode", description="Encoding commands.", invoke_without_command=True
     )
+    @unified_cooldown(3)
     async def encode(self, ctx: commands.Context):
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = ctx.prefix or "/"
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -1841,7 +1974,8 @@ class General(commands.Cog, name="General"):
         embed.set_footer(text=f"Use {prefix}encode <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @encode.command(name="binary", description="Convert text to binary.")
+    @encode.hybrid_command(name="binary", description="Convert text to binary.")
+    @unified_cooldown(5)
     async def binary_encode(self, ctx: commands.Context, *, text: str = None):
         binary_pattern = r"^[01\s]+$"
         text = await self._resolve_input_from_reply(ctx, text)
@@ -1871,7 +2005,8 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.command(name="base64", description="Convert text to base64.")
+    @encode.hybrid_command(name="base64", description="Convert text to base64.")
+    @unified_cooldown(5)
     async def base64_encode(self, ctx: commands.Context, *, text: str = None):
         base64_pattern = (
             r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
@@ -1905,7 +2040,8 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.command(name="rot13", description="Apply ROT13 encoding to text.")
+    @encode.hybrid_command(name="rot13", description="Apply ROT13 encoding to text.")
+    @unified_cooldown(5)
     async def rot13_encode(self, ctx: commands.Context, *, text: str = None):
         text = await self._resolve_input_from_reply(ctx, text)
         if not text:
@@ -1930,7 +2066,8 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.command(name="hex", description="Convert text to hexadecimal.")
+    @encode.hybrid_command(name="hex", description="Convert text to hexadecimal.")
+    @unified_cooldown(5)
     async def hex_encode(self, ctx: commands.Context, *, text: str = None):
         hex_pattern = r"^(0x)?[0-9a-fA-F]+$"
         text = await self._resolve_input_from_reply(ctx, text)
@@ -1962,7 +2099,8 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.command(name="morse", description="Convert text to Morse code.")
+    @encode.hybrid_command(name="morse", description="Convert text to Morse code.")
+    @unified_cooldown(5)
     async def morse_encode(self, ctx: commands.Context, *, text: str = None):
         morse_pattern = r"^[\s\.-/]+$"
         text = await self._resolve_input_from_reply(ctx, text)
@@ -2037,13 +2175,12 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @commands.group(
+    @commands.hybrid_group(
         name="decode", description="Decoding commands.", invoke_without_command=True
     )
+    @unified_cooldown(3)
     async def decode(self, ctx: commands.Context):
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = ctx.prefix or "/"
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -2070,7 +2207,8 @@ class General(commands.Cog, name="General"):
         embed.set_footer(text=f"Use {prefix}decode <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @decode.command(name="binary", description="Convert binary to text.")
+    @decode.hybrid_command(name="binary", description="Convert binary to text.")
+    @unified_cooldown(5)
     async def binary_decode(self, ctx: commands.Context, *, binary: str = None):
         binary_pattern = r"^[01\s]+$"
         embed = discord.Embed(title="Binary to Text", color=discord.Color.blurple())
@@ -2094,7 +2232,8 @@ class General(commands.Cog, name="General"):
             embed.description = "Invalid binary input. Ensure it's composed of 0s and 1s in 8-bit chunks."
         await ctx.reply(embed=embed)
 
-    @decode.command(name="base64", description="Convert base64 to text.")
+    @decode.hybrid_command(name="base64", description="Convert base64 to text.")
+    @unified_cooldown(5)
     async def base64_decode(self, ctx: commands.Context, *, text: str = None):
         base64_pattern = (
             r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
@@ -2121,7 +2260,8 @@ class General(commands.Cog, name="General"):
             )
         await ctx.reply(embed=embed)
 
-    @decode.command(name="rot13", description="Decode ROT13 encoded text.")
+    @decode.hybrid_command(name="rot13", description="Decode ROT13 encoded text.")
+    @unified_cooldown(5)
     async def rot13_decode(self, ctx: commands.Context, *, text: str = None):
         text = await self._resolve_input_from_reply(ctx, text)
         if not text:
@@ -2145,7 +2285,8 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @decode.command(name="hex", description="Convert hexadecimal to text.")
+    @decode.hybrid_command(name="hex", description="Convert hexadecimal to text.")
+    @unified_cooldown(5)
     async def hex_decode(self, ctx: commands.Context, *, text: str = None):
         hex_pattern = r"^(0x)?[0-9a-fA-F]+$"
         embed = discord.Embed(
@@ -2173,7 +2314,8 @@ class General(commands.Cog, name="General"):
             )
         await ctx.reply(embed=embed)
 
-    @decode.command(name="morse", description="Convert Morse code to text.")
+    @decode.hybrid_command(name="morse", description="Convert Morse code to text.")
+    @unified_cooldown(5)
     async def morse_decode(self, ctx: commands.Context, *, text: str = None):
         morse_pattern = r"^[\s\.-/]+$"
         text = await self._resolve_input_from_reply(ctx, text)
@@ -2429,9 +2571,10 @@ class General(commands.Cog, name="General"):
                         ephemeral=True,
                     )
 
-    @commands.command(
+    @commands.hybrid_command(
         name="whois", description="Get WHOIS information about an IP address."
     )
+    @unified_cooldown(10)
     async def whois(self, ctx: commands.Context, ip_address: str):
         """Get information about an IP address."""
 
@@ -2508,7 +2651,10 @@ class General(commands.Cog, name="General"):
                         delete_after=5,
                     )
 
-    @commands.command(name="remind", description="Set a reminder for a specific time.")
+    @commands.hybrid_command(
+        name="remind", description="Set a reminder for a specific time."
+    )
+    @unified_cooldown(10)
     async def remind(self, ctx: commands.Context, time: str, *, reminder: str):
         """Set a reminder for a specific time."""
         try:
@@ -2546,9 +2692,10 @@ class General(commands.Cog, name="General"):
         embed2 = discord.Embed(description=f"**REMINDER:**\n\n{safe_reminder}")
         await ctx.reply(embed=embed2)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="apod", description="Fetch NASA's Astronomy Picture of the Day."
     )
+    @unified_cooldown(30)
     async def apod(self, ctx: commands.Context):
         """Fetches NASA's Astronomy Picture of the Day"""
         await ctx.reply(
@@ -2944,7 +3091,8 @@ class General(commands.Cog, name="General"):
         lines.append(current_line)
         return lines
 
-    @commands.command(name="forgetme")
+    @commands.hybrid_command(name="forgetme")
+    @unified_cooldown(60)
     async def forget_me(self, ctx):
         """
         Delete all personal/economy/game/social data for the invoking user.

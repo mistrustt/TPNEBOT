@@ -205,6 +205,8 @@ class DiscordBot(commands.Bot):
             f"postgresql+asyncpg://{self.db_user}:{self.db_pw}@{self.db_host}:{self.db_port}/{self.db_name}"
         )
         self.cooldowns = UnifiedCooldownManager(self)
+        self._context_start_times: dict[int, float] = {}
+        self._interaction_start_times: dict[int, float] = {}
         self.config = self.database.load_config()
         self.debug_mode_active = False
         self.cool_guys = [
@@ -502,7 +504,17 @@ class DiscordBot(commands.Bot):
                     await ctx.send(embed=embed, delete_after=5)
                     return
 
-            ctx._stats_started_at = time.perf_counter()
+            self._context_start_times[id(ctx)] = time.perf_counter()
+
+            # Commands decorated with unified_cooldown manage their own lock/check.
+            # Trying to lock here too would deadlock because the wrapper also locks.
+            uses_unified_cooldown = getattr(
+                ctx.command.callback, "_unified_cooldown", False
+            )
+            if uses_unified_cooldown:
+                await super().invoke(ctx)
+                return
+
             async with self.cooldowns.lock(user_id, command_name):
                 remaining_cooldown = await self.cooldowns.get_remaining(
                     user_id, command_name
@@ -555,7 +567,7 @@ class DiscordBot(commands.Bot):
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
-            interaction._stats_started_at = time.perf_counter()
+            self._interaction_start_times[id(interaction)] = time.perf_counter()
             # Ensure the mapping table has this user so hashes can be resolved later.
             try:
                 await self.database.ensure_user_identity(interaction.user.id)
@@ -609,7 +621,7 @@ class DiscordBot(commands.Bot):
             user_hash = hash_user_id(user.id)
             guild_id = guild.id if guild else None
             latency_ms = None
-            started_at = getattr(ctx, "_stats_started_at", None)
+            started_at = self._context_start_times.pop(id(ctx), None)
             if started_at is not None:
                 latency_ms = int((time.perf_counter() - started_at) * 1000)
 
@@ -661,7 +673,7 @@ class DiscordBot(commands.Bot):
             user_hash = hash_user_id(interaction.user.id)
             guild_id = interaction.guild.id if interaction.guild else None
             latency_ms = None
-            started_at = getattr(interaction, "_stats_started_at", None)
+            started_at = self._interaction_start_times.pop(id(interaction), None)
             if started_at is not None:
                 latency_ms = int((time.perf_counter() - started_at) * 1000)
 
@@ -710,6 +722,7 @@ class DiscordBot(commands.Bot):
     async def on_app_command_error(
         self, interaction: discord.Interaction, error
     ) -> None:
+        started_at = self._interaction_start_times.pop(id(interaction), None)
         try:
             if not isinstance(error, app_commands.CommandOnCooldown):
                 command = getattr(interaction, "command", None)
@@ -727,7 +740,6 @@ class DiscordBot(commands.Bot):
                     error_type=type(error).__name__,
                     used_at=used_at,
                 )
-                started_at = getattr(interaction, "_stats_started_at", None)
                 if started_at is not None:
                     latency_ms = int((time.perf_counter() - started_at) * 1000)
                     await self.database.record_command_latency(
@@ -796,6 +808,7 @@ class DiscordBot(commands.Bot):
             self.logger.exception(error)
 
     async def on_command_error(self, ctx: Context, error) -> None:
+        started_at = self._context_start_times.pop(id(ctx), None)
         try:
             if ctx.command and not isinstance(
                 error, (commands.CommandNotFound, commands.CommandOnCooldown)
@@ -813,7 +826,6 @@ class DiscordBot(commands.Bot):
                     error_type=type(error).__name__,
                     used_at=used_at,
                 )
-                started_at = getattr(ctx, "_stats_started_at", None)
                 if started_at is not None:
                     latency_ms = int((time.perf_counter() - started_at) * 1000)
                     await self.database.record_command_latency(
