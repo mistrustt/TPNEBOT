@@ -69,7 +69,11 @@ class FairGateClient:
         self.admin_api_key = admin_api_key
         self.algorithm = algorithm
         self._session: aiohttp.ClientSession | None = None
-        self._timeout = timeout or aiohttp.ClientTimeout(total=15)
+        # Default gives slow game servers more headroom while still catching
+        # truly stuck connections quickly.
+        self._timeout = timeout or aiohttp.ClientTimeout(
+            total=30, connect=10, sock_read=25
+        )
         self._seed: dict[str, Any] | None = None
 
     @classmethod
@@ -78,6 +82,7 @@ class FairGateClient:
 
         At least one of ``FAIRGATE_API_KEY`` (for gameplay) or
         ``FAIRGATE_ADMIN_API_KEY`` (for app management) must be set.
+        ``FAIRGATE_TIMEOUT`` can override the default 30-second request timeout.
         """
         base_url = os.getenv("FAIRGATE_BASE_URL", "http://localhost:8080")
         api_key = os.getenv("FAIRGATE_API_KEY") or None
@@ -86,10 +91,21 @@ class FairGateClient:
             raise FairGateError(
                 "Neither FAIRGATE_API_KEY nor FAIRGATE_ADMIN_API_KEY is configured"
             )
+
+        timeout = None
+        if raw_timeout := os.getenv("FAIRGATE_TIMEOUT"):
+            try:
+                timeout = aiohttp.ClientTimeout(total=float(raw_timeout))
+            except ValueError:
+                logger.warning(
+                    "FAIRGATE_TIMEOUT value %r is not a number; using default", raw_timeout
+                )
+
         return cls(
             base_url=base_url,
             api_key=api_key,
             admin_api_key=admin_api_key,
+            timeout=timeout,
         )
 
     def _session_or_create(self) -> aiohttp.ClientSession:
