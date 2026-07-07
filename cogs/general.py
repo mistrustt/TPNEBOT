@@ -19,7 +19,7 @@ from discord.ext import commands
 from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
 from urllib.parse import urlparse
-from typing import List
+from typing import List, Optional
 from discord.ext.commands import Context
 from datetime import datetime, timedelta, timezone
 from PIL import ImageFont, Image, ImageDraw, ImageFilter
@@ -1284,7 +1284,10 @@ class General(commands.Cog, name="General"):
     )
     @unified_cooldown(5)
     async def names(
-        self, ctx: commands.Context, user: discord.User = None, per_page: int = 10
+        self,
+        ctx: commands.Context,
+        user: Optional[discord.User] = None,
+        per_page: int = 10,
     ):
         """Displays the username and nickname history of a specified user.
 
@@ -1465,7 +1468,7 @@ class General(commands.Cog, name="General"):
     )
     @unified_cooldown(3)
     async def avatar(
-        self, ctx: commands.Context, member: discord.Member = None
+        self, ctx: commands.Context, member: Optional[discord.Member] = None
     ) -> None:
         member = member or ctx.author
         embed = discord.Embed(
@@ -1480,7 +1483,9 @@ class General(commands.Cog, name="General"):
         description="View the server-specific avatar of a user (if they have one). Defaults to your own avatar.",
     )
     @unified_cooldown(3)
-    async def server_avatar(self, ctx: commands.Context, member: discord.Member = None):
+    async def server_avatar(
+        self, ctx: commands.Context, member: Optional[discord.Member] = None
+    ):
         member = member or ctx.author
 
         server_avatar_url = member.display_avatar.url if member.display_avatar else None
