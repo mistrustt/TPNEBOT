@@ -779,7 +779,9 @@ class General(commands.Cog, name="General"):
     @commands.hybrid_command(name="afk", description="Set your AFK status.")
     @unified_cooldown(5)
     async def afk(
-        self, ctx: commands.Context, *, reason: str = "No reason provided"
+        self,
+        ctx: commands.Context,
+        reason: Optional[str] = "No reason provided",
     ) -> None:
         """
         Set your AFK status with an optional reason.
