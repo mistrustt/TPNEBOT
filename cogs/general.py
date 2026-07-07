@@ -1987,7 +1987,7 @@ class General(commands.Cog, name="General"):
         embed.set_footer(text=f"Use {prefix}encode <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @encode.hybrid_command(name="binary", description="Convert text to binary.")
+    @encode.command(name="binary", description="Convert text to binary.")
     @unified_cooldown(5)
     async def binary_encode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2020,7 +2020,7 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.hybrid_command(name="base64", description="Convert text to base64.")
+    @encode.command(name="base64", description="Convert text to base64.")
     @unified_cooldown(5)
     async def base64_encode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2057,7 +2057,7 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.hybrid_command(name="rot13", description="Apply ROT13 encoding to text.")
+    @encode.command(name="rot13", description="Apply ROT13 encoding to text.")
     @unified_cooldown(5)
     async def rot13_encode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2085,7 +2085,7 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.hybrid_command(name="hex", description="Convert text to hexadecimal.")
+    @encode.command(name="hex", description="Convert text to hexadecimal.")
     @unified_cooldown(5)
     async def hex_encode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2120,7 +2120,7 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @encode.hybrid_command(name="morse", description="Convert text to Morse code.")
+    @encode.command(name="morse", description="Convert text to Morse code.")
     @unified_cooldown(5)
     async def morse_encode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2230,7 +2230,7 @@ class General(commands.Cog, name="General"):
         embed.set_footer(text=f"Use {prefix}decode <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @decode.hybrid_command(name="binary", description="Convert binary to text.")
+    @decode.command(name="binary", description="Convert binary to text.")
     @unified_cooldown(5)
     async def binary_decode(
         self, ctx: commands.Context, binary: Optional[str] = None
@@ -2257,7 +2257,7 @@ class General(commands.Cog, name="General"):
             embed.description = "Invalid binary input. Ensure it's composed of 0s and 1s in 8-bit chunks."
         await ctx.reply(embed=embed)
 
-    @decode.hybrid_command(name="base64", description="Convert base64 to text.")
+    @decode.command(name="base64", description="Convert base64 to text.")
     @unified_cooldown(5)
     async def base64_decode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2287,7 +2287,7 @@ class General(commands.Cog, name="General"):
             )
         await ctx.reply(embed=embed)
 
-    @decode.hybrid_command(name="rot13", description="Decode ROT13 encoded text.")
+    @decode.command(name="rot13", description="Decode ROT13 encoded text.")
     @unified_cooldown(5)
     async def rot13_decode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2314,7 +2314,7 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
-    @decode.hybrid_command(name="hex", description="Convert hexadecimal to text.")
+    @decode.command(name="hex", description="Convert hexadecimal to text.")
     @unified_cooldown(5)
     async def hex_decode(
         self, ctx: commands.Context, text: Optional[str] = None
@@ -2345,7 +2345,7 @@ class General(commands.Cog, name="General"):
             )
         await ctx.reply(embed=embed)
 
-    @decode.hybrid_command(name="morse", description="Convert Morse code to text.")
+    @decode.command(name="morse", description="Convert Morse code to text.")
     @unified_cooldown(5)
     async def morse_decode(
         self, ctx: commands.Context, text: Optional[str] = None

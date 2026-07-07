@@ -213,11 +213,6 @@ def slash_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
 
             return await func(*args, **kwargs)
 
-        try:
-            wrapper.__signature__ = inspect.signature(func)
-        except Exception:
-            pass
-
         wrapper._unified_cooldown = True
         return wrapper
 
@@ -298,11 +293,6 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                 result = await func(*args, **kwargs)
                 await bot.cooldowns.set_cooldown(ctx_or_interaction, seconds, name)
                 return result
-
-        try:
-            wrapper.__signature__ = inspect.signature(func)
-        except Exception:
-            pass
 
         wrapper._unified_cooldown = True
         return wrapper
