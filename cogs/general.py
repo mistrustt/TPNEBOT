@@ -548,7 +548,9 @@ class General(commands.Cog, name="General"):
         name="help", description="Displays a list of available commands."
     )
     @unified_cooldown(5)
-    async def help(self, ctx: commands.Context, *, query: str = None):
+    async def help(
+        self, ctx: commands.Context, query: Optional[str] = None
+    ):
         prefix = ctx.prefix or "/"
         color = (
             ctx.author.top_role.color
@@ -1981,7 +1983,9 @@ class General(commands.Cog, name="General"):
 
     @encode.hybrid_command(name="binary", description="Convert text to binary.")
     @unified_cooldown(5)
-    async def binary_encode(self, ctx: commands.Context, *, text: str = None):
+    async def binary_encode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         binary_pattern = r"^[01\s]+$"
         text = await self._resolve_input_from_reply(ctx, text)
 
@@ -2012,7 +2016,9 @@ class General(commands.Cog, name="General"):
 
     @encode.hybrid_command(name="base64", description="Convert text to base64.")
     @unified_cooldown(5)
-    async def base64_encode(self, ctx: commands.Context, *, text: str = None):
+    async def base64_encode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         base64_pattern = (
             r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
         )
@@ -2047,7 +2053,9 @@ class General(commands.Cog, name="General"):
 
     @encode.hybrid_command(name="rot13", description="Apply ROT13 encoding to text.")
     @unified_cooldown(5)
-    async def rot13_encode(self, ctx: commands.Context, *, text: str = None):
+    async def rot13_encode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         text = await self._resolve_input_from_reply(ctx, text)
         if not text:
             embed = discord.Embed(
@@ -2073,7 +2081,9 @@ class General(commands.Cog, name="General"):
 
     @encode.hybrid_command(name="hex", description="Convert text to hexadecimal.")
     @unified_cooldown(5)
-    async def hex_encode(self, ctx: commands.Context, *, text: str = None):
+    async def hex_encode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         hex_pattern = r"^(0x)?[0-9a-fA-F]+$"
         text = await self._resolve_input_from_reply(ctx, text)
         if not text:
@@ -2106,7 +2116,9 @@ class General(commands.Cog, name="General"):
 
     @encode.hybrid_command(name="morse", description="Convert text to Morse code.")
     @unified_cooldown(5)
-    async def morse_encode(self, ctx: commands.Context, *, text: str = None):
+    async def morse_encode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         morse_pattern = r"^[\s\.-/]+$"
         text = await self._resolve_input_from_reply(ctx, text)
         if not text:
@@ -2214,7 +2226,9 @@ class General(commands.Cog, name="General"):
 
     @decode.hybrid_command(name="binary", description="Convert binary to text.")
     @unified_cooldown(5)
-    async def binary_decode(self, ctx: commands.Context, *, binary: str = None):
+    async def binary_decode(
+        self, ctx: commands.Context, binary: Optional[str] = None
+    ):
         binary_pattern = r"^[01\s]+$"
         embed = discord.Embed(title="Binary to Text", color=discord.Color.blurple())
         try:
@@ -2239,7 +2253,9 @@ class General(commands.Cog, name="General"):
 
     @decode.hybrid_command(name="base64", description="Convert base64 to text.")
     @unified_cooldown(5)
-    async def base64_decode(self, ctx: commands.Context, *, text: str = None):
+    async def base64_decode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         base64_pattern = (
             r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
         )
@@ -2267,7 +2283,9 @@ class General(commands.Cog, name="General"):
 
     @decode.hybrid_command(name="rot13", description="Decode ROT13 encoded text.")
     @unified_cooldown(5)
-    async def rot13_decode(self, ctx: commands.Context, *, text: str = None):
+    async def rot13_decode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         text = await self._resolve_input_from_reply(ctx, text)
         if not text:
             embed = discord.Embed(
@@ -2292,7 +2310,9 @@ class General(commands.Cog, name="General"):
 
     @decode.hybrid_command(name="hex", description="Convert hexadecimal to text.")
     @unified_cooldown(5)
-    async def hex_decode(self, ctx: commands.Context, *, text: str = None):
+    async def hex_decode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         hex_pattern = r"^(0x)?[0-9a-fA-F]+$"
         embed = discord.Embed(
             title="Hexadecimal to Text", color=discord.Color.blurple()
@@ -2321,7 +2341,9 @@ class General(commands.Cog, name="General"):
 
     @decode.hybrid_command(name="morse", description="Convert Morse code to text.")
     @unified_cooldown(5)
-    async def morse_decode(self, ctx: commands.Context, *, text: str = None):
+    async def morse_decode(
+        self, ctx: commands.Context, text: Optional[str] = None
+    ):
         morse_pattern = r"^[\s\.-/]+$"
         text = await self._resolve_input_from_reply(ctx, text)
 
@@ -2788,7 +2810,9 @@ class General(commands.Cog, name="General"):
             await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(name="quote", description="Quote a message or text.")
-    async def quote(self, ctx: commands.Context, *, payload: str = None):
+    async def quote(
+        self, ctx: commands.Context, payload: Optional[str] = None
+    ):
         """Quote a message or text."""
         try:
             msg = None
