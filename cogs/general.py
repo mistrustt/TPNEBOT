@@ -1542,7 +1542,9 @@ class General(commands.Cog, name="General"):
         description="Ask the magic 8-ball a question and get a cryptic answer. Your question is sent to OpenRouter AI.",
     )
     @unified_cooldown(15)
-    async def eight_ball(self, ctx: commands.Context, *, question: str) -> None:
+    async def eight_ball(
+        self, ctx: commands.Context, question: Optional[str] = None
+    ) -> None:
         # Disallow questions longer than 100 characters (admins bypass)
         if len(question) > 100 and not ctx.author.guild_permissions.administrator:
             await ctx.reply(
@@ -1642,7 +1644,9 @@ class General(commands.Cog, name="General"):
         name="ai", description="Ask the AI a question and get a response. Your question is sent to OpenRouter AI."
     )
     @unified_cooldown(15)
-    async def ai(self, ctx: commands.Context, *, question: str):
+    async def ai(
+        self, ctx: commands.Context, question: Optional[str] = None
+    ):
         """Ask the AI a question and get a response."""
         # Disallow questions longer than 100 characters (admins bypass)
         if len(question) > 100 and not ctx.author.guild_permissions.administrator:
@@ -2684,7 +2688,9 @@ class General(commands.Cog, name="General"):
         name="remind", description="Set a reminder for a specific time."
     )
     @unified_cooldown(10)
-    async def remind(self, ctx: commands.Context, time: str, *, reminder: str):
+    async def remind(
+        self, ctx: commands.Context, time: str, reminder: Optional[str] = None
+    ):
         """Set a reminder for a specific time."""
         try:
             time = humanfriendly.parse_timespan(time)
