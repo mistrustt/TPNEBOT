@@ -8,6 +8,7 @@ from typing import Optional, Union
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ext.commands import BucketType, Cooldown
 
 logger = logging.getLogger("discord_bot")
 
@@ -150,7 +151,9 @@ def prefix_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
         async with ctx.bot.cooldowns.lock(ctx.author.id, name):
             remaining = await ctx.bot.cooldowns.get_remaining(ctx.author.id, name)
             if remaining > 0:
-                raise commands.CommandOnCooldown(None, remaining)
+                raise commands.CommandOnCooldown(
+                    Cooldown(1, seconds), remaining, BucketType.user
+                )
         return True
 
     return commands.check(predicate)
@@ -288,7 +291,9 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                         raise app_commands.CommandOnCooldown(
                             app_commands.Cooldown(1, seconds), remaining
                         )
-                    raise commands.CommandOnCooldown(None, remaining)
+                    raise commands.CommandOnCooldown(
+                        Cooldown(1, seconds), remaining, BucketType.user
+                    )
 
                 result = await func(*args, **kwargs)
                 await bot.cooldowns.set_cooldown(ctx_or_interaction, seconds, name)
