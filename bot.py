@@ -258,6 +258,18 @@ class DiscordBot(commands.Bot):
         config = await self.config
         loaded_cogs = config.loaded_cogs if config else []
         unloaded_cogs = config.unloaded_cogs if config else []
+        # Jishaku development environment check
+
+        if os.getenv("INFISICAL_ENVIRONMENT") == "dev":
+            self.logger.info("Development environment detected. Loading Jishaku cog.")
+            try:
+                await self.load_extension("jishaku")
+                self.logger.info("Loaded extension 'jishaku'")
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to load extension jishaku\n{type(e).__name__}: {e}"
+                )
+
         for file in cogs_path.glob("*.py"):
             extension = f"cogs.{file.stem}"
 
