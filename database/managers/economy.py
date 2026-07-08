@@ -2908,6 +2908,17 @@ class EconomyMixin(BaseManager):
         VELOCITY_CRISIS_THRESHOLD = Decimal("0.001")  # Near-zero money velocity
         LIQUIDITY_CRISIS_THRESHOLD = Decimal("0.005")  # Less than 0.5% circulating
 
+        # Bootstrap guard: a fresh/empty database has no circulating currency and
+        # therefore no velocity. The circuit breaker is meant to detect crises in
+        # an active economy, not to prevent the economy from starting up.
+        if liquidity_ratio <= 0:
+            return {
+                "triggered": False,
+                "reasons": [],
+                "velocity": velocity,
+                "liquidity_ratio": liquidity_ratio,
+            }
+
         reason = []
 
         if velocity < VELOCITY_CRISIS_THRESHOLD:
