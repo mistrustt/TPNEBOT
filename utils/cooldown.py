@@ -201,15 +201,26 @@ def slash_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                         interaction.user.id, name
                     )
                     if remaining > 0:
+                        logger.debug(
+                            "Slash cooldown blocked user %s for /%s (%.2fs remaining)",
+                            interaction.user.id,
+                            name,
+                            remaining,
+                        )
                         raise app_commands.CommandOnCooldown(
                             app_commands.Cooldown(1, seconds), remaining
                         )
 
-                    result = await func(*args, **kwargs)
+                    # Set the cooldown immediately so that Discord interaction
+                    # retries (which can fire if the command does not respond
+                    # within ~3 seconds) see that an invocation is already in
+                    # progress instead of racing into the command body.
                     await interaction.client.cooldowns.set_cooldown(
                         interaction.user.id, name, seconds
                     )
-                    return result
+
+                logger.debug("Set slash cooldown for user %s /%s", interaction.user.id, name)
+                return await func(*args, **kwargs)
 
             return await func(*args, **kwargs)
 
@@ -282,6 +293,13 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
             async with bot.cooldowns.lock(user_id, name):
                 remaining = await bot.cooldowns.get_remaining(user_id, name)
                 if remaining > 0:
+                    logger.debug(
+                        "Unified cooldown blocked user %s for %s (%.2fs remaining, slash=%s)",
+                        user_id,
+                        name,
+                        remaining,
+                        is_slash,
+                    )
                     if is_slash:
                         raise app_commands.CommandOnCooldown(
                             app_commands.Cooldown(1, seconds), remaining
@@ -290,9 +308,19 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                         Cooldown(1, seconds), remaining, BucketType.user
                     )
 
-                result = await func(*args, **kwargs)
+                # Set the cooldown immediately so that Discord interaction
+                # retries (which can fire if the command does not respond within
+                # ~3 seconds) see that an invocation is already in progress
+                # instead of racing into the command body.
                 await bot.cooldowns.set_cooldown(ctx_or_interaction, seconds, name)
-                return result
+
+            logger.debug(
+                "Set unified cooldown for user %s command %s (slash=%s)",
+                user_id,
+                name,
+                is_slash,
+            )
+            return await func(*args, **kwargs)
 
         wrapper._unified_cooldown = True
         return wrapper
