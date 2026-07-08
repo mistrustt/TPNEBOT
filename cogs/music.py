@@ -4,6 +4,7 @@ import logging
 import aiohttp
 import asyncio
 from io import BytesIO
+from typing import Optional
 from zoneinfo import ZoneInfo
 from colorthief import ColorThief
 from discord.ext import commands, tasks
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from urllib.parse import quote
 from utils.cache import Cache
+from utils.cooldown import unified_cooldown
 from utils.embeds import Embeds
 from itertools import product
 from moviepy import *
@@ -46,7 +48,7 @@ class Music(commands.Cog, name="Music"):
         self.cache_songs.start()
         self.is_blacktea_synced = False
 
-        self.valid_names = []
+        self.valid_names = set()
         self.producer_counts = {}
         self.ongoing_blacktea = []
         self.ongoing_higherlower = []
@@ -180,6 +182,105 @@ class Music(commands.Cog, name="Music"):
     async def cog_unload(self):
         self._auto_cache_clean.cancel()
         await self.session.close()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        Enforce the same guardrails used for prefix commands (blacklist, DM block,
+        account age, command status, role restrictions) on slash/app invocations
+        inside this cog. View callbacks are left to their own interaction_check.
+        """
+        if interaction.type != discord.InteractionType.application_command:
+            return True
+
+        user = interaction.user
+        if getattr(self.bot, "owner_ids", None) and user.id in self.bot.owner_ids:
+            return True
+
+        try:
+            if not interaction.response.is_done():
+                if await self.bot.database.is_user_blacklisted(user.id):
+                    await interaction.response.send_message(
+                        "You are blacklisted from using this bot.", ephemeral=True
+                    )
+                    return False
+        except Exception:
+            pass
+
+        if interaction.guild is None:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Commands can only be used in a server.", ephemeral=True
+                    )
+            except Exception:
+                pass
+            return False
+
+        account_age = discord.utils.utcnow() - user.created_at
+        if account_age < timedelta(days=30):
+            days_remaining = 30 - account_age.days
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"Your account must be at least 30 days old to use commands. "
+                        f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
+            return False
+
+        command = interaction.command
+        command_name = (
+            getattr(command, "qualified_name", None)
+            or getattr(command, "name", None)
+            or "unknown"
+        )
+
+        try:
+            channel_id = interaction.channel_id
+            enabled = await self.bot.database.get_command_status(command_name, channel_id)
+            if enabled is False:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"The `/{command_name}` command is disabled in this channel by staff.",
+                        ephemeral=True,
+                    )
+                return False
+            enabled_global = await self.bot.database.get_command_status(command_name)
+            if enabled_global is False:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"The `/{command_name}` command is currently disabled for maintenance.",
+                        ephemeral=True,
+                    )
+                return False
+        except Exception:
+            pass
+
+        try:
+            if interaction.guild and getattr(interaction.user, "roles", None):
+                command_names = [command_name]
+                aliases = getattr(command, "aliases", None) or []
+                command_names.extend(a.lower() for a in aliases)
+                has_permission = True
+                for cmd_name in command_names:
+                    if not await self.bot.database.check_command_role_restriction(
+                        interaction.guild.id, cmd_name, interaction.user.roles
+                    ):
+                        has_permission = False
+                        break
+                if not has_permission:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"You don't have the required role to use `/{command_name}`.",
+                            ephemeral=True,
+                        )
+                    return False
+        except Exception:
+            pass
+
+        return True
 
     def can_test(ctx: commands.Context, cog=None):
         if cog is None:
@@ -358,12 +459,16 @@ class Music(commands.Cog, name="Music"):
             logger.warning(f"Last.fm API request failed for user {lastfm_username}")
             return []
 
-    @commands.group(name="lf", invoke_without_command=True)
+    @commands.hybrid_group(name="lf", invoke_without_command=True, description="Last.fm command group.")
+    @unified_cooldown(3)
     async def lastfm(self, ctx: Context) -> None:
         """Last.fm command group"""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        if ctx.interaction is not None:
+            prefix = "/"
+        else:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -390,7 +495,8 @@ class Music(commands.Cog, name="Music"):
         embed.set_footer(text=f"Use {prefix}lastfm <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
-    @lastfm.command(name="set")
+    @lastfm.command(name="set", description="Set your Last.fm username.")
+    @unified_cooldown(10)
     async def set_lastfm(self, ctx: Context, username: str) -> None:
         """Set your Last.fm username"""
         user_id = int(ctx.author.id)
@@ -402,7 +508,8 @@ class Music(commands.Cog, name="Music"):
             )
         )
 
-    @lastfm.command(name="update")
+    @lastfm.command(name="update", description="Manually update your Last.fm recent listening index.")
+    @unified_cooldown(30)
     async def manual_update_index(self, ctx: Context):
         """Allow users to manually update their recent listening data index."""
         user_id = int(ctx.author.id)
@@ -415,7 +522,8 @@ class Music(commands.Cog, name="Music"):
         await self.update_user_index(lastfm_username)
         await ctx.reply("Your recent listening data has been updated.")
 
-    @lastfm.command(name="color")
+    @lastfm.command(name="color", description="Set your Last.fm embed color.")
+    @unified_cooldown(10)
     async def set_color(self, ctx: Context, color: str) -> None:
         """Set your Last.fm embed color with HEX codes or standard color names."""
         color_bank = {
@@ -478,7 +586,8 @@ class Music(commands.Cog, name="Music"):
                 )
             )
 
-    @lastfm.command(name="votes")
+    @lastfm.command(name="votes", description="See your Last.fm vote statistics.")
+    @unified_cooldown(15)
     async def lastfm_stats(self, ctx: Context):
         """See your Last.fm vote statistics"""
         user_id = int(ctx.author.id)
@@ -524,7 +633,8 @@ class Music(commands.Cog, name="Music"):
             )
         )
 
-    @lastfm.command(name="plays")
+    @lastfm.command(name="plays", description="Display the play count for the current song on Last.fm.")
+    @unified_cooldown(15)
     async def song_plays(self, ctx: Context):
         """Display the play count for the current song on Last.fm."""
         user_id = int(ctx.author.id)
@@ -572,7 +682,8 @@ class Music(commands.Cog, name="Music"):
         )
         await ctx.reply(embed=embed)
 
-    @lastfm.command(name="toptentracks", aliases=["ttt"])
+    @lastfm.command(name="toptentracks", aliases=["ttt"], description="Display your top ten tracks on Last.fm.")
+    @unified_cooldown(15)
     async def top_tracks(self, ctx: Context):
         """Display the user's top ten tracks on Last.fm."""
         user_id = int(ctx.author.id)
@@ -621,7 +732,8 @@ class Music(commands.Cog, name="Music"):
         embed.set_footer(text="Data from Last.fm")
         await ctx.reply(embed=embed)
 
-    @lastfm.command(name="topartists", aliases=["tar"])
+    @lastfm.command(name="topartists", aliases=["tar"], description="Display your top artists on Last.fm.")
+    @unified_cooldown(15)
     async def top_artists(self, ctx: Context):
         """Display the user's top artists on Last.fm."""
         user_id = int(ctx.author.id)
@@ -685,9 +797,19 @@ class Music(commands.Cog, name="Music"):
                 logger.error(f"Error fetching top artists for {lastfm_username}: {type(e).__name__} - {e}")
                 await ctx.reply("An error occurred while fetching your top artists. Please try again later.")
 
-    @lastfm.command(name="whoknows", aliases=["wk"])
-    async def who_knows(self, ctx: Context, *, artist_name: str):
+    @lastfm.command(name="whoknows", aliases=["wk"], description="Show who in the server has listened to an artist the most.")
+    @unified_cooldown(30)
+    async def who_knows(self, ctx: Context, artist_name: Optional[str] = None):
         """Show who in the server has listened to the specified artist the most."""
+        if not artist_name:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide an artist name.",
+                    color=0x36393E,
+                )
+            )
+            return
         user_id = int(ctx.author.id)
         embed_color = await self.bot.database.get_lastfm_embed_color(user_id)
         listening_users = []
@@ -793,7 +915,8 @@ class Music(commands.Cog, name="Music"):
             )
         await ctx.reply(embed=embed)
 
-    @commands.command(name="np")
+    @commands.hybrid_command(name="np", description="View what you are currently playing on Last.fm.")
+    @unified_cooldown(15)
     async def now_playing(self, ctx: Context) -> None:
         """View what you are currently playing on Last.fm"""
         user_id = int(ctx.author.id)
@@ -1086,9 +1209,10 @@ class Music(commands.Cog, name="Music"):
             await asyncio.sleep(delay)
         return None
 
-    @commands.command(name="snp")
+    @commands.hybrid_command(name="snp", description="View what you are currently playing on Spotify.")
+    @unified_cooldown(30)
     async def spotify_now_playing(
-        self, ctx: commands.Context, member: discord.Member = None
+        self, ctx: commands.Context, member: Optional[discord.Member] = None
     ) -> None:
         """View what you are currently playing on Spotify."""
         member = member or ctx.author
@@ -1336,11 +1460,15 @@ class Music(commands.Cog, name="Music"):
                 )
             )
 
-    @commands.group(name="jwapi")
+    @commands.hybrid_group(name="jwapi", description="JuiceWRLD API command group.")
+    @unified_cooldown(3)
     async def juicewrld_api(self, ctx: commands.Context) -> None:
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        if ctx.interaction is not None:
+            prefix = "/"
+        else:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -1365,11 +1493,12 @@ class Music(commands.Cog, name="Music"):
             color=discord.Color.blurple(),
         )
         embed.set_footer(text=f"Use {prefix}jwapi <subcommand> for details.")
-        await ctx.reply(embed=embed, mention_author=False)        
+        await ctx.reply(embed=embed, mention_author=False)
 
-    @juicewrld_api.command(name="np")
+    @juicewrld_api.command(name="np", description="View what you are currently playing on JuiceWRLD API desktop app.")
+    @unified_cooldown(15)
     async def juicewrld_now_playing(
-        self, ctx: commands.Context, member: discord.Member = None
+        self, ctx: commands.Context, member: Optional[discord.Member] = None
     ) -> None:
         """View what you are currently playing on JuiceWRLD API desktop app."""
         member = member or ctx.author
@@ -1695,8 +1824,9 @@ class Music(commands.Cog, name="Music"):
                 )
             )
 
-    @juicewrld_api.command(name="link")
-    async def juicewrld_link(self, ctx: commands.Context, code: str = None) -> None:
+    @juicewrld_api.command(name="link", description="Link your Discord account to JuiceWRLD API using a pairing code.")
+    @unified_cooldown(10)
+    async def juicewrld_link(self, ctx: commands.Context, code: Optional[str] = None) -> None:
         """Link your Discord account to JuiceWRLD API using a pairing code."""
         prefix = await self.bot.database.get_prefix(ctx.guild.id) if ctx.guild else "!"
 
@@ -2287,8 +2417,18 @@ class Music(commands.Cog, name="Music"):
 
         return layout_view if valid_snippets else None
 
-    @commands.command('groupbuy', aliases=['gb', 'gbinfo', 'groupbuyinfo'], help='Find a songs groupbuy information')
-    async def groupbuy(self, ctx: commands.Context, *, query: str):
+    @commands.hybrid_command(name='groupbuy', aliases=['gb', 'gbinfo', 'groupbuyinfo'], description='Find a songs groupbuy information')
+    @unified_cooldown(10)
+    async def groupbuy(self, ctx: commands.Context, query: Optional[str] = None):
+        if not query:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide a song name to search for.",
+                    color=0x36393E,
+                )
+            )
+            return
         songs = await self.fetch_song(ctx, query, allow_unsurfaced=True)
         if songs is None:
             return
@@ -2328,8 +2468,18 @@ class Music(commands.Cog, name="Music"):
                 f'I couldnt find a song with the name: `{query}`',
             )
 
-    @commands.command("leak", description="Search for a Juice WRLD leak by name")
-    async def leak(self, ctx: commands.Context, *, query: str):
+    @commands.hybrid_command("leak", description="Search for a Juice WRLD leak by name")
+    @unified_cooldown(10)
+    async def leak(self, ctx: commands.Context, query: Optional[str] = None):
+        if not query:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide a song name to search for.",
+                    color=0x36393E,
+                )
+            )
+            return
         song_list = await self.fetch_song(ctx, query, allow_unsurfaced=True)
         if song_list is None:
             return
@@ -2392,8 +2542,18 @@ class Music(commands.Cog, name="Music"):
                 f"I couldnt find a song with the name: `{query}`",
             )
 
-    @commands.command("session", description="Search for a Juice WRLD session by name")
-    async def session(self, ctx: commands.Context, *, query: str):
+    @commands.hybrid_command("session", description="Search for a Juice WRLD session by name")
+    @unified_cooldown(10)
+    async def session(self, ctx: commands.Context, query: Optional[str] = None):
+        if not query:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide a session name to search for.",
+                    color=0x36393E,
+                )
+            )
+            return
         song_list = await self.fetch_session(ctx, query)
         if song_list is None:
             return
@@ -2509,10 +2669,20 @@ class Music(commands.Cog, name="Music"):
 
         return embeds
 
-    @commands.command(
+    @commands.hybrid_command(
         name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song"
     )
-    async def lyrics(self, ctx: commands.Context, *, query: str):
+    @unified_cooldown(10)
+    async def lyrics(self, ctx: commands.Context, query: Optional[str] = None):
+        if not query:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide a song name to get lyrics for.",
+                    color=0x36393E,
+                )
+            )
+            return
         try:
             song_list = await self.fetch_song(ctx, query)
             if song_list is None:
@@ -2714,21 +2884,27 @@ class Music(commands.Cog, name="Music"):
             if ii < len(songs) - 1:
                 container.add_item(discord.ui.Separator())
 
-    @commands.command('syncsurfaces', aliases=['syncleaks'])
+    @commands.hybrid_command(name='syncsurfaces', aliases=['syncleaks'], description='Sync the Juice WRLD surfaces cache (owner only).')
     @commands.is_owner()
-    async def sync_surfaces(self, ctx: commands.Context):        
+    @unified_cooldown(30)
+    async def sync_surfaces(self, ctx: commands.Context):
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
-        
-        await ctx.message.add_reaction('🔄')
+
+        if ctx.message is not None:
+            await ctx.message.add_reaction('🔄')
         status = await Cache.fetch_songs()
         if status != 200:
             return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
-        
-        await self.store_latest_surfaces()
-        await ctx.message.add_reaction('✅')
 
-    @commands.command('surfaces', aliases=['leaks'])
+        await self.store_latest_surfaces()
+        if ctx.message is not None:
+            await ctx.message.add_reaction('✅')
+        else:
+            await ctx.reply(embed=discord.Embed(description='Surfaces cache synced successfully.', color=discord.Color.green()))
+
+    @commands.hybrid_command(name='surfaces', aliases=['leaks'], description='Browse the latest Juice WRLD surfaces.')
+    @unified_cooldown(15)
     async def surfaces(self, ctx: commands.Context):
         try:
 
@@ -2751,8 +2927,18 @@ class Music(commands.Cog, name="Music"):
         except Exception as e:
             await ctx.send(e)
         
-    @commands.command("snippet", aliases=["snip"])
-    async def snippet(self, ctx: commands.Context, *, query: str):
+    @commands.hybrid_command("snippet", aliases=["snip"], description="Search for a Juice WRLD song snippet.")
+    @unified_cooldown(15)
+    async def snippet(self, ctx: commands.Context, query: Optional[str] = None):
+        if not query:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide a song name to search for.",
+                    color=0x36393E,
+                )
+            )
+            return
         song_list = await self.fetch_song(ctx, query, allow_unsurfaced=False)
         if song_list is None:
             return
@@ -2821,9 +3007,10 @@ class Music(commands.Cog, name="Music"):
                 f"I couldnt find a song with the name: `{query}`",
             )
 
-    @commands.command(
-        "randomleak", aliases=["rleak"], description="Get a random Juice WRLD leak"
+    @commands.hybrid_command(
+        name="randomleak", aliases=["rleak"], description="Get a random Juice WRLD leak"
     )
+    @unified_cooldown(15)
     async def randomleak(self, ctx: commands.Context):
         data = await self.fetch_random_playable_song()
         if data is None:
@@ -2996,8 +3183,9 @@ class Music(commands.Cog, name="Music"):
 
         return True, output_path
 
-    @commands.command(aliases=["hstats"])
-    async def heardlestats(self, ctx: commands.Context, member: discord.Member = None):
+    @commands.hybrid_command(name="heardlestats", aliases=["hstats"], description="View Heardle statistics for a user.")
+    @unified_cooldown(10)
+    async def heardlestats(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         member = member or ctx.author
 
         stats = await self.bot.database.get_heardle_stats(member.id)
@@ -3023,45 +3211,15 @@ class Music(commands.Cog, name="Music"):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(
-        name="shhheardle", help="Shows the heardle answer for the given user"
-    )
-    async def shhheardle(self, ctx: commands.Context, member: discord.Member = None):
-        member = member or ctx.author
-
-        if (
-            Music.can_test(ctx, self) == False
-            and ctx.author.guild_permissions.manage_guild == False
-        ):
-            await Embeds.send_error_embed(
-                ctx.channel,
-                ctx.author,
-                "You do not have permission to use this command.",
-            )
-            return
-
-        if (
-            member.id not in self.heardle_answers
-            or self.heardle_answers[member.id] is None
-        ):
-            await Embeds.send_warning_embed(
-                ctx.channel,
-                ctx.author,
-                f"{member.display_name} does not have an ongoing Heardle game.",
-            )
-            return
-
-        answer = self.heardle_answers[member.id]
-        await Embeds.send_info_embed(
-            ctx.channel,
-            ctx.author,
-            f"The answer to {member.display_name}'s ongoing Heardle game is: **{answer}**",
-        )
-
-
     async def sync_blacktea(self):
-        self.valid_names = []
+        self.valid_names = set()
         self.producer_counts = {}
+
+        self._blacktea_name_to_songs = {}
+        self._blacktea_name_to_producers = {}
+        self._blacktea_name_to_category_era = {}
+        self._blacktea_name_to_year = {}
+        self._blacktea_name_to_max_price = {}
 
         songs = Cache.get_songs()
         for song in songs:
@@ -3070,240 +3228,161 @@ class Music(commands.Cog, name="Music"):
 
             era = song.get("era", {})
             era_name = era.get("name", "N/A")
-            if era_name == "POST": 
+            if era_name == "POST":
                 continue
-            if len(producers) > 5: 
+            if len(producers) > 5:
                 continue
 
             for producer in producers:
-                if producer in self.producer_counts:
-                    self.producer_counts[producer] += 1
-                else:
-                    self.producer_counts[producer] = 1
+                self.producer_counts[producer] = self.producer_counts.get(producer, 0) + 1
+
+            category = song.get("category", "")
+            date_leaked = song.get("date_leaked", "")
+            end_line_index = date_leaked.rfind("\n")
+            real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+            year = real_date_leaked[2].strip() if real_date_leaked and len(real_date_leaked) >= 3 else ""
+
+            groupbuy_info = song.get("groupbuy_info", {})
+            price = groupbuy_info.get("price", "")
+            numerical_price = "".join(filter(str.isdigit, price))
+            min_price = int(numerical_price) if numerical_price else None
 
             track_titles = song.get("track_titles", [])
+            seen_names_for_song = set()
             for title in track_titles:
-                acceptable_alt_name_list = self.get_acceptable_track_names(title)
-                self.valid_names.extend(acceptable_alt_name_list)
+                for acceptable_name in self.get_acceptable_track_names(title):
+                    if acceptable_name in seen_names_for_song:
+                        continue
+                    seen_names_for_song.add(acceptable_name)
+
+                    self.valid_names.add(acceptable_name)
+
+                    self._blacktea_name_to_songs.setdefault(acceptable_name, []).append(song)
+
+                    name_producers = self._blacktea_name_to_producers.setdefault(acceptable_name, set())
+                    name_producers.update(producers)
+
+                    if category and era_name:
+                        self._blacktea_name_to_category_era.setdefault(acceptable_name, set()).add(f"{category}{era_name}")
+
+                    if year:
+                        self._blacktea_name_to_year.setdefault(acceptable_name, set()).add(year.lower())
+
+                    if min_price is not None:
+                        current_max = self._blacktea_name_to_max_price.get(acceptable_name)
+                        if current_max is None or min_price > current_max:
+                            self._blacktea_name_to_max_price[acceptable_name] = min_price
+
+        self.is_blacktea_synced = True
 
     def get_random_song_for_blacktea(self):
         songs = Cache.get_songs()
-        if songs is None:
+        if not songs:
             return None
-        random_index = random.randint(0, len(songs) - 1)
-        return songs[random_index]
+        return random.choice(songs)
 
-    def get_random_3l_for_blacktea(self, song):
+    def find_songs_by_name(self, name):
+        return self._blacktea_name_to_songs.get(name, [])
+
+    def blacktea_check_producer(self, song_name, producer):
+        return producer in self._blacktea_name_to_producers.get(song_name, set())
+
+    def blacktea_check_category(self, song_name, category_era):
+        return category_era in self._blacktea_name_to_category_era.get(song_name, set())
+
+    def blacktea_check_leaked(self, song_name, leaked_date):
+        return leaked_date.lower() in self._blacktea_name_to_year.get(song_name, set())
+
+    def blacktea_check_groupbuy_price(self, song_name, leaked_date):
+        max_price = self._blacktea_name_to_max_price.get(song_name)
+        return max_price is not None and max_price >= int(leaked_date)
+
+    def _get_3l_for_song(self, song):
+        """Return a valid random 3-letter slice for a song, or None if impossible."""
         main_name = self.get_most_acceptable_track_name(song.get("name", ""))
         names = self.get_acceptable_track_names(song.get("name", ""))
 
-        def with_name(name):
-            valid_slices = []
-
-            for i in range(len(name) - 2):
-                chunk = name[i:i+3]
-
-                if all(c.isalpha() for c in chunk):
-                    valid_slices.append(chunk)
-
-            if not valid_slices:
-                return None
-
-            return random.choice(valid_slices)
-        
-        main = with_name(main_name)
-        if main:
-            return main
-        else:
-            for name in names:
-                result = with_name(name)
-                if result:
-                    return result
+        for name in (main_name, *names):
+            valid_slices = [
+                name[i:i+3]
+                for i in range(len(name) - 2)
+                if all(c.isalpha() for c in name[i:i+3])
+            ]
+            if valid_slices:
+                return random.choice(valid_slices)
         return None
 
-    def find_songs_by_name(self, name):
-        if not hasattr(self, "song_index"):
-            self.song_index = {}
-
-        if name in self.song_index:
-            return self.song_index[name]
+    def _build_default_category(self, song):
+        """Build a default 3-letter category, picking a new song if needed."""
+        for _ in range(8):
+            random_3l = self._get_3l_for_song(song)
+            if random_3l:
+                break
+            song = self.get_random_song_for_blacktea()
         else:
-            songs = Cache.get_songs()
-            valid_songs = []
-            for song in songs:
-                track_titles = song.get("track_titles", [])
-                for title in track_titles:
-                    for acceptable_name in self.get_acceptable_track_names(title):
-                        if acceptable_name == name:
-                            valid_songs.append(song)
-            self.song_index[name] = valid_songs
-            return valid_songs
-                        
-    def blacktea_check_producer(self, song_name, producer):
-        songs = self.find_songs_by_name(song_name)
-        if not songs:
-            return False
-
-        for song in songs:
-            producers = song.get("producers", "N/A")
-            producers = [p.strip() for p in re.split(r"&|,| and ", producers) if p.strip()]
-            if producer in producers:
-                return True
-
-        return False
-
-    def blacktea_check_category(self, song_name, category_era):
-        songs = self.find_songs_by_name(song_name)
-        if not songs:
-            return False
-        
-        for song in songs:
-            category = song.get("category", "")
-            era = song.get("era", {})
-            era_name = era.get("name", "")
-            if f'{category}{era_name}' == category_era:
-                return True
-        return False
-    
-    def blacktea_check_leaked(self, song_name, leaked_date):
-        songs = self.find_songs_by_name(song_name)
-        if not songs:
-            return False
-
-        for song in songs:
-            date_leaked = song.get("date_leaked", "")
-            end_line_index = date_leaked.rfind("\n")
-            real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
-            if real_date_leaked and len(real_date_leaked) < 3:
-                return False
-            year = real_date_leaked[2].strip()
-            if year and year.lower() == leaked_date.lower():
-                return True
-        return False
-    
-    def blacktea_check_groupbuy_price(self, song_name, leaked_date):
-        songs = self.find_songs_by_name(song_name)
-        if not songs:
-            return False
-
-        for song in songs:
-            groupbuy_info = song.get("groupbuy_info", {})
-            price = groupbuy_info.get("price", "")
-            numerical_price = ''.join(filter(str.isdigit, price))
-            if not numerical_price:
-                return False
-            
-            return int(numerical_price) >= int(leaked_date)
-        return False
+            random_3l = "xxx"
+        return {
+            "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
+            "check_func": lambda song_name: random_3l.lower() in song_name.lower()
+        }
 
     def get_random_blacktea_category_data(self, song):
-        def default_return(song):
-            random_3l = self.get_random_3l_for_blacktea(song)
-            while not random_3l:
-                song = self.get_random_song_for_blacktea()
-                random_3l = self.get_random_3l_for_blacktea(song)
-            return {
-                "description": f"Name a **Juice WRLD** song that contains **{random_3l.lower()}**",
-                "check_func": lambda song_name: random_3l.lower() in song_name.lower()
-            }
-        
-        random_index = random.randint(0, 4)
-        if random_index == 0:
-            producers = song.get("producers", "N/A")
-            producers = [
-                p.strip()
-                for p in re.split(r"&|,| and ", producers)
-                if p.strip()
-            ]
+        for attempt in range(8):
+            random_index = random.randint(0, 4)
 
-            producer = random.choice(producers) if producers else None
-            if producer in self.producer_counts:
-                count = self.producer_counts[producer]
-                if count < 6: 
-                    return self.get_random_blacktea_category_data(song)
-            
-            return {
-                "description": f"Name a **Juice WRLD** song produced by **{producer}**",
-                "check_func": lambda song_name: self.blacktea_check_producer(song_name, producer)
-            }
-        elif random_index == 1:
-            ALBUMS = {
-                'jute':                 {'name': 'JUICED UP THE EP', 'color': '#FFE602'},
-                'LND':                  {'name': 'Legends Never Die', 'color': '#F700FF'},
-                'afflictions':          {'name': 'affliction', 'color': '#000000'},
-                'bdm':                  {'name': 'BINGEDRINKINGMUSIC', 'color': '#000000'},
-                'HIH 999':              {'name': 'Heartbroken In Hollywood 9 9 9', 'color': '#FF653E'},
-                'jw 999':               {'name': 'JuiceWRLD 9 9 9', 'color': '#FF2C2C'},
-                'ND':                   {'name': 'NOTHINGS DIFFERENT </3', 'color': '#FF8800'},
-                'GB&GR':                {'name': 'Goodbye & Good Riddance', 'color': '#008CFF'},
-                'GB&GR (AE)':           {'name': 'Goodbye & Good Riddance (Anniversary Edition)', 'color': '#008CFF'},
-                'GB&GR (5YAE)':         {'name': 'Goodbye & Good Riddance (5 Year Anniversary Edition)', 'color': '#008CFF'},
-                'WOD':                  {'name': 'WRLD ON DRUGS', 'color': '#00FF94'},
-                'DRFL':                 {'name': 'Death Race For Love', 'color': '#FF9900'},
-                'DRFL (BTV)':           {'name': 'Death Race For Love (Bonus Track Version)', 'color': '#FF9900'},
-                'OUT':                  {'name': 'Outsiders', 'color': '#2B2B2B'},
-                'POST':                 {'name': 'Posthumous', 'color': '#00CCFF'},
-                'TPP':                  {'name': 'The Pre-Party', 'color': '#EA00FF'},
-                'TPP (EE)':             {'name': 'The Pre-Party (Extended Edition)', 'color': '#EA00FF'},
-                'FD':                   {'name': 'Fighting Demons', 'color': '#2E2E2E'},
-                'FD (CE)':              {'name': 'Fighting Demons (Complete Edition)', 'color': '#2E2E2E'},
-                'FD (EE)':              {'name': 'Fighting Demons (Extended Edition)', 'color': '#2E2E2E'},
-                'FD (DDE)':             {'name': 'Fighting Demons (Digital Deluxe Edition)', 'color': '#2E2E2E'},
-                'TPNE':                 {'name': 'The Party Never Ends', 'color': '#CC00FF'},
-            }
+            if random_index == 0:
+                producers_raw = song.get("producers", "N/A")
+                producers = [p.strip() for p in re.split(r"&|,| and ", producers_raw) if p.strip()]
+                producer = random.choice(producers) if producers else None
+                if producer and self.producer_counts.get(producer, 0) >= 6:
+                    return {
+                        "description": f"Name a **Juice WRLD** song produced by **{producer}**",
+                        "check_func": lambda song_name, p=producer: self.blacktea_check_producer(song_name, p)
+                    }
 
-            category = song.get("category", "")
-            era = song.get("era", {})
-            era_name = era.get("name", "")
+            elif random_index == 1:
+                category = song.get("category", "")
+                era_name = song.get("era", {}).get("name", "")
+                if category and era_name and category != "recording_session" and era_name not in ("GB&GR (AE)", "GB&GR (5YAE)", "MAINSTREAM"):
+                    era_full = self.ALBUMS.get(era_name, {}).get("name", era_name)
+                    return {
+                        "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
+                        "check_func": lambda song_name, ce=f"{category}{era_name}": self.blacktea_check_category(song_name, ce)
+                    }
 
-            era_full = ALBUMS.get(era_name, {}).get("name", era_name)
+            elif random_index == 2:
+                date_leaked = song.get("date_leaked", "")
+                end_line_index = date_leaked.rfind("\n")
+                real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
+                if real_date_leaked and len(real_date_leaked) >= 3:
+                    year = real_date_leaked[2].strip()
+                    if year:
+                        return {
+                            "description": f"Name a **Juice WRLD** song that leaked in **{year}**",
+                            "check_func": lambda song_name, y=year.lower(): self.blacktea_check_leaked(song_name, y)
+                        }
 
-            if category == "recording_session" or era_name == "GB&GR (AE)" or era_name == "GB&GR (5YAE)" or era_name == "MAINSTREAM":
-                return default_return(song)
+            elif random_index == 3:
+                groupbuy_info = song.get("groupbuy_info", {})
+                price = groupbuy_info.get("price", "")
+                numerical_price = "".join(filter(str.isdigit, price))
+                if numerical_price:
+                    return {
+                        "description": f"Name a **Juice WRLD** song that was groupbuyed for **{price}** or higher",
+                        "check_func": lambda song_name, np=numerical_price: self.blacktea_check_groupbuy_price(song_name, np)
+                    }
 
-            return {
-                "description": f"Name a **Juice WRLD** song that is **{category}** and made during **{era_full.upper()}**",
-                "check_func": lambda song_name: self.blacktea_check_category(song_name, f"{category}{era_name}")
-            }
-        elif random_index == 2:
-            date_leaked = song.get("date_leaked", "")
-            end_line_index = date_leaked.rfind("\n")
-            real_date_leaked = date_leaked[end_line_index:date_leaked.find(".", end_line_index)].strip().replace(",", "").split()
-            if not real_date_leaked or len(real_date_leaked) < 3:
-                return default_return(song)
-            year = real_date_leaked[2].strip()
+            # Default path: try a fresh song for the next attempt.
+            song = self.get_random_song_for_blacktea()
 
-            return {
-                "description": f"Name a **Juice WRLD** song that leaked in **{year}**",
-                "check_func": lambda song_name: self.blacktea_check_leaked(song_name, year.lower())
-            }
-        elif random_index == 3:
-            groupbuy_info = song.get("groupbuy_info", {})
-            price = groupbuy_info.get("price", "")
-            if len(price) == 0:
-                return default_return(song)
-            
-            numerical_price = ''.join(filter(str.isdigit, price))
-            if not numerical_price:
-                return default_return(song)
+        return self._build_default_category(song)
 
-            return {
-                "description": f"Name a **Juice WRLD** song that was groupbuyed for **{price}** or higher",
-                "check_func": lambda song_name: self.blacktea_check_groupbuy_price(song_name, numerical_price)
-            }
-        else:
-            return default_return(song)
-        
-    async def check_is_envy(ctx: commands.Context):
-        if ctx.author.id == 1095747082599530627:
-            return True
-        else:
-            return False
-
-    @commands.command(name="syncblacktea", aliases=["sbt"])
-    @commands.check_any(commands.is_owner(), commands.check(check_is_envy))
+    @commands.hybrid_command(name="syncblacktea", aliases=["sbt"], description="Sync the Blacktea valid names cache (owner only).")
+    @commands.is_owner()
+    @unified_cooldown(30)
     async def syncblacktea(self, ctx: commands.Context):
-        await ctx.message.add_reaction('🔄')
+        if ctx.message is not None:
+            await ctx.message.add_reaction('🔄')
 
         songs = Cache.get_songs()
         old_names_length = len(self.valid_names)
@@ -3312,122 +3391,154 @@ class Music(commands.Cog, name="Music"):
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
         await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
 
-        await ctx.message.add_reaction('✅')
+        if ctx.message is not None:
+            await ctx.message.add_reaction('✅')
+        else:
+            await ctx.reply(embed=discord.Embed(description='Blacktea cache synced successfully.', color=discord.Color.green()))
 
-    @commands.command(name="blacktea", help="Play blacktea (blacktea from bleed but wit juice wrld songs)")
-    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True), commands.check(check_is_envy))
+    @commands.hybrid_command(name="blacktea", description="Play blacktea with Juice WRLD songs.")
+    @commands.is_owner()
+    @unified_cooldown(60)
     async def blacktea(self, ctx: commands.Context):
-        if ctx.author.id in self.ongoing_blacktea :
+        if ctx.author.id in self.ongoing_blacktea:
             await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
             return
-        
+
         if not self.is_blacktea_synced:
             await self.sync_blacktea()
 
         players = []
-        used_words = []
+        player_ids = set()
         created_messages = []
         self.ongoing_blacktea.append(ctx.author.id)
-    
+
         blacktea_embed = discord.Embed(
-            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds.\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song fits the **given category**. Failure to do so within the **15** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
-            color = discord.Color.green(),
+            description=":alarm_clock: Waiting for **players**, react with ✅ to join. The game will begin in **30** seconds (or as soon as 2 players join).\n\n`GOAL:` You have **10** seconds to say a **Juice WRLD** song that fits the **given category**. Failure to do so within the **15** seconds will lose a life. Each player has **2** lives to begin with.\n\n`NOTES:` A song can only be used **once** through the course of the game.",
+            color=discord.Color.green(),
         )
         blacktea_embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
-        message = await ctx.send(embed=blacktea_embed)
-        await message.add_reaction("✅")
-        await asyncio.sleep(30)
+        join_message = await ctx.send(embed=blacktea_embed)
+        await join_message.add_reaction("✅")
+        created_messages.append(join_message)
 
-        created_messages.append(message)
+        def reaction_check(reaction, user):
+            return (
+                reaction.message.id == join_message.id
+                and str(reaction.emoji) == "✅"
+                and not user.bot
+            )
 
-        message = await ctx.fetch_message(message.id)
-        for reaction in message.reactions:
-            if str(reaction.emoji) == "✅":
-                async for user in reaction.users():
-                    if not user.bot: 
-                        players.append({
-                            "id": user.id,
-                            "display_name": user.display_name,
-                            "avatar_url": ctx.guild.get_member(user.id).display_avatar.url,
-                            "color": user.color,
-                            "mention": user.mention,
-                            "lives": 2,
-                        })
+        start_time = asyncio.get_event_loop().time()
+        while True:
+            remaining = 30.0 - (asyncio.get_event_loop().time() - start_time)
+            if remaining <= 0:
+                break
+            try:
+                reaction, user = await self.bot.wait_for(
+                    "reaction_add", check=reaction_check, timeout=remaining
+                )
+            except asyncio.TimeoutError:
+                break
+
+            if user.id in player_ids:
+                continue
+
+            member = ctx.guild.get_member(user.id)
+            player_ids.add(user.id)
+            players.append({
+                "id": user.id,
+                "display_name": member.display_name if member else user.display_name,
+                "avatar_url": member.display_avatar.url if member else user.display_avatar.url,
+                "color": member.color if member else discord.Color.default(),
+                "mention": member.mention if member else user.mention,
+                "lives": 2,
+            })
+
+            if len(players) >= 2:
+                break
 
         if len(players) <= 1:
             self.ongoing_blacktea.remove(ctx.author.id)
             await Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
             return
-        
+
         await self.bot.database.set_cooldown(
             ctx.author.id, ctx.command.qualified_name, 30
         )
 
-        def get_alive_players(players):
-            return [p for p in players if p['lives'] > 0]
+        # Pre-shuffle a pool of candidate songs so each round can pop a fresh song
+        # without repeated random sampling or recursion.
+        all_songs = Cache.get_songs() or []
+        candidate_songs = [s for s in all_songs if s.get("name")]
+        random.shuffle(candidate_songs)
+        used_names = set()
 
-        alive_players = get_alive_players(players)
+        alive_players = [p for p in players if p["lives"] > 0]
         while len(alive_players) > 1:
             for player in alive_players:
-                def get_song_recursive(attempt=0):
-                    if attempt > 5:
-                        return None
-                    song = self.get_random_song_for_blacktea()
-                    if not song:
-                        return get_song_recursive(attempt + 1)
-                    main_name = song.get("name", "")
-                    if main_name.lower() in used_words:
-                        return get_song_recursive(attempt + 1)
-                    used_words.append(main_name.lower())
-                    return song
+                song = None
+                while candidate_songs:
+                    candidate = candidate_songs.pop()
+                    main_name = candidate.get("name", "").lower()
+                    if main_name and main_name not in used_names:
+                        used_names.add(main_name)
+                        song = candidate
+                        break
 
-                song = get_song_recursive()
-                if not song:
-                    await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch a valid song for the game. Ending game early.")
+                if song is None:
+                    await Embeds.send_error_embed(ctx.channel, ctx.author, "Ran out of unique songs for the game. Ending early.")
                     self.ongoing_blacktea.remove(ctx.author.id)
+                    alive_players = []
                     break
+
                 category_data = self.get_random_blacktea_category_data(song)
+                description = category_data.get("description", "No description available")
+                check_func = category_data["check_func"]
+
                 embed = discord.Embed(
-                    description=category_data.get("description", "No description available"),
-                    color = player.get("color", discord.Color.default()).value if player.get("color") else discord.Color.default().value,
+                    description=description,
+                    color=player.get("color", discord.Color.default()).value if player.get("color") else discord.Color.default().value,
                 )
                 embed.set_author(name=player.get("display_name", "Unknown Player"), icon_url=player.get("avatar_url", ""))
-                message = await ctx.send(player["mention"], embed=embed)
-                created_messages.append(message)
+                round_message = await ctx.send(player["mention"], embed=embed)
+                created_messages.append(round_message)
 
                 def check(m):
-                    return m.author.id == player['id'] and m.channel == ctx.channel and m.content.lower().strip() in self.valid_names and category_data["check_func"](m.content.lower().strip())
+                    if m.author.id != player["id"] or m.channel != ctx.channel:
+                        return False
+                    content = m.content.lower().strip()
+                    return content in self.valid_names and check_func(content)
+
                 try:
-                    guess = await self.bot.wait_for('message', check=check, timeout=15)
+                    guess = await self.bot.wait_for("message", check=check, timeout=15)
                     await guess.add_reaction("✅")
-                    continue
                 except asyncio.TimeoutError:
-                    player['lives'] -= 1
-                    message = await ctx.send(embed=discord.Embed(
+                    player["lives"] -= 1
+                    loss_message = await ctx.send(embed=discord.Embed(
                         description=f"💥 {player['mention']} you now have **{player['lives']}** lives. One correct answer was **{song.get('name', 'N/A')}**",
                         color=discord.Color.red(),
                     ))
-                    created_messages.append(message)
-                    alive_players = get_alive_players(players)
+                    created_messages.append(loss_message)
+                    alive_players = [p for p in players if p["lives"] > 0]
                     if len(alive_players) <= 1:
                         break
-                    else:
-                        continue
+
         if len(alive_players) == 1:
             winner = alive_players[0]
-            message = await ctx.send(embed=discord.Embed(
+            await ctx.send(embed=discord.Embed(
                 description=f"🏆 {winner['mention']} is the winner of this game of Blacktea with **{winner['lives']}** lives remaining!",
                 color=discord.Color.gold(),
             ), delete_after=15)
 
-        for message in created_messages:
+        for msg in created_messages:
             try:
-                await message.delete()
-            except Exception as e:
+                await msg.delete()
+            except Exception:
                 pass
         self.ongoing_blacktea.remove(ctx.author.id)
 
-    @commands.command(name="heardle", help="Play a game of Heardle. Juice WRLD songs only.")
+    @commands.hybrid_command(name="heardle", description="Play a game of Heardle. Juice WRLD songs only.")
+    @unified_cooldown(60)
     async def heardle(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_heardle:
             await Embeds.send_error_embed(
@@ -3595,8 +3706,18 @@ class Music(commands.Cog, name="Music"):
         await self._safe_delete(message)
         self.handle_user_done_heardle(ctx.author.id)
 
-    @commands.command(aliases=["makesnip"])
-    async def makesnippet(self, ctx: commands.Context, *, query: str):
+    @commands.hybrid_command(name="makesnippet", aliases=["makesnip"], description="Create a snippet from a Juice WRLD song.")
+    @unified_cooldown(60)
+    async def makesnippet(self, ctx: commands.Context, query: Optional[str] = None):
+        if not query:
+            await ctx.reply(
+                embed=discord.Embed(
+                    title="Error",
+                    description="Please provide a song name to make a snippet from.",
+                    color=0x36393E,
+                )
+            )
+            return
         debounce = self.snippet_debounce.get(ctx.author.id, False)
         if debounce:
             await Embeds.send_warning_embed(
@@ -3771,8 +3892,9 @@ class Music(commands.Cog, name="Music"):
                 channels.append(channel)
         return channels
 
-    @commands.command(name="countpledge", aliases=["pledges", "pledged", "countpledges"])
+    @commands.hybrid_command(name="countpledge", aliases=["pledges", "pledged", "countpledges"], description="Count pledges in a pledge channel.")
     @commands.check_any(commands.has_permissions(administrator=True), commands.check(can_test))
+    @unified_cooldown(60)
     async def countpledge(self, ctx: commands.Context, after_message_id: int = 0):
         pledges_channels = self.find_pledges_channel(ctx.guild)
         count = len(pledges_channels)
@@ -3875,7 +3997,8 @@ class Music(commands.Cog, name="Music"):
 
         return None
 
-    @commands.command(name="higherlower", help="Play a game of Higher or Lower with Juice WRLD song streams or whatever")
+    @commands.hybrid_command(name="higherlower", description="Play a game of Higher or Lower with Juice WRLD song streams.")
+    @unified_cooldown(30)
     async def higherlower(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_higherlower:
             await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Higher or Lower!")
@@ -4245,8 +4368,9 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
 
         await asyncio.gather(*[warm(u) for u in urls], return_exceptions=True)
 
-    @commands.command(name="cover", help="Search for available covers of a song")
-    async def cover(self, ctx: commands.Context, *, song_name: str = None):
+    @commands.hybrid_command(name="cover", description="Search for available covers of a song")
+    @unified_cooldown(15)
+    async def cover(self, ctx: commands.Context, song_name: Optional[str] = None):
         """Search for song covers in the Juice WRLD API database, grouped by artist."""
         if not song_name:
             await ctx.send(embed=discord.Embed(
