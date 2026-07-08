@@ -78,6 +78,7 @@ from .managers import (
     MusicMixin,
 )
 
+
 class DatabaseManager(
     CoreMixin,
     GuildMixin,
@@ -90,4 +91,10 @@ class DatabaseManager(
     MusicMixin,
     BaseManager,
 ):
-    pass
+    async def initialize(self):
+        """Create tables and seed required runtime rows on a fresh database."""
+        await super().initialize()
+        # VIP tiers must exist before any game can record rakeback/UserVIP rows.
+        await self.ensure_default_vip_tiers()
+        # Economy supply record must exist for the circuit breaker and rebalancing.
+        await self.initialize_supply_record()

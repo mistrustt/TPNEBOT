@@ -888,6 +888,7 @@ class CasinoMixin(BaseManager):
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
         user_id = self.hash_user_id(user_id)
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 # Get or create user VIP record
@@ -910,6 +911,7 @@ class CasinoMixin(BaseManager):
 
     async def upgrade_all_users_vip(self) -> None:
         """Upgrade VIP tiers for all users based on their total wagered."""
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 # Get all user VIP records
@@ -934,6 +936,7 @@ class CasinoMixin(BaseManager):
         """Get or create user VIP record with tier info."""
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             result = await session.execute(
                 select(UserVIP).where(UserVIP.user_id == user_id)
@@ -957,6 +960,7 @@ class CasinoMixin(BaseManager):
 
     async def get_all_vip_tiers(self) -> List[VIPTier]:
         """Get all VIP tiers ordered by level."""
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             result = await session.execute(select(VIPTier).order_by(VIPTier.level))
             return list(result.scalars().all())
@@ -1007,6 +1011,10 @@ class CasinoMixin(BaseManager):
         raw_user_id = user_id
         await self.ensure_user_identity(raw_user_id)
         user_id = self.hash_user_id(user_id)
+        # Defensive: on a fresh/empty database the vip_tiers table may not have
+        # been seeded yet. Make sure the default tiers exist before we try to
+        # create a UserVIP row that references tier_id=1.
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 # Get or create user VIP record
@@ -1350,6 +1358,7 @@ class CasinoMixin(BaseManager):
         """Manually set a user's VIP tier (admin only)."""
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 # Verify tier exists
@@ -1378,6 +1387,7 @@ class CasinoMixin(BaseManager):
         """Reset user's VIP progress to default (admin only)."""
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
+        await self.ensure_default_vip_tiers()
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(
@@ -1388,6 +1398,9 @@ class CasinoMixin(BaseManager):
                 if user_vip:
                     user_vip.tier_id = 1
                     user_vip.total_rakeback_earned = Decimal("0")
+                else:
+                    user_vip = UserVIP(user_id=user_id, tier_id=1)
+                    session.add(user_vip)
 
                 # Reset rakeback balance
                 balance_result = await session.execute(
