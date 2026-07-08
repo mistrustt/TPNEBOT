@@ -719,12 +719,31 @@ class DiscordBot(commands.Bot):
             f"(ID:{interaction.channel_id})"
         )
 
+    def _get_cooldown_retry_after(self, error) -> float | None:
+        """Extract retry_after from app command cooldown errors or wrappers."""
+        if isinstance(error, app_commands.CommandOnCooldown):
+            return error.retry_after
+        if isinstance(error, app_commands.CommandInvokeError) and isinstance(
+            error.original, app_commands.CommandOnCooldown
+        ):
+            return error.original.retry_after
+        return None
+
     async def on_app_command_error(
         self, interaction: discord.Interaction, error
     ) -> None:
         started_at = self._interaction_start_times.pop(id(interaction), None)
+
+        # Unwrap hybrid/app command invoke wrappers to find the real error.
+        root_error = error
+        if isinstance(error, (app_commands.CommandInvokeError, commands.HybridCommandError)):
+            root_error = error.original
+
+        retry_after = self._get_cooldown_retry_after(error)
+        is_cooldown = retry_after is not None
+
         try:
-            if not isinstance(error, app_commands.CommandOnCooldown):
+            if not is_cooldown:
                 command = getattr(interaction, "command", None)
                 command_name = command.qualified_name if command else "unknown"
                 used_at = discord.utils.utcnow()
@@ -737,7 +756,7 @@ class DiscordBot(commands.Bot):
                     guild_id=guild_id,
                     user_hash=user_hash,
                     is_slash=True,
-                    error_type=type(error).__name__,
+                    error_type=type(root_error).__name__,
                     used_at=used_at,
                 )
                 if started_at is not None:
@@ -756,8 +775,8 @@ class DiscordBot(commands.Bot):
         command = getattr(interaction, "command", None)
         command_name = getattr(command, "qualified_name", "unknown")
 
-        if _root_cause_is_db_error(error):
-            original = getattr(error, "original", error)
+        if _root_cause_is_db_error(root_error):
+            original = getattr(root_error, "original", root_error)
             self.logger.warning(
                 f"Database error in slash /{command_name}: "
                 f"{type(original).__name__}: {original}"
@@ -771,41 +790,42 @@ class DiscordBot(commands.Bot):
             else:
                 await interaction.followup.send(message, ephemeral=True)
             return
-        if self._is_transient_discord_api_error(error):
+        if self._is_transient_discord_api_error(root_error):
             self.logger.warning(
                 f"Discord API error in slash /{command_name}: "
-                f"{type(error).__name__}: {error}"
+                f"{type(root_error).__name__}: {root_error}"
             )
             return
         if (
-            isinstance(error, app_commands.CommandInvokeError)
-            and self._is_transient_discord_api_error(error.original)
+            isinstance(root_error, app_commands.CommandInvokeError)
+            and self._is_transient_discord_api_error(root_error.original)
         ):
-            original = error.original
+            original = root_error.original
             self.logger.warning(
                 f"Discord API error in slash /{command_name}: "
                 f"{type(original).__name__}: {original}"
             )
             return
 
-        if isinstance(error, app_commands.CommandOnCooldown):
-            embed = await self.cooldowns.get_cooldown_embed(error.retry_after)
+        if is_cooldown:
+            embed = await self.cooldowns.get_cooldown_embed(retry_after)
             if not interaction.response.is_done():
                 await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
                 await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        # fallback for any other errors
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "❌ Something went wrong.", ephemeral=True
+            )
         else:
-            # fallback for any other errors
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    "❌ Something went wrong.", ephemeral=True
-                )
-            else:
-                await interaction.followup.send(
-                    "❌ Something went wrong.", ephemeral=True
-                )
-            # and log it
-            self.logger.exception(error)
+            await interaction.followup.send(
+                "❌ Something went wrong.", ephemeral=True
+            )
+        # and log it
+        self.logger.exception(error)
 
     async def on_command_error(self, ctx: Context, error) -> None:
         started_at = self._context_start_times.pop(id(ctx), None)
@@ -842,6 +862,19 @@ class DiscordBot(commands.Bot):
         if isinstance(error, commands.CommandOnCooldown):
             embed = await CooldownUtils.get_cooldown_embed(error.retry_after)
             await ctx.reply(embed=embed, delete_after=error.retry_after)
+        elif isinstance(error, commands.HybridCommandError) and isinstance(
+            error.original, app_commands.CommandOnCooldown
+        ):
+            # For hybrid-slash invocations that bubble up to the prefix error handler,
+            # reply with a cooldown embed. ctx.interaction is present for slash paths.
+            embed = await self.cooldowns.get_cooldown_embed(error.original.retry_after)
+            if ctx.interaction is not None:
+                if not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message(embed=embed, ephemeral=True)
+                else:
+                    await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await ctx.reply(embed=embed, delete_after=error.original.retry_after)
         elif isinstance(error, commands.CommandNotFound):
             return
         elif isinstance(error, commands.errors.UnexpectedQuoteError):
