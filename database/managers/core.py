@@ -5,6 +5,7 @@ from sqlalchemy import update, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, case, text
 from typing import List, Optional
+from utils.security import raise_if_url
 from ..models import (
     BotConfig,
     ServerSettings,
@@ -822,6 +823,7 @@ class CoreMixin(BaseManager):
             }
 
     async def add_task(self, user_id: int, task: str) -> Task:
+        raise_if_url(task, "task")
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -883,6 +885,7 @@ class CoreMixin(BaseManager):
             return True
 
     async def edit_task(self, user_id: int, task_order: int, new_task: str) -> bool:
+        raise_if_url(new_task, "task")
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             stmt = (

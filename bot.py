@@ -43,6 +43,14 @@ def _root_cause_is_db_error(error) -> bool:
     return False
 
 
+def _is_url_validation_error(error) -> bool:
+    """Return True if *error* is a URL-block ValueError from DB validation."""
+    original = error if not isinstance(error, commands.CommandInvokeError) else getattr(error, "original", error)
+    if isinstance(original, ValueError) and str(original).startswith("URLs are not allowed"):
+        return True
+    return False
+
+
 def _is_owner_predicate(check) -> bool:
     """Return True if *check* is the discord.py owner-only predicate."""
     qualname = getattr(check, "__qualname__", "")
@@ -951,6 +959,15 @@ class DiscordBot(commands.Bot):
             pass
         elif isinstance(error, commands.CheckAnyFailure):
             pass
+        elif _is_url_validation_error(error):
+            original = getattr(error, "original", error)
+            embed = discord.Embed(
+                title="🚫 Invalid Input",
+                description=str(original),
+                color=discord.Color.red(),
+            )
+            ctx.command.reset_cooldown(ctx)
+            return await ctx.reply(embed=embed, delete_after=10)
         elif _root_cause_is_db_error(error):
             original = getattr(error, "original", error)
             self.logger.warning(

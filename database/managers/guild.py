@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy import update, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import List, Optional
+from utils.security import raise_if_url
 from ..models import (
     ServerSettings,
     CommandStatus,
@@ -789,6 +790,7 @@ class GuildMixin(BaseManager):
 
     async def set_nuke_msg(self, guild_id: int, new_message: str):
         """Change the nuke confirmation message for a guild."""
+        raise_if_url(new_message, "nuke message")
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(

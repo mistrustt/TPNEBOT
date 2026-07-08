@@ -4,7 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy import delete, exists, update, func
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List
-from utils.security import encrypt_location, decrypt_location
+from utils.security import encrypt_location, decrypt_location, raise_if_url
 from ..models import (
     LastFMusers,
     UserTimezone,
@@ -104,6 +104,7 @@ class UserMixin(BaseManager):
 
     async def add_favorite_song(self, user_id: int, song_title: str):
         """Add a favorite song for the user."""
+        raise_if_url(song_title, "favorite song")
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         try:
@@ -159,6 +160,7 @@ class UserMixin(BaseManager):
             logging.error(f"Error clearing favorite songs: {str(e)}")
 
     async def set_user_timezone(self, user_id: int, timezone: str):
+        raise_if_url(timezone, "timezone")
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
@@ -181,6 +183,7 @@ class UserMixin(BaseManager):
             return timezone
 
     async def set_user_location(self, user_id: int, location: str):
+        raise_if_url(location, "location")
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:

@@ -3,6 +3,7 @@ from .base import BaseManager
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
 from sqlalchemy.exc import SQLAlchemyError
+from utils.security import raise_if_url
 from ..models import (
     LastFMusers,
     LastFMvotes,
@@ -39,6 +40,7 @@ class MusicMixin(BaseManager):
             raise
 
     async def set_lastfm_username(self, discord_id: str, username: str) -> None:
+        raise_if_url(username, "Last.fm username")
         await self.ensure_user_identity(discord_id)
         discord_id = self.hash_user_id(discord_id)
         try:

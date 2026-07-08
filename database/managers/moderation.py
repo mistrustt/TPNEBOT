@@ -5,6 +5,7 @@ from sqlalchemy import update, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from typing import List, Optional
+from utils.security import raise_if_url
 from ..models import (
     CaseNote,
     Punishment,
@@ -158,6 +159,7 @@ class ModerationMixin(BaseManager):
         duration: Optional[int] = None,
     ) -> Optional[int]:
         """Add a punishment record and return the case_id."""
+        raise_if_url(reason, "punishment reason")
         await self.ensure_user_identity(user_id)
         await self.ensure_user_identity(moderator_id)
         user_id = self.hash_user_id(user_id)
@@ -251,6 +253,7 @@ class ModerationMixin(BaseManager):
         self, case_id: int, guild_id: int, new_reason: str
     ) -> bool:
         """Update the reason for a punishment case. Returns True if successful."""
+        raise_if_url(new_reason, "punishment reason")
         try:
             async with self.async_sessionmaker() as session:
                 stmt = (
@@ -274,6 +277,7 @@ class ModerationMixin(BaseManager):
         self, case_id: int, guild_id: int, moderator_id: int, note: str
     ) -> bool:
         """Add a note to a punishment case. Returns True if successful."""
+        raise_if_url(note, "case note")
         await self.ensure_user_identity(moderator_id)
         moderator_id = self.hash_user_id(moderator_id)
         try:
@@ -404,6 +408,8 @@ class ModerationMixin(BaseManager):
         Each dict should contain: user_id, guild_id, moderator_id, punishment_type, reason, duration (optional)
         Returns the number of punishments successfully added.
         """
+        for p in punishments:
+            raise_if_url(p.get("reason"), "punishment reason")
         for p in punishments:
             raw_user_id = p["user_id"]
             raw_moderator_id = p["moderator_id"]

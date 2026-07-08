@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 
 from cryptography.fernet import Fernet
 
@@ -104,3 +105,46 @@ def encrypt_location(location: str) -> str:
 def decrypt_location(ciphertext: str) -> str:
     """Decrypt a stored location string."""
     return get_location_fernet().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+
+
+# Common URL / invite patterns used to keep user-input fields free of links.
+# This is intentionally broad: any scheme, discord.gg invites, markdown links,
+# and bare domains with TLDs are rejected.
+_URL_SCHEME_RE = re.compile(
+    r"[a-zA-Z][a-zA-Z0-9+.-]*://", re.IGNORECASE
+)
+_DISCORD_INVITE_RE = re.compile(
+    r"(?:discord(?:\.com/invite|\.gg|app\.com/invite|\.gg/invite)|gg)/[a-zA-Z0-9-]+",
+    re.IGNORECASE,
+)
+_MARKDOWN_LINK_RE = re.compile(
+    r"\[([^\]]*)\]\(([^)]+)\)", re.IGNORECASE
+)
+_WWW_RE = re.compile(
+    r"(?:^|\s)www\.[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/\S*)?",
+    re.IGNORECASE,
+)
+
+
+def contains_url(text: str | None) -> bool:
+    """Return True if ``text`` appears to contain a URL or invite link."""
+    if not text or not isinstance(text, str):
+        return False
+    if _URL_SCHEME_RE.search(text):
+        return True
+    if _DISCORD_INVITE_RE.search(text):
+        return True
+    if _MARKDOWN_LINK_RE.search(text):
+        return True
+    if _WWW_RE.search(text):
+        return True
+    return False
+
+
+def raise_if_url(text: str | None, field_name: str = "input") -> None:
+    """Raise ValueError if ``text`` contains a URL or invite link."""
+    if contains_url(text):
+        raise ValueError(
+            f"URLs are not allowed in {field_name}. Please remove any links, "
+            f"invites, or website addresses and try again."
+        )
