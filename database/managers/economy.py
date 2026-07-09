@@ -25,7 +25,7 @@ import logging
 from decimal import Decimal, ROUND_HALF_UP
 from utils.amount import AmountUtils
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 ADMIN_IDS = {284439598422163476, 538773310704582666, 657182369240973312}  # Owner IDs
 
@@ -2030,20 +2030,6 @@ class EconomyMixin(BaseManager):
             # Gini = 0 means perfect equality, Gini = 1 means maximum inequality
             # Wealth includes wallet, bank, and crypto at latest prices; treasury excluded.
             volatility_index = await self._calculate_wealth_gini()
-
-            # Log or persist as needed
-            logger.info(
-                {
-                    "date": str(today),
-                    "treasury_balance": float(treasury_balance),
-                    "total_supply": float(total_supply),
-                    "circulating_supply": float(circulating_supply),
-                    "avg_wallet_balance": float(avg_wallet_balance),
-                    "transaction_volume": float(transaction_volume),
-                    "active_users": active_users,
-                    "volatility_index": float(volatility_index),
-                }
-            )
 
             # Calculate additional economic metrics
             liquidity_ratio = (

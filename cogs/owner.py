@@ -31,7 +31,7 @@ from database.manager import ItemType
 import importlib.util
 from utils.embeds import Embeds
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 MAX_FIELD_VALUE_LENGTH = 1024
 
@@ -174,9 +174,7 @@ class MetricsPaginator(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(
-        label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️"
-    )
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
     async def previous(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -188,7 +186,7 @@ class MetricsPaginator(discord.ui.View):
         else:
             await interaction.response.defer()
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, emoji="▶️")
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = self.get_total_pages()
         if self.current_page < total_pages - 1:
@@ -250,7 +248,7 @@ class TodoPaginator(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.author.id
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
     async def previous(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -262,7 +260,7 @@ class TodoPaginator(discord.ui.View):
         else:
             await interaction.response.defer()
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         total_pages = (len(self.tasks) - 1) // self.per_page + 1
         if self.current_page < total_pages - 1:
@@ -2843,7 +2841,7 @@ class Owner(commands.Cog, name="Owner"):
                     )
                     await interaction.response.edit_message(embed=embed, view=None)
 
-            @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary)
+            @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
             async def prev_button(
                 self, interaction: discord.Interaction, _: discord.ui.Button
             ):
@@ -2851,7 +2849,7 @@ class Owner(commands.Cog, name="Owner"):
                     self.idx = (self.idx - 1) % len(entries)
                     await self._render(interaction)
 
-            @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
+            @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
             async def next_button(
                 self, interaction: discord.Interaction, _: discord.ui.Button
             ):
@@ -3146,7 +3144,7 @@ class Owner(commands.Cog, name="Owner"):
                     return False
                 return True
 
-            @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+            @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
             async def previous(
                 self, interaction: discord.Interaction, _: discord.ui.Button
             ):
@@ -3158,7 +3156,7 @@ class Owner(commands.Cog, name="Owner"):
                     embed=self.embeds[self.current], view=self
                 )
 
-            @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+            @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
             async def next(
                 self, interaction: discord.Interaction, _: discord.ui.Button
             ):
@@ -4619,9 +4617,7 @@ class Owner(commands.Cog, name="Owner"):
                 return False
             return True
 
-        @discord.ui.button(
-            label="Previous", style=discord.ButtonStyle.secondary, emoji="◀️"
-        )
+        @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
         async def previous(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
@@ -4633,9 +4629,7 @@ class Owner(commands.Cog, name="Owner"):
             else:
                 await interaction.response.defer()
 
-        @discord.ui.button(
-            label="Next", style=discord.ButtonStyle.secondary, emoji="▶️"
-        )
+        @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
         async def next(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):

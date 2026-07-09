@@ -5,7 +5,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class Community(commands.Cog, name="Community"):
@@ -135,7 +135,7 @@ class Community(commands.Cog, name="Community"):
                 embed.set_footer(text=f"Page {self.current_page + 1}/{len(self.pages)}")
                 await interaction.response.edit_message(embed=embed, view=self)
 
-            @discord.ui.button(label="◀️", style=discord.ButtonStyle.primary)
+            @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
             async def previous_page(
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ):
@@ -143,7 +143,7 @@ class Community(commands.Cog, name="Community"):
                     self.current_page -= 1
                     await self.update_embed(interaction)
 
-            @discord.ui.button(label="▶️", style=discord.ButtonStyle.primary)
+            @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
             async def next_page(
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ):

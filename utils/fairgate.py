@@ -17,7 +17,7 @@ from urllib.parse import urljoin
 import asyncio
 import aiohttp
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class FairGateError(Exception):

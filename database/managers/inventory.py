@@ -29,7 +29,7 @@ import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class InventoryMixin(BaseManager):

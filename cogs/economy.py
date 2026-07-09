@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Sequence, List, Any
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 class DropView(discord.ui.View):
     def __init__(self, bot, inter, amount, drop_author, currency_name, emoji, cog):
@@ -321,7 +321,7 @@ class ShopView(View):
         else:
             await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
     async def previous_button(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ):
@@ -402,7 +402,7 @@ class ShopView(View):
                 embed=confirm_embed, view=confirm_view, ephemeral=True
             )
 
-    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
     async def next_button(self, interaction: discord.Interaction, _: discord.ui.Button):
         """Go to the next shop item."""
         if interaction.user.id != self.user_id:
@@ -1070,7 +1070,7 @@ class TransactionPaginator(discord.ui.View):
         )
         return embed
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray, emoji="⬅️")
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
     async def previous_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -1089,7 +1089,7 @@ class TransactionPaginator(discord.ui.View):
         embed = await self.get_page_embed(self.current_page)
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.gray, emoji="➡️")
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
     async def next_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):

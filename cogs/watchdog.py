@@ -10,7 +10,7 @@ from typing import Optional
 import humanfriendly
 import base64
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class Watchdog(commands.Cog, name="Watchdog"):

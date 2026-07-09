@@ -13,7 +13,7 @@ from typing import Optional
 
 import aiohttp
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class InfisicalSecretsManager:
@@ -120,6 +120,7 @@ class InfisicalSecretsManager:
         Args:
             mapping: {os.environ_name: infisical_secret_name}
         """
+        logger.info("-------------------")
         for env_name, secret_name in mapping.items():
             value = await self.get_secret(secret_name)
             os.environ[env_name] = value

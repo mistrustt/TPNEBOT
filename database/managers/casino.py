@@ -24,7 +24,7 @@ import logging
 from decimal import Decimal
 from utils.amount import AmountUtils
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class CasinoMixin(BaseManager):

@@ -15,7 +15,7 @@ from utils.misc import MiscUtils
 from typing import Optional
 from matplotlib.ticker import MaxNLocator
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class Moderation(commands.Cog, name="Moderation"):
@@ -1464,9 +1464,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 super().__init__()
                 self.page_num = 0
 
-            @discord.ui.button(
-                label="Previous", style=discord.ButtonStyle.primary, disabled=True
-            )
+            @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
             async def previous(
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ):
@@ -1475,7 +1473,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 embed = await create_embed(self.page_num)
                 await interaction.response.edit_message(embed=embed, view=self)
 
-            @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
+            @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
             async def next(
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ):
@@ -4490,7 +4488,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
                 return embed
 
-            @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+            @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
             async def previous_page(
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ):
@@ -4502,7 +4500,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 embed = self.create_embed()
                 await interaction.response.edit_message(embed=embed, view=self)
 
-            @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+            @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
             async def next_page(
                 self, interaction: discord.Interaction, button: discord.ui.Button
             ):

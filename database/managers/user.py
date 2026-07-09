@@ -56,7 +56,7 @@ from datetime import timezone
 import discord
 import logging
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class UserMixin(BaseManager):

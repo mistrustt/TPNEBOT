@@ -219,7 +219,7 @@ class VoiceControlView(discord.ui.View):
         )
 
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 ALLOWED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".wav")
 MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50 MB

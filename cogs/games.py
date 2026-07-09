@@ -10,7 +10,7 @@ from discord.ext.commands import Context
 from discord.ui import View, button, Button
 from utils.misc import MiscUtils
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
@@ -64,7 +64,7 @@ async def fetch_wyr_question() -> str | None:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "google/gemma-3n-e4b-it:free",  # model name
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",  # model name
         "messages": [
             {
                 "role": "user",
@@ -111,7 +111,6 @@ async def fetch_wyr_question() -> str | None:
             except Exception as e:
                 logger.exception("Malformed WYR response")
                 return None
-
 
 class Games(commands.Cog, name="Games"):
     def __init__(self, bot: commands.Bot) -> None:

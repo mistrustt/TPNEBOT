@@ -30,7 +30,7 @@ try:
 except Exception:
     _apg_exc = None
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 # Exceptions treated as transient database connection failures.  These are retried
 # with exponential backoff so brief outages (restart, network blip, failover)

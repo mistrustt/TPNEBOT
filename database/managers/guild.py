@@ -18,7 +18,7 @@ from datetime import timedelta
 import discord
 import logging
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class GuildMixin(BaseManager):

@@ -12,7 +12,7 @@ import asyncio
 from faker import Faker
 from typing import Union
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 
 

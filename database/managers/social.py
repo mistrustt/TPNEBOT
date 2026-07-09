@@ -16,7 +16,7 @@ import logging
 from datetime import date
 import discord
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class SocialMixin(BaseManager):

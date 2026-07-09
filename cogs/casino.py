@@ -35,7 +35,7 @@ from utils.fairgate import FairGateClient, FairGateError
 from aiohttp import ClientConnectorError, ServerDisconnectedError
 from textwrap import shorten
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class CrashView(discord.ui.LayoutView):
@@ -3350,7 +3350,7 @@ class GameHistoryPaginator(discord.ui.View):
                 self.history
             )
 
-    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.gray, emoji="⬅️")
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
     async def previous_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -3364,7 +3364,7 @@ class GameHistoryPaginator(discord.ui.View):
         new_embed = await self.get_page_embed()
         await interaction.response.edit_message(embed=new_embed, view=self)
 
-    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.gray, emoji="➡️")
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
     async def next_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -3484,7 +3484,7 @@ class Casino(commands.Cog):
         try:
             self.fairgate_client = FairGateClient.from_env()
             logger.info(
-                f"FairGate middleware initialized; all casino games now use FairGate"
+                f"Casino middleware initialized"
             )
             # Always backfill seeds when FairGate is available.
             if self.fairgate_client.api_key:
@@ -3492,7 +3492,7 @@ class Casino(commands.Cog):
                     self._fairgate_backfill_loop()
                 )
         except FairGateError as e:
-            logger.warning(f"FairGate middleware is configured but init failed: {e}")
+            logger.warning(f"Casino middleware is configured but init failed: {e}")
 
         # SLOTS constants imported from fairness.py
         self.SLOTS_SYMBOLS = SLOTS_SYMBOLS

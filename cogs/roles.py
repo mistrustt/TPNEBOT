@@ -5,7 +5,7 @@ from typing import Optional
 import logging
 import asyncio
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class RolesPaginator(discord.ui.View):
@@ -118,7 +118,7 @@ class InRolePaginator(discord.ui.View):
         )
         return embed
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.grey, emoji="⬅️")
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.secondary, emoji="⬅️")
     async def previous_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -131,7 +131,7 @@ class InRolePaginator(discord.ui.View):
         self._update_buttons()
         await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.grey, emoji="➡️")
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.secondary, emoji="➡️")
     async def next_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):

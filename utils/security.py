@@ -8,7 +8,7 @@ import re
 
 from cryptography.fernet import Fernet
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 _warned_missing_key = False
 _warned_missing_stats_salt = False
 

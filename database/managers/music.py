@@ -12,7 +12,7 @@ from ..models import (
 import discord
 import logging
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class MusicMixin(BaseManager):

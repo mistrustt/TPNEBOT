@@ -362,11 +362,6 @@ class DiscordBot(commands.Bot):
             await self.database.initialize()
             self.logger.info("Database Tables initialized successfully.")
             self.logger.info("-------------------")
-            # Collect initial economic metrics
-            self.logger.info("Collecting initial economic metrics...")
-            await self.database.collect_daily_economy_snapshot()
-            self.logger.info("Initial economic metrics collected successfully")
-            self.logger.info("-------------------")
             self.logger.info("Attempting to load cogs...")
             await self.load_cogs()
             self.logger.info("Cog loading stage completed successfully.")
