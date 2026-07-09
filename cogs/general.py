@@ -2769,8 +2769,9 @@ class General(commands.Cog, name="General"):
                 await ctx.reply(embed=embed, delete_after=5)
                 return
 
-            title = "NASA Astronomy Picture of the Day"
-            # explanation = data.get('explanation', 'No Explanation')
+            apod_title = data.get("title", "No Title")
+            explanation = data.get("explanation", "No explanation provided.")
+            media_type = data.get("media_type", "image")
             url = data.get("url", "")
             hdurl = data.get("hdurl", "")
             date = data.get("date", "Unknown Date")
@@ -2781,22 +2782,61 @@ class General(commands.Cog, name="General"):
                 else discord.Color.blurple()
             )
 
-            embed = discord.Embed(
-                title=title,
-                # description=explanation,
-                color=color,
-            )
-            embed.set_image(url=url)
-            embed.set_footer(text=date)
-            embed.set_author(
-                name=data.get("title", "No Title"),
-                icon_url="https://www.nasa.gov/wp-content/themes/nasa/assets/images/nasa-logo@2x.png",
-            )
-            if hdurl:
-                embed.add_field(
-                    name="HD Image", value=f"[apod.nasa.gov]({hdurl})", inline=False
-                )
-            message = await ctx.reply(embed=embed)
+            # Components V2 layout: a media gallery handles both images and
+            # videos (YouTube/Vimeo embeds unfurl as players), while a container
+            # holds the title, explanation and any HD link.
+            class APODContainer(discord.ui.Container):
+                def __init__(self):
+                    super().__init__(accent_color=color)
+
+                    header = discord.ui.Section(
+                        accessory=discord.ui.Thumbnail(
+                            media="https://www.nasa.gov/wp-content/themes/nasa/assets/images/nasa-logo@2x.png"
+                        )
+                    )
+                    header.add_item(
+                        discord.ui.TextDisplay(
+                            f"## {apod_title}\n"
+                            f"### NASA Astronomy Picture of the Day\n"
+                            f"-# {date}"
+                        )
+                    )
+                    self.add_item(header)
+                    self.add_item(discord.ui.Separator())
+
+                    if media_type == "video":
+                        self.add_item(
+                            discord.ui.TextDisplay(
+                                "-# Today's APOD is a video. It is shown above if the link is supported."
+                            )
+                        )
+
+                    if explanation:
+                        self.add_item(
+                            discord.ui.TextDisplay(explanation[:4000])
+                        )
+
+                    if hdurl:
+                        self.add_item(discord.ui.Separator())
+                        row = discord.ui.ActionRow()
+                        row.add_item(
+                            discord.ui.Button(
+                                label="View HD Image",
+                                url=hdurl,
+                            )
+                        )
+                        self.add_item(row)
+
+            layout_view = discord.ui.LayoutView(timeout=None)
+
+            if url:
+                gallery = discord.ui.MediaGallery()
+                gallery.add_item(media=url)
+                layout_view.add_item(gallery)
+
+            layout_view.add_item(APODContainer())
+
+            message = await ctx.reply(view=layout_view)
             await message.add_reaction("👍")
             await asyncio.sleep(1)
             await message.add_reaction("👎")
