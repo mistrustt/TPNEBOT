@@ -217,23 +217,7 @@ class DiscordBot(commands.Bot):
         self._interaction_start_times: dict[int, float] = {}
         self.config = self.database.load_config()
         self.debug_mode_active = False
-        self.cool_guys = [
-            284439598422163476,
-            782529966666678283,
-            975220499233788006,
-            1160736856384753694,
-            597490815299878922,
-            404096862857986048,
-            1166140569861496853,
-            736148885055078431,
-            538773310704582666,
-            657182369240973312,
-            1173579369399210120,
-            1099696209637167145,  # toxic
-            1382196396190470215,  # FLOW (GOATED ASF)
-            1282494458339922033,  # jwa
-        ]
-        self.version = "2026.06.30"
+        self.version = "2026.07.08"
         # Discord privileged intents we require and why:
         # - message_content: spam-channel enforcement, automated moderation
         #   (PII/card/token detection), message delete/edit logging, attachment
@@ -391,6 +375,9 @@ class DiscordBot(commands.Bot):
 
             self.logger.info("Loading cogs...")
             await self.load_cogs()
+
+            self.tree.error = self.on_app_command_error
+            self.logger.info("Registered slash command error handler.")
 
             await self.tree.sync()
             self.logger.info(
@@ -744,6 +731,10 @@ class DiscordBot(commands.Bot):
         if isinstance(error, app_commands.CommandOnCooldown):
             return error.retry_after
         if isinstance(error, app_commands.CommandInvokeError) and isinstance(
+            error.original, app_commands.CommandOnCooldown
+        ):
+            return error.original.retry_after
+        if isinstance(error, commands.HybridCommandError) and isinstance(
             error.original, app_commands.CommandOnCooldown
         ):
             return error.original.retry_after

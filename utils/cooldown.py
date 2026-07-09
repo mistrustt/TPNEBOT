@@ -2,6 +2,7 @@ import asyncio
 import functools
 import inspect
 import logging
+import time
 from collections import defaultdict
 from typing import Optional, Union
 
@@ -67,6 +68,11 @@ class UnifiedCooldownManager:
         self._locks: defaultdict[tuple[int, str], asyncio.Lock] = defaultdict(
             asyncio.Lock
         )
+        # In-flight slash interactions per (user_id, command_name). Used to
+        # distinguish a legitimate second invocation from a Discord retry that
+        # fires when the first invocation has not responded within ~3 seconds.
+        self._in_flight: dict[tuple[int, str], int] = {}
+        self._cooldown_started_at: dict[tuple[int, str], float] = {}
 
     def _key(self, user_id: int, command_name: str) -> tuple[int, str]:
         return (user_id, command_name)
@@ -74,6 +80,20 @@ class UnifiedCooldownManager:
     def lock(self, user_id: int, command_name: str):
         """Return the asyncio.Lock for a specific user/command pair."""
         return self._locks[self._key(user_id, command_name)]
+
+    def set_in_flight(
+        self, user_id: int, command_name: str, interaction_id: int
+    ) -> None:
+        """Mark a slash interaction as currently processing this command."""
+        self._in_flight[self._key(user_id, command_name)] = interaction_id
+
+    def clear_in_flight(self, user_id: int, command_name: str) -> None:
+        """Clear the in-flight marker for a user/command pair."""
+        self._in_flight.pop(self._key(user_id, command_name), None)
+
+    def is_in_flight(self, user_id: int, command_name: str) -> bool:
+        """Return True if a slash interaction is still processing this command."""
+        return self._key(user_id, command_name) in self._in_flight
 
     async def get_remaining(self, user_id: int, command_name: str) -> float:
         """Return the remaining cooldown in seconds for a user and command."""
@@ -129,6 +149,7 @@ class UnifiedCooldownManager:
             raise ValueError("Could not determine command name for cooldown")
 
         await self.bot.database.set_cooldown(user_id, name, int(seconds))
+        self._cooldown_started_at[self._key(user_id, name)] = time.perf_counter()
 
     async def get_cooldown_embed(self, remaining_cooldown: float) -> discord.Embed:
         return await CooldownUtils.get_cooldown_embed(remaining_cooldown)
@@ -194,16 +215,29 @@ def slash_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
             )
 
             if name:
-                async with interaction.client.cooldowns.lock(
-                    interaction.user.id, name
-                ):
-                    remaining = await interaction.client.cooldowns.get_remaining(
-                        interaction.user.id, name
-                    )
+                cooldowns = interaction.client.cooldowns
+                user_id = interaction.user.id
+                async with cooldowns.lock(user_id, name):
+                    remaining = await cooldowns.get_remaining(user_id, name)
                     if remaining > 0:
+                        # If the same user/command is already being processed,
+                        # this interaction is likely a Discord retry. Tell the
+                        # user to wait instead of showing a raw cooldown error.
+                        if cooldowns.is_in_flight(user_id, name):
+                            try:
+                                if not interaction.response.is_done():
+                                    await interaction.response.send_message(
+                                        "⏳ Your request is still being processed. "
+                                        "Please wait a moment.",
+                                        ephemeral=True,
+                                    )
+                            except Exception:
+                                pass
+                            return
+
                         logger.debug(
                             "Slash cooldown blocked user %s for /%s (%.2fs remaining)",
-                            interaction.user.id,
+                            user_id,
                             name,
                             remaining,
                         )
@@ -215,12 +249,14 @@ def slash_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                     # retries (which can fire if the command does not respond
                     # within ~3 seconds) see that an invocation is already in
                     # progress instead of racing into the command body.
-                    await interaction.client.cooldowns.set_cooldown(
-                        interaction.user.id, name, seconds
-                    )
+                    await cooldowns.set_cooldown(user_id, name, seconds)
+                    cooldowns.set_in_flight(user_id, name, interaction.id)
 
-                logger.debug("Set slash cooldown for user %s /%s", interaction.user.id, name)
-                return await func(*args, **kwargs)
+                logger.debug("Set slash cooldown for user %s /%s", user_id, name)
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    cooldowns.clear_in_flight(user_id, name)
 
             return await func(*args, **kwargs)
 
@@ -293,6 +329,28 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
             async with bot.cooldowns.lock(user_id, name):
                 remaining = await bot.cooldowns.get_remaining(user_id, name)
                 if remaining > 0:
+                    # If the same user/command is already being processed by an
+                    # active slash interaction, this is likely a Discord retry
+                    # rather than a deliberate second invocation. Respond with a
+                    # friendly "still processing" message instead of a cooldown
+                    # error to avoid confusing users.
+                    if is_slash and bot.cooldowns.is_in_flight(user_id, name):
+                        interaction = (
+                            ctx_or_interaction.interaction
+                            if isinstance(ctx_or_interaction, commands.Context)
+                            else ctx_or_interaction
+                        )
+                        try:
+                            if not interaction.response.is_done():
+                                await interaction.response.send_message(
+                                    "⏳ Your request is still being processed. "
+                                    "Please wait a moment.",
+                                    ephemeral=True,
+                                )
+                        except Exception:
+                            pass
+                        return
+
                     logger.debug(
                         "Unified cooldown blocked user %s for %s (%.2fs remaining, slash=%s)",
                         user_id,
@@ -313,6 +371,13 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                 # ~3 seconds) see that an invocation is already in progress
                 # instead of racing into the command body.
                 await bot.cooldowns.set_cooldown(ctx_or_interaction, seconds, name)
+                if is_slash:
+                    interaction = (
+                        ctx_or_interaction.interaction
+                        if isinstance(ctx_or_interaction, commands.Context)
+                        else ctx_or_interaction
+                    )
+                    bot.cooldowns.set_in_flight(user_id, name, interaction.id)
 
             logger.debug(
                 "Set unified cooldown for user %s command %s (slash=%s)",
@@ -320,7 +385,11 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                 name,
                 is_slash,
             )
-            return await func(*args, **kwargs)
+            try:
+                return await func(*args, **kwargs)
+            finally:
+                if is_slash:
+                    bot.cooldowns.clear_in_flight(user_id, name)
 
         wrapper._unified_cooldown = True
         return wrapper
