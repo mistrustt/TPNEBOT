@@ -2884,9 +2884,8 @@ class Music(commands.Cog, name="Music"):
             if ii < len(songs) - 1:
                 container.add_item(discord.ui.Separator())
 
-    @commands.hybrid_command(name='syncsurfaces', aliases=['syncleaks'], description='Sync the Juice WRLD surfaces cache (owner only).')
+    @commands.command(name='syncsurfaces', aliases=['syncleaks'], description='Sync the Juice WRLD surfaces cache (owner only).', hidden=True)
     @commands.is_owner()
-    @unified_cooldown(30)
     async def sync_surfaces(self, ctx: commands.Context):
         if self.cache_songs.is_running():
             self.cache_songs.cancel()
@@ -3385,9 +3384,8 @@ class Music(commands.Cog, name="Music"):
 
         return self._build_default_category(song)
 
-    @commands.hybrid_command(name="syncblacktea", aliases=["sbt"], description="Sync the Blacktea valid names cache (owner only).")
+    @commands.command(name="syncblacktea", aliases=["sbt"], description="Sync the Blacktea valid names cache (owner only).", hidden=True)
     @commands.is_owner()
-    @unified_cooldown(30)
     async def syncblacktea(self, ctx: commands.Context):
         if ctx.message is not None:
             await ctx.message.add_reaction('🔄')
@@ -3405,7 +3403,6 @@ class Music(commands.Cog, name="Music"):
             await ctx.reply(embed=discord.Embed(description='Blacktea cache synced successfully.', color=discord.Color.green()))
 
     @commands.hybrid_command(name="blacktea", description="Play blacktea with Juice WRLD songs.")
-    @commands.is_owner()
     @unified_cooldown(60)
     async def blacktea(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_blacktea:
@@ -3904,9 +3901,8 @@ class Music(commands.Cog, name="Music"):
                 channels.append(channel)
         return channels
 
-    @commands.hybrid_command(name="countpledge", aliases=["pledges", "pledged", "countpledges"], description="Count pledges in a pledge channel.")
+    @commands.command(name="countpledge", aliases=["pledges", "pledged", "countpledges"], description="Count pledges in a pledge channel.", hidden=True)
     @commands.check_any(commands.has_permissions(administrator=True), commands.check(can_test))
-    @unified_cooldown(60)
     async def countpledge(self, ctx: commands.Context, after_message_id: int = 0):
         pledges_channels = self.find_pledges_channel(ctx.guild)
         count = len(pledges_channels)

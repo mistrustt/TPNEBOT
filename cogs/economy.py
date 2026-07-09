@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 from utils.misc import MiscUtils
 from utils.amount import AmountUtils
 from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -1179,6 +1180,9 @@ class Economy(commands.Cog):
         self.validate_economy_task.cancel()
         self.fire_inactive_employees_task.cancel()
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
+
     async def _next_u64(self, user_id: int, *, tag: str) -> tuple[int, dict]:
         server_seed, client_seed, nonce = await self.bot.database.bump_and_get(user_id)
         msg = f"{client_seed}:{nonce}:{tag}".encode()
@@ -1506,9 +1510,10 @@ class Economy(commands.Cog):
     async def before_fire_inactive_employees_task(self):
         await self.bot.wait_until_ready()
 
-    @commands.command(
+    @commands.hybrid_command(
         name="balance", aliases=["bal"], description="Check your current balance."
     )
+    @unified_cooldown(10)
     async def balance(self, ctx: commands.Context, member: discord.Member = None):
         """Check your current balance."""
         try:
@@ -1624,11 +1629,12 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="leaderboard",
         aliases=["lb"],
         description="View the top 10 users by net balance.",
     )
+    @unified_cooldown(10)
     async def leaderboard(self, ctx: commands.Context):
         """Displays the top 10 users by net balance."""
         top_users = await self.bot.database.get_top_balance_users(limit=10)
@@ -1681,7 +1687,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @commands.group(
-        name="economy", aliases=["eco", "econ"], description="View economy statistics and related features."
+        name="economy", aliases=["eco", "econ"], invoke_without_command=True
     )
     async def economy(self, ctx: commands.Context):
         """Fetch and display economy statistics."""
@@ -1766,6 +1772,7 @@ class Economy(commands.Cog):
     @economy.command(
         name="trends", aliases=["trend"], description="View economic trends over time."
     )
+    @unified_cooldown(10)
     async def economy_trends(self, ctx: commands.Context, days: int = 30):
         """Display economic trends over the specified number of days."""
         if not hasattr(self.bot, 'database'):
@@ -1828,6 +1835,7 @@ class Economy(commands.Cog):
     @economy.command(
         name="health", aliases=["status"], description="Get the overall economic health score."
     )
+    @unified_cooldown(10)
     async def economy_health(self, ctx: commands.Context):
         """Display the overall economic health score and breakdown with personalized recommendations."""
         if not hasattr(self.bot, 'database'):
@@ -1883,7 +1891,7 @@ class Economy(commands.Cog):
         embed.set_footer(text="Higher scores indicate better economic health")
         await ctx.send(embed=embed)
 
-    @commands.command(name="daily", description="Claim your daily reward.")
+    @commands.hybrid_command(name="daily", description="Claim your daily reward.")
     @unified_cooldown(86400)
     async def daily(self, ctx: commands.Context):
         """Receive a daily reward."""
@@ -1942,7 +1950,7 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="weekly", description="Claim your weekly reward.")
+    @commands.hybrid_command(name="weekly", description="Claim your weekly reward.")
     @unified_cooldown(604800)
     async def weekly(self, ctx: commands.Context):
         """Receive a weekly reward."""
@@ -2002,7 +2010,7 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="monthly", description="Claim your monthly reward.")
+    @commands.hybrid_command(name="monthly", description="Claim your monthly reward.")
     @unified_cooldown(2592000)
     async def monthly(self, ctx: commands.Context):
         """Receive a monthly reward."""
@@ -2057,7 +2065,8 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="beg", description="Beg for money. Maybe you'll get lucky!")
+    @commands.hybrid_command(name="beg", description="Beg for money. Maybe you'll get lucky!")
+    @unified_cooldown(3)
     async def beg(self, ctx: commands.Context):
         """Beg for money. Maybe you'll get lucky!"""
 
@@ -2215,9 +2224,6 @@ class Economy(commands.Cog):
                     name="Beg",
                     icon_url=self.utils.get_avatar_url(ctx.author),
                 )
-                await self.bot.database.set_cooldown(
-                    user_id, ctx.command.qualified_name, 3
-                )
         except ValueError as e:
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
@@ -2233,7 +2239,7 @@ class Economy(commands.Cog):
         "executive": {"title": "Executive", "base_salary": Decimal("3000000")},
     }
 
-    @commands.group(name="job", description="Job commands to earn some money.")
+    @commands.group(name="job", invoke_without_command=True)
     async def job(self, ctx: commands.Context):
         """Group command for jobs."""
         if ctx.invoked_subcommand is None:
@@ -2252,6 +2258,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed)
 
     @job.command(name="list", description="View all available jobs.")
+    @unified_cooldown(10)
     async def job_list(self, ctx: commands.Context):
         """List all available jobs with their base salaries."""
         color = (
@@ -2276,6 +2283,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @job.command(name="apply", description="Apply for a job to earn some money.")
+    @unified_cooldown(86400)
     async def job_apply(self, ctx: commands.Context, job_name: str):
         """Apply for a job."""
         user_id = ctx.author.id
@@ -2310,9 +2318,6 @@ class Economy(commands.Cog):
             "executive": 0.15,
         }
         hire_chance = hire_chances.get(job_name, 0.50)
-
-        # Set cooldown regardless of outcome
-        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 86400)
 
         # Roll for hiring (roll < hire_chance means success)
         roll = secrets.randbelow(100) / 100
@@ -2352,6 +2357,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed)
 
     @job.command(name="work", description="Work to earn your salary (24h cooldown).")
+    @unified_cooldown(86400)
     async def job_work(self, ctx: commands.Context):
         """Work at your job to earn salary."""
         user_id = ctx.author.id
@@ -2403,10 +2409,6 @@ class Economy(commands.Cog):
                 color=color,
             )
 
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, 86400
-            )
-
             await ctx.reply(embed=embed)
 
         except ValueError as e:
@@ -2414,6 +2416,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
 
     @job.command(name="info", description="View your current job details.")
+    @unified_cooldown(10)
     async def job_info(self, ctx: commands.Context):
         """View your current job information."""
         user_id = ctx.author.id
@@ -2512,7 +2515,7 @@ class Economy(commands.Cog):
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.group(name="loan", aliases=["loans"], description="Take out a loan. Pay it back with interest!")
+    @commands.group(name="loan", aliases=["loans"], invoke_without_command=True)
     async def loan(self, ctx: commands.Context):
         """Group command for managing loans."""
         if ctx.invoked_subcommand is None:
@@ -2558,6 +2561,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed)
 
     @loan.command(name="take", aliases=["get"], description="Take out a new loan.")
+    @unified_cooldown(10)
     async def loan_take(self, ctx: commands.Context, amount: str):
         """Take out a loan. Pay it back with interest!"""
         user_id = ctx.author.id
@@ -2624,6 +2628,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed, delete_after=5)
 
     @loan.command(name="repay", aliases=["pay"], description="Repay an active loan.")
+    @unified_cooldown(10)
     async def loan_repay(self, ctx: commands.Context, amount: str):
         """Repay part or all of an active loan."""
         user_id = ctx.author.id
@@ -2697,7 +2702,6 @@ class Economy(commands.Cog):
     @commands.command(
         name="scout",
         aliases=["mark"],
-        description="Scout for potential 'job' candidates.",
     )
     async def scout(self, ctx: commands.Context):
         guild_member_ids = {m.id for m in ctx.guild.members}
@@ -2748,12 +2752,9 @@ class Economy(commands.Cog):
         if avatar:
             embed.set_thumbnail(url=avatar)
 
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 900
-        )
         await ctx.reply(embed=embed, delete_after=15)
 
-    @commands.command(name="rob", description="Attempt to rob another user.")
+    @commands.command(name="rob")
     async def rob(self, ctx: commands.Context, target: discord.Member):
         """Attempt to rob another user."""
         user_id = ctx.author.id
@@ -2959,9 +2960,6 @@ class Economy(commands.Cog):
                 else:
                     result_message = f"💥 **You attempted to rob** {target.mention}'s bank account but found nothing to steal!"
 
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, cooldown_seconds
-            )
             embed = discord.Embed(
                 description=result_message,
                 color=discord.Color.green()
@@ -2981,7 +2979,6 @@ class Economy(commands.Cog):
 
     @commands.command(
         name="drain",
-        description="Drain a single user's wallet of its entire balance once a day.",
     )
     async def drain(self, ctx: commands.Context, target: discord.Member):
         """Attempt to drain another user's wallet."""
@@ -3032,12 +3029,8 @@ class Economy(commands.Cog):
                     fee_from_amount=True,
                 )
 
-                await self.bot.database.set_cooldown(
-                    ctx.author.id, ctx.command.qualified_name, 86400
-                )
-
                 result_message = (
-                    f"💰 You successfully drained {self.currency_name} **{await self.formatter(target_balance)}** "
+                    f"💰 You successfully drained {self.currency_name} **{await self.formatter(target_balance)}**"
                     f"from {target.mention}'s wallet!"
                 )
 
@@ -3080,9 +3073,6 @@ class Economy(commands.Cog):
                 )
                 await ctx.reply(embed=embed, delete_after=5)
                 return
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 86400
-            )
             embed = discord.Embed(
                 description=(
                     f"🚨 You attempted to drain {target.mention}'s wallet but got caught! "
@@ -3095,11 +3085,12 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="send",
         aliases=["transfer", "tfr", "give"],
         description="Transfer currency to another user.",
     )
+    @unified_cooldown(10)
     async def transfer(
         self, ctx: commands.Context, member: discord.Member, amount: str
     ):
@@ -3189,10 +3180,6 @@ class Economy(commands.Cog):
                     f"ID: `{txid}`"
                 )
             )
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 10
-            )
-
         except ValueError as e:
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             embed.set_author(
@@ -3200,7 +3187,7 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="drop", description="Drop money for others to claim")
+    @commands.command(name="drop")
     async def drop(self, ctx: commands.Context, amount: str):
         user_id = ctx.author.id
         drop_wallet = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -3248,9 +3235,6 @@ class Economy(commands.Cog):
         )
 
         await self.bot.database.add_reputation_score(ctx.author.id, 1)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         view = DropView(
             self.bot, ctx, amount, ctx.author, self.currency_name, choice, self
         )
@@ -3263,7 +3247,7 @@ class Economy(commands.Cog):
             "author": ctx.author,
         }
 
-    @commands.command(name="airdrop", description="Start a money airdrop.")
+    @commands.command(name="airdrop")
     async def airdrop(self, ctx: commands.Context, amount: str):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -3312,13 +3296,10 @@ class Economy(commands.Cog):
             self.bot, amount_converted, self.currency_name, wallet_id, ctx.author
         )
         await self.bot.database.add_reputation_score(ctx.author.id, 1)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 15
-        )
         message = await ctx.reply(embed=embed, view=view)
         view.message = message
 
-    @commands.command(name='xmas', description="Open your Christmas gift!")
+    @commands.command(name='xmas')
     async def xmas(self, ctx: commands.Context):
         """Open your Christmas gift!"""
         
@@ -3368,12 +3349,9 @@ class Economy(commands.Cog):
             name="Christmas Gift", icon_url=self.utils.get_avatar_url(ctx.author)
         )
 
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 86400
-        )
         await ctx.reply(embed=embed)
 
-    @commands.command(name="newyear", description="Open your New Year's gift!")
+    @commands.command(name="newyear")
     async def newyear(self, ctx: commands.Context):
         """Open your New Year's gift!"""
         
@@ -3384,11 +3362,8 @@ class Economy(commands.Cog):
                 description="🎉 **It's not New Year's Day yet!** This command only works on January 1st.",
                 color=discord.Color.orange()
             )
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 86400
-            )
             return await ctx.reply(embed=embed, delete_after=10)
-        
+
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         gift_amount = Decimal(str(user_id)) * Decimal("3")
@@ -3407,9 +3382,11 @@ class Economy(commands.Cog):
 
     @commands.group(name="crypto", aliases=["coin","coins"], invoke_without_command=True)
     async def crypto(self, ctx: commands.Context):
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -3437,7 +3414,8 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed, mention_author=False)
 
     @crypto.command(name="buy", description="Buy cryptocurrency with your balance")
-    async def crypto_buy(self, ctx: commands.Context, currency: str, amount: str ):
+    @unified_cooldown(10)
+    async def crypto_buy(self, ctx: commands.Context, currency: str, amount: str):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         balance = Decimal(str(await self.bot.database.get_wallet_balance(wallet_id)))
@@ -3506,6 +3484,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @crypto.command(name="sell", description="Sell cryptocurrency for your balance")
+    @unified_cooldown(10)
     async def crypto_sell(self, ctx: commands.Context, currency: str, amount: str):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -3569,6 +3548,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @crypto.command(name="transfer", description="Transfer cryptocurrency to another user")
+    @unified_cooldown(10)
     async def crypto_transfer(self, ctx: commands.Context, recipient: discord.Member, currency: str, amount: str):
         sender_id = ctx.author.id
         receiver_id = recipient.id
@@ -3693,7 +3673,6 @@ class Economy(commands.Cog):
     @commands.command(
         name="deposit",
         aliases=["dep", "dp", "depo"],
-        description="Deposit currency into your bank.",
     )
     async def deposit(self, ctx: commands.Context, amount: str):
         """Deposit currency into the bank."""
@@ -3720,9 +3699,6 @@ class Economy(commands.Cog):
                         description=f"You successfully deposited {self.currency_name} **{await self.formatter(amount)}**.",
                         color=discord.Color.green(),
                     )
-                    await self.bot.database.set_cooldown(
-                        ctx.author.id, ctx.command.qualified_name, 10
-                    )
                     await ctx.reply(embed=embed)
 
                 except ValueError as e:
@@ -3741,7 +3717,6 @@ class Economy(commands.Cog):
     @commands.command(
         name="withdraw",
         aliases=["with", "wd"],
-        description="Withdraw currency from your bank.",
     )
     async def withdraw(self, ctx: commands.Context, amount: str):
         """Withdraw currency from the bank."""
@@ -3768,9 +3743,6 @@ class Economy(commands.Cog):
                         description=f"You successfully withdrew {self.currency_name} **{await self.formatter(amount)}**.",
                         color=discord.Color.green(),
                     )
-                    await self.bot.database.set_cooldown(
-                        ctx.author.id, ctx.command.qualified_name, 10
-                    )
                     await ctx.reply(embed=embed)
 
                 except ValueError as e:
@@ -3791,7 +3763,6 @@ class Economy(commands.Cog):
     @commands.command(
         name="treasury",
         aliases=["treas"],
-        description="Displays the current treasury balance.",
     )
     async def treasury_info(self, ctx: commands.Context):
         """Fetch and display treasury balance and latest transactions."""
@@ -3806,9 +3777,6 @@ class Economy(commands.Cog):
                 value=f"💰 **{await self.formatter(treasury_balance)}**",
                 inline=False,
             )
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 3
-            )
             await ctx.reply(embed=embed)
 
         except Exception as e:
@@ -3821,7 +3789,6 @@ class Economy(commands.Cog):
     @commands.command(
         name="transactions",
         aliases=["txs"],
-        description="View your latest transactions.",
     )
     async def transactions_cmd(
         self, ctx: commands.Context, member: discord.Member = None
@@ -3846,12 +3813,9 @@ class Economy(commands.Cog):
             initial_embed = await paginator.get_page_embed(0)
             message = await ctx.reply(embed=initial_embed, view=paginator)
             paginator.message = message
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
 
     @commands.command(
-        name="transaction", aliases=["tx"], description="Lookup a transaction by ID."
+        name="transaction", aliases=["tx"]
     )
     async def transaction_lookup_cmd(self, ctx: commands.Context, txid: str):
         """Look up a transaction by its UUID and present a clean, informative embed."""
@@ -4001,9 +3965,6 @@ class Economy(commands.Cog):
             except Exception:
                 pass
 
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
             await ctx.reply(embed=embed)
 
         except Exception as e:
@@ -4013,12 +3974,14 @@ class Economy(commands.Cog):
                 delete_after=5,
             )
 
-    @commands.group(name="bounty", description="Manage bounties")
+    @commands.group(name="bounty", invoke_without_command=True)
     async def bounty(self, ctx: commands.Context):
         """Group command for managing bounties."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -4046,6 +4009,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed, mention_author=False)
 
     @bounty.command(name="set", description="Set a bounty on another user")
+    @unified_cooldown(10)
     async def bounty_set(
         self, ctx: commands.Context, member: discord.Member, amount: str
     ):
@@ -4079,6 +4043,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed)
 
     @bounty.command(name="list", description="List top active bounties")
+    @unified_cooldown(10)
     async def bounty_list(self, ctx: commands.Context):
         msg = await ctx.reply("Fetching top bounties...")
         top_bounties: List = await self.bot.database.get_top_bounty_users(10)
@@ -4385,12 +4350,14 @@ class Economy(commands.Cog):
 
     # ==================== VIP Commands ====================
 
-    @commands.group(name="vip", description="VIP tier information and benefits", invoke_without_command=True)
+    @commands.group(name="vip", invoke_without_command=True)
     async def vip_group(self, ctx: commands.Context):
         """Group command for VIP tier information."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -4418,6 +4385,7 @@ class Economy(commands.Cog):
         await ctx.reply(embed=embed, mention_author=False)
 
     @vip_group.command(name="status", aliases=["stat"], description="View your VIP tier status and progress")
+    @unified_cooldown(10)
     async def vip_status(self, ctx: commands.Context):
         """View your current VIP tier status."""
         try:
@@ -4526,6 +4494,7 @@ class Economy(commands.Cog):
             )
 
     @vip_group.command(name="tiers", aliases=['tier'], description="View all VIP tiers and their benefits")
+    @unified_cooldown(10)
     async def vip_tiers(self, ctx: commands.Context):
         """Display all VIP tiers with benefits."""
         try:
@@ -4575,6 +4544,7 @@ class Economy(commands.Cog):
             )
 
     @vip_group.command(name="leaderboard", aliases=["lb"], description="View top players by total wagered")
+    @unified_cooldown(10)
     async def vip_leaderboard(self, ctx: commands.Context):
         """Display top VIP players by total wagered."""
         try:
@@ -4630,6 +4600,7 @@ class Economy(commands.Cog):
             )
 
     @vip_group.command(name="claim", description="Claim your accumulated rakeback")
+    @unified_cooldown(3600)
     async def claim_rakeback(self, ctx: commands.Context):
         """Claim accumulated rakeback."""
         try:

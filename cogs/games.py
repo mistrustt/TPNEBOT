@@ -9,6 +9,8 @@ from discord.ext import commands
 from discord.ext.commands import Context
 from discord.ui import View, button, Button
 from utils.misc import MiscUtils
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
 
@@ -64,7 +66,7 @@ async def fetch_wyr_question() -> str | None:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",  # model name
+        "model": "nvidia/nemotron-3-nano-30b-a3b:free",  # model name
         "messages": [
             {
                 "role": "user",
@@ -117,31 +119,39 @@ class Games(commands.Cog, name="Games"):
         self.bot = bot
         self.utils = MiscUtils(self)
 
-    @commands.command(name="rps")
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
+
+    @commands.hybrid_command(name="rps", description="Play Rock Paper Scissors.")
+    @unified_cooldown(5)
     async def rps(self, ctx: Context[commands.Bot], player: discord.User = None):
         game = button_games.BetaRockPaperScissors(player)
         await game.start(ctx)
 
-    @commands.command(name="tictactoe", aliases=["ttt"])
+    @commands.hybrid_command(
+        name="tictactoe", aliases=["ttt"], description="Play Tic-Tac-Toe with another user."
+    )
+    @unified_cooldown(5)
     async def tictactoe(self, ctx: Context[commands.Bot], member: discord.User):
         await ctx.defer()
         game = button_games.BetaTictactoe(cross=ctx.author, circle=member)
         await game.start(ctx)
 
-    @commands.command(name="wordle")
+    @commands.hybrid_command(name="wordle", description="Play a game of Wordle.")
+    @unified_cooldown(5)
     async def wordle(self, ctx: Context[commands.Bot]):
         await ctx.defer()
         game = button_games.BetaWordle()
         await game.start(ctx)
 
-    @commands.command(name="memory")
+    @commands.command(name="memory", description="Play the memory matching game.")
     async def memory_game(self, ctx: Context[commands.Bot]):
-        await ctx.defer()
         game = button_games.MemoryGame()
         await game.start(ctx)
 
-    @commands.command(name="wouldyourather", aliases=["wyr"])
-    @commands.cooldown(1, 15, commands.BucketType.user)
+    @commands.command(
+        name="wouldyourather", aliases=["wyr"], description="Get a random Would-You-Rather question."
+    )
     async def would_you_rather(self, ctx: commands.Context):
         # 1) Fetch
 
@@ -197,8 +207,10 @@ class Games(commands.Cog, name="Games"):
             # schedule without blocking
             ctx.bot.loop.create_task(end_game())
 
-    @commands.command(name="coinflip", aliases=["cf"], description="Flip a coin!")
-    @commands.cooldown(1, 3, commands.BucketType.user)
+    @commands.hybrid_command(
+        name="coinflip", aliases=["cf"], description="Flip a coin!"
+    )
+    @unified_cooldown(3)
     async def coinflip(self, ctx: Context):
         """Flip a coin, not really much else to it."""
         frames = [

@@ -8,6 +8,8 @@ from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from urllib.parse import urlparse
 from utils.misc import MiscUtils
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 
 class VoiceControlView(discord.ui.View):
@@ -430,10 +432,16 @@ class Voicechat(commands.Cog):
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
-    @commands.command(
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
+
+    @commands.hybrid_command(
         name="jtcsetup", description="Set up the Join To Create system in your server."
     )
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_channels=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def jtc_setup(self, ctx: Context):
         """Creates the Join To Create system for the server (only once)."""
         guild = ctx.guild
@@ -548,16 +556,19 @@ class Voicechat(commands.Cog):
         owner_id = await self._resolve_id(owner_id)
         return vc if owner_id == member.id else None
 
-    @commands.group(
+    @commands.hybrid_group(
         name="vc",
         invoke_without_command=True,
         description="Voice channel management commands",
     )
+    @unified_cooldown(5)
     async def vc(self, ctx: Context):
         """Lists all available voice channel commands."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -589,6 +600,7 @@ class Voicechat(commands.Cog):
         aliases=["permit"],
         description="Allow a user to join your private VC",
     )
+    @unified_cooldown(5)
     async def allow(self, ctx: Context, user: discord.Member):
         """Allows a specific user to join the VC."""
         try:
@@ -621,6 +633,7 @@ class Voicechat(commands.Cog):
     @vc.command(
         name="kick", aliases=["boot"], description="Kick a user from your private VC"
     )
+    @unified_cooldown(5)
     async def kick(self, ctx: Context, user: discord.Member):
         """Kicks a user from the voice channel."""
         try:
@@ -659,6 +672,7 @@ class Voicechat(commands.Cog):
             return
 
     @vc.command(name="ban", description="Ban a user from your private VC")
+    @unified_cooldown(5)
     async def ban(self, ctx: Context, user: discord.Member):
         """Bans a user from the voice channel."""
         try:
@@ -690,6 +704,7 @@ class Voicechat(commands.Cog):
             return
 
     @vc.command(name="unban", description="Unban a user from your private VC")
+    @unified_cooldown(5)
     async def unban(self, ctx: Context, user: discord.Member):
         """Unbans a user from the voice channel."""
         vc = await self.is_owner(ctx.author)
@@ -711,6 +726,7 @@ class Voicechat(commands.Cog):
         await ctx.reply(embed=embed, delete_after=5)
 
     @vc.command(name="lock", description="Lock your voice channel")
+    @unified_cooldown(5)
     async def lock(self, ctx: Context):
         """Locks the voice channel to prevent others from joining."""
         try:
@@ -741,6 +757,7 @@ class Voicechat(commands.Cog):
             return
 
     @vc.command(name="unlock", description="Unlock your voice channel")
+    @unified_cooldown(5)
     async def unlock(self, ctx: Context):
         """Unlocks the voice channel."""
         try:
@@ -775,6 +792,7 @@ class Voicechat(commands.Cog):
         aliases=["hide"],
         description="Make your VC invisible to everyone except you",
     )
+    @unified_cooldown(5)
     async def ghost(self, ctx: Context):
         """Hides the voice channel from everyone except the owner."""
         try:
@@ -807,6 +825,7 @@ class Voicechat(commands.Cog):
     @vc.command(
         name="reveal", aliases=["show"], description="Make your VC visible again"
     )
+    @unified_cooldown(5)
     async def reveal(self, ctx: Context):
         """Makes the voice channel visible again."""
         try:
@@ -839,6 +858,7 @@ class Voicechat(commands.Cog):
     @vc.command(
         name="setlimit", aliases=["limit"], description="Set the user limit for your VC"
     )
+    @unified_cooldown(5)
     async def set_limit(self, ctx: Context, limit: int):
         """Allows the owner to set a user limit."""
         try:
@@ -878,6 +898,7 @@ class Voicechat(commands.Cog):
             return
 
     @vc.command(name="rename", description="Rename your private VC")
+    @unified_cooldown(5)
     async def rename(self, ctx: Context, *, new_name: str):
         """Allows the owner to rename their voice channel."""
         try:
@@ -917,6 +938,7 @@ class Voicechat(commands.Cog):
             return
 
     @vc.command(name="claim", description="Claim ownership of an empty private VC")
+    @unified_cooldown(5)
     async def claim(self, ctx: Context):
         """Allows a user to claim a voice channel if the owner has left."""
         try:
@@ -979,6 +1001,7 @@ class Voicechat(commands.Cog):
             return
 
     @vc.command(name="nuke", description="Delete your private voice channel")
+    @unified_cooldown(5)
     async def nuke(self, ctx: Context):
         """Deletes the owner's voice channel immediately."""
         try:
@@ -1143,16 +1166,24 @@ class Voicechat(commands.Cog):
             )
             await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="play",
         aliases=["p"],
-        help="Plays an attached audio file or a direct audio URL in the voice channel",
+        description="Plays an attached audio file or a direct audio URL in the voice channel",
     )
-    async def play(self, ctx, *, query: str = None):
+    @unified_cooldown(10)
+    async def play(
+        self,
+        ctx: Context,
+        attachment: Optional[discord.Attachment] = None,
+        *,
+        query: Optional[str] = None,
+    ):
         """Plays an attached audio file or direct audio URL and queues it if another song is playing."""
-        # Attachment path: preserve existing behavior.
-        if ctx.message.attachments:
+        # Attachment path: preserve prefix behavior using the invoking message.
+        if ctx.message and ctx.message.attachments:
             attachment = ctx.message.attachments[0]
+        if attachment:
             if not any(
                 attachment.filename.endswith(ext) for ext in ALLOWED_AUDIO_EXTENSIONS
             ):
@@ -1185,7 +1216,8 @@ class Voicechat(commands.Cog):
         file_path, display_name = result
         await self._enqueue_audio_file(ctx, file_path, display_name)
 
-    @commands.command()
+    @commands.hybrid_command(name="skip", description="Skips the currently playing song")
+    @unified_cooldown(5)
     async def skip(self, ctx):
         """Skips the currently playing song"""
         vc = self.voice_clients.get(ctx.guild.id)
@@ -1200,7 +1232,8 @@ class Voicechat(commands.Cog):
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.send(embed=embed, delete_after=5)
 
-    @commands.command()
+    @commands.hybrid_command(name="queue", description="Displays the current music queue")
+    @unified_cooldown(5)
     async def queue(self, ctx):
         """Displays the current music queue"""
         if ctx.guild.id not in self.queues or not self.queues[ctx.guild.id]:
@@ -1225,11 +1258,12 @@ class Voicechat(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="stop",
         aliases=["dc", "disconnect"],
-        help="Stops playback and disconnects from the voice channel",
+        description="Stops playback and disconnects from the voice channel",
     )
+    @unified_cooldown(5)
     async def stop(self, ctx):
         """Stops playback and disconnects, deleting only the file associated with this guild"""
         vc = self.voice_clients.get(ctx.guild.id)
@@ -1255,7 +1289,8 @@ class Voicechat(commands.Cog):
         else:
             await ctx.send("I am not connected to any voice channel.", delete_after=5)
 
-    @commands.command(name="pause", help="Pauses the currently playing audio.")
+    @commands.hybrid_command(name="pause", description="Pauses the currently playing audio.")
+    @unified_cooldown(5)
     async def pause(self, ctx):
         """Pauses the current playback"""
         vc = self.voice_clients.get(ctx.guild.id)
@@ -1270,7 +1305,8 @@ class Voicechat(commands.Cog):
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="resume", help="Resumes the currently paused audio.")
+    @commands.hybrid_command(name="resume", description="Resumes the currently paused audio.")
+    @unified_cooldown(5)
     async def resume(self, ctx):
         """Resumes the paused playback"""
         vc = self.voice_clients.get(ctx.guild.id)
@@ -1285,11 +1321,12 @@ class Voicechat(commands.Cog):
             embed.set_footer(text="Action requested by: " + ctx.author.name)
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="volume",
         aliases=["vol"],
-        help="Adjusts the volume of the current audio (1-100%)",
+        description="Adjusts the volume of the current audio (1-100%)",
     )
+    @unified_cooldown(5)
     async def volume(self, ctx, volume: str):
         """Adjusts the volume of the current playback (1-100%)"""
         volume = volume.replace("%", "")

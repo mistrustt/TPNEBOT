@@ -15,6 +15,8 @@ from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
 from utils.amount import AmountUtils
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Optional
@@ -1801,8 +1803,6 @@ class RouletteView(discord.ui.LayoutView):
             except ValueError:
                 pass
 
-        await self.bot.database.set_cooldown(self.user_id, "roulette", 5)
-
         # ── Build result display ──
         result_lines = []
         for label, multiplier, payout in bet_results:
@@ -3505,6 +3505,9 @@ class Casino(commands.Cog):
         if self.fairgate_client:
             asyncio.create_task(self.fairgate_client.close())
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
+
     async def _fairgate_backfill_loop(self) -> None:
         """Poll FairGate for revealed seeds and back-fill pending game rows."""
         if not self.fairgate_client:
@@ -4273,16 +4276,14 @@ class Casino(commands.Cog):
 
         return amount
 
-    @commands.group(
+    @commands.hybrid_group(
         name="casino",
         invoke_without_command=True,
-        help="Casino command group. Use !casino help for subcommands.",
+        description="Casino command group. Use /casino for subcommands.",
     )
     async def casino(self, ctx: commands.Context):
         """Root for casino commands. Lists available subcommands."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = ctx.prefix or "/"
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -4314,7 +4315,7 @@ class Casino(commands.Cog):
         await ctx.reply(embed=embed, mention_author=False)
 
     @casino.command(
-        name="stats", help="Check your win/loss statistics for a specific game."
+        name="stats", description="Check your win/loss statistics for a specific game."
     )
     async def casino_stats(
         self,
@@ -4389,7 +4390,7 @@ class Casino(commands.Cog):
     @casino.command(
         name="leaderboard",
         aliases=["lb"],
-        help="View the top winners and losers for a specific game.",
+        description="View the top winners and losers for a specific game.",
     )
     async def casino_leaderboard(
         self, ctx: commands.Context, game_name: str = "gamble", limit: int = 10
@@ -4445,7 +4446,7 @@ class Casino(commands.Cog):
         await ctx.send(embed=embed)
 
     @casino.command(
-        name="history", aliases=["games", "ghistory"], help="View your game history."
+        name="history", aliases=["games", "ghistory"], description="View your game history."
     )
     async def casino_history(self, ctx: commands.Context, limit: int = 100):
         """
@@ -4475,120 +4476,30 @@ class Casino(commands.Cog):
     @casino.command(
         name="verify",
         aliases=["v", "verif", "check"],
-        help="verify a provably-fair game outcome",
+        description="Verify a provably-fair game outcome.",
         hidden=True,
     )
+    @unified_cooldown(5)
     async def casino_verify(
-        self, ctx: commands.Context, game: str, *args: str
+        self,
+        ctx: commands.Context,
+        game: str,
+        nonce: int,
+        user: Optional[discord.Member] = None,
+        step: Optional[int] = None,
     ):
         """
         Usage examples:
           !casino verify gamble 42
-          !casino verify gamble @user 42
-          !casino verify supergamble @user 7
-          !casino verify dice @user 5
+          !casino verify gamble 42 @user
           !casino verify ladder 3 2
-          !casino verify ladder @user 3 2
-          !casino verify slots @user 10
-          !casino verify blackjack @user 15
-          !casino verify poker @user 12
-          !casino verify roulette @user 9
-          !casino verify mines @user 12
 
-        The user mention is optional and defaults to the command author.
+        The user is optional and defaults to the command author.
         For ladder, supply the step number as the last argument.
         """
-        # ── parse the trailing arguments: optional user + nonce + game extras
-        # Two valid shapes (plus ladder's extra step):
-        #   <game> <nonce> [step]
-        #   <game> <user> <nonce> [step]
-        # Disambiguation: a bare integer (e.g. "42") is always a nonce. To
-        # verify another user's game by ID, the caller must use the <@id>
-        # mention form (or a username/display name).
         game_key = (game or "").lower()
-        is_ladder = game_key == "ladder"
-        member: discord.Member | discord.User = ctx.author
-        nonce: int | None = None
-        extra_args: list[str] = []
-
-        if not args:
-            return await ctx.reply(
-                f"Usage: `!casino verify {game} [@user] <nonce>`"
-                + (" `<step>`" if is_ladder else ""),
-                mention_author=False,
-            )
-
-        def _looks_like_user_mention(token: str) -> bool:
-            """A token is treated as a user mention only if it has explicit
-            mention syntax (`<@id>` / `<@!id>`) or a non-numeric name. A
-            bare integer is always a nonce.
-            """
-            if not token:
-                return False
-            stripped = token.strip().strip("<>@!").strip()
-            # `<@123>` or `<@!123>` => user. bare "123" => nonce.
-            return bool(token.strip().startswith("<@")) or not stripped.isdigit()
-
-        async def _resolve_user(token: str):
-            if not token:
-                return None
-            cleaned = token.strip().strip("<>@!").strip()
-            if not cleaned:
-                return None
-            if cleaned.isdigit():
-                uid = int(cleaned)
-                resolved = None
-                if ctx.guild:
-                    resolved = ctx.guild.get_member(uid)
-                if resolved is None:
-                    resolved = self.bot.get_user(uid)
-                if resolved is not None:
-                    return resolved
-                try:
-                    return await self.bot.fetch_user(uid)
-                except (discord.NotFound, discord.HTTPException):
-                    return None
-            if ctx.guild:
-                for mm in ctx.guild.members:
-                    if (
-                        str(mm) == cleaned
-                        or mm.display_name == cleaned
-                        or mm.name == cleaned
-                    ):
-                        return mm
-            return None
-
-        first = args[0]
-        if _looks_like_user_mention(first):
-            resolved = await _resolve_user(first)
-            if resolved is not None:
-                member = resolved
-                remainder = list(args[1:])
-            else:
-                # Looked like a user mention but didn't resolve. Tell the
-                # caller instead of silently dropping it on the floor.
-                return await ctx.reply(
-                    f"Could not resolve user `{first}`. "
-                    "Use a `@mention`, a username, or `<@id>`.",
-                    mention_author=False,
-                )
-        else:
-            remainder = list(args)
-
-        if not remainder:
-            return await ctx.reply(
-                f"Provide a nonce to verify, e.g. `!casino verify {game} 42`.",
-                mention_author=False,
-            )
-
-        try:
-            nonce = int(remainder[0])
-        except (TypeError, ValueError):
-            return await ctx.reply(
-                f"Nonce must be an integer, got `{remainder[0]}`.",
-                mention_author=False,
-            )
-        extra_args = remainder[1:]
+        member: discord.Member | discord.User = user or ctx.author
+        extra_args: list[str] = [str(step)] if step is not None else []
 
         user_id = member.id
 
@@ -4793,8 +4704,9 @@ class Casino(commands.Cog):
         await ctx.reply(embed=embed, mention_author=False)
 
     @casino.command(
-        name="seed", help="View your current client seed and the active FairGate server seed hash."
+        name="seed", description="View your current client seed and the active FairGate server seed hash."
     )
+    @unified_cooldown(5)
     async def casino_seed(self, ctx: commands.Context):
         """
         Usage:
@@ -4822,14 +4734,14 @@ class Casino(commands.Cog):
         embed.add_field(name="Server Seed Hash", value=f"`{server_hash}`", inline=False)
         embed.set_footer(text="These seeds are used for provable fairness in games.")
 
-        await self.bot.database.set_cooldown(ctx.author.id, "casino seed", 5)
         await ctx.reply(embed=embed, mention_author=False)
 
     @casino.command(
         name="setseed",
         aliases=["newseed"],
-        help="Update your client seed for provable fairness.",
+        description="Update your client seed for provable fairness.",
     )
+    @unified_cooldown(5)
     async def casino_setseed(
         self, ctx: commands.Context, *, seed: Optional[str] = None
     ):
@@ -4847,12 +4759,12 @@ class Casino(commands.Cog):
             color=discord.Color.green(),
         )
 
-        await self.bot.database.set_cooldown(ctx.author.id, "casino setseed", 5)
         await ctx.reply(embed=embed, mention_author=False)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="gamble", description="Gamble your money for a chance to win big!"
     )
+    @unified_cooldown(5)
     async def gamble(self, ctx: Context, bet_amount: str):
         try:
             user_id = ctx.author.id
@@ -4995,20 +4907,18 @@ class Casino(commands.Cog):
                     final_state={"loss": str(amount)},
                 )
 
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
             await ctx.reply(embed=embed)
 
         except ValueError as e:
             embed = discord.Embed(description=str(e), color=discord.Color.red())
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="supergamble",
         aliases=["sg", "sgamble"],
         description="Gamble at a 15% chance to win for amazing rewards!",
     )
+    @unified_cooldown(60)
     async def supergamble(self, ctx: Context, bet_amount: str):
         try:
             user_id = ctx.author.id
@@ -5189,9 +5099,6 @@ class Casino(commands.Cog):
                 outcome = "loss"
                 outcome_amount = amount
 
-            await self.bot.database.set_cooldown(
-                user_id, ctx.command.qualified_name, 60
-            )
             await ctx.reply(embed=embed)
 
             await self._remove_refund(session_id, user_id=user_id)
@@ -5373,11 +5280,12 @@ class Casino(commands.Cog):
         
         return "\n".join(lines)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="slots",
         aliases=["slot"],
         description="Play the slots with 5x4 grid, 20 paylines, Wilds & Scatters!",
     )
+    @unified_cooldown(5)
     async def slots(self, ctx: Context, bet_amount: str):
         """Modern 5x4 slot machine with 20 paylines, Wild substitutions, and Scatter pays."""
         user_id = ctx.author.id
@@ -5517,18 +5425,16 @@ class Casino(commands.Cog):
         container.add_item(view.buttons)
         view.add_item(container)
 
-        # Set cooldown
-        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
-
         # Send response with view
         message = await ctx.reply(view=view)
         view.message = message
 
-    @commands.command(
+    @commands.hybrid_command(
         name="dice",
         aliases=["diceroll", "roll"],
         description="Roll two dice and bet on the outcome.",
     )
+    @unified_cooldown(5)
     async def roll(self, ctx: Context, bet_amount: str, guess: str):
         user_id = ctx.author.id
         session_id = None
@@ -5697,9 +5603,6 @@ class Casino(commands.Cog):
             )
 
         embed.description = result
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         await ctx.reply(embed=embed)
 
         await self._remove_refund(session_id, user_id=user_id)
@@ -5718,11 +5621,12 @@ class Casino(commands.Cog):
             final_state={"amount": str(winnings or amount)},
         )
 
-    @commands.command(
+    @commands.hybrid_command(
         name="roulette",
         aliases=["roul", "rou"],
         description="Play roulette — interactive betting with Components V2.",
     )
+    @unified_cooldown(5)
     async def roulette(self, ctx: Context, bet_amount: str = None):
         if bet_amount is None:
             embed = discord.Embed(
@@ -5771,11 +5675,12 @@ class Casino(commands.Cog):
         )
         view.message = await ctx.reply(view=view)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="double",
         aliases=["don", "doubleornothing"],
         description="Start a double or nothing game",
     )
+    @unified_cooldown(5)
     async def double_or_nothing(self, ctx: Context, bet_amount: str):
         """Start a double or nothing game. Uses Components V2 Container system."""
         user_id = ctx.author.id
@@ -5862,16 +5767,14 @@ class Casino(commands.Cog):
         )
         await view.build_initial_container()
 
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         msg = await ctx.reply(view=view)
         view.message = msg
         self._register_session_handler(session_id, view.force_end)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="blackjack", aliases=["bj", "21"], description="Play a game of blackjack"
     )
+    @unified_cooldown(5)
     async def blackjack(self, ctx: Context, bet_amount: str):
         """
         Play Blackjack with a fresh deck for each game.
@@ -6590,9 +6493,6 @@ class Casino(commands.Cog):
         view = discord.ui.LayoutView()
         view.add_item(container)
 
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         await ctx.reply(view=view)
 
     @commands.command(
@@ -6657,8 +6557,6 @@ class Casino(commands.Cog):
             amount=bet,
             reason="poker_bet",
         )
-
-        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
 
         try:
             deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
@@ -6895,14 +6793,14 @@ class Casino(commands.Cog):
         )
         await view.build_initial_container()
 
-        await self.bot.database.set_cooldown(user_id, ctx.command.qualified_name, 5)
         msg = await ctx.reply(view=view)
         view.message = msg
         self._register_session_handler(session_id, view.force_end)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="crash", description="Start a crash game in the current channel."
     )
+    @unified_cooldown(10)
     async def crash(self, ctx: Context):
         cid = ctx.channel.id
         if cid in self.active_games and self.active_games[cid].is_running:
@@ -6945,10 +6843,6 @@ class Casino(commands.Cog):
                 final_state={"refund": refund},
             )
             self.cleanup_after_game(cid)
-
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 10
-        )
 
         await view.start_game(ctx)
 
@@ -7169,7 +7063,8 @@ class Casino(commands.Cog):
         admin_view.add_item(win_btn)
 
         await ctx.send(embed=embed, view=admin_view)
-        await ctx.message.add_reaction("✅")
+        if ctx.message:
+            await ctx.message.add_reaction("✅")
 
     @commands.command(name="minesadmin", hidden=True)
     @commands.is_owner()
@@ -7239,10 +7134,11 @@ class Casino(commands.Cog):
         )
 
         await ctx.send(embed=embed)
-        try:
-            await ctx.message.add_reaction("✅")
-        except discord.HTTPException:
-            pass
+        if ctx.message:
+            try:
+                await ctx.message.add_reaction("✅")
+            except discord.HTTPException:
+                pass
 
     @commands.command(name="fairgateadmin", hidden=True)
     @commands.is_owner()
@@ -7456,7 +7352,10 @@ class Casino(commands.Cog):
             logger.exception("Unexpected error in fairgate admin command")
             await ctx.send(f"Unexpected error: `{e}`", delete_after=10)
 
-    @commands.command(name="mines")
+    @commands.hybrid_command(
+        name="mines",
+        description="Play Mines — choose bombs and bet, then reveal safe gems.",
+    )
     async def mines(
         self, ctx: commands.Context, num_bombs: int = None, bet_amount: str = None
     ):
@@ -7661,7 +7560,9 @@ class Casino(commands.Cog):
             view.add_item(container)
             await ctx.reply(view=view)
 
-    @commands.command("keno")
+    @commands.command(
+        name="keno", description="Play Keno — pick numbers and match the draw."
+    )
     async def keno(self, ctx: commands.Context, player_bet: str):
         if ctx.guild.id != 1336128367166095380:
             return

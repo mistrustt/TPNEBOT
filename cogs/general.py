@@ -33,7 +33,7 @@ COINMARKETCAP_API_URL = (
 )
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-llmmodel = "nvidia/nemotron-3-ultra-550b-a55b:free"
+LLM_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 NASA_API_KEY = os.getenv("NASA_API_KEY")
 
 HIDDEN_COGS = {"Owner", "Jishaku"}
@@ -684,10 +684,9 @@ class General(commands.Cog, name="General"):
         view.add_item(menu)
         await ctx.reply("Please select a command category:", view=view)
 
-    @commands.hybrid_command(
+    @commands.command(
         name="membercount", description="Shows detailed member statistics."
     )
-    @unified_cooldown(5)
     async def member_count(self, ctx: commands.Context) -> None:
         """Shows detailed member statistics including online status and role distributions."""
 
@@ -980,7 +979,7 @@ class General(commands.Cog, name="General"):
             await ctx.send("No snipe history to clear!", delete_after=5)
 
     @commands.command(
-        name="cleardms", description="Clear all direct messages from the bot."
+        name="cleardms", help="Clear all direct messages from the bot."
     )
     @commands.dm_only()
     async def clear_dms(self, ctx: commands.Context) -> None:
@@ -1044,10 +1043,9 @@ class General(commands.Cog, name="General"):
         except Exception:
             await ctx.send("An error occurred", delete_after=5)
 
-    @commands.hybrid_command(
+    @commands.command(
         name="listbots", description="List all bots in the server."
     )
-    @unified_cooldown(5)
     async def list_bots(self, ctx: commands.Context) -> None:
         """List all bots in the server with their IDs."""
         bots = [member for member in ctx.guild.members if member.bot]
@@ -1063,10 +1061,9 @@ class General(commands.Cog, name="General"):
         embed.set_footer(text=f"Total Bots: {len(bots)}")
         await ctx.send(embed=embed)
 
-    @commands.hybrid_command(
-        name="botinfo", description="Get information about the bot."
+    @commands.command(
+        name="botinfo", help="Get information about the bot."
     )
-    @unified_cooldown(5)
     async def botinfo(self, ctx: commands.Context) -> None:
         logger.debug("Botinfo command called")
 
@@ -1118,10 +1115,8 @@ class General(commands.Cog, name="General"):
         await ctx.reply(embed=embed)
         logger.debug("Botinfo message sent")
 
-    @commands.hybrid_command(name="setprefix")
+    @commands.command(name="setprefix")
     @commands.has_permissions(administrator=True)
-    @app_commands.default_permissions(administrator=True)
-    @unified_cooldown(5)
     async def set_prefix(self, ctx: Context, prefix: str):
         try:
             await self.bot.database.set_prefix(ctx.guild.id, prefix)
@@ -1282,10 +1277,9 @@ class General(commands.Cog, name="General"):
         )
         await ctx.send(embed=embed)
 
-    @commands.hybrid_command(
-        name="names", description="View the username/nickname history of a user."
+    @commands.command(
+        name="names", help="View the username/nickname history of a user."
     )
-    @unified_cooldown(5)
     async def names(
         self,
         ctx: commands.Context,
@@ -1319,10 +1313,9 @@ class General(commands.Cog, name="General"):
         embed = view.get_current_embed()
         await ctx.send(embed=embed, view=view)
 
-    @commands.hybrid_command(
-        name="clearnames", description="Clear your username/nickname history"
+    @commands.command(
+        name="clearnames", help="Clear your username/nickname history"
     )
-    @unified_cooldown(30)
     async def clearnames(self, ctx: commands.Context):
         """Clears the username and nickname history of the command invoker."""
 
@@ -1480,12 +1473,11 @@ class General(commands.Cog, name="General"):
         embed.set_image(url=self.utils.get_avatar_url(member))
         await ctx.reply(embed=embed)
 
-    @commands.hybrid_command(
+    @commands.command(
         name="serveravatar",
         aliases=["sav"],
-        description="View the server-specific avatar of a user (if they have one). Defaults to your own avatar.",
+        help="View the server-specific avatar of a user (if they have one). Defaults to your own avatar.",
     )
-    @unified_cooldown(3)
     async def server_avatar(
         self, ctx: commands.Context, member: Optional[discord.Member] = None
     ):
@@ -1506,11 +1498,10 @@ class General(commands.Cog, name="General"):
             )
             await ctx.reply(embed=embed)
 
-    @commands.hybrid_command(
+    @commands.command(
         name="invite",
-        description="Get the invite link of the bot to be able to invite it.",
+        help="Get the invite link of the bot to be able to invite it.",
     )
-    @unified_cooldown(30)
     async def invite(self, ctx: commands.Context) -> None:
         logger.debug("Invite command called")
         embed = discord.Embed(
@@ -1676,7 +1667,7 @@ Question: {question}"""
         """
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload: dict = {
-            "model": model or llmmodel,
+            "model": model or LLM_MODEL,
             "messages": messages,
         }
         if reasoning:
@@ -1747,10 +1738,9 @@ Question: {question}"""
 
         return answer, None
 
-    @commands.hybrid_command(
-        name="emojisteal", description="Steal a custom server emoji"
+    @commands.command(
+        name="emojisteal", help="Steal a custom server emoji"
     )
-    @unified_cooldown(10)
     async def steal(self, ctx: commands.Context, emoji: str):
         """Steal a custom emoji without writing to disk."""
         try:
@@ -1782,10 +1772,9 @@ Question: {question}"""
                 delete_after=5,
             )
 
-    @commands.hybrid_command(
-        name="convert", description="Convert currency from one type to another."
+    @commands.command(
+        name="convert", help="Convert currency from one type to another."
     )
-    @unified_cooldown(10)
     async def convert_currency(
         self, ctx: commands.Context, amount: float, from_currency: str, to_currency: str
     ):
@@ -1840,10 +1829,9 @@ Question: {question}"""
                 logger.error(error_msg)
                 await ctx.reply(error_msg)
 
-    @commands.hybrid_command(
-        name="password", description="Generate a random password"
+    @commands.command(
+        name="password", help="Generate a random password"
     )
-    @unified_cooldown(30)
     async def generate_password_command(
         self,
         ctx: commands.Context,
@@ -1876,10 +1864,9 @@ Question: {question}"""
                 delete_after=10,
             )
 
-    @commands.hybrid_command(
-        name="uptime", description="Check the bot's uptime."
+    @commands.command(
+        name="uptime", help="Check the bot's uptime."
     )
-    @unified_cooldown(5)
     async def uptime(self, ctx: commands.Context):
         """Shows the bot's uptime."""
         current_time = discord.utils.utcnow()
@@ -1907,16 +1894,22 @@ Question: {question}"""
         )
         await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="quickpoll",
         aliases=["qp"],
         description="Creates a poll by reacting to the user's message.",
     )
+    @unified_cooldown(5)
     async def quickpoll(self, ctx: Context, *, question: str):
         """React to the invoking message with upvote/downvote to create a poll."""
         try:
-            await ctx.message.add_reaction("👍")
-            await ctx.message.add_reaction("👎")
+            if ctx.message:
+                await ctx.message.add_reaction("👍")
+                await ctx.message.add_reaction("👎")
+            else:
+                poll = await ctx.send(f"📊 {question}")
+                await poll.add_reaction("👍")
+                await poll.add_reaction("👎")
         except discord.HTTPException:
             return
 
@@ -1954,10 +1947,9 @@ Question: {question}"""
         s = s.strip("` \n\r\t")
         return s.strip()
 
-    @commands.hybrid_group(
-        name="encode", description="Encoding commands.", invoke_without_command=True
+    @commands.group(
+        name="encode", help="Encoding commands.", invoke_without_command=True
     )
-    @unified_cooldown(3)
     async def encode(self, ctx: commands.Context):
         prefix = ctx.prefix or "/"
 
@@ -2197,10 +2189,9 @@ Question: {question}"""
         )
         await ctx.reply(embed=embed)
 
-    @commands.hybrid_group(
-        name="decode", description="Decoding commands.", invoke_without_command=True
+    @commands.group(
+        name="decode", help="Decoding commands.", invoke_without_command=True
     )
-    @unified_cooldown(3)
     async def decode(self, ctx: commands.Context):
         prefix = ctx.prefix or "/"
 
@@ -2603,10 +2594,9 @@ Question: {question}"""
                         ephemeral=True,
                     )
 
-    @commands.hybrid_command(
-        name="whois", description="Get WHOIS information about an IP address."
+    @commands.command(
+        name="whois", help="Get WHOIS information about an IP address."
     )
-    @unified_cooldown(10)
     async def whois(self, ctx: commands.Context, ip_address: str):
         """Get information about an IP address."""
 
@@ -2693,10 +2683,9 @@ Question: {question}"""
                         delete_after=5,
                     )
 
-    @commands.hybrid_command(
-        name="remind", description="Set a reminder for a specific time."
+    @commands.command(
+        name="remind", help="Set a reminder for a specific time."
     )
-    @unified_cooldown(10)
     async def remind(
         self, ctx: commands.Context, time: str, reminder: Optional[str] = None
     ):
@@ -2865,7 +2854,9 @@ Question: {question}"""
             )
             await ctx.reply(embed=embed, delete_after=5)
 
-    @commands.command(name="quote", description="Quote a message or text.")
+    @commands.command(
+        name="quote", help="Quote a message, message link, or text."
+    )
     async def quote(
         self, ctx: commands.Context, payload: Optional[str] = None
     ):
@@ -2876,8 +2867,8 @@ Question: {question}"""
             author_name = None
             avatar_user = None
 
-            # Check if this is a reply to a message
-            if ctx.message.reference and ctx.message.reference.message_id:
+            # Check if this is a reply to a message (only available for prefix invocations)
+            if ctx.message and ctx.message.reference and ctx.message.reference.message_id:
                 try:
                     msg = await ctx.channel.fetch_message(
                         ctx.message.reference.message_id
@@ -3176,8 +3167,7 @@ Question: {question}"""
         lines.append(current_line)
         return lines
 
-    @commands.hybrid_command(name="forgetme")
-    @unified_cooldown(60)
+    @commands.command(name="forgetme")
     async def forget_me(self, ctx):
         """
         Delete all personal/economy/game/social data for the invoking user.

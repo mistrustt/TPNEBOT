@@ -4,6 +4,8 @@ from discord.ext.commands import Context
 from typing import Optional
 import logging
 import asyncio
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
 
@@ -156,6 +158,9 @@ class RoleTools(commands.Cog, name="Roles"):
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
+
     async def find_role(self, ctx: Context, role_name: str):
         """Helper method to find a role by partial name, ID, or mention."""
         matching_roles = [
@@ -204,13 +209,16 @@ class RoleTools(commands.Cog, name="Roles"):
         else:
             return matching_roles[0], None
 
-    @commands.group(
+    @commands.hybrid_group(
         name="role",
         aliases=["r"],
         description="Group for role management. Use subcommands or call directly to toggle a role on a member.",
         invoke_without_command=True,
     )
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def role(
         self, ctx: Context, member: Optional[discord.Member] = None, *, role_name: Optional[str] = None
     ):
@@ -282,6 +290,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="create", description="Creates a new role.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def create_role(self, ctx: Context, *, role_name: str):
         try:
             guild = ctx.guild
@@ -307,6 +318,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="strip", description="Removes all roles from a member")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def strip_roles(self, ctx: commands.Context, member: discord.Member = None):
         try:
             member = member or ctx.author
@@ -423,6 +437,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="rename", description="Rename a role.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def edit_role_name(self, ctx: Context, role_name: str, *, new_name: str):
         """Changes the name of an existing role."""
         role, error = await self.find_role(ctx, role_name)
@@ -455,6 +472,9 @@ class RoleTools(commands.Cog, name="Roles"):
         name="color", description="Change a role color. Usage: role color <role> <#hex>"
     )
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def edit_role_color(self, ctx: Context, role_name: str, color: discord.Color):
         """Changes the color of an existing role."""
         role, error = await self.find_role(ctx, role_name)
@@ -485,6 +505,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="delete", description="Deletes an existing role.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def delete_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -513,6 +536,9 @@ class RoleTools(commands.Cog, name="Roles"):
         name="force", description="Forces a role on a user, reapplying it if removed."
     )
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def force_role(self, ctx: Context, member: discord.Member, *, role_name: str):
         """Forces a role on a user, reapplying it if removed."""
         role, error = await self.find_role(ctx, role_name)
@@ -599,6 +625,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @role.command(name="unforce", description="Removes a forced role from a user.")
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def unforce_role(
         self, ctx: Context, member: discord.Member, *, role_name: str
     ):
@@ -638,6 +667,9 @@ class RoleTools(commands.Cog, name="Roles"):
         description="Transfers a user's roles to another account",
     )
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def transfer_role(
         self,
         ctx: Context,
@@ -721,6 +753,9 @@ class RoleTools(commands.Cog, name="Roles"):
         name="restore", description="Restores previously stripped roles for a member"
     )
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def restore_roles(self, ctx: Context, member: discord.Member):
         """
         Restores previously stripped roles for a member if they exist in the log.
@@ -791,6 +826,9 @@ class RoleTools(commands.Cog, name="Roles"):
         description="Gives a role to all members in the server.",
     )
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def give_all_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -842,6 +880,9 @@ class RoleTools(commands.Cog, name="Roles"):
         description="Removes a role from all members in the server.",
     )
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def remove_all_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -887,11 +928,12 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="roles",
         aliases=["lr", "listroles"],
         description="Lists all roles or the roles of a specific user.",
     )
+    @unified_cooldown(10)
     async def list_roles(
         self, ctx: commands.Context, member: Optional[discord.Member] = None
     ):
@@ -924,12 +966,14 @@ class RoleTools(commands.Cog, name="Roles"):
         message = await ctx.send(embed=embed, view=paginator)
         paginator.message = message
 
-    @commands.command(
+    @commands.hybrid_command(
         name="staffroles",
         aliases=["lsr", "liststaffroles"],
         description="Lists all roles with staff permissions.",
     )
     @commands.has_permissions(administrator=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def list_staff_roles(self, ctx: Context) -> None:
         """Lists all roles in the server with staff permissions."""
 
@@ -975,12 +1019,15 @@ class RoleTools(commands.Cog, name="Roles"):
 
         await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="roleinfo",
         aliases=["ri"],
         description="Displays information about a specific role.",
     )
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def roleinfo(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1030,11 +1077,12 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="inrole",
         aliases=["ir"],
         description="Lists all members with a specific role.",
     )
+    @unified_cooldown(10)
     async def in_role(self, ctx: commands.Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1054,12 +1102,15 @@ class RoleTools(commands.Cog, name="Roles"):
         embed = view.get_embed()
         await ctx.send(embed=embed, view=view)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="rolebots",
         aliases=["rb"],
         description="Gives a role to all bots in the server.",
     )
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def give_all_bots_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1100,8 +1151,11 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=embed)
 
-    @commands.command(name='rolehumans', aliases=['rh'], description="Gives a role to all humans in the server.")
+    @commands.hybrid_command(name='rolehumans', aliases=['rh'], description="Gives a role to all humans in the server.")
     @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def give_all_humans_role(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1143,17 +1197,22 @@ class RoleTools(commands.Cog, name="Roles"):
             )
             return await ctx.reply(embed=embed)
 
-    @commands.group(
+    @commands.hybrid_group(
         name="autorole",
         aliases=["ar"],
         invoke_without_command=True,
         description="Manage autoroles given to users when they join.",
     )
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def autorole(self, ctx: Context):
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -1182,6 +1241,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @autorole.command(name="add", description="Add a role to autoroles.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def autorole_add(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1199,6 +1261,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @autorole.command(name="remove", description="Remove a role from autoroles.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def autorole_remove(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
@@ -1213,6 +1278,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @autorole.command(name="list", description="List configured autoroles for this server.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def autorole_list(self, ctx: Context):
         try:
             ids = await self.bot.database.get_auto_roles(ctx.guild.id)
@@ -1229,6 +1297,9 @@ class RoleTools(commands.Cog, name="Roles"):
 
     @autorole.command(name="clear", description="Clear all autoroles for this server.")
     @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    @discord.app_commands.default_permissions(manage_roles=True)
+    @unified_cooldown(10)
     async def autorole_clear(self, ctx: Context):
         try:
             await self.bot.database.clear_auto_roles(ctx.guild.id)

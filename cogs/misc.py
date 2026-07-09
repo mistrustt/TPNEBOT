@@ -11,6 +11,8 @@ from utils.misc import MiscUtils
 import asyncio
 from faker import Faker
 from typing import Union
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
@@ -90,6 +92,9 @@ class Misc(commands.Cog, name="Misc"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
 
     def calculate_aura(self, reactions_received: int, reactions_given: int) -> str:
         aura_score = reactions_received - reactions_given
@@ -217,7 +222,7 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.group(
         name="sobs",
-        help="Shows the number of sob reactions a user has received and given.",
+        description="Shows the number of sob reactions a user has received and given.",
         invoke_without_command=True,
     )
     async def sobs(self, ctx: Context, member: discord.Member = None) -> None:
@@ -246,6 +251,7 @@ class Misc(commands.Cog, name="Misc"):
         aliases=["lb"],
         description="Display the top and bottom 10 users by sobs received.",
     )
+    @unified_cooldown(10)
     async def sobs_leaderboard(self, ctx: Context) -> None:
         await ctx.defer()
         top_users = await self.bot.database.get_top_sobs_users(limit=10)
@@ -308,7 +314,7 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.group(
         name="skulls",
-        help="Shows the number of skull reactions a user has received and given.",
+        description="Shows the number of skull reactions a user has received and given.",
         invoke_without_command=True,
     )
     async def skulls(self, ctx: Context, member: discord.Member = None) -> None:
@@ -339,6 +345,7 @@ class Misc(commands.Cog, name="Misc"):
         aliases=["lb"],
         description="Display the top and bottom 10 users by skulls received.",
     )
+    @unified_cooldown(10)
     async def skulls_leaderboard(self, ctx: Context) -> None:
         await ctx.defer()
         top_users = await self.bot.database.get_top_skulls_users(limit=10)
@@ -400,7 +407,7 @@ class Misc(commands.Cog, name="Misc"):
     @commands.group(
         name="flames",
         aliases=["fires"],
-        help="Shows the number of flame reactions a user has received and given.",
+        description="Shows the number of flame reactions a user has received and given.",
         invoke_without_command=True,
     )
     async def flames(self, ctx: Context, member: discord.Member = None) -> None:
@@ -429,6 +436,7 @@ class Misc(commands.Cog, name="Misc"):
         aliases=["lb"],
         description="Display the top and bottom 10 users by flames received.",
     )
+    @unified_cooldown(10)
     async def flames_leaderboard(self, ctx: Context) -> None:
         await ctx.defer()
         top_users = await self.bot.database.get_top_flames_users(limit=10)
@@ -489,7 +497,7 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.group(
         name="hearts",
-        help="Shows the number of heart reactions a user has received and given.",
+        description="Shows the number of heart reactions a user has received and given.",
         invoke_without_command=True,
     )
     async def hearts(self, ctx: Context, member: discord.Member = None) -> None:
@@ -518,6 +526,7 @@ class Misc(commands.Cog, name="Misc"):
         aliases=["lb"],
         description="Display the top and bottom 10 users by hearts received.",
     )
+    @unified_cooldown(10)
     async def hearts_leaderboard(self, ctx: Context) -> None:
         await ctx.defer()
         top_users = await self.bot.database.get_top_hearts_users(limit=10)
@@ -580,7 +589,7 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.group(
         name="clowns",
-        help="Shows the number of clown reactions a user has received and given.",
+        description="Shows the number of clown reactions a user has received and given.",
         invoke_without_command=True,
     )
     async def clowns(self, ctx: Context, member: discord.Member = None) -> None:
@@ -609,6 +618,7 @@ class Misc(commands.Cog, name="Misc"):
         aliases=["lb"],
         description="Display the top and bottom 10 users by clowns received.",
     )
+    @unified_cooldown(10)
     async def clowns_leaderboard(self, ctx: Context) -> None:
         await ctx.defer()
         top_users = await self.bot.database.get_top_clowns_users(limit=10)
@@ -684,9 +694,8 @@ class Misc(commands.Cog, name="Misc"):
     @commands.command(
         name="setreact",
         aliases=["setsobs", "setskulls", "setflames", "sethearts"],
-        help=(
-            "Adjust a user's reactions.\n"
-            "Usage: `!setreact @user|user_id <sobs|skulls|flames|hearts> <rx|tx> <amount>`"
+        description=(
+            "Adjust a user's reactions."
         ),
         hidden=True,
     )
@@ -765,13 +774,11 @@ class Misc(commands.Cog, name="Misc"):
             inline=False,
         )
 
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 900
-        )
         await ctx.reply(embed=embed)
 
-    @commands.command(name="karma", description="View a user's reputation score.")
+    @commands.hybrid_command(name="karma", description="View a user's reputation score.")
     @commands.guild_only()
+    @unified_cooldown(5)
     async def karma(self, ctx: Context, member: discord.Member = None) -> None:
         """Alias for !rep. Karma and reputation are the same score."""
         await self.reputation(ctx, member)
@@ -805,12 +812,14 @@ class Misc(commands.Cog, name="Misc"):
     @reputation.command(
         name="good", description="Give a user a positive reputation point."
     )
+    @unified_cooldown(900)
     async def upvote(self, ctx: Context, member: discord.Member = None) -> None:
         await self.change_reputation(ctx, member, 1)
 
     @reputation.command(
         name="bad", description="Give a user a negative reputation point."
     )
+    @unified_cooldown(900)
     async def downvote(self, ctx: Context, member: discord.Member = None) -> None:
         await self.change_reputation(ctx, member, -1)
 
@@ -819,6 +828,7 @@ class Misc(commands.Cog, name="Misc"):
         aliases=["lb"],
         description="Shows the top 10 users by reputation.",
     )
+    @unified_cooldown(10)
     async def rep_leaderboard(self, ctx: Context):
         top_users = await self.bot.database.get_top_reputation_users(limit=10)
         bottom_users = await self.bot.database.get_bottom_reputation_users(limit=10)
@@ -885,9 +895,6 @@ class Misc(commands.Cog, name="Misc"):
         embed.set_footer(
             text=f"Your position: {await self.bot.database.get_reputation_user_rank(ctx.author.id)}"
         )
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         await ctx.send(embed=embed)
 
     def get_continent_from_country(country: str) -> str:
@@ -934,7 +941,7 @@ class Misc(commands.Cog, name="Misc"):
         }
         return emoji_mapping.get(continent_code, "❓")
 
-    @commands.command(name="setrep", hidden=True)
+    @commands.command(name="setrep", description="Owner: set a user's reputation.", hidden=True)
     @commands.is_owner()
     async def admin_rep(
         self, ctx: Context, member: discord.Member = None, rep: int = 0
@@ -953,7 +960,7 @@ class Misc(commands.Cog, name="Misc"):
             delete_after=15,
         )
 
-    @commands.group(name="juul", invoke_without_command=True)
+    @commands.group(name="juul", description="Server juul game commands.", invoke_without_command=True)
     @commands.guild_only()
     async def juul(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
@@ -980,12 +987,10 @@ class Misc(commands.Cog, name="Misc"):
         embed.add_field(name="Passes", value=juul.passes if juul else 0, inline=True)
         embed.add_field(name="Steals", value=juul.steals if juul else 0, inline=True)
         embed.add_field(name="Status", value="Locked 🔒" if (juul and juul.locked) else "Unlocked 🔓", inline=True)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         await ctx.reply(embed=embed)
 
-    @juul.command(name="hit")
+    @juul.command(name="hit", description="Take a hit from the server juul.")
+    @unified_cooldown(5)
     async def juul_hit(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
@@ -1009,7 +1014,8 @@ class Misc(commands.Cog, name="Misc"):
             )
         )
 
-    @juul.command(name="pass")
+    @juul.command(name="pass", description="Pass the server juul to another user.")
+    @unified_cooldown(5)
     async def juul_pass(self, ctx: Context, member: discord.Member):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
@@ -1042,7 +1048,8 @@ class Misc(commands.Cog, name="Misc"):
             )
         )
 
-    @juul.command(name="steal")
+    @juul.command(name="steal", description="Steal the server juul.")
+    @unified_cooldown(5)
     async def juul_steal(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
@@ -1076,8 +1083,10 @@ class Misc(commands.Cog, name="Misc"):
             )
         )
 
-    @juul.command(name="lock")
+    @juul.command(name="lock", description="Lock the server juul so it can't be stolen.")
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(5)
     async def juul_lock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
@@ -1101,8 +1110,10 @@ class Misc(commands.Cog, name="Misc"):
             )
         )
 
-    @juul.command(name="unlock")
+    @juul.command(name="unlock", description="Unlock the server juul so it can be stolen.")
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(5)
     async def juul_unlock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
@@ -1121,7 +1132,10 @@ class Misc(commands.Cog, name="Misc"):
             )
         )
 
-    @juul.command(name="flavor", aliases=["flavour"])
+    @juul.command(
+        name="flavor", aliases=["flavour"], description="Check or change the juul flavor."
+    )
+    @unified_cooldown(5)
     async def juul_flavor(self, ctx: Context, flavor: str = None):
         """Check or change the Juul flavor."""
         if flavor is None:
@@ -1180,10 +1194,11 @@ class Misc(commands.Cog, name="Misc"):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(
-        name="tz", aliases=["timezone", "time"], help="Show your current timezone."
+    @commands.hybrid_command(
+        name="tz", aliases=["timezone", "time"], description="Show your current timezone."
     )
     @commands.guild_only()
+    @unified_cooldown(5)
     async def show_time(self, ctx: Context):
         try:
             user_timezone = await self.bot.database.get_user_timezone(ctx.author.id)
@@ -1207,9 +1222,6 @@ class Misc(commands.Cog, name="Misc"):
                 name=ctx.author.display_name,
                 icon_url=self.utils.get_avatar_url(ctx.author),
             )
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
             await ctx.reply(embed=embed)
 
         except Exception as e:
@@ -1218,7 +1230,7 @@ class Misc(commands.Cog, name="Misc"):
     @commands.command(
         name="setlocation",
         aliases=["setloc", "settz"],
-        help="Set your location for weather commands. (use in DMs for privacy)",
+        description="Set your location for weather commands. (use in DMs for privacy)",
     )
     async def set_location(self, ctx, *, location: str = None):
         if location is None:
@@ -1267,15 +1279,13 @@ class Misc(commands.Cog, name="Misc"):
             await self.bot.database.set_user_timezone(ctx.author.id, timezone_str)
 
         await self.bot.database.set_user_location(ctx.author.id, standardized_location)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 10
-        )
         await ctx.reply(f"📍 Your location has been set.")
 
-    @commands.command(
-        name="weather", aliases=["temp", "wind"], help="Check your local weather."
+    @commands.hybrid_command(
+        name="weather", aliases=["temp", "wind"], description="Check your local weather."
     )
     @commands.guild_only()
+    @unified_cooldown(10)
     async def weather(self, ctx):
         """Fetch and display weather based on stored location."""
         user_data = await self.bot.database.get_user_location(ctx.author.id)

@@ -4,6 +4,8 @@ import datetime
 from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
 
@@ -12,6 +14,9 @@ class Community(commands.Cog, name="Community"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.utils = MiscUtils(self)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -96,12 +101,13 @@ class Community(commands.Cog, name="Community"):
                 except Exception as e:
                     logger.error(f"Unexpected error deleting message: {e}")
 
-    @commands.group(
+    @commands.hybrid_group(
         name="grail",
         aliases=["grails"],
-        help="Command to view favourite songs",
+        description="Command to view favourite songs",
         invoke_without_command=True,
     )
+    @unified_cooldown(10)
     async def grail(self, ctx: Context, member: discord.Member = None):
         await ctx.defer()
         member = member or ctx.author
@@ -242,7 +248,8 @@ class Community(commands.Cog, name="Community"):
 
         await ctx.send(embed=embed)
 
-    @grail.command(name="clear")
+    @grail.command(name="clear", description="Clear your favourite songs.")
+    @unified_cooldown(10)
     async def clear_favorite(self, ctx: Context):
         """Clear your favourite songs."""
         await self.bot.database.clear_favorite_songs(ctx.author.id)
@@ -260,12 +267,15 @@ class Community(commands.Cog, name="Community"):
         )
         await ctx.reply(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="setspamchannel",
         aliases=["setspam"],
         description="Set the spam channel for the current guild",
     )
     @commands.has_permissions(manage_channels=True)
+    @commands.bot_has_permissions(manage_channels=True)
+    @discord.app_commands.default_permissions(manage_channels=True)
+    @unified_cooldown(10)
     async def set_spam_channel(self, ctx, channel: discord.TextChannel):
         """Command to set the spam channel for the current guild."""
         if channel is None:

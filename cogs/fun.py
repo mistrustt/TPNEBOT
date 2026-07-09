@@ -6,9 +6,12 @@ from datetime import timedelta
 import aiohttp
 import discord
 import logging
+from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
 
@@ -19,14 +22,17 @@ class Fun(commands.Cog, name="Fun"):
         self.utils = MiscUtils(self)
         self.ban_roulette_history = {}
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
-    @commands.command(
+    @commands.hybrid_command(
         name="randomfact", aliases=["rfact"], description="Get a random fact."
     )
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @unified_cooldown(10)
     async def randomfact(self, ctx: Context) -> None:
         """
         Get a random fact from API Ninjas.
@@ -80,12 +86,12 @@ class Fun(commands.Cog, name="Fun"):
 
                 await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="fotd",
         aliases=["factoftheday"],
         description="Get a random fact of the day.",
     )
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @unified_cooldown(10)
     async def fotd(self, ctx: Context) -> None:
         """Get a random fact of the day."""
         url = "https://uselessfacts.jsph.pl/api/v2/facts/today?language=en"
@@ -136,8 +142,8 @@ class Fun(commands.Cog, name="Fun"):
 
                 await ctx.reply(embed=embed)
 
-    @commands.command(name="dog")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.hybrid_command(name="dog", description="Get a random dog photo.")
+    @unified_cooldown(10)
     async def dog(self, ctx: commands.Context):
         """Get a random dog photo."""
         url = "https://random.dog/woof.json"
@@ -155,8 +161,8 @@ class Fun(commands.Cog, name="Fun"):
                     
                     await ctx.reply(embed=embed)
 
-    @commands.command(name="cat")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.hybrid_command(name="cat", description="Get a random cat photo.")
+    @unified_cooldown(10)
     async def cat(self, ctx: commands.Context):
         """Get a random cat photo."""
         url = "https://api.thecatapi.com/v1/images/search"
@@ -174,8 +180,8 @@ class Fun(commands.Cog, name="Fun"):
                     
                     await ctx.reply(embed=embed)
 
-    @commands.command(name="fox")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.hybrid_command(name="fox", description="Get a random fox photo.")
+    @unified_cooldown(10)
     async def fox(self, ctx: commands.Context):
         """Get a random fox photo."""
         url = "https://randomfox.ca/floof/"
@@ -193,8 +199,7 @@ class Fun(commands.Cog, name="Fun"):
                     
                     await ctx.reply(embed=embed)
 
-    @commands.command(name="penguin")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.command(name="penguin", description="Get a random penguin photo.")
     async def penguin(self, ctx: commands.Context):
         """Get a random penguin photo."""
         url = "https://penguin.sjsharivker.workers.dev/api"
@@ -215,8 +220,9 @@ class Fun(commands.Cog, name="Fun"):
                     
                     await ctx.reply(embed=embed)
 
-    @commands.command(name="duck", hidden=True)
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.command(
+        name="duck", description="Get a random duck photo.", hidden=True
+    )
     async def duck(self, ctx: commands.Context):
         """Get a random duck photo."""
         url = "https://random-d.uk/api/v2/random"
@@ -236,18 +242,13 @@ class Fun(commands.Cog, name="Fun"):
 
     @commands.command(name="boom", aliases=["kaboom"], description="boom.")
     async def pow(self, ctx: Context):
-        await ctx.defer()
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 5
-        )
         await ctx.reply("pow :boom:")
 
     @commands.command(
-        name="gay", aliases=["gayrate"], help="Estimates how homosexual a user is"
+        name="gay", aliases=["gayrate"], description="Estimates how homosexual a user is"
     )
     async def random_percentage(self, ctx: Context, member: discord.Member = None):
         """Estimates how homosexual a user is"""
-        await ctx.defer()
         percentage = random.randrange(100)
         color = discord.Color.blurple()
         if isinstance(ctx.channel, discord.DMChannel):
@@ -259,9 +260,6 @@ class Fun(commands.Cog, name="Fun"):
                 else discord.Color.blurple()
             )
         if member is None:
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
             if percentage > 50:
                 embed = discord.Embed(
                     description=f"are {percentage}% gay :rainbow:", color=color
@@ -277,9 +275,6 @@ class Fun(commands.Cog, name="Fun"):
                 )
                 await ctx.reply(embed=embed)
         elif member == ctx.author:
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
             if percentage > 50:
                 embed = discord.Embed(
                     description=f"are {percentage}% gay :rainbow:", color=color
@@ -295,9 +290,6 @@ class Fun(commands.Cog, name="Fun"):
                 )
                 await ctx.reply(embed=embed)
         elif member != ctx.author:
-            await self.bot.database.set_cooldown(
-                ctx.author.id, ctx.command.qualified_name, 5
-            )
             if percentage > 50:
                 embed = discord.Embed(
                     description=f"is {percentage}% gay :rainbow:", color=color
@@ -316,7 +308,7 @@ class Fun(commands.Cog, name="Fun"):
                 await ctx.reply(embed=embed)
 
     @commands.command(
-        name="penis", aliases=["dih"], help="Find out how large your penis is."
+        name="penis", aliases=["dih"], description="Find out how large your penis is."
     )
     async def size(self, ctx: Context, member: discord.Member = None):
         member = member or ctx.author
@@ -333,7 +325,9 @@ class Fun(commands.Cog, name="Fun"):
         )
         await ctx.reply(embed=embed)
 
-    @commands.command(name="weight", help="Find out how much you weigh")
+    @commands.command(
+        name="weight", description="Find out how much you weigh"
+    )
     async def weight(self, ctx: Context, member: discord.Member = None):
         """Find out how much you weigh"""
         member = member or ctx.author
@@ -369,7 +363,9 @@ class Fun(commands.Cog, name="Fun"):
         )
         await ctx.reply(embed=embed)
 
-    @commands.command(name="height", help="Find out how tall you are")
+    @commands.command(
+        name="height", description="Find out how tall you are"
+    )
     async def height(self, ctx: Context, member: discord.Member = None):
         """Find out how tall you are (for comedic purposes)."""
         member = member or ctx.author
@@ -397,7 +393,7 @@ class Fun(commands.Cog, name="Fun"):
         )
         await ctx.reply(embed=embed)
 
-    @commands.command(name="iq", help="Find out your IQ")
+    @commands.command(name="iq", description="Find out your IQ")
     async def iq(self, ctx: Context, member: discord.Member = None):
         """Find out your IQ."""
         member = member or ctx.author
@@ -421,7 +417,7 @@ class Fun(commands.Cog, name="Fun"):
         await ctx.reply(embed=embed)
 
     @commands.command(
-        name="banroulette", aliases=["br"], help="Play a game of banroulette"
+        name="banroulette", aliases=["br"], description="Play a game of banroulette"
     )
     @commands.has_guild_permissions(ban_members=True)
     async def banroulette(self, ctx: Context):
@@ -435,9 +431,6 @@ class Fun(commands.Cog, name="Fun"):
         await message.add_reaction("🔫")
 
         await asyncio.sleep(15)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 30
-        )
 
         message = await ctx.fetch_message(message.id)
         users = set()
@@ -492,7 +485,7 @@ class Fun(commands.Cog, name="Fun"):
         await ctx.send(embed=embed)
 
     @commands.command(
-        name="timeoutroulette", aliases=["tr"], help="Play a game of timeout roulette"
+        name="timeoutroulette", aliases=["tr"], description="Play a game of timeout roulette"
     )
     @commands.has_guild_permissions(moderate_members=True)
     async def timeoutroulette(self, ctx: Context):
@@ -506,9 +499,6 @@ class Fun(commands.Cog, name="Fun"):
         await message.add_reaction("⏰")
 
         await asyncio.sleep(15)
-        await self.bot.database.set_cooldown(
-            ctx.author.id, ctx.command.qualified_name, 30
-        )
 
         message = await ctx.fetch_message(message.id)
         users = set()

@@ -12,6 +12,8 @@ import humanfriendly
 from discord.ext.commands import Context
 from database.models import PunishmentType
 from utils.misc import MiscUtils
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 from typing import Optional
 from matplotlib.ticker import MaxNLocator
 
@@ -44,6 +46,9 @@ class Moderation(commands.Cog, name="Moderation"):
 
     def cog_unload(self):
         self.sync_counts.cancel()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
 
     @staticmethod
     def _is_hash(value) -> bool:
@@ -201,7 +206,6 @@ class Moderation(commands.Cog, name="Moderation"):
         name="mcc",
         aliases=["membercountchannel"],
         description="Create a locked voice channel that displays the server's member count.",
-        help="Create a locked voice channel that displays the server's member count.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
@@ -256,7 +260,6 @@ class Moderation(commands.Cog, name="Moderation"):
         name="setmcc",
         aliases=["setmembercountchannel"],
         description="Set an existing voice channel as the member count channel.",
-        help="Set an existing voice channel as the member count channel. Accepts a mention, ID, or name.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
@@ -314,7 +317,6 @@ class Moderation(commands.Cog, name="Moderation"):
         name="delmcc",
         aliases=["deletemembercountchannel"],
         description="Delete the configured member count channel.",
-        help="Delete the configured member count channel after confirmation.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
@@ -418,7 +420,6 @@ class Moderation(commands.Cog, name="Moderation"):
         name="mccstatus",
         aliases=["mccinfo"],
         description="Show the configured member count channel and current count.",
-        help="Show the configured member count channel and current count.",
     )
     @commands.guild_only()
     async def mcc_status(self, ctx: Context):
@@ -461,7 +462,7 @@ class Moderation(commands.Cog, name="Moderation"):
             delete_after=20,
         )
 
-    @commands.command(name="setreportchannel", aliases=["src"])
+    @commands.command(name="setreportchannel", aliases=["src"], description="Set the channel where user reports are sent.")
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def report_channel(self, ctx: Context, *, channel_input: str):
@@ -650,21 +651,20 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await report_channel.send(embed=embed, view=view)
 
-            await self.bot.database.set_cooldown(
-                interaction.user.id, interaction.command.qualified_name, 1800
-            )
             await interaction.response.send_message(
                 "Thank you for your report. The moderation team will review it.",
                 ephemeral=True,
             )
 
-    @commands.command(
+    @commands.hybrid_command(
         name="purge",
         aliases=["clear","prune"],
         description="Deletes user messages from a channel",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(5)
     async def purge(self, ctx: Context, arg1: str, arg2: str = None):
         """
         Deletes messages from a channel. Can specify amount and/or user.
@@ -770,11 +770,9 @@ class Moderation(commands.Cog, name="Moderation"):
         except Exception as e:
             await ctx.send(f"An unexpected error occurred: {e}", delete_after=5)
 
-    @commands.command(name="botclear", aliases=["bc"])
+    @commands.command(name="botclear", aliases=["bc"], description="Clear bot messages and command invocations from a channel.")
     @commands.guild_only()
-    @commands.check_any(
-        commands.has_permissions(manage_messages=True),
-    )
+    @commands.has_permissions(manage_messages=True)
     async def app_clear(self, ctx: Context):
         """Clear all bot messages and any invocation of your bot's commands."""
         try:
@@ -801,7 +799,8 @@ class Moderation(commands.Cog, name="Moderation"):
                 ):
                     await ctx.channel.delete_messages(chunk)
 
-                await ctx.message.delete()
+                if ctx.message:
+                    await ctx.message.delete()
         except discord.Forbidden:
             await ctx.send(
                 "I don't have permission to delete messages.", delete_after=5
@@ -811,13 +810,15 @@ class Moderation(commands.Cog, name="Moderation"):
         except discord.NotFound:
             pass
 
-    @commands.command(
+    @commands.hybrid_command(
         name="kick",
         description="Kick a user out of the server.",
     )
     @commands.guild_only()
     @commands.has_permissions(kick_members=True)
     @commands.bot_has_permissions(kick_members=True)
+    @app_commands.default_permissions(kick_members=True)
+    @unified_cooldown(10)
     async def kick(
         self, ctx: Context, identifier: str, *, reason: str = "No reason provided"
     ) -> None:
@@ -945,13 +946,15 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
                 await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="ban",
         description="Bans a user from the server.",
     )
     @commands.guild_only()
     @commands.has_permissions(ban_members=True)
     @commands.bot_has_permissions(ban_members=True)
+    @app_commands.default_permissions(ban_members=True)
+    @unified_cooldown(10)
     async def ban(
         self, ctx: Context, identifier: str, *, reason: str = "No reason provided"
     ) -> None:
@@ -1157,12 +1160,14 @@ class Moderation(commands.Cog, name="Moderation"):
                 ),
                 view=view,
             )
-    @commands.command(
+    @commands.hybrid_command(
         name="tempban", description="Temporarily bans a user for a specified duration."
     )
     @commands.guild_only()
     @commands.has_permissions(ban_members=True)
     @commands.bot_has_permissions(ban_members=True)
+    @app_commands.default_permissions(ban_members=True)
+    @unified_cooldown(10)
     async def tempban(
         self,
         ctx: Context,
@@ -1330,13 +1335,15 @@ class Moderation(commands.Cog, name="Moderation"):
         except discord.HTTPException:
             pass
 
-    @commands.command(
+    @commands.hybrid_command(
         name="unban",
         description="Unbans a user from the server and sends them an invite.",
     )
     @commands.guild_only()
     @commands.has_permissions(ban_members=True)
     @commands.bot_has_permissions(ban_members=True)
+    @app_commands.default_permissions(ban_members=True)
+    @unified_cooldown(10)
     async def unban(self, ctx: Context, *, identifier: str) -> None:
         """Unban a specified user by ID, Name or Mention"""
         bans = [entry async for entry in ctx.guild.bans()]
@@ -1404,13 +1411,15 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.send(embed=embed)
 
-    @commands.command(
+    @commands.hybrid_command(
         name="history",
         aliases=["ph", "punishments"],
         description="View a user's punishment history.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(10)
     async def history(self, ctx: Context, user: discord.Member):
         """View a specific user's punishment history"""
         guild_id = ctx.guild.id
@@ -1528,9 +1537,11 @@ class Moderation(commands.Cog, name="Moderation"):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name="timeout", aliases=["to"])
+    @commands.hybrid_command(name="timeout", aliases=["to"], description="Timeout a user for a specified duration.")
     @commands.guild_only()
     @commands.has_permissions(moderate_members=True)
+    @app_commands.default_permissions(moderate_members=True)
+    @unified_cooldown(10)
     async def timeout(
         self,
         ctx: commands.Context,
@@ -1685,9 +1696,11 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
             )
 
-    @commands.command(name="untimeout", aliases=["uto"])
+    @commands.hybrid_command(name="untimeout", aliases=["uto"], description="Remove a timeout from a user.")
     @commands.guild_only()
     @commands.has_permissions(moderate_members=True)
+    @app_commands.default_permissions(moderate_members=True)
+    @unified_cooldown(10)
     async def untimeout(self, ctx: commands.Context, identifier: str):
         """Untimeout a user"""
 
@@ -1970,12 +1983,14 @@ class Moderation(commands.Cog, name="Moderation"):
         except discord.HTTPException:
             pass
 
-    @commands.command(
+    @commands.hybrid_command(
         name="warn",
         description="Adds a warning to a user in the server.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(10)
     async def warning_add(
         self, ctx: Context, identifier: str, *, reason: str = "No reason provided"
     ) -> None:
@@ -2128,7 +2143,7 @@ class Moderation(commands.Cog, name="Moderation"):
         embed.color = discord.Color.green()
         await status_message.edit(embed=embed)
 
-    @commands.command(name="jail")
+    @commands.command(name="jail", description="Jail a user in the server.")
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     @commands.bot_has_permissions(manage_roles=True)
@@ -2341,7 +2356,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
                 await channel.send(embed=embed)
 
-    @commands.command(name="unjail")
+    @commands.command(name="unjail", description="Release a user from jail.")
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     @commands.bot_has_permissions(manage_roles=True)
@@ -2506,7 +2521,7 @@ class Moderation(commands.Cog, name="Moderation"):
         except discord.Forbidden:
             pass
 
-    @commands.group(name="antimp3", aliases=["nomp3"])
+    @commands.group(name="antimp3", aliases=["nomp3"], invoke_without_command=True, description="Manage the Anti-MP3 feature.")
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def anti_mp3(self, ctx: Context):
@@ -2542,6 +2557,7 @@ class Moderation(commands.Cog, name="Moderation"):
         aliases=["on"],
         description="Enable the Anti-MP3 feature for the server",
     )
+    @unified_cooldown(5)
     async def enable_antimp3(self, ctx: Context):
         """Toggle the Anti-MP3 feature"""
         guild_id = ctx.guild.id
@@ -2571,6 +2587,7 @@ class Moderation(commands.Cog, name="Moderation"):
         aliases=["off"],
         description="Disable the Anti-MP3 feature for the server",
     )
+    @unified_cooldown(5)
     async def disable_antimp3(self, ctx: Context):
         """Toggle the Anti-MP3 feature"""
         guild_id = ctx.guild.id
@@ -2738,11 +2755,13 @@ class Moderation(commands.Cog, name="Moderation"):
 
         return member
 
-    @commands.command(
+    @commands.hybrid_command(
         name="mute", description="Mute a user by assigning them the mute role."
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(10)
     async def mute_user(self, ctx: Context, identifier: str, *args):
         """
         Usage:
@@ -2847,11 +2866,13 @@ class Moderation(commands.Cog, name="Moderation"):
             except Exception as e:
                 self.bot.logger.error(f"Failed to auto-unmute {member}: {e}")
 
-    @commands.command(
+    @commands.hybrid_command(
         name="unmute", description="Unmute a user by removing the mute role."
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(10)
     async def unmute_user(self, ctx: Context, *, identifier: str):
         """Restore a users messaging permissions"""
         guild_id = ctx.guild.id
@@ -3044,7 +3065,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(
         name="runmute",
-        description="Unmute a user by removing the mute role.",
+        description="Unmute a user by removing the react mute role.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
@@ -3137,7 +3158,14 @@ class Moderation(commands.Cog, name="Moderation"):
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
-    async def image_mute_user(self, ctx: Context, identifier: str, *args):
+    async def image_mute_user(
+        self,
+        ctx: Context,
+        identifier: str,
+        duration: Optional[str] = None,
+        *,
+        reason: Optional[str] = None,
+    ):
         """
         Usage:
           !imute @user               > indefinite image-mute
@@ -3168,19 +3196,21 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
-        duration_seconds: Optional[int] = None
-        reason = "No reason provided"
-        if args:
-            first = args[0]
-            if re.match(r"^\d+[smhd]$", first):
-                try:
-                    duration_seconds = humanfriendly.parse_timespan(first)
-                except humanfriendly.InvalidTimespan:
-                    reason = " ".join(args)
-                else:
-                    reason = " ".join(args[1:]) or reason
+        # Normalize prefix-style "!imute @user spoilers" where duration is actually a reason.
+        if duration and not re.match(r"^\d+[smhd]$", duration):
+            if reason:
+                reason = f"{duration} {reason}"
             else:
-                reason = " ".join(args)
+                reason = duration
+            duration = None
+
+        duration_seconds: Optional[int] = None
+        if duration:
+            try:
+                duration_seconds = humanfriendly.parse_timespan(duration)
+            except humanfriendly.InvalidTimespan:
+                pass
+        reason = reason or "No reason provided"
 
         mute_settings = await self.bot.database.get_mute_settings(ctx.guild.id)
         if not mute_settings:
@@ -3203,7 +3233,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
         desc = f"**{member}** has been image-muted."
         if duration_seconds:
-            desc += f" (for {first})"
+            desc += f" (for {duration})"
         embed = discord.Embed(description=desc, color=discord.Color.blurple())
         embed.set_author(
             name=f"Moderator: {ctx.author}",
@@ -3242,7 +3272,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.command(
         name="iunmute",
-        description="Unmute a user by removing the mute role.",
+        description="Unmute a user by removing the image mute role.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
@@ -3329,7 +3359,9 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.send(embed=embed)
 
-    @commands.command(name="ce", aliases=["enablecommand"], hidden=True)
+    @commands.command(
+        name="ce", aliases=["enablecommand"], description="Enable a command in the specified channel.", hidden=True
+    )
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
     async def enable_channel_command(
@@ -3360,7 +3392,9 @@ class Moderation(commands.Cog, name="Moderation"):
                 f"The `{command_name}` command has been enabled in {channel_name}."
             )
 
-    @commands.command(name="cd", aliases=["disablecommand"], hidden=True)
+    @commands.command(
+        name="cd", aliases=["disablecommand"], description="Disable a command in the specified channel.", hidden=True
+    )
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True)) # people be begging to disable shit cuz spam lol
     async def disable_channel_command(
@@ -3391,9 +3425,11 @@ class Moderation(commands.Cog, name="Moderation"):
                 f"The `{command_name}` command has been disabled in {channel_name}."
             )
 
-    @commands.command(name="case")
+    @commands.hybrid_command(name="case", description="View details of a specific case.")
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
+    @app_commands.default_permissions(manage_messages=True)
+    @unified_cooldown(10)
     async def case_info(self, ctx: Context, case_id: int):
         """View details of a specific case."""
         guild_id = ctx.guild.id
@@ -3464,7 +3500,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name="casenote")
+    @commands.command(name="casenote", description="Add a note to a specific case.")
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     async def add_note(self, ctx: Context, case_id: int, *, note: str):
@@ -3480,7 +3516,7 @@ class Moderation(commands.Cog, name="Moderation"):
         except Exception as e:
             await ctx.send(f"An error occurred while adding the note: {e}")
 
-    @commands.command(name="reason")
+    @commands.command(name="reason", description="Update the reason for a specific case.")
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     async def update_case(self, ctx: Context, case_id: int, *, new_reason: str):
@@ -3566,13 +3602,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
             async def _do_nuke(cancel_event: asyncio.Event):
                 try:
-                    try:
-                        await self.bot.database.set_cooldown(
-                            ctx.author.id, ctx.command.qualified_name, 900
-                        )
-                    except Exception:
-                        logger.exception("Failed to set nuke cooldown")
-
                     try:
                         countdown_message = await ctx.send("# 🔥 Nuke Incoming! 🔥")
                         await asyncio.sleep(1)
@@ -3833,7 +3862,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await channel.edit(slowmode_delay=seconds)
         await ctx.send(f"Slowmode set to {duration} in {channel.mention}")
 
-    @commands.command(name="lock", help="Locks a specified channel.")
+    @commands.command(name="lock", description="Locks a specified channel.")
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_channels=True))
     @commands.bot_has_permissions(manage_channels=True)
@@ -3860,7 +3889,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
         await ctx.send(f"🔒 Locked {channel.mention} for the reason: {reason}")
 
-    @commands.command(name="unlock", help="Unlocks a specified channel.")
+    @commands.command(name="unlock", description="Unlocks a specified channel.")
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_channels=True))
     @commands.bot_has_permissions(manage_channels=True)
@@ -3885,7 +3914,7 @@ class Moderation(commands.Cog, name="Moderation"):
         name="lockdownset",
         aliases=["ldset", "ldch"],
         invoke_without_command=True,
-        help="Manage which channels are affected by lockdown.",
+        description="Manage which channels are affected by lockdown.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
@@ -3896,7 +3925,9 @@ class Moderation(commands.Cog, name="Moderation"):
         )
         await ctx.send(embed=embed)
 
-    @lockdown_channels.command(name="add", help="Add a channel to the lockdown list.")
+    @lockdown_channels.command(name="add", description="Add a channel to the lockdown list.")
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def lockdown_channels_add(
         self, ctx: Context, channel: discord.TextChannel = None
     ):
@@ -3912,8 +3943,10 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.send(embed=embed)
 
     @lockdown_channels.command(
-        name="remove", help="Remove a channel from the lockdown list."
+        name="remove", description="Remove a channel from the lockdown list."
     )
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def lockdown_channels_remove(
         self, ctx: Context, channel: discord.TextChannel = None
     ):
@@ -3933,8 +3966,10 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
 
     @lockdown_channels.command(
-        name="list", help="List all channels in the lockdown list."
+        name="list", description="List all channels in the lockdown list."
     )
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def lockdown_channels_list(self, ctx: Context):
         ids = await self.bot.database.get_lockdown_channels(ctx.guild.id)
         if not ids:
@@ -3951,7 +3986,7 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.send("🔒 **Lockdown channels:**\n" + "\n".join(mentions))
 
     @commands.command(
-        name="lockdown", aliases=["ld"], help="Lock all channels in the lockdown list."
+        name="lockdown", aliases=["ld"], description="Lock all channels in the lockdown list."
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
@@ -3979,7 +4014,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.command(
         name="unlockdown",
         aliases=["uld"],
-        help="Unlock all channels in the lockdown list.",
+        description="Unlock all channels in the lockdown list.",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
@@ -4230,6 +4265,8 @@ class Moderation(commands.Cog, name="Moderation"):
     @alts.command(name="add", description="Add an alt for a user via snowflake.")
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def add(self, ctx: Context, main_id: int, alt_id: int):
         """Add an alt for a user."""
         not_implemented = False
@@ -4252,6 +4289,8 @@ class Moderation(commands.Cog, name="Moderation"):
     @alts.command(name="remove", description="Remove an alt for a user via snowflake.")
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def remove(self, ctx: Context, member: discord.Member, alt: discord.Member):
         """Remove an alt for a user."""
         not_implemented = False
@@ -4267,6 +4306,8 @@ class Moderation(commands.Cog, name="Moderation"):
     @alts.command(name="clear", description="Clear all known alts for a user.")
     @commands.guild_only()
     @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def clear(self, ctx: Context, member: discord.Member):
         """Clear all alts for a user."""
         not_implemented = False
@@ -4286,9 +4327,11 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def restrictcommand(self, ctx: Context):
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -4325,6 +4368,8 @@ class Moderation(commands.Cog, name="Moderation"):
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def restrictcommand_add(
         self, ctx: Context, command_name: str, role: discord.Role
     ):
@@ -4353,6 +4398,8 @@ class Moderation(commands.Cog, name="Moderation"):
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def restrictcommand_remove(
         self, ctx: Context, command_name: str, role: discord.Role
     ):
@@ -4379,6 +4426,8 @@ class Moderation(commands.Cog, name="Moderation"):
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def restrictcommand_reset(self, ctx: Context):
         count = await self.bot.database.clear_all_command_restrictions(ctx.guild.id)
 
@@ -4394,6 +4443,8 @@ class Moderation(commands.Cog, name="Moderation"):
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
+    @unified_cooldown(10)
     async def restrictcommand_list(self, ctx: Context, filter_arg: str = None):
         restrictions = await self.bot.database.get_command_restrictions(ctx.guild.id)
 

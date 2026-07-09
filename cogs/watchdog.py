@@ -9,6 +9,8 @@ from collections import defaultdict
 from typing import Optional
 import humanfriendly
 import base64
+from utils.cooldown import unified_cooldown
+from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
 
@@ -114,6 +116,9 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
     def cog_unload(self):
         self.process_log_queue.cancel()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await check_slash_guardrails(self, interaction)
 
     def luhn(self, cn: str) -> bool:
         """
@@ -409,16 +414,21 @@ class Watchdog(commands.Cog, name="Watchdog"):
     async def before_process_log_queue(self):
         await self.bot.wait_until_ready()
 
-    @commands.group(
-        name="watchdog", aliases=["modlog", "ml"], invoke_without_command=True
+    @commands.hybrid_group(
+        name="watchdog", aliases=["modlog", "ml"], invoke_without_command=True,
+        description="Main command group for managing Watchdog logging."
     )
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def watchdog_cmd(self, ctx: Context):
         """Main command group for managing Watchdog logging."""
-        prefix = await self.bot.get_prefix(ctx.message)
-        if isinstance(prefix, list):
-            prefix = prefix[0]
+        prefix = "/"
+        if ctx.message:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
 
         subcmds = getattr(ctx.command, "commands", []) or []
         lines = []
@@ -450,8 +460,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @watchdog_cmd.command(name="channel", aliases=["c"])
+    @watchdog_cmd.command(name="channel", aliases=["c"], description="Set the logging channel for this server.")
     @commands.has_permissions(administrator=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def set_channel(self, ctx: Context, channel: discord.TextChannel):
         """Set the logging channel for this server."""
         guild_id = ctx.guild.id
@@ -462,8 +474,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         await ctx.send(f"Log channel has been set to {channel.mention}.")
 
-    @watchdog_cmd.command(name="toggle", aliases=["t"])
+    @watchdog_cmd.command(name="toggle", aliases=["t"], description="Enable or disable logging for this server or a specific feature.")
     @commands.has_permissions(administrator=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def toggle_listener(self, ctx: Context, feature: str = None):
         """Enable or disable logging for this server or a specific feature.
         
@@ -517,8 +531,10 @@ class Watchdog(commands.Cog, name="Watchdog"):
             status = "enabled" if enabled else "disabled"
             await ctx.send(f"Watchdog logging has been {status}.")
 
-    @watchdog_cmd.command(name="status")
+    @watchdog_cmd.command(name="status", description="Displays the current logging settings for the server.")
     @commands.has_permissions(administrator=True)
+    @discord.app_commands.default_permissions(administrator=True)
+    @unified_cooldown(10)
     async def status(self, ctx: Context):
         """Displays the current logging settings for the server."""
         guild_id = ctx.guild.id
