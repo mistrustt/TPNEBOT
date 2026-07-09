@@ -21,7 +21,7 @@ import re
 import random
 from moviepy import AudioFileClip, ImageClip
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 JUICEWRLD_API = "https://juicewrldapi.com"
@@ -1946,7 +1946,7 @@ class Music(commands.Cog, name="Music"):
                     embed=discord.Embed(
                         description="Request failed. Please try again later.",
                         color=discord.Color.red(),
-                    ).set_image(url=f"https://http.cat/{response.status}"),
+                    ),
                     delete_after=5,
                 )
                 return None
@@ -1996,7 +1996,7 @@ class Music(commands.Cog, name="Music"):
                     embed=discord.Embed(
                         description="Request failed. Please try again later.",
                         color=discord.Color.red(),
-                    ).set_image(url=f"https://http.cat/{response.status}"),
+                    ),
                     delete_after=5,
                 )
                 return None
@@ -2895,7 +2895,15 @@ class Music(commands.Cog, name="Music"):
             await ctx.message.add_reaction('🔄')
         status = await Cache.fetch_songs()
         if status != 200:
-            return await ctx.reply(embed=discord.Embed(description='Request failed. Please try again later.', color=discord.Color.red()).set_image(url=f'https://http.cat/{status}'), delete_after=5)
+            logger.error(f"syncsurfaces cache fetch failed: HTTP {status}")
+            return await ctx.reply(
+                embed=discord.Embed(
+                    title="⚠️ Sync Failed",
+                    description=f"Surface cache sync failed (HTTP {status}). Please try again later.",
+                    color=discord.Color.red(),
+                ),
+                delete_after=10,
+            )
 
         await self.store_latest_surfaces()
         if ctx.message is not None:
@@ -3554,7 +3562,9 @@ class Music(commands.Cog, name="Music"):
                 color=discord.Color.red(),
             )
             if code:
-                embed.set_image(url=f"https://http.cat/{code}")
+                embed.add_field(
+                    name="Status", value=f"HTTP {code}", inline=False
+                )
             await ctx.reply(embed=embed, delete_after=5)
 
         data = await self.fetch_random_playable_song()
@@ -3737,7 +3747,9 @@ class Music(commands.Cog, name="Music"):
                 color=discord.Color.red(),
             )
             if code:
-                embed.set_image(url=f"https://http.cat/{code}")
+                embed.add_field(
+                    name="Status", value=f"HTTP {code}", inline=False
+                )
             await ctx.reply(embed=embed, delete_after=5)
 
         try:

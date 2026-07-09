@@ -10,7 +10,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class Fun(commands.Cog, name="Fun"):
@@ -76,7 +76,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{request.status}")
+                    
 
                 await ctx.send(embed=embed)
 
@@ -98,7 +98,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the Useless Facts API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{response.status}")
+                    
                     return await ctx.reply(embed=embed)
 
                 data = await response.json()
@@ -152,7 +152,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the Dog API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    
                     await ctx.reply(embed=embed)
 
     @commands.command(name="cat")
@@ -171,7 +171,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the Cat API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    
                     await ctx.reply(embed=embed)
 
     @commands.command(name="fox")
@@ -190,7 +190,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the Fox API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    
                     await ctx.reply(embed=embed)
 
     @commands.command(name="penguin")
@@ -212,7 +212,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the Penguin API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    
                     await ctx.reply(embed=embed)
 
     @commands.command(name="duck", hidden=True)
@@ -231,7 +231,7 @@ class Fun(commands.Cog, name="Fun"):
                         description="There was a problem contacting the Duck API. Please try again later.",
                         color=discord.Color.red(),
                     )
-                    embed.set_image(url=f"https://http.cat/{resp.status}")
+                    
                     await ctx.reply(embed=embed)
 
     @commands.command(name="boom", aliases=["kaboom"], description="boom.")
