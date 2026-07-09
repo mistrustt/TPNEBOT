@@ -1085,8 +1085,6 @@ class Misc(commands.Cog, name="Misc"):
 
     @juul.command(name="lock", description="Lock the server juul so it can't be stolen.")
     @commands.has_permissions(manage_messages=True)
-    @app_commands.default_permissions(manage_messages=True)
-    @unified_cooldown(5)
     async def juul_lock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
@@ -1112,8 +1110,6 @@ class Misc(commands.Cog, name="Misc"):
 
     @juul.command(name="unlock", description="Unlock the server juul so it can be stolen.")
     @commands.has_permissions(manage_messages=True)
-    @app_commands.default_permissions(manage_messages=True)
-    @unified_cooldown(5)
     async def juul_unlock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:

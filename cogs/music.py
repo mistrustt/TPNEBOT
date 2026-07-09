@@ -2910,8 +2910,7 @@ class Music(commands.Cog, name="Music"):
         else:
             await ctx.reply(embed=discord.Embed(description='Surfaces cache synced successfully.', color=discord.Color.green()))
 
-    @commands.hybrid_command(name='surfaces', aliases=['leaks'], description='Browse the latest Juice WRLD surfaces.')
-    @unified_cooldown(15)
+    @commands.command(name='surfaces', aliases=['leaks'], description='Browse the latest Juice WRLD surfaces.')
     async def surfaces(self, ctx: commands.Context):
         try:
 
@@ -3190,8 +3189,7 @@ class Music(commands.Cog, name="Music"):
 
         return True, output_path
 
-    @commands.hybrid_command(name="heardlestats", aliases=["hstats"], description="View Heardle statistics for a user.")
-    @unified_cooldown(10)
+    @commands.command(name="heardlestats", aliases=["hstats"], description="View Heardle statistics for a user.")
     async def heardlestats(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         member = member or ctx.author
 
@@ -3713,8 +3711,7 @@ class Music(commands.Cog, name="Music"):
         await self._safe_delete(message)
         self.handle_user_done_heardle(ctx.author.id)
 
-    @commands.hybrid_command(name="makesnippet", aliases=["makesnip"], description="Create a snippet from a Juice WRLD song.")
-    @unified_cooldown(60)
+    @commands.command(name="makesnippet", aliases=["makesnip"], description="Create a snippet from a Juice WRLD song.")
     async def makesnippet(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
             await ctx.reply(
@@ -4005,8 +4002,7 @@ class Music(commands.Cog, name="Music"):
 
         return None
 
-    @commands.hybrid_command(name="higherlower", description="Play a game of Higher or Lower with Juice WRLD song streams.")
-    @unified_cooldown(30)
+    @commands.command(name="higherlower", description="Play a game of Higher or Lower with Juice WRLD song streams.")
     async def higherlower(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_higherlower:
             await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Higher or Lower!")
@@ -4376,8 +4372,7 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
 
         await asyncio.gather(*[warm(u) for u in urls], return_exceptions=True)
 
-    @commands.hybrid_command(name="cover", description="Search for available covers of a song")
-    @unified_cooldown(15)
+    @commands.command(name="cover", description="Search for available covers of a song")
     async def cover(self, ctx: commands.Context, song_name: Optional[str] = None):
         """Search for song covers in the Juice WRLD API database, grouped by artist."""
         if not song_name:

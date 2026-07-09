@@ -2762,7 +2762,14 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(manage_messages=True)
     @app_commands.default_permissions(manage_messages=True)
     @unified_cooldown(10)
-    async def mute_user(self, ctx: Context, identifier: str, *args):
+    async def mute_user(
+        self,
+        ctx: Context,
+        identifier: str,
+        duration: Optional[str] = None,
+        *,
+        reason: Optional[str] = None,
+    ):
         """
         Usage:
           !mute @user               > indefinite mute (reason defaults)
@@ -2793,19 +2800,21 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
             return
 
+        # Normalize prefix usage where the second positional arg may be a duration or reason.
         duration_seconds: Optional[int] = None
-        reason = "No reason provided"
-        if args:
-            first = args[0]
-            if re.match(r"^\d+[smhd]$", first):
-                try:
-                    duration_seconds = humanfriendly.parse_timespan(first)
-                except humanfriendly.InvalidTimespan:
-                    reason = " ".join(args)
-                else:
-                    reason = " ".join(args[1:]) or reason
+        reason = reason or "No reason provided"
+        if duration and not re.match(r"^\d+[smhd]$", duration):
+            if reason == "No reason provided":
+                reason = duration
             else:
-                reason = " ".join(args)
+                reason = f"{duration} {reason}"
+            duration = None
+        if duration:
+            try:
+                duration_seconds = humanfriendly.parse_timespan(duration)
+            except humanfriendly.InvalidTimespan:
+                reason = duration
+                duration_seconds = None
 
         mute_settings = await self.bot.database.get_mute_settings(ctx.guild.id)
         if not mute_settings:

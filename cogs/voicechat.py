@@ -4,6 +4,7 @@ import discord
 import logging
 import os
 import re
+from typing import Optional
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from urllib.parse import urlparse

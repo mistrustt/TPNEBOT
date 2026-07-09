@@ -73,9 +73,23 @@ class UnifiedCooldownManager:
         # fires when the first invocation has not responded within ~3 seconds.
         self._in_flight: dict[tuple[int, str], int] = {}
         self._cooldown_started_at: dict[tuple[int, str], float] = {}
+        # Recently processed slash interaction IDs. Discord can (and does) send
+        # the same interaction more than once if the first response is slow or
+        # if commands are registered multiple times. Tracking interaction IDs
+        # lets us drop duplicate invocations safely.
+        self._processed_interactions: dict[int, float] = {}
+        self._processed_ttl = 300.0  # 5 minutes
 
     def _key(self, user_id: int, command_name: str) -> tuple[int, str]:
         return (user_id, command_name)
+
+    def _cleanup_processed_interactions(self) -> None:
+        """Remove stale processed interaction IDs to prevent unbounded growth."""
+        now = time.perf_counter()
+        cutoff = now - self._processed_ttl
+        stale = [iid for iid, ts in self._processed_interactions.items() if ts < cutoff]
+        for iid in stale:
+            self._processed_interactions.pop(iid, None)
 
     def lock(self, user_id: int, command_name: str):
         """Return the asyncio.Lock for a specific user/command pair."""
@@ -85,6 +99,7 @@ class UnifiedCooldownManager:
         self, user_id: int, command_name: str, interaction_id: int
     ) -> None:
         """Mark a slash interaction as currently processing this command."""
+        self._cleanup_processed_interactions()
         self._in_flight[self._key(user_id, command_name)] = interaction_id
 
     def clear_in_flight(self, user_id: int, command_name: str) -> None:
@@ -94,6 +109,22 @@ class UnifiedCooldownManager:
     def is_in_flight(self, user_id: int, command_name: str) -> bool:
         """Return True if a slash interaction is still processing this command."""
         return self._key(user_id, command_name) in self._in_flight
+
+    def mark_interaction_processed(self, interaction_id: int) -> bool:
+        """
+        Record that a slash interaction has been processed.
+        Returns True if this is a duplicate and should be ignored.
+        """
+        self._cleanup_processed_interactions()
+        if interaction_id in self._processed_interactions:
+            return True
+        self._processed_interactions[interaction_id] = time.perf_counter()
+        return False
+
+    def is_interaction_processed(self, interaction_id: int) -> bool:
+        """Return True if a slash interaction has already been handled."""
+        self._cleanup_processed_interactions()
+        return interaction_id in self._processed_interactions
 
     async def get_remaining(self, user_id: int, command_name: str) -> float:
         """Return the remaining cooldown in seconds for a user and command."""
@@ -327,6 +358,24 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                 return await func(*args, **kwargs)
 
             async with bot.cooldowns.lock(user_id, name):
+                # Deduplicate slash interactions by ID. Discord can send the same
+                # interaction multiple times, and hybrid commands can also be
+                # dispatched twice if command registrations overlap. Drop exact
+                # duplicates silently to avoid "already acknowledged" errors.
+                if is_slash:
+                    interaction = (
+                        ctx_or_interaction.interaction
+                        if isinstance(ctx_or_interaction, commands.Context)
+                        else ctx_or_interaction
+                    )
+                    if bot.cooldowns.mark_interaction_processed(interaction.id):
+                        logger.debug(
+                            "Dropping duplicate slash interaction %s for %s",
+                            interaction.id,
+                            name,
+                        )
+                        return
+
                 remaining = await bot.cooldowns.get_remaining(user_id, name)
                 if remaining > 0:
                     # If the same user/command is already being processed by an
@@ -335,11 +384,6 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                     # friendly "still processing" message instead of a cooldown
                     # error to avoid confusing users.
                     if is_slash and bot.cooldowns.is_in_flight(user_id, name):
-                        interaction = (
-                            ctx_or_interaction.interaction
-                            if isinstance(ctx_or_interaction, commands.Context)
-                            else ctx_or_interaction
-                        )
                         try:
                             if not interaction.response.is_done():
                                 await interaction.response.send_message(
@@ -372,11 +416,6 @@ def unified_cooldown(seconds: float, *, cooldown_name: Optional[str] = None):
                 # instead of racing into the command body.
                 await bot.cooldowns.set_cooldown(ctx_or_interaction, seconds, name)
                 if is_slash:
-                    interaction = (
-                        ctx_or_interaction.interaction
-                        if isinstance(ctx_or_interaction, commands.Context)
-                        else ctx_or_interaction
-                    )
                     bot.cooldowns.set_in_flight(user_id, name, interaction.id)
 
             logger.debug(

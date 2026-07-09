@@ -2043,7 +2043,7 @@ class Economy(commands.Cog):
             await self.bot.database.add_reputation_score(ctx.author.id, 5)
             multiplier_text = ""
             if multiplier != Decimal("1.0"):
-                multiplier_text = f" (Economic Multiplier: {multiplier}x)"
+                multiplier_text = f" (Economic Multiplier: {float(multiplier):.3f}x)"
             embed = discord.Embed(
                 description=f"Your monthly reward is **{self.currency_name} {await self.formatter(monthly_amount)}**.{multiplier_text}",
                 color=color,
@@ -2054,7 +2054,7 @@ class Economy(commands.Cog):
             if multiplier != Decimal("1.0"):
                 embed.add_field(
                     name="Economic Multiplier",
-                    value=f"Base: {await self.formatter(base_amount)} | Multiplier: {multiplier}x",
+                    value=f"Base: {await self.formatter(base_amount)} | Multiplier: {float(multiplier):.3f}x",
                     inline=False
                 )
             await ctx.reply(embed=embed)

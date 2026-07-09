@@ -576,6 +576,15 @@ class DiscordBot(commands.Bot):
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
             self._interaction_start_times[id(interaction)] = time.perf_counter()
+            # Discord can dispatch the same application command interaction more
+            # than once (retries / duplicate registrations). Drop exact duplicates
+            # before they reach the command tree to avoid "already acknowledged".
+            if self.cooldowns.is_interaction_processed(interaction.id):
+                self.logger.debug(
+                    "Ignoring duplicate application command interaction %s",
+                    interaction.id,
+                )
+                return
             # Ensure the mapping table has this user so hashes can be resolved later.
             try:
                 await self.database.ensure_user_identity(interaction.user.id)
