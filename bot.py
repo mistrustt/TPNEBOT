@@ -195,7 +195,7 @@ def setup_logging():
 
 
 setup_logging()
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger("discord.client")
 
 
 class DiscordBot(commands.Bot):
@@ -218,6 +218,7 @@ class DiscordBot(commands.Bot):
         self.config = self.database.load_config()
         self.debug_mode_active = False
         self.version = "2026.07.08"
+        self.cool_guys = None
         # Discord privileged intents we require and why:
         # - message_content: spam-channel enforcement, automated moderation
         #   (PII/card/token detection), message delete/edit logging, attachment
@@ -253,7 +254,7 @@ class DiscordBot(commands.Bot):
         # Jishaku development environment check
 
         if os.getenv("INFISICAL_ENVIRONMENT") == "dev":
-            self.logger.info("Development environment detected. Loading Jishaku cog.")
+            self.logger.info("Development environment active.")
             try:
                 await self.load_extension("jishaku")
                 self.logger.info("Loaded extension 'jishaku'")
@@ -330,9 +331,6 @@ class DiscordBot(commands.Bot):
         except Exception as e:
             self.logger.error(f"Error in economic rebalance task: {e}")
 
-    def is_coolguy(self, user_id: int):
-        return user_id in self.cool_guys
-
     @staticmethod
     def _is_transient_discord_api_error(error: Exception) -> bool:
         """Return True if *error* is a Discord server-side API failure (5xx)."""
@@ -351,7 +349,6 @@ class DiscordBot(commands.Bot):
                 f"Running on: {platform.system()} {platform.release()} ({os.name})"
             )
             self.logger.info("-------------------")
-
             self.logger.info("Checking database connection...")
             db_init_time = discord.utils.utcnow()
             async with self.database.async_sessionmaker() as session:
@@ -361,37 +358,46 @@ class DiscordBot(commands.Bot):
                 f"Database responded in {db_connected_time.total_seconds()}s."
             )
             self.logger.info("Database connection established successfully.")
-
             self.logger.info("Initializing database tables...")
             await self.database.initialize()
             self.logger.info("Database Tables initialized successfully.")
-
+            self.logger.info("-------------------")
             # Collect initial economic metrics
-            try:
-                await self.database.collect_daily_economy_snapshot()
-                self.logger.info("Initial economic metrics collected successfully")
-            except Exception as e:
-                self.logger.error(f"Error collecting initial economic metrics: {e}")
-
-            self.logger.info("Loading cogs...")
+            self.logger.info("Collecting initial economic metrics...")
+            await self.database.collect_daily_economy_snapshot()
+            self.logger.info("Initial economic metrics collected successfully")
+            self.logger.info("-------------------")
+            self.logger.info("Attempting to load cogs...")
             await self.load_cogs()
-
-            self.tree.error = self.on_app_command_error
-            self.logger.info("Registered slash command error handler.")
-
+            self.logger.info("Cog loading stage completed successfully.")
+            self.logger.info("-------------------")
             await self.tree.sync()
             self.logger.info(
                 "Commands have been synced successfully to the global command tree."
             )
-
-            self.status_task.start()
-            self.cache_songs.start()
-            self.stats_retention_task.start()
-            self.economic_metrics_collection_task.start()
-            self.economic_rebalance_task.start()
-            self.logger.info("Status task started successfully.")
             self.logger.info("-------------------")
-            self.logger.info(f"Bot is ready. Awaiting gateway connection...")
+            self.logger.info("Starting background tasks...")
+            self.status_task.start()
+            self.logger.info("Status task started successfully.")
+            self.cache_songs.start()
+            self.logger.info("Song cache task started successfully.")
+            self.stats_retention_task.start()
+            self.logger.info("Stats retention task started successfully.")
+            self.economic_metrics_collection_task.start()
+            self.logger.info("Economic metrics collection task started successfully.")
+            self.economic_rebalance_task.start()
+            self.logger.info("Economic rebalance task started successfully.")
+            self.logger.info("-------------------")
+            self.logger.info(f"The bot is ready. Awaiting discord gateway connection...")
+            if self.cool_guys is None:
+                try:
+                    app_info = await self.application_info()
+                    team_members = getattr(
+                        getattr(app_info, "team", None), "members", []
+                    )
+                    self.cool_guys = [int(member.id) for member in team_members]
+                except Exception:
+                    self.cool_guys = []
 
         except Exception as e:
             self.logger.error(f"An error occurred during setup: {e}")
@@ -402,7 +408,7 @@ class DiscordBot(commands.Bot):
             if ctx.command is None:
                 return
 
-            if self.debug_mode_active and not self.is_coolguy(ctx.author.id):
+            if self.debug_mode_active and ctx.author.id not in self.cool_guys:
                 embed = discord.Embed(
                     description="The bot is currently in maintenance mode. Please try again later.",
                     color=discord.Color.red(),
@@ -734,10 +740,6 @@ class DiscordBot(commands.Bot):
             error.original, app_commands.CommandOnCooldown
         ):
             return error.original.retry_after
-        if isinstance(error, commands.HybridCommandError) and isinstance(
-            error.original, app_commands.CommandOnCooldown
-        ):
-            return error.original.retry_after
         return None
 
     async def on_app_command_error(
@@ -996,7 +998,6 @@ class DiscordBot(commands.Bot):
             detailed_error = "".join(
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
-
             prefix = await self.database.get_prefix(ctx.guild.id) if ctx.guild else "!"
             invoked_with = ctx.invoked_with or ctx.command.name
             command_display = f"`{prefix}{invoked_with}`"
