@@ -108,8 +108,9 @@ def decrypt_location(ciphertext: str) -> str:
 
 
 # Common URL / invite patterns used to keep user-input fields free of links.
-# This is intentionally broad: any scheme, discord.gg invites, markdown links,
-# and bare domains with TLDs are rejected.
+# This is intentionally broad: any URI scheme (http://, https://, discord://,
+# tg://, steam://, etc.), discord.gg invites, markdown links, and www. domains
+# are rejected to prevent in-app and cross-app redirect attacks.
 _URL_SCHEME_RE = re.compile(
     r"[a-zA-Z][a-zA-Z0-9+.-]*://", re.IGNORECASE
 )
