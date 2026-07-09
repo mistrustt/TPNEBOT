@@ -1,16 +1,19 @@
+
+import os
+import re
 import aiohttp
 import asyncio
 import discord
 import logging
-import os
-import re
 from typing import Optional
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 from urllib.parse import urlparse
 from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
+from utils.security import resolve_id, resolve_ids
 
 
 class VoiceControlView(discord.ui.View):
@@ -244,26 +247,6 @@ class Voicechat(commands.Cog):
         await self.session.close()
 
     @staticmethod
-    def _is_hash(value) -> bool:
-        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
-        return (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(c in "0123456789abcdefABCDEF" for c in value)
-        )
-
-    async def _resolve_id(self, value):
-        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
-        if value is None or isinstance(value, int):
-            return value
-        if self._is_hash(value):
-            return await self.bot.database.resolve_user_hash(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
     def _is_valid_audio_url(url: str) -> bool:
         """Return True if the URL is an HTTP(S) link to an allowed audio extension."""
         parsed = urlparse(url)
@@ -449,12 +432,7 @@ class Voicechat(commands.Cog):
 
         existing = await self.bot.database.get_jtc_channels(guild.id)
         if existing:
-            embed = discord.Embed(
-                title="Join To Create",
-                description="JTC is already set up in this server!",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "JTC is already set up in this server!", title="Join To Create", delete_after=5, reply=True)
             return
 
         jtc_channel = discord.utils.get(guild.voice_channels, name="Join To Create")
@@ -532,7 +510,7 @@ class Voicechat(commands.Cog):
             temp_owner_id = await self.bot.database.get_temp_channel_owner(
                 before.channel.id
             )
-            temp_owner_id = await self._resolve_id(temp_owner_id)
+            temp_owner_id = await resolve_id(self.bot.database,temp_owner_id)
 
             if temp_owner_id is None:
                 return
@@ -554,7 +532,7 @@ class Voicechat(commands.Cog):
             return None
 
         owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
-        owner_id = await self._resolve_id(owner_id)
+        owner_id = await resolve_id(self.bot.database,owner_id)
         return vc if owner_id == member.id else None
 
     @commands.hybrid_group(
@@ -607,12 +585,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.set_permissions(user, connect=True)
@@ -623,12 +596,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to allow this user.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to allow this user.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(
@@ -640,21 +608,11 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             if user not in vc.members:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="⚠️ That user is not in your voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "⚠️ That user is not in your voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
 
             await user.move_to(None)
             embed = discord.Embed(
@@ -664,12 +622,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to kick this user.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to kick this user.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(name="ban", description="Ban a user from your private VC")
@@ -679,12 +632,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.set_permissions(user, connect=False)
@@ -696,12 +644,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to ban this user.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to ban this user.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(name="unban", description="Unban a user from your private VC")
@@ -710,21 +653,11 @@ class Voicechat(commands.Cog):
         """Unbans a user from the voice channel."""
         vc = await self.is_owner(ctx.author)
         if not vc:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="🚫 You are not the owner of a voice channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
         await vc.set_permissions(user, connect=True)
-        embed = discord.Embed(
-            title="Voice Channel Management",
-            description=f"✅ {user.mention} has been unbanned from the channel.",
-            color=discord.Color.green(),
-        )
-        await ctx.reply(embed=embed, delete_after=5)
+        await Embeds.success(ctx, f"✅ {user.mention} has been unbanned from the channel.", title="Voice Channel Management", delete_after=5, reply=True)
 
     @vc.command(name="lock", description="Lock your voice channel")
     @unified_cooldown(5)
@@ -733,12 +666,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.set_permissions(vc.guild.default_role, connect=False)
@@ -749,12 +677,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to lock the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to lock the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(name="unlock", description="Unlock your voice channel")
@@ -764,12 +687,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.set_permissions(vc.guild.default_role, connect=True)
@@ -780,12 +698,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to unlock the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to unlock the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(
@@ -799,12 +712,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.set_permissions(vc.guild.default_role, view_channel=False)
@@ -815,12 +723,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to hide the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to hide the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(
@@ -832,12 +735,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.set_permissions(vc.guild.default_role, view_channel=True)
@@ -848,12 +746,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to reveal the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to reveal the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(
@@ -865,21 +758,11 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             if limit < 0 or limit > 99:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="⚠️ Please provide a valid limit between 0-99.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "⚠️ Please provide a valid limit between 0-99.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.edit(user_limit=limit)
@@ -890,12 +773,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to set the limit.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to set the limit.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(name="rename", description="Rename your private VC")
@@ -905,21 +783,11 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             if len(new_name) > 32:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="⚠️ The name must be **32 characters or less**.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "⚠️ The name must be **32 characters or less**.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await vc.edit(name=new_name)
@@ -930,12 +798,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to rename the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to rename the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(name="claim", description="Claim ownership of an empty private VC")
@@ -945,16 +808,11 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.get_vc(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             owner_id = await self.bot.database.get_temp_channel_owner(vc.id)
-            owner_id = await self._resolve_id(owner_id)
+            owner_id = await resolve_id(self.bot.database,owner_id)
             owner = discord.utils.get(vc.members, id=owner_id)
 
             if (
@@ -965,40 +823,20 @@ class Voicechat(commands.Cog):
                 await vc.set_permissions(
                     ctx.author, connect=True, manage_channels=True, move_members=True
                 )
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description=f"✅ You are now the owner of **{vc.name}**!",
-                    color=discord.Color.green(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.success(ctx, f"✅ You are now the owner of **{vc.name}**!", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             if owner:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 The owner is still in the channel, you cannot claim it.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 The owner is still in the channel, you cannot claim it.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             await self.bot.database.set_temp_channel_owner(vc.id, ctx.author.id)
             await vc.set_permissions(
                 ctx.author, connect=True, manage_channels=True, move_members=True
             )
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description=f"✅ You are now the owner of **{vc.name}**!",
-                color=discord.Color.green(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.success(ctx, f"✅ You are now the owner of **{vc.name}**!", title="Voice Channel Management", delete_after=5, reply=True)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description=f"⚠️ I don't have the necessary permissions to claim the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, f"⚠️ I don't have the necessary permissions to claim the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     @vc.command(name="nuke", description="Delete your private voice channel")
@@ -1008,12 +846,7 @@ class Voicechat(commands.Cog):
         try:
             vc = await self.is_owner(ctx.author)
             if not vc:
-                embed = discord.Embed(
-                    title="Voice Channel Management",
-                    description="🚫 You are not the owner of a voice channel.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "🚫 You are not the owner of a voice channel.", title="Voice Channel Management", delete_after=5, reply=True)
                 return
 
             channel_name = vc.name
@@ -1029,12 +862,7 @@ class Voicechat(commands.Cog):
             )
             await ctx.reply(embed=embed, delete_after=5)
         except discord.Forbidden:
-            embed = discord.Embed(
-                title="Voice Channel Management",
-                description="⚠️ I don't have the necessary permissions to delete the channel.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "⚠️ I don't have the necessary permissions to delete the channel.", title="Voice Channel Management", delete_after=5, reply=True)
             return
 
     async def ensure_voice(self, ctx):
@@ -1161,11 +989,7 @@ class Voicechat(commands.Cog):
             await vc.disconnect()
             del self.voice_clients[ctx.guild.id]
             self.queues.pop(ctx.guild.id, None)
-            embed = discord.Embed(
-                description="Disconnected from the voice channel, queue finished. 🔇",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
+            await Embeds.error(ctx, "Disconnected from the voice channel, queue finished. 🔇", reply=False)
 
     @commands.hybrid_command(
         name="play",
@@ -1254,10 +1078,7 @@ class Voicechat(commands.Cog):
                 for i, song in enumerate(self.queues[ctx.guild.id])
             ]
         )
-        embed = discord.Embed(
-            title="Music Queue", description=queue_list, color=discord.Color.green()
-        )
-        await ctx.send(embed=embed)
+        await Embeds.success(ctx, queue_list, title="Music Queue", reply=False)
 
     @commands.hybrid_command(
         name="stop",

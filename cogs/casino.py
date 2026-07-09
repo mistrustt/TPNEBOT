@@ -17,6 +17,8 @@ from utils.misc import MiscUtils
 from utils.amount import AmountUtils
 from utils.cooldown import unified_cooldown
 from utils.guardrails import check_slash_guardrails
+from utils.security import resolve_id, resolve_ids
+from utils.embeds import Embeds
 from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Optional
@@ -3891,46 +3893,6 @@ class Casino(commands.Cog):
         )
         return result["outcome"]
 
-    @staticmethod
-    def _is_hash(value) -> bool:
-        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
-        return (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(c in "0123456789abcdefABCDEF" for c in value)
-        )
-
-    async def _resolve_id(self, value):
-        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
-        if value is None or isinstance(value, int):
-            return value
-        if self._is_hash(value):
-            return await self.bot.database.resolve_user_hash(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    async def _resolve_ids(self, values):
-        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
-        if not values:
-            return {}
-        unique = list(dict.fromkeys(v for v in values if v is not None))
-        hashes = [v for v in unique if self._is_hash(v)]
-        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
-        mapping = {}
-        for v in unique:
-            if isinstance(v, int):
-                mapping[v] = v
-            elif self._is_hash(v):
-                mapping[v] = resolved.get(v)
-            else:
-                try:
-                    mapping[v] = int(v)
-                except (TypeError, ValueError):
-                    mapping[v] = None
-        return mapping
-
     def _json_safe(self, value: Any) -> Any:
         if isinstance(value, Decimal):
             return str(value)
@@ -4331,12 +4293,7 @@ class Casino(commands.Cog):
 
         if game_key not in self.games:
             valid = ", ".join(g.title() for g in sorted(self.games))
-            embed = discord.Embed(
-                title="Invalid Game",
-                description=f"Choose one of: {valid}.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, mention_author=False)
+            return await Embeds.error(ctx, description=f"Choose one of: {valid}.", title="Invalid Game")
 
         wins, losses = await self.bot.database.get_game_stats(member.id, game_key)
         total_games = wins + losses
@@ -4403,12 +4360,7 @@ class Casino(commands.Cog):
 
         if game_key not in self.games:
             valid = ", ".join(g.title() for g in sorted(self.games))
-            embed = discord.Embed(
-                title="Invalid Game",
-                description=f"Choose one of: {valid}.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, mention_author=False)
+            return await Embeds.error(ctx, description=f"Choose one of: {valid}.", title="Invalid Game")
 
         top_winners = await self.bot.database.get_top_game_winners(game_key, limit)
 
@@ -4426,7 +4378,7 @@ class Casino(commands.Cog):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_winners = await self._resolve_ids([uid for uid, _ in top_winners])
+            resolved_winners = await resolve_ids(self.bot.database,[uid for uid, _ in top_winners])
             for idx, (user_id, wins) in enumerate(top_winners):
                 raw_id = resolved_winners.get(user_id)
                 if raw_id:
@@ -4460,12 +4412,7 @@ class Casino(commands.Cog):
 
         history = await self.bot.database.get_user_game_history(member.id, limit)
         if not history:
-            embed = discord.Embed(
-                title="Game History",
-                description="No game history found.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5, mention_author=False)
+            return await Embeds.error(ctx, description="No game history found.", title="Game History", delete_after=5)
 
         view = GameHistoryPaginator(
             cog=self, history=history, member=member, requester=ctx.author
@@ -4505,15 +4452,10 @@ class Casino(commands.Cog):
 
         record = await self.bot.database.fetch_game_for_user(user_id, game_key, nonce)
         if not record:
-            embed = discord.Embed(
-                title="🔎 Verification — Error",
-                description=(
+            return await Embeds.error(ctx, description=(
                     f"No record found for `{game_key}` nonce `{nonce}` for "
                     f"{member.display_name}."
-                ),
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=8, mention_author=False)
+                ), title="🔎 Verification — Error", delete_after=8)
 
         provider = getattr(record, "provider", "local")
 
@@ -4754,12 +4696,7 @@ class Casino(commands.Cog):
             seed = secrets.token_hex(16)
 
         await self.bot.database.set_client_seed(ctx.author.id, seed)
-        embed = discord.Embed(
-            description=f"Your client seed has been updated to: `{seed}`",
-            color=discord.Color.green(),
-        )
-
-        await ctx.reply(embed=embed, mention_author=False)
+        await Embeds.success(ctx, description=f"Your client seed has been updated to: `{seed}`")
 
     @commands.hybrid_command(
         name="gamble", description="Gamble your money for a chance to win big!"
@@ -4779,21 +4716,14 @@ class Casino(commands.Cog):
             try:
                 amount = await self.amount_handler(bet_amount, balance)
             except ValueError as e:
-                embed = discord.Embed(description=str(e), color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=str(e), delete_after=5)
                 return
 
             max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
             if amount > max_allowed:
                 amount = max_allowed
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                        f"**{await self.formatter(amount)} {self.currency_name}**.",
-                        color=discord.Color.orange(),
-                    ),
-                    delete_after=5,
-                )
+                await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                        f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id,
@@ -4801,10 +4731,7 @@ class Casino(commands.Cog):
                     description="Gamble Bet",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
                 return
 
             session_id = await self._create_game_session(
@@ -4839,11 +4766,7 @@ class Casino(commands.Cog):
                     amount=amount,
                     reason="FairGate unreachable — gamble bet refunded",
                 )
-                embed = discord.Embed(
-                    description="🚫 The game server could not be reached. Your bet has been refunded.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description="🚫 The game server could not be reached. Your bet has been refunded.", delete_after=5)
                 return
             is_winner = side == "heads"
 
@@ -4910,8 +4833,7 @@ class Casino(commands.Cog):
             await ctx.reply(embed=embed)
 
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description=str(e), delete_after=5)
 
     @commands.hybrid_command(
         name="supergamble",
@@ -4933,30 +4855,20 @@ class Casino(commands.Cog):
             try:
                 amount = await self.amount_handler(bet_amount, balance)
             except ValueError as e:
-                embed = discord.Embed(description=str(e), color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=str(e), delete_after=5)
                 return
 
             max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
             if amount > max_allowed:
                 amount = max_allowed
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                        f"**{await self.formatter(amount)} {self.currency_name}**.",
-                        color=discord.Color.orange(),
-                    ),
-                    delete_after=5,
-                )
+                await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                        f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id, -amount, "SuperGamble Bet"
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
                 return
 
             session_id = await self._create_game_session(
@@ -4995,11 +4907,7 @@ class Casino(commands.Cog):
                     amount=amount,
                     reason="FairGate unreachable — supergamble bet refunded",
                 )
-                embed = discord.Embed(
-                    description="🚫 The game server could not be reached. Your bet has been refunded.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description="🚫 The game server could not be reached. Your bet has been refunded.", delete_after=5)
                 return
 
             # Process game result for rakeback
@@ -5114,10 +5022,7 @@ class Casino(commands.Cog):
             )
 
         except ValueError as e:
-            await ctx.reply(
-                embed=discord.Embed(description=str(e), color=discord.Color.red()),
-                delete_after=5,
-            )
+            await Embeds.error(ctx, description=str(e), delete_after=5)
 
     async def fairgate_generate_slots_grid(
         self, user_id: int, PF: dict
@@ -5300,22 +5205,13 @@ class Casino(commands.Cog):
         try:
             stake = await self.amount_handler(bet_amount, balance)
         except ValueError as e:
-            return await ctx.reply(
-                embed=discord.Embed(description=str(e), color=discord.Color.red()),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description=str(e), delete_after=5)
 
         # Check max bet limit
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id)
         if stake > max_allowed:
             stake = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"High-roller bet capped at **{await self.formatter(stake)} {currency}**.",
-                    color=discord.Color.orange(),
-                ),
-                delete_after=5,
-            )
+            await Embeds.warning(ctx, description=f"High-roller bet capped at **{await self.formatter(stake)} {currency}**.", color=discord.Color.orange(), delete_after=5)
 
         # Deduct initial bet from wallet
         try:
@@ -5323,10 +5219,7 @@ class Casino(commands.Cog):
                 wallet_id, -stake, "Slots Bet"
             )
         except ValueError as e:
-            return await ctx.reply(
-                embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
 
         # Get provable fairness data
         PF = await self.start_fairgate_proof(user_id)
@@ -5363,11 +5256,7 @@ class Casino(commands.Cog):
                 amount=stake,
                 reason="FairGate unreachable — slots bet refunded",
             )
-            embed = discord.Embed(
-                description="🚫 The game server could not be reached. Your bet has been refunded.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description="🚫 The game server could not be reached. Your bet has been refunded.", delete_after=5)
             return
 
         # Evaluate paylines
@@ -5449,21 +5338,14 @@ class Casino(commands.Cog):
         try:
             amount = await self.amount_handler(bet_amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description=str(e), delete_after=5)
             return
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if amount > max_allowed:
             amount = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                    f"**{await self.formatter(amount)} {self.currency_name}**.",
-                    color=discord.Color.orange(),
-                ),
-                delete_after=5,
-            )
+            await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                    f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
         normalized_guess = guess.lower()
         if (
@@ -5489,10 +5371,7 @@ class Casino(commands.Cog):
                 wallet_id=wallet_id, amount=-Decimal(amount), description="Dice Bet"
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
             return
 
         session_id = await self._create_game_session(
@@ -5527,11 +5406,7 @@ class Casino(commands.Cog):
                 amount=amount,
                 reason="FairGate unreachable — dice bet refunded",
             )
-            embed = discord.Embed(
-                description="🚫 The game server could not be reached. Your bet has been refunded.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description="🚫 The game server could not be reached. Your bet has been refunded.", delete_after=5)
             return
         die1 = die2 = None  # FairGate sum mode does not expose individual dice
         even_or_odd = "E" if total % 2 == 0 else "O"
@@ -5589,10 +5464,7 @@ class Casino(commands.Cog):
                     wallet_id=wallet_id, amount=winnings, description="Dice Win"
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
                 return
             await self._record_game_outcome(
                 user_id, "dice", "win", amount, PF
@@ -5629,18 +5501,13 @@ class Casino(commands.Cog):
     @unified_cooldown(5)
     async def roulette(self, ctx: Context, bet_amount: str = None):
         if bet_amount is None:
-            embed = discord.Embed(
-                title="Roulette",
-                description=(
+            await Embeds.custom(ctx, description=(
                     "Usage: `!roulette <amount>`\n\n"
                     "An interactive roulette table will appear where you can place **multiple bets** "
                     f"(up to {ROULETTE_MAX_BETS}) on different positions. Each bet costs the specified amount.\n\n"
                     "Click bet types to toggle them on/off, then spin!\n\n"
                     f"**Paytable:**\n{ROULETTE_PAYTABLE_TEXT}"
-                ),
-                color=discord.Color.blue(),
-            )
-            await ctx.reply(embed=embed, delete_after=20)
+                ), title="Roulette", color=discord.Color.blue(), delete_after=20)
             return
 
         user_id = ctx.author.id
@@ -5651,21 +5518,14 @@ class Casino(commands.Cog):
         try:
             amount = await self.amount_handler(bet_amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description=str(e), delete_after=5)
             return
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if amount > max_allowed:
             amount = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                    f"**{await self.formatter(amount)} {self.currency_name}**.",
-                    color=discord.Color.orange(),
-                ),
-                delete_after=5,
-            )
+            await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                    f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
         formatted_bet = await self.formatter(amount)
         view = RouletteView(
@@ -6509,34 +6369,22 @@ class Casino(commands.Cog):
         try:
             bet = await self.amount_handler(bet_amount, balance)
         except ValueError as e:
-            return await ctx.reply(
-                embed=discord.Embed(description=str(e), color=discord.Color.red()),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description=str(e), delete_after=5)
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if bet > max_allowed:
             bet = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=(
+            await Embeds.warning(ctx, description=(
                         "You are a high-roller, so your bet was auto-adjusted to the max allowed: "
                         f"**{await self.formatter(bet)} {self.currency_name}**"
-                    ),
-                    color=discord.Color.orange(),
-                ),
-                delete_after=5,
-            )
+                    ), color=discord.Color.orange(), delete_after=5)
 
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id, amount=-bet, description="Poker Bet"
             )
         except ValueError as e:
-            return await ctx.reply(
-                embed=discord.Embed(description=f"🚫 {e}", color=discord.Color.red()),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
 
         session_id = await self._create_game_session(
             ctx,
@@ -6569,13 +6417,7 @@ class Casino(commands.Cog):
                 amount=bet,
                 reason="FairGate unreachable — poker bet refunded",
             )
-            return await ctx.reply(
-                embed=discord.Embed(
-                    description="🚫 The game server could not be reached. Your bet has been refunded.",
-                    color=discord.Color.red(),
-                ),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description="🚫 The game server could not be reached. Your bet has been refunded.", delete_after=5)
 
         player_hand = [deck.pop(), deck.pop()]
         bot_hand = [deck.pop(), deck.pop()]
@@ -6631,34 +6473,24 @@ class Casino(commands.Cog):
             try:
                 bet_amount = await self.amount_handler(bet_amount, balance)
             except ValueError as e:
-                embed = discord.Embed(description=str(e), color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=str(e), delete_after=5)
                 self.active_players.discard(user_id)
                 return
 
             max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
             if bet_amount > max_allowed:
                 bet_amount = max_allowed
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description=(
+                await Embeds.warning(ctx, description=(
                             "You are a high-roller, so your bet was auto-adjusted to the max allowed: "
                             f"**{await self.formatter(bet_amount)} {self.currency_name}**."
-                        ),
-                        color=discord.Color.orange(),
-                    ),
-                    delete_after=5,
-                )
+                        ), color=discord.Color.orange(), delete_after=5)
 
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id, amount=-bet_amount, description="HiLo Bet"
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
                 self.active_players.discard(user_id)
                 return
 
@@ -6685,11 +6517,7 @@ class Casino(commands.Cog):
                     reason="FairGate unreachable — hilo bet refunded",
                 )
                 self.active_players.discard(user_id)
-                embed = discord.Embed(
-                    description="🚫 The game server could not be reached. Your bet has been refunded.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description="🚫 The game server could not be reached. Your bet has been refunded.", delete_after=5)
                 return
             # First card must be between 2 and Q (local parity).
             first_idx = next(
@@ -6713,12 +6541,7 @@ class Casino(commands.Cog):
         except Exception as e:
             self.active_players.discard(user_id)
             self.bot.logger.error(f"Error in hilo command: {e}", exc_info=True)
-            error_embed = discord.Embed(
-                title="⚠️ Error",
-                description="An error occurred while starting the game.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=error_embed, delete_after=5)
+            await Embeds.error(ctx, description="An error occurred while starting the game.", title="⚠️ Error", delete_after=5)
 
     @commands.command(
         name="ladder",
@@ -6737,34 +6560,20 @@ class Casino(commands.Cog):
             amount = await self.amount_handler(bet_amount, balance)
             amount = Decimal(amount)
         except ValueError as e:
-            return await ctx.reply(
-                embed=discord.Embed(description=str(e), color=discord.Color.red()),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description=str(e), delete_after=5)
 
         max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
         if amount > max_allowed:
             amount = max_allowed
-            await ctx.reply(
-                embed=discord.Embed(
-                    description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                    f"**{await self.formatter(amount)} {self.currency_name}**.",
-                    color=discord.Color.orange(),
-                ),
-                delete_after=5,
-            )
+            await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                    f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id, amount=-amount, description="Lucky Ladder bet"
             )
         except ValueError as e:
-            return await ctx.reply(
-                embed=discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                ),
-                delete_after=5,
-            )
+            return await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
 
         session_id = await self._create_game_session(
             ctx,
@@ -7084,7 +6893,7 @@ class Casino(commands.Cog):
             title=f"💣 Mines Admin — #{channel.name}",
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Player", value=f"<@{await self._resolve_id(view.user_id)}>", inline=True)
+        embed.add_field(name="Player", value=f"<@{await resolve_id(self.bot.database,view.user_id)}>", inline=True)
         embed.add_field(
             name="Bet",
             value=f"{self.currency_name} **{await self.formatter(view.bet_amount)}**",
@@ -7279,12 +7088,7 @@ class Casino(commands.Cog):
                     lines = [f"• {g}" for g in games]
                 else:
                     lines = [str(games)]
-                embed = discord.Embed(
-                    title="🎮 FairGate Supported Games",
-                    description="\n".join(lines) if lines else "No games returned.",
-                    color=discord.Color.blurple(),
-                )
-                return await ctx.send(embed=embed)
+                return await Embeds.custom(ctx, description="\n".join(lines) if lines else "No games returned.", title="🎮 FairGate Supported Games", color=discord.Color.blurple(), reply=False)
 
             if action == "patch":
                 if not name:
@@ -7579,21 +7383,14 @@ class Casino(commands.Cog):
             try:
                 amount = await self.amount_handler(player_bet, balance)
             except ValueError as e:
-                embed = discord.Embed(description=str(e), color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, description=str(e), delete_after=5)
                 return
 
             max_allowed = await self.bot.database.get_max_gamble_amount(user_id, False)
             if amount > max_allowed:
                 amount = max_allowed
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                        f"**{await self.formatter(amount)} {self.currency_name}**.",
-                        color=discord.Color.orange(),
-                    ),
-                    delete_after=5,
-                )
+                await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                        f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
             session_id = await self._create_game_session(
                 ctx,
@@ -7631,8 +7428,7 @@ class Casino(commands.Cog):
             self._register_session_handler(session_id, force_end)
 
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, description=str(e), delete_after=5)
 
 
 async def setup(bot: commands.Bot):
@@ -7784,11 +7580,7 @@ class StakeSelect(discord.ui.Select):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            embed = discord.Embed(
-                f"⚠️ {itn.user.mention}: This is not your game",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         game_ui_container: GameUIContainer = self.parent.parent
         label = next(
@@ -7809,18 +7601,10 @@ class BetButton(discord.ui.Button):
 
     async def handle_bullshit(self, table_ui_view: TableUI, itn: discord.Interaction):
         if table_ui_view.player != itn.user:
-            embed = discord.Embed(
-                f"⚠️ {itn.user.mention}: This is not your game",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         if not table_ui_view or not table_ui_view.message:
-            embed = discord.Embed(
-                f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game",
-                color=discord.Color.red(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.error(itn, title=f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", ephemeral=True, reply=False)
 
         all_buttons = table_ui_view.get_all_buttons()
         for button in all_buttons:
@@ -7839,11 +7623,7 @@ class BetButton(discord.ui.Button):
             )
         except FairGateError as exc:
             logger.exception("Keno draw failed for user %s: %s", table_ui_view.player.id, exc)
-            embed = discord.Embed(
-                description="🚫 The game server could not be reached. No bet has been taken.",
-                color=discord.Color.red(),
-            )
-            await itn.response.send_message(embed=embed, ephemeral=True)
+            await Embeds.error(itn, description="🚫 The game server could not be reached. No bet has been taken.", ephemeral=True, reply=False)
             return None
 
         selected = [all_buttons[i] for i in drawn]
@@ -7856,11 +7636,7 @@ class BetButton(discord.ui.Button):
         selected_stake = game_ui_select.values
 
         if not selected_stake:
-            embed = discord.Embed(
-                description=f"⚠️ {itn.user.mention}: You forgot to select the stakes",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, description=f"⚠️ {itn.user.mention}: You forgot to select the stakes", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         bet_multiplier = await table_ui_view.get_multiplier(selected_stake[0])
         player_bet = game_ui_container.player_bet
@@ -7889,25 +7665,15 @@ class BetButton(discord.ui.Button):
             )
             if player_bet > max_allowed:
                 player_bet = max_allowed
-                await itn.message.reply(
-                    embed=discord.Embed(
-                        description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                        f"**{await self.cog.formatter(player_bet)} {self.cog.currency_name}**.",
-                        color=discord.Color.orange(),
-                    ),
-                    delete_after=5,
-                )
+                await Embeds.warning(itn, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
+                        f"**{await self.cog.formatter(player_bet)} {self.cog.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
             total_win = player_bet * Decimal(bet_multiplier) * rtp_boost
             total_win_formatted = await self.cog.formatter(total_win)
 
             balance = await self.bot.database.get_wallet_balance(wallet_id)
             if balance < player_bet:
-                embed = discord.Embed(
-                    description=f"🚫 {itn.user.mention}: Insufficient Funds",
-                    color=discord.Color.red(),
-                )
-                return await itn.response.send_message(embed=embed, ephemeral=True)
+                return await Embeds.error(itn, description=f"🚫 {itn.user.mention}: Insufficient Funds", ephemeral=True, reply=False)
 
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -7916,10 +7682,7 @@ class BetButton(discord.ui.Button):
                     description="Keno Bet",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                return await itn.response.send_message(embed=embed, delete_after=5)
+                return await Embeds.error(itn, description=f"🚫 Transaction failed: {e}", delete_after=5, reply=False)
 
             session_id = getattr(game_ui_container, "session_id", None) or getattr(
                 table_ui_view, "session_id", None
@@ -7967,10 +7730,7 @@ class BetButton(discord.ui.Button):
                 )
 
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
-                )
-                return await itn.response.send_message(embed=embed, delete_after=5)
+                return await Embeds.error(itn, description=f"🚫 Transaction failed: {e}", delete_after=5, reply=False)
 
             await self.cog._remove_refund(session_id, user_id=table_ui_view.player.id)
             await self.cog._end_game_session(
@@ -7993,18 +7753,10 @@ class RandomPickButton(discord.ui.Button):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            embed = discord.Embed(
-                f"⚠️ {itn.user.mention}: This is not your game",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         if not table_ui_view or not table_ui_view.message:
-            embed = discord.Embed(
-                f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game",
-                color=discord.Color.red(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.error(itn, title=f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", ephemeral=True, reply=False)
 
         all_buttons = table_ui_view.get_all_buttons()
 
@@ -8019,11 +7771,7 @@ class RandomPickButton(discord.ui.Button):
             )
         except FairGateError as exc:
             logger.exception("Keno random pick failed for user %s: %s", table_ui_view.player.id, exc)
-            embed = discord.Embed(
-                description="🚫 The game server could not be reached. Please try again.",
-                color=discord.Color.red(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.error(itn, description="🚫 The game server could not be reached. Please try again.", ephemeral=True, reply=False)
         selected = [all_buttons[i] for i in drawn]
 
         for button in all_buttons:
@@ -8046,18 +7794,10 @@ class ClearTableButton(discord.ui.Button):
         table_ui_view: TableUI = self.parent.parent.table_ui_view
 
         if table_ui_view.player != itn.user:
-            embed = discord.Embed(
-                f"⚠️ {itn.user.mention}: This is not your game",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         if not table_ui_view or not table_ui_view.message:
-            embed = discord.Embed(
-                f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game",
-                color=discord.Color.red(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.error(itn, title=f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", ephemeral=True, reply=False)
 
         await table_ui_view.reset_buttons()
         await itn.response.defer()
@@ -8071,11 +7811,7 @@ class NumberButton(discord.ui.Button):
         table_ui_view: TableUI = self.view
 
         if table_ui_view.player != itn.user:
-            embed = discord.Embed(
-                f"⚠️ {itn.user.mention}: This is not your game",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         all_buttons = table_ui_view.get_all_buttons()
 
@@ -8088,11 +7824,7 @@ class NumberButton(discord.ui.Button):
                 button.style = table_ui_view.default_color
 
         if user_selects >= self.view.max_picks and self.emoji is None:
-            embed = discord.Embed(
-                f"⚠️ {itn.user.mention}: You selected the max amount of tiles: {self.view.max_picks}",
-                color=discord.Color.yellow(),
-            )
-            return await itn.response.send_message(embed=embed, ephemeral=True)
+            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: You selected the max amount of tiles: {self.view.max_picks}", color=discord.Color.yellow(), ephemeral=True, reply=False)
 
         if self.style == table_ui_view.default_color:
             self.style = self.view.selected_color

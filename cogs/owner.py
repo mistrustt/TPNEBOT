@@ -1,7 +1,4 @@
 import discord
-from discord.ext import commands
-from discord import app_commands
-from discord.ext.commands import Context
 import os
 import uuid
 import copy
@@ -14,8 +11,12 @@ import asyncio
 import time
 import statistics
 import psutil
+from discord.ext import commands
+from discord import app_commands
+from discord.ext.commands import Context
 from utils.misc import MiscUtils
 from utils.metrics_charts import MetricsChartView
+from utils.security import resolve_id, resolve_ids
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from sqlalchemy import text, select, func
@@ -533,46 +534,6 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = discord.utils.utcnow()
-
-    @staticmethod
-    def _is_hash(value) -> bool:
-        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
-        return (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(c in "0123456789abcdefABCDEF" for c in value)
-        )
-
-    async def _resolve_id(self, value):
-        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
-        if value is None or isinstance(value, int):
-            return value
-        if self._is_hash(value):
-            return await self.bot.database.resolve_user_hash(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    async def _resolve_ids(self, values):
-        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
-        if not values:
-            return {}
-        unique = list(dict.fromkeys(v for v in values if v is not None))
-        hashes = [v for v in unique if self._is_hash(v)]
-        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
-        mapping = {}
-        for v in unique:
-            if isinstance(v, int):
-                mapping[v] = v
-            elif self._is_hash(v):
-                mapping[v] = resolved.get(v)
-            else:
-                try:
-                    mapping[v] = int(v)
-                except (TypeError, ValueError):
-                    mapping[v] = None
-        return mapping
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
@@ -1852,10 +1813,10 @@ class Owner(commands.Cog, name="Owner"):
                     for index, role in enumerate(matching_roles)
                 ]
             )
-            embed = discord.Embed(
-                description=f"Multiple roles found matching '**{role_name}**':\n{role_list}\nPlease reply with the number of the role you want."
+            msg = await Embeds.custom(
+                ctx,
+                f"Multiple roles found matching '**{role_name}**':\n{role_list}\nPlease reply with the number of the role you want.",
             )
-            msg = await ctx.send(embed=embed)
 
             def check(m):
                 return (
@@ -2082,20 +2043,20 @@ class Owner(commands.Cog, name="Owner"):
         """Add a new task to your todo list."""
         try:
             await self.bot.database.add_task(ctx.author.id, task)
-            embed = discord.Embed(
+            await Embeds.success(
+                ctx,
+                f"Task: **{task}** has been added to your todo list.",
                 title="Task Added",
-                description=f"Task: **{task}** has been added to your todo list.",
-                color=discord.Color.green(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
         except Exception as err:
             logging.error(f"Error adding task: {err}")
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "An unexpected error occurred while adding your task.",
                 title="Error Adding Task",
-                description="An unexpected error occurred while adding your task.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
 
     @todolist.command(name="list", hidden=True)
     @commands.is_owner()
@@ -2105,20 +2066,20 @@ class Owner(commands.Cog, name="Owner"):
             tasks = await self.bot.database.get_tasks(ctx.author.id)
         except Exception as err:
             logging.error(f"Error retrieving tasks: {err}")
-            embed = discord.Embed(
+            return await Embeds.error(
+                ctx,
+                "Failed to retrieve tasks.",
                 title="Todo List",
-                description="Failed to retrieve tasks.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            return await ctx.send(embed=embed)
 
         if not tasks:
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "Your todo list is empty!",
                 title="Todo List",
-                description="Your todo list is empty!",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
             return
 
         # If tasks list is short, send in one embed. Else, use pagination.
@@ -2145,26 +2106,28 @@ class Owner(commands.Cog, name="Owner"):
         try:
             success = await self.bot.database.complete_task(ctx.author.id, task_id)
             if success:
-                embed = discord.Embed(
+                await Embeds.success(
+                    ctx,
+                    f"Task **{task_id}** has been marked as complete!",
                     title="Task Completed",
-                    description=f"Task **{task_id}** has been marked as complete!",
-                    color=discord.Color.green(),
+                    delete_after=None,
                 )
             else:
-                embed = discord.Embed(
+                await Embeds.error(
+                    ctx,
+                    "Invalid task number.",
                     title="Error",
-                    description="Invalid task number.",
-                    color=discord.Color.red(),
+                    delete_after=None,
                 )
-            await ctx.send(embed=embed)
+            return
         except Exception as err:
             logging.error(f"Error completing task {task_id}: {err}")
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "An error occurred while completing the task.",
                 title="Error",
-                description="An error occurred while completing the task.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
 
     @todolist.command(name="delete", hidden=True)
     @commands.is_owner()
@@ -2173,26 +2136,28 @@ class Owner(commands.Cog, name="Owner"):
         try:
             success = await self.bot.database.delete_task(ctx.author.id, task_id)
             if success:
-                embed = discord.Embed(
+                await Embeds.warning(
+                    ctx,
+                    f"Task **{task_id}** has been deleted.",
                     title="Task Deleted",
-                    description=f"Task **{task_id}** has been deleted.",
-                    color=discord.Color.orange(),
+                    delete_after=None,
                 )
             else:
-                embed = discord.Embed(
+                await Embeds.error(
+                    ctx,
+                    "Invalid task number.",
                     title="Error",
-                    description="Invalid task number.",
-                    color=discord.Color.red(),
+                    delete_after=None,
                 )
-            await ctx.send(embed=embed)
+            return
         except Exception as err:
             logging.error(f"Error deleting task {task_id}: {err}")
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "An error occurred while deleting the task.",
                 title="Error",
-                description="An error occurred while deleting the task.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
 
     @todolist.command(name="edit", hidden=True)
     @commands.is_owner()
@@ -2203,26 +2168,29 @@ class Owner(commands.Cog, name="Owner"):
                 ctx.author.id, task_id, new_task
             )
             if success:
-                embed = discord.Embed(
+                await Embeds.custom(
+                    ctx,
+                    f"Task **{task_id}** has been updated.",
                     title="Task Edited",
-                    description=f"Task **{task_id}** has been updated.",
                     color=discord.Color.blurple(),
+                    delete_after=None,
                 )
             else:
-                embed = discord.Embed(
+                await Embeds.error(
+                    ctx,
+                    "Invalid task number.",
                     title="Error",
-                    description="Invalid task number.",
-                    color=discord.Color.red(),
+                    delete_after=None,
                 )
-            await ctx.send(embed=embed)
+            return
         except Exception as err:
             logging.error(f"Error editing task {task_id}: {err}")
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "An error occurred while editing the task.",
                 title="Error",
-                description="An error occurred while editing the task.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
 
     @todolist.command(name="clear", hidden=True)
     @commands.is_owner()
@@ -2230,20 +2198,20 @@ class Owner(commands.Cog, name="Owner"):
         """Clear all tasks from your todo list."""
         try:
             count = await self.bot.database.clear_tasks(ctx.author.id)
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                f"All tasks ({count}) have been removed from your todo list.",
                 title="Todo List Cleared",
-                description=f"All tasks ({count}) have been removed from your todo list.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
         except Exception as err:
             logging.error(f"Error clearing tasks: {err}")
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "An error occurred while clearing tasks.",
                 title="Error",
-                description="An error occurred while clearing tasks.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
 
     @commands.command(name="setstatus", hidden=True)
     @commands.is_owner()
@@ -2413,7 +2381,7 @@ class Owner(commands.Cog, name="Owner"):
             return await ctx.send("No active game sessions.")
 
         session_owner_ids = [getattr(s, "owner_id", None) for s in sessions]
-        resolved_owners = await self._resolve_ids(session_owner_ids)
+        resolved_owners = await resolve_ids(self.bot.database,session_owner_ids)
 
         lines = []
         for s in sessions:
@@ -2421,12 +2389,13 @@ class Owner(commands.Cog, name="Owner"):
             raw_owner = resolved_owners.get(getattr(s, "owner_id", None))
             owner_str = f"<@{raw_owner}>" if raw_owner else "Unknown"
             lines.append(f"{s.id} • {s.game_name} • owner {owner_str} • {created}")
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            "\n".join(lines),
             title="Active Game Sessions",
-            description="\n".join(lines),
             color=discord.Color.blurple(),
+            delete_after=None,
         )
-        await ctx.send(embed=embed)
 
     @gamesession.command(name="show", hidden=True)
     @commands.is_owner()
@@ -2441,8 +2410,8 @@ class Owner(commands.Cog, name="Owner"):
             return await ctx.send("Session not found.")
 
         participant_ids = list(gs.participants or [])
-        resolved_participants = await self._resolve_ids(participant_ids)
-        raw_owner = await self._resolve_id(getattr(gs, "owner_id", None))
+        resolved_participants = await resolve_ids(self.bot.database,participant_ids)
+        raw_owner = await resolve_id(self.bot.database,getattr(gs, "owner_id", None))
 
         embed = discord.Embed(title=f"Session {gs.id}", color=discord.Color.blurple())
         embed.add_field(name="Game", value=gs.game_name, inline=True)
@@ -2495,12 +2464,13 @@ class Owner(commands.Cog, name="Owner"):
                 f"{created} • {e.event_type} • "
                 f"{textwrap.shorten(str(e.payload), width=700, placeholder='...')}"
             )
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            "\n".join(lines),
             title=f"Session Events — {sid}",
-            description="\n".join(lines),
             color=discord.Color.blurple(),
+            delete_after=None,
         )
-        await ctx.send(embed=embed)
 
     @gamesession.command(name="end", hidden=True)
     @commands.is_owner()
@@ -2737,7 +2707,7 @@ class Owner(commands.Cog, name="Owner"):
         admin_ids = [
             getattr(r, "admin_id", None) for r in rows if getattr(r, "admin_id", None)
         ]
-        resolved_ids = await self._resolve_ids(user_ids + admin_ids)
+        resolved_ids = await resolve_ids(self.bot.database,user_ids + admin_ids)
 
         for r in rows:
             uid = resolved_ids.get(getattr(r, "user_id", None))
@@ -2938,42 +2908,44 @@ class Owner(commands.Cog, name="Owner"):
                 )
 
             if not member:
-                embed = discord.Embed(
-                    description=f"No user found with the identifier: {identifier}. Please try again.",
-                    color=discord.Color.red(),
+                await Embeds.error(
+                    ctx,
+                    f"No user found with the identifier: {identifier}. Please try again.",
+                    delete_after=None,
                 )
-                await ctx.send(embed=embed)
                 return
 
             is_blacklisted = await self.bot.database.is_user_blacklisted(member.id)
             if is_blacklisted:
-                embed = discord.Embed(
-                    description=f"User {getattr(member, 'name', str(member.id))} is already blacklisted.",
+                await Embeds.custom(
+                    ctx,
+                    f"User {getattr(member, 'name', str(member.id))} is already blacklisted.",
                     color=0x000000,
+                    delete_after=None,
                 )
-                await ctx.send(embed=embed)
                 return
 
             if member.id in self.bot.owner_ids:
-                embed = discord.Embed(
-                    description=f"You can't blacklist a bot admin.",
-                    color=discord.Color.red(),
+                await Embeds.error(
+                    ctx,
+                    "You can't blacklist a bot admin.",
+                    delete_after=None,
                 )
-                await ctx.send(embed=embed)
                 return
 
             await self.bot.database.add_to_blacklist(member.id, ctx.author.id, reason)
-            embed = discord.Embed(
-                description=f"User {getattr(member, 'name', str(member.id))} has been blacklisted.\nReason: {reason}",
+            await Embeds.custom(
+                ctx,
+                f"User {getattr(member, 'name', str(member.id))} has been blacklisted.\nReason: {reason}",
                 color=0x000000,
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
         except Exception as e:
-            embed = discord.Embed(
-                description=f"**Database Error**: ```{e}```", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                f"**Database Error**: ```{e}```",
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
-            return
 
     @blacklist.command(
         name="remove",
@@ -3009,34 +2981,37 @@ class Owner(commands.Cog, name="Owner"):
                 )
 
             if not member:
-                embed = discord.Embed(
-                    description=f"No user found with the identifier: {identifier}. Please try again.",
-                    color=discord.Color.red(),
+                await Embeds.error(
+                    ctx,
+                    f"No user found with the identifier: {identifier}. Please try again.",
+                    delete_after=None,
                 )
-                await ctx.send(embed=embed)
                 return
 
             is_blacklisted = await self.bot.database.is_user_blacklisted(member.id)
             if not is_blacklisted:
-                embed = discord.Embed(
-                    description=f"User {member.name} is not blacklisted.",
+                await Embeds.custom(
+                    ctx,
+                    f"User {member.name} is not blacklisted.",
                     color=0x36393E,
+                    delete_after=None,
                 )
-                await ctx.send(embed=embed)
                 return
 
             await self.bot.database.remove_from_blacklist(member.id)
-            embed = discord.Embed(
-                description=f"User {member.name} has been removed from the blacklist.",
+            await Embeds.custom(
+                ctx,
+                f"User {member.name} has been removed from the blacklist.",
                 color=discord.Color.blurple(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
         except Exception as e:
-            embed = discord.Embed(
-                description=f"**Database Error**: ```{e}```", color=0x36393E
+            await Embeds.custom(
+                ctx,
+                f"**Database Error**: ```{e}```",
+                color=0x36393E,
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
-            return
 
     @blacklist.command(
         name="clear", aliases=["c"], help="Clear the entire blacklist.", hidden=True
@@ -3046,17 +3021,18 @@ class Owner(commands.Cog, name="Owner"):
         """Clears the entire blacklist."""
         try:
             await self.bot.database.clear_blacklist()
-            embed = discord.Embed(
-                description="The blacklist has been cleared.",
-                color=discord.Color.green(),
+            await Embeds.success(
+                ctx,
+                "The blacklist has been cleared.",
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
         except Exception as e:
-            embed = discord.Embed(
-                description=f"**Database Error**: ```{e}```", color=0x36393E
+            await Embeds.custom(
+                ctx,
+                f"**Database Error**: ```{e}```",
+                color=0x36393E,
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
-            return
 
     @commands.command(
         name="dm", help="Send a direct message to a user by their ID.", hidden=True
@@ -3278,12 +3254,13 @@ class Owner(commands.Cog, name="Owner"):
         try:
             # Invoke the command as the impersonated user.
             await self.bot.invoke(new_ctx)
-            embed = discord.Embed(
+            await Embeds.success(
+                ctx,
+                f"Command executed as {who.mention} in {new_channel.mention}:\n```{command}```",
                 title="Command Executed",
-                description=f"Command executed as {who.mention} in {new_channel.mention}:\n```{command}```",
-                color=discord.Color.green(),
+                reply=True,
+                delete_after=None,
             )
-            await ctx.reply(embed=embed)
         except Exception as e:
             logger.exception("Error during sudo invocation:", exc_info=e)
             await ctx.send(
@@ -3361,11 +3338,12 @@ class Owner(commands.Cog, name="Owner"):
             for command_name in all_commands:
                 await self.bot.database.clear_all_cooldowns()
 
-            embed = discord.Embed(
-                description="All cooldowns for all users have been reset.",
+            await Embeds.custom(
+                ctx,
+                "All cooldowns for all users have been reset.",
                 color=discord.Color.blurple(),
+                delete_after=5,
             )
-            await ctx.send(embed=embed, delete_after=5)
             return
 
         # If user is a string but not 'all', try to convert to User
@@ -3387,11 +3365,12 @@ class Owner(commands.Cog, name="Owner"):
             if current_cooldown > 0:
                 await self.bot.database.set_cooldown(user.id, command_name, 0)
 
-        embed = discord.Embed(
-            description=f"All cooldowns for {user.display_name} have been reset.",
+        await Embeds.custom(
+            ctx,
+            f"All cooldowns for {user.display_name} have been reset.",
             color=discord.Color.blurple(),
+            delete_after=5,
         )
-        await ctx.send(embed=embed, delete_after=5)
 
     @commands.command(
         name="error", help="Raises an error for testing purposes.", hidden=True
@@ -3601,8 +3580,7 @@ class Owner(commands.Cog, name="Owner"):
             try:
                 amount = await self.amount_handler(amount, treasury)
             except ValueError as e:
-                embed = discord.Embed(description=str(e), color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, str(e), delete_after=5, reply=True)
                 return
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -3611,10 +3589,9 @@ class Owner(commands.Cog, name="Owner"):
                     f"Admin Audit - Grant from {ctx.author.name}",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                await Embeds.error(
+                    ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True
                 )
-                await ctx.reply(embed=embed, delete_after=5)
                 return
             await self.bot.database.update_supply()
 
@@ -3625,20 +3602,19 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(name="giveall", hidden=True)
     @commands.is_owner()
     async def admin_bank_giveall(self, ctx: Context, amount: str):
         """Give a specified amount to every user in the server."""
         if ctx.guild is None:
-            embed = discord.Embed(
-                description="🚫 This command can only be used in a server.",
-                color=discord.Color.red(),
+            return await Embeds.error(
+                ctx,
+                "🚫 This command can only be used in a server.",
+                delete_after=5,
+                reply=True,
             )
-            return await ctx.reply(embed=embed, delete_after=5)
 
         try:
             treasury = await self.bot.database.get_treasury_balance()
@@ -3647,24 +3623,26 @@ class Owner(commands.Cog, name="Owner"):
 
             members = [m for m in ctx.guild.members if not m.bot]
             if not members:
-                embed = discord.Embed(
-                    description="🚫 No eligible users found in this server.",
-                    color=discord.Color.red(),
+                return await Embeds.error(
+                    ctx,
+                    "🚫 No eligible users found in this server.",
+                    delete_after=5,
+                    reply=True,
                 )
-                return await ctx.reply(embed=embed, delete_after=5)
 
             total_cost = amount * Decimal(len(members))
             if total_cost > treasury:
-                embed = discord.Embed(
-                    description=(
+                return await Embeds.error(
+                    ctx,
+                    (
                         f"🚫 Insufficient treasury funds. Giving **{await self.formatter(amount)}** "
                         f"to **{len(members)}** users would require "
                         f"**{await self.formatter(total_cost)}**, but the treasury only has "
                         f"**{await self.formatter(treasury)}**."
                     ),
-                    color=discord.Color.red(),
+                    delete_after=5,
+                    reply=True,
                 )
-                return await ctx.reply(embed=embed, delete_after=5)
 
             success = 0
             failed = 0
@@ -3698,9 +3676,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(
         name="take", aliases=["steal", "seize", "confiscate"], hidden=True
@@ -3732,10 +3708,9 @@ class Owner(commands.Cog, name="Owner"):
                     f"Admin Audit - Seizure by {ctx.author.name}",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                await Embeds.error(
+                    ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True
                 )
-                await ctx.reply(embed=embed, delete_after=5)
                 return
             await self.bot.database.validate_economy()
 
@@ -3746,9 +3721,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(name="freeze", aliases=["lock"], hidden=True)
     @commands.is_owner()
@@ -3767,9 +3740,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(name="thaw", aliases=["unfreeze"], hidden=True)
     @commands.is_owner()
@@ -3788,9 +3759,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(name="reset", aliases=["wipe"], hidden=True)
     @commands.is_owner()
@@ -3831,11 +3800,7 @@ class Owner(commands.Cog, name="Owner"):
             await ctx.send(embed=embed)
 
         except Exception as e:
-            await ctx.send(
-                embed=discord.Embed(
-                    description=f"❌ Error: {e}", color=discord.Color.red()
-                )
-            )
+            await Embeds.error(ctx, f"❌ Error: {e}", delete_after=None)
 
     @adminbank.command(name="refund", aliases=["reimburse"], hidden=True)
     @commands.is_owner()
@@ -3855,9 +3820,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(name="mint", aliases=["create"], hidden=True)
     @commands.is_owner()
@@ -3878,9 +3841,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     @adminbank.command(name="burn", aliases=["destroy"], hidden=True)
     @commands.is_owner()
@@ -3901,9 +3862,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except ValueError as e:
-            await ctx.send(
-                embed=discord.Embed(description=str(e), color=discord.Color.red())
-            )
+            await Embeds.error(ctx, str(e), delete_after=None)
 
     # ==================== VIP Admin Commands ====================
 
@@ -3964,12 +3923,12 @@ class Owner(commands.Cog, name="Owner"):
             success = await self.bot.database.reset_user_vip(user.id)
 
             if success:
-                embed = discord.Embed(
+                await Embeds.success(
+                    ctx,
+                    f"Reset {user.mention}'s VIP progress to Bronze.",
                     title="VIP Progress Reset",
-                    description=f"Reset {user.mention}'s VIP progress to Bronze.",
-                    color=discord.Color.green(),
+                    delete_after=None,
                 )
-                await ctx.send(embed=embed)
             else:
                 await ctx.send("Failed to reset VIP progress.")
 
@@ -4085,12 +4044,12 @@ class Owner(commands.Cog, name="Owner"):
 
                 await session.commit()
 
-            embed = discord.Embed(
+            await Embeds.success(
+                ctx,
+                f"Added **{float(amount_decimal):,.0f}** rakeback to {user.mention}'s balance.",
                 title="Rakeback Added",
-                description=f"Added **{float(amount_decimal):,.0f}** rakeback to {user.mention}'s balance.",
-                color=discord.Color.green(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in add_rakeback: {e}")
@@ -4171,11 +4130,7 @@ class Owner(commands.Cog, name="Owner"):
             embed.set_author(name="Admin Audit", icon_url=ctx.author.display_avatar.url)
             await ctx.send(embed=embed)
         except Exception as e:
-            await ctx.send(
-                embed=discord.Embed(
-                    description=f"Error: {e}", color=discord.Color.red()
-                )
-            )
+            await Embeds.error(ctx, f"Error: {e}", delete_after=None)
 
     @commands.command(name="shopitem", hidden=True)
     @commands.is_owner()
@@ -4258,12 +4213,12 @@ class Owner(commands.Cog, name="Owner"):
             unlimited=unlimited,
         )
         stock_text = "unlimited" if unlimited else str(quantity)
-        embed = discord.Embed(
+        await Embeds.success(
+            ctx,
+            f"Added {stock_text} of '{name}' to the shop for {price} coins each.",
             title="Shop",
-            description=f"Added {stock_text} of '{name}' to the shop for {price} coins each.",
-            color=discord.Color.green(),
+            delete_after=None,
         )
-        await ctx.send(embed=embed)
 
     @commands.command(name="restock", hidden=True)
     @commands.is_owner()
@@ -4278,37 +4233,32 @@ class Owner(commands.Cog, name="Owner"):
             except ValueError:
                 item = await self.bot.database.get_shop_item(item_identifier)
         except Exception as e:
-            embed = discord.Embed(
-                title="Shop",
-                description=f"Error retrieving item: {e}",
-                color=discord.Color.red(),
+            await Embeds.error(
+                ctx, f"Error retrieving item: {e}", title="Shop", delete_after=None
             )
-            await ctx.send(embed=embed)
             return
 
         if not item:
-            embed = discord.Embed(
-                title="Shop",
-                description="Item not found in the shop.",
-                color=discord.Color.red(),
+            await Embeds.error(
+                ctx, "Item not found in the shop.", title="Shop", delete_after=None
             )
-            await ctx.send(embed=embed)
             return
 
         success = await self.bot.database.update_shop_item_quantity(item.id, quantity)
         if success:
-            embed = discord.Embed(
+            await Embeds.success(
+                ctx,
+                f"{quantity} of '{item.name}' have been added to the shop.",
                 title="Shop",
-                description=f"{quantity} of '{item.name}' have been added to the shop.",
-                color=discord.Color.green(),
+                delete_after=None,
             )
         else:
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                "Failed to update item quantity.",
                 title="Shop",
-                description="Failed to update item quantity.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-        await ctx.send(embed=embed)
 
     @app_commands.command(
         name="shopmodal",
@@ -4329,12 +4279,13 @@ class Owner(commands.Cog, name="Owner"):
         """Edit an existing shop item using a modal."""
         item = await self.bot.database.get_shop_item_by_id(item_id)
         if not item:
-            embed = discord.Embed(
+            await Embeds.error(
+                interaction,
+                f"No item found with ID {item_id}.",
                 title="Shop",
-                description=f"No item found with ID {item_id}.",
-                color=discord.Color.red(),
+                ephemeral=True,
+                delete_after=None,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         modal = ShopItemModal(self.bot, edit_item=item)
@@ -4346,12 +4297,12 @@ class Owner(commands.Cog, name="Owner"):
         """List all shop items with their details."""
         items = await self.bot.database.list_shop_items()
         if not items:
-            embed = discord.Embed(
+            await Embeds.warning(
+                ctx,
+                "No items in the shop.",
                 title="Shop Items",
-                description="No items in the shop.",
-                color=discord.Color.orange(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
             return
 
         items_per_page = 10
@@ -4405,12 +4356,12 @@ class Owner(commands.Cog, name="Owner"):
         )
 
         if not shop_item:
-            embed = discord.Embed(
+            await Embeds.error(
+                ctx,
+                f"No shop item found with name '{item_name}'.",
                 title="Give Item",
-                description=f"No shop item found with name '{item_name}'.",
-                color=discord.Color.red(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
             return
 
         # Create inventory item(s) for the user
@@ -4446,12 +4397,12 @@ class Owner(commands.Cog, name="Owner"):
         effects = await self.bot.database.get_user_active_effects(member.id)
 
         if not effects:
-            embed = discord.Embed(
+            await Embeds.warning(
+                ctx,
+                f"{member.display_name} has no active effects.",
                 title="Active Effects",
-                description=f"{member.display_name} has no active effects.",
-                color=discord.Color.orange(),
+                delete_after=None,
             )
-            await ctx.send(embed=embed)
             return
 
         embed = discord.Embed(
@@ -4486,19 +4437,19 @@ class Owner(commands.Cog, name="Owner"):
         cleared = await self.bot.database.clear_item_cooldown(member.id, item_name)
 
         if cleared:
-            embed = discord.Embed(
+            await Embeds.success(
+                ctx,
+                f"Cleared cooldown for **{item_name}** for {member.display_name}.",
                 title="Cooldown Cleared",
-                description=f"Cleared cooldown for **{item_name}** for {member.display_name}.",
-                color=discord.Color.green(),
+                delete_after=None,
             )
         else:
-            embed = discord.Embed(
+            await Embeds.warning(
+                ctx,
+                f"{member.display_name} had no cooldown for **{item_name}**.",
                 title="No Cooldown",
-                description=f"{member.display_name} had no cooldown for **{item_name}**.",
-                color=discord.Color.orange(),
+                delete_after=None,
             )
-
-        await ctx.send(embed=embed)
 
     @commands.command(
         name="ownerlog",
@@ -4538,12 +4489,13 @@ class Owner(commands.Cog, name="Owner"):
         )
 
         if not entries:
-            embed = discord.Embed(
+            return await Embeds.warning(
+                ctx,
+                "No matching entries found.",
                 title="Owner Command Audit Log",
-                description="No matching entries found.",
-                color=discord.Color.orange(),
+                reply=True,
+                delete_after=None,
             )
-            return await ctx.reply(embed=embed)
 
         lines = []
         for entry in entries:

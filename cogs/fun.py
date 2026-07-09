@@ -11,6 +11,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
@@ -39,12 +40,7 @@ class Fun(commands.Cog, name="Fun"):
         """
         self.api_key = os.getenv("API_NINJAS_KEY")
         if not self.api_key:
-            embed = discord.Embed(
-                title="Error!",
-                description="API key for API Ninjas is not set.",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
+            await Embeds.error(ctx, "API key for API Ninjas is not set.", title="Error!", reply=False)
             return
         url = "https://api.api-ninjas.com/v1/facts"
         headers = {"X-Api-Key": self.api_key}
@@ -77,14 +73,7 @@ class Fun(commands.Cog, name="Fun"):
                             color=discord.Color.red(),
                         )
                 else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-
-                await ctx.send(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the API. Please try again later.", title="Error!", reply=False)
 
     @commands.hybrid_command(
         name="fotd",
@@ -99,13 +88,7 @@ class Fun(commands.Cog, name="Fun"):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the Useless Facts API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-                    return await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the Useless Facts API. Please try again later.", title="Error!", reply=True)
 
                 data = await response.json()
 
@@ -117,12 +100,7 @@ class Fun(commands.Cog, name="Fun"):
                     item = None
 
                 if not item or not item.get("text"):
-                    embed = discord.Embed(
-                        title="Oops!",
-                        description="Couldn't parse a fact of the day from the API response.",
-                        color=discord.Color.red(),
-                    )
-                    return await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "Couldn't parse a fact of the day from the API response.", title="Oops!", reply=True)
 
                 fact_text = item["text"]
                 source = item.get("source") or item.get("source_url") or "unknown"
@@ -153,13 +131,7 @@ class Fun(commands.Cog, name="Fun"):
                     data = await resp.json()
                     await ctx.reply(data["url"])
                 else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the Dog API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-                    await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the Dog API. Please try again later.", title="Error!", reply=True)
 
     @commands.hybrid_command(name="cat", description="Get a random cat photo.")
     @unified_cooldown(10)
@@ -172,13 +144,7 @@ class Fun(commands.Cog, name="Fun"):
                     data = await resp.json()
                     await ctx.reply(data[0]["url"])
                 else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the Cat API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-                    await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the Cat API. Please try again later.", title="Error!", reply=True)
 
     @commands.hybrid_command(name="fox", description="Get a random fox photo.")
     @unified_cooldown(10)
@@ -191,13 +157,7 @@ class Fun(commands.Cog, name="Fun"):
                     data = await resp.json()
                     await ctx.reply(data["image"])
                 else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the Fox API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-                    await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the Fox API. Please try again later.", title="Error!", reply=True)
 
     @commands.command(name="penguin", description="Get a random penguin photo.")
     async def penguin(self, ctx: commands.Context):
@@ -212,13 +172,7 @@ class Fun(commands.Cog, name="Fun"):
                     data = await resp.json()
                     await ctx.reply(data["img"])
                 else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the Penguin API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-                    await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the Penguin API. Please try again later.", title="Error!", reply=True)
 
     @commands.command(
         name="duck", description="Get a random duck photo.", hidden=True
@@ -232,13 +186,7 @@ class Fun(commands.Cog, name="Fun"):
                     data = await resp.json()
                     await ctx.reply(data["url"])
                 else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There was a problem contacting the Duck API. Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    
-                    await ctx.reply(embed=embed)
+                    await Embeds.error(ctx, "There was a problem contacting the Duck API. Please try again later.", title="Error!", reply=True)
 
     @commands.command(name="boom", aliases=["kaboom"], description="boom.")
     async def pow(self, ctx: Context):
@@ -476,13 +424,7 @@ class Fun(commands.Cog, name="Fun"):
                 color=discord.Color.red(),
             )
         except Exception as e:
-            embed = discord.Embed(
-                title="Ban Roulette",
-                description=f"Failed to ban {victim.mention}: {str(e)}",
-                color=discord.Color.red(),
-            )
-
-        await ctx.send(embed=embed)
+            await Embeds.error(ctx, f"Failed to ban {victim.mention}: {str(e)}", title="Ban Roulette", reply=False)
 
     @commands.command(
         name="timeoutroulette", aliases=["tr"], description="Play a game of timeout roulette"
@@ -548,13 +490,7 @@ class Fun(commands.Cog, name="Fun"):
                 color=discord.Color.red(),
             )
         except Exception as e:
-            embed = discord.Embed(
-                title="Timeout Roulette",
-                description=f"Failed to timeout {victim.mention}: {str(e)}",
-                color=discord.Color.red(),
-            )
-
-        await ctx.send(embed=embed)
+            await Embeds.error(ctx, f"Failed to timeout {victim.mention}: {str(e)}", title="Timeout Roulette", reply=False)
 
 async def setup(bot) -> None:
     await bot.add_cog(Fun(bot))

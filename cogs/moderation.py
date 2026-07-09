@@ -1,24 +1,28 @@
-from encodings.aliases import aliases
+import re
+import io
 import discord
 import logging
 import asyncio
-import re
-import io
 import matplotlib.pyplot as plt
+import humanfriendly
 from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import timedelta
-import humanfriendly
+from encodings.aliases import aliases
 from discord.ext.commands import Context
 from database.models import PunishmentType
 from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
 from utils.guardrails import check_slash_guardrails
+from utils.security import resolve_id, resolve_ids
+from utils.embeds import Embeds
 from typing import Optional
 from matplotlib.ticker import MaxNLocator
 
-logger = logging.getLogger("discord.client")
 
+# Suppress noisy matplotlib INFO logging
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+logger = logging.getLogger("discord.client")
 
 class Moderation(commands.Cog, name="Moderation"):
     def __init__(self, bot) -> None:
@@ -49,46 +53,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await check_slash_guardrails(self, interaction)
-
-    @staticmethod
-    def _is_hash(value) -> bool:
-        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
-        return (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(c in "0123456789abcdefABCDEF" for c in value)
-        )
-
-    async def _resolve_id(self, value):
-        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
-        if value is None or isinstance(value, int):
-            return value
-        if self._is_hash(value):
-            return await self.bot.database.resolve_user_hash(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    async def _resolve_ids(self, values):
-        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
-        if not values:
-            return {}
-        unique = list(dict.fromkeys(v for v in values if v is not None))
-        hashes = [v for v in unique if self._is_hash(v)]
-        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
-        mapping = {}
-        for v in unique:
-            if isinstance(v, int):
-                mapping[v] = v
-            elif self._is_hash(v):
-                mapping[v] = resolved.get(v)
-            else:
-                try:
-                    mapping[v] = int(v)
-                except (TypeError, ValueError):
-                    mapping[v] = None
-        return mapping
 
     async def _get_settings(self, guild: discord.Guild):
         """Fetch channel_id and name template from DB (fallbacks included)."""
@@ -931,12 +895,7 @@ class Moderation(commands.Cog, name="Moderation"):
                     )
                     await member.send(embed=dm_embed)
                 except:
-                    await ctx.reply(
-                        embed=discord.Embed(
-                            description=f"Could not send user a DM message!",
-                            color=discord.Color.red(),
-                        )
-                    )
+                    await Embeds.error(ctx, f"Could not send user a DM message!")
 
                 await member.kick(reason=reason)
             except Exception as e:
@@ -1204,41 +1163,17 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found for `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found for `{identifier}`.", reply=False)
 
         if member == ctx.guild.me:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="I refuse to ban myself.", color=discord.Color.red()
-                )
-            )
+            return await Embeds.error(ctx, "I refuse to ban myself.", reply=False)
         if member == ctx.author:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="You cannot tempban yourself.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "You cannot tempban yourself.", reply=False)
         if isinstance(member, discord.Member):
             if member.top_role >= ctx.author.top_role:
-                return await ctx.send(
-                    embed=discord.Embed(
-                        description="🚫 You cannot tempban someone with an equal or higher role.",
-                        color=discord.Color.red(),
-                    )
-                )
+                return await Embeds.error(ctx, "🚫 You cannot tempban someone with an equal or higher role.", reply=False)
             if member.top_role >= ctx.guild.me.top_role:
-                return await ctx.send(
-                    embed=discord.Embed(
-                        description="🚫 I cannot tempban someone with an equal or higher role than me.",
-                        color=discord.Color.red(),
-                    )
-                )
+                return await Embeds.error(ctx, "🚫 I cannot tempban someone with an equal or higher role than me.", reply=False)
 
         try:
             secs = humanfriendly.parse_timespan(duration)
@@ -1396,12 +1331,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 dm_embed.set_footer(text="We hope to see you again!")
                 await user_to_unban.send(embed=dm_embed)
             except:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description=f"Could not send the invite to the user via DM.",
-                        color=discord.Color.red(),
-                    )
-                )
+                await Embeds.error(ctx, f"Could not send the invite to the user via DM.")
 
         else:
             embed = discord.Embed(
@@ -1438,7 +1368,7 @@ class Moderation(commands.Cog, name="Moderation"):
         ]
 
         moderator_ids = [getattr(p, "moderator_id", None) for p in history]
-        resolved_moderators = await self._resolve_ids(moderator_ids)
+        resolved_moderators = await resolve_ids(self.bot.database,moderator_ids)
 
         def generate_entry(punishment):
             raw_moderator_id = resolved_moderators.get(getattr(punishment, "moderator_id", None))
@@ -1565,78 +1495,31 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with identifier `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)
 
         if not isinstance(member, discord.Member):
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="That user is not in this server, so I can't timeout them.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "That user is not in this server, so I can't timeout them.", reply=False)
 
         if member.id == ctx.author.id:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 You cannot timeout yourself.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 You cannot timeout yourself.", reply=False)
         if member == ctx.guild.me:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 I refuse to timeout myself.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 I refuse to timeout myself.", reply=False)
         if ctx.author.top_role <= member.top_role:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 You cannot timeout someone with an equal or higher role.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 You cannot timeout someone with an equal or higher role.", reply=False)
         if member.top_role >= ctx.guild.me.top_role:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 I cannot timeout someone with an equal or higher role.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 I cannot timeout someone with an equal or higher role.", reply=False)
 
         try:
             seconds = humanfriendly.parse_timespan(time)
         except humanfriendly.InvalidTimespan:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 Invalid time format. Please provide something like `10m`, `2h30m`, etc.",
-                    color=discord.Color.red(),
-                ),
-                delete_after=10,
-            )
+            return await Embeds.error(ctx, "🚫 Invalid time format. Please provide something like `10m`, `2h30m`, etc.", delete_after=10, reply=False)
 
         if seconds < 30:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 Timeout must be at least 30 seconds.",
-                    color=discord.Color.red(),
-                ),
-                delete_after=10,
-            )
+            return await Embeds.error(ctx, "🚫 Timeout must be at least 30 seconds.", delete_after=10, reply=False)
 
         max_seconds = 28 * 24 * 3600
         if seconds > max_seconds:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 Maximum timeout is 28 days.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 Maximum timeout is 28 days.", reply=False)
 
         duration = timedelta(seconds=seconds)
         timeout_until = discord.utils.utcnow() + duration
@@ -1683,18 +1566,9 @@ class Moderation(commands.Cog, name="Moderation"):
             await member.send(embed=dm)
 
         except discord.Forbidden:
-            await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 I lack permission to timeout that user.",
-                    color=discord.Color.red(),
-                )
-            )
+            await Embeds.error(ctx, "🚫 I lack permission to timeout that user.", reply=False)
         except Exception as e:
-            await ctx.send(
-                embed=discord.Embed(
-                    description=f"🚫 An error occurred: {e}", color=discord.Color.red()
-                )
-            )
+            await Embeds.error(ctx, f"🚫 An error occurred: {e}", reply=False)
 
     @commands.hybrid_command(name="untimeout", aliases=["uto"], description="Remove a timeout from a user.")
     @commands.guild_only()
@@ -1720,38 +1594,18 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with the identifier `{identifier}`. Please try again.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with the identifier `{identifier}`. Please try again.", reply=False)
 
         if not isinstance(member, discord.Member):
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="That user is not in this server, so I can't untimeout them.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "That user is not in this server, so I can't untimeout them.", reply=False)
 
         now = discord.utils.utcnow()
         if not member.timed_out_until or member.timed_out_until <= now:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"{ctx.author.mention}: {member.name} is not timed out.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"{ctx.author.mention}: {member.name} is not timed out.", reply=False)
 
         try:
             await member.edit(timed_out_until=None)
-            await ctx.send(
-                embed=discord.Embed(
-                    description=f"{ctx.author.mention}: {member.name} is no longer timed out.",
-                    color=discord.Color.blurple(),
-                )
-            )
+            await Embeds.info(ctx, f"{ctx.author.mention}: {member.name} is no longer timed out.", reply=False)
 
             lifted_at = discord.utils.utcnow()
             time_str = lifted_at.strftime("%Y/%m/%d %I:%M:%S %p")
@@ -1768,19 +1622,9 @@ class Moderation(commands.Cog, name="Moderation"):
             await member.send(embed=dm_embed)
 
         except discord.Forbidden:
-            await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 I lack permission to lift that timeout.",
-                    color=discord.Color.red(),
-                )
-            )
+            await Embeds.error(ctx, "🚫 I lack permission to lift that timeout.", reply=False)
         except discord.HTTPException as e:
-            await ctx.send(
-                embed=discord.Embed(
-                    description=f"🚫 An error occurred: {e}",
-                    color=discord.Color.red(),
-                )
-            )
+            await Embeds.error(ctx, f"🚫 An error occurred: {e}", reply=False)
 
     @commands.command(
         name="nick", description="Change the nickname of a user on a server."
@@ -2186,35 +2030,15 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with `{identifier}`.", reply=False)
 
         if not isinstance(member, discord.Member):
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="That user is not in this server, so I can't jail them.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "That user is not in this server, so I can't jail them.", reply=False)
 
         if member.top_role >= ctx.author.top_role:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 You cannot jail someone with an equal or higher role.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 You cannot jail someone with an equal or higher role.", reply=False)
         if member.top_role >= ctx.guild.me.top_role:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 I cannot jail someone with an equal or higher role than me.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 I cannot jail someone with an equal or higher role than me.", reply=False)
 
         guild_id = ctx.guild.id
         jail_settings = await self.bot.database.get_jail_settings(guild_id)
@@ -2228,24 +2052,18 @@ class Moderation(commands.Cog, name="Moderation"):
                 "🚫 Jail role or channel misconfigured. Contact an admin."
             )
 
-        raw_dur = duration
-        raw_reason = reason
         duration_seconds = None
         jailed_until = None
 
-        if raw_dur and re.match(r"^\d+[smhd]$", raw_dur):
+        if duration:
             try:
-                secs = humanfriendly.parse_timespan(raw_dur)
+                duration_seconds = humanfriendly.parse_timespan(duration)
+                jailed_until = discord.utils.utcnow() + timedelta(seconds=duration_seconds)
+                reason_text = reason or "No reason provided"
             except humanfriendly.InvalidTimespan:
-                reason_text = f"{raw_dur} {raw_reason}".strip()
-            else:
-                duration_seconds = secs
-                jailed_until = (
-                    discord.utils.utcnow() + timedelta(seconds=secs)
-                )
-                reason_text = raw_reason
+                reason_text = f"{duration} {reason or ''}".strip() or "No reason provided"
         else:
-            reason_text = f"{raw_dur} {raw_reason}".strip() if raw_dur else raw_reason
+            reason_text = reason or "No reason provided"
 
         to_remove = [
             r
@@ -2255,15 +2073,8 @@ class Moderation(commands.Cog, name="Moderation"):
         removed_ids = [r.id for r in to_remove]
 
         if jail_role.position >= ctx.guild.me.top_role.position:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=(
-                        "🚫 I cannot assign the jail role because my role is not high enough. "
-                        "Please move my bot role above the jail role in the server settings."
-                    ),
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 I cannot assign the jail role because my role is not high enough. "
+                        "Please move my bot role above the jail role in the server settings.", reply=False)
 
         await self.bot.database.add_jailed_user(
             guild_id, member.id, jailed_until, removed_ids
@@ -2373,21 +2184,11 @@ class Moderation(commands.Cog, name="Moderation"):
 
         jail_settings = await self.bot.database.get_jail_settings(guild_id)
         if not jail_settings or not jail_settings.jail_role_id:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="No jail settings found for this server. Use `!jailsetup` to configure.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "No jail settings found for this server. Use `!jailsetup` to configure.", reply=False)
 
         jail_role = ctx.guild.get_role(jail_settings.jail_role_id)
         if not jail_role:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 The jail role no longer exists or is misconfigured.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 The jail role no longer exists or is misconfigured.", reply=False)
 
         member = None
         if re.match(r"^\d+$", identifier):
@@ -2412,58 +2213,26 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with the identifier: `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with the identifier: `{identifier}`.", reply=False)
 
         if not isinstance(member, discord.Member):
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="That user is not in this server, so I can't unjail them.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "That user is not in this server, so I can't unjail them.", reply=False)
 
         jail_channel = ctx.guild.get_channel(jail_settings.jail_channel_id)
         if not jail_channel:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 The jail channel is misconfigured or no longer exists.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 The jail channel is misconfigured or no longer exists.", reply=False)
 
         if jail_role not in member.roles:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"**{member.name}** is not currently jailed.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"**{member.name}** is not currently jailed.", reply=False)
 
         if jail_role.position >= ctx.guild.me.top_role.position:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=(
-                        "🚫 I cannot remove the jail role because my highest role is not above it. "
-                        "Please move my bot role above the jail role in the server settings."
-                    ),
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 I cannot remove the jail role because my highest role is not above it. "
+                        "Please move my bot role above the jail role in the server settings.", reply=False)
 
         try:
             await member.remove_roles(jail_role, reason="Unjailed by moderator")
         except discord.Forbidden:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="🚫 Failed to remove the jail role due to missing permissions.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, "🚫 Failed to remove the jail role due to missing permissions.", reply=False)
 
         jailed_record = await self.bot.database.get_jailed_user(guild_id, member.id)
 
@@ -2485,15 +2254,8 @@ class Moderation(commands.Cog, name="Moderation"):
                     )
                 except discord.Forbidden:
                     skipped_names = [r.name for r in roles_to_restore]
-                    return await ctx.send(
-                        embed=discord.Embed(
-                            description=(
-                                "🚫 I could not restore the previous roles due to missing permissions. "
-                                f"Roles that failed to reassign: {', '.join(skipped_names)}."
-                            ),
-                            color=discord.Color.red(),
-                        )
-                    )
+                    return await Embeds.error(ctx, "🚫 I could not restore the previous roles due to missing permissions. "
+                                f"Roles that failed to reassign: {', '.join(skipped_names)}.", reply=False)
 
         await self.bot.database.remove_jailed_user(guild_id, member.id)
 
@@ -2778,12 +2540,7 @@ class Moderation(commands.Cog, name="Moderation"):
         """
         member = await self._lookup_member(ctx, identifier)
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with identifier `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)
 
         if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
@@ -2802,19 +2559,13 @@ class Moderation(commands.Cog, name="Moderation"):
 
         # Normalize prefix usage where the second positional arg may be a duration or reason.
         duration_seconds: Optional[int] = None
-        reason = reason or "No reason provided"
-        if duration and not re.match(r"^\d+[smhd]$", duration):
-            if reason == "No reason provided":
-                reason = duration
-            else:
-                reason = f"{duration} {reason}"
-            duration = None
         if duration:
             try:
                 duration_seconds = humanfriendly.parse_timespan(duration)
             except humanfriendly.InvalidTimespan:
-                reason = duration
+                reason = f"{duration} {reason or ''}".strip()
                 duration_seconds = None
+        reason = reason or "No reason provided"
 
         mute_settings = await self.bot.database.get_mute_settings(ctx.guild.id)
         if not mute_settings:
@@ -2835,7 +2586,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
         desc = f"**{member}** has been muted."
         if duration_seconds:
-            desc += f" (for {first})"
+            desc += f" (for {humanfriendly.format_timespan(duration_seconds)})"
         embed = discord.Embed(description=desc, color=discord.Color.blurple())
         embed.set_author(
             name=f"Moderator: {ctx.author}",
@@ -2846,14 +2597,24 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if duration_seconds:
             asyncio.create_task(
-                self._auto_unmute(member, muted_role, duration_seconds, ctx)
+                self._auto_unmute(ctx.guild.id, member.id, muted_role.id, duration_seconds, ctx)
             )
 
     async def _auto_unmute(
-        self, member: discord.Member, role: discord.Role, delay: int, ctx: Context
+        self, guild_id: int, user_id: int, role_id: int, delay: int, ctx: Context
     ):
-        """Sleep for `delay` seconds, then remove the role and log it."""
+        """Sleep for `delay` seconds, then re-fetch the member and remove the role."""
         await asyncio.sleep(delay)
+
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return
+        role = guild.get_role(role_id)
+        if not role:
+            return
+        member = guild.get_member(user_id)
+        if not member:
+            return
 
         if role in member.roles:
             try:
@@ -2861,7 +2622,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
                 await self.bot.database.add_punishment(
                     user_id=member.id,
-                    guild_id=ctx.guild.id,
+                    guild_id=guild_id,
                     moderator_id=self.bot.user.id,
                     punishment_type=PunishmentType.UNMUTE,
                     reason="Mute expired",
@@ -2978,12 +2739,7 @@ class Moderation(commands.Cog, name="Moderation"):
         """
         member = await self._lookup_member(ctx, identifier)
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with identifier `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)
 
         if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
@@ -3004,15 +2760,12 @@ class Moderation(commands.Cog, name="Moderation"):
         reason = "No reason provided"
         if args:
             first = args[0]
-            if re.match(r"^\d+[smhd]$", first):
-                try:
-                    duration_seconds = humanfriendly.parse_timespan(first)
-                except humanfriendly.InvalidTimespan:
-                    reason = " ".join(args)
-                else:
-                    reason = " ".join(args[1:]) or reason
-            else:
+            try:
+                duration_seconds = humanfriendly.parse_timespan(first)
+            except humanfriendly.InvalidTimespan:
                 reason = " ".join(args)
+            else:
+                reason = " ".join(args[1:]) or reason
 
         mute_settings = await self.bot.database.get_mute_settings(ctx.guild.id)
         if not mute_settings:
@@ -3035,7 +2788,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
         desc = f"**{member}** has been react-muted."
         if duration_seconds:
-            desc += f" (for {first})"
+            desc += f" (for {humanfriendly.format_timespan(duration_seconds)})"
         embed = discord.Embed(description=desc, color=discord.Color.blurple())
         embed.set_author(
             name=f"Moderator: {ctx.author}",
@@ -3046,19 +2799,31 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if duration_seconds:
             asyncio.create_task(
-                self._auto_react_unmute(member, rmuted_role, duration_seconds, ctx)
+                self._auto_react_unmute(ctx.guild.id, member.id, rmuted_role.id, duration_seconds, ctx)
             )
 
     async def _auto_react_unmute(
-        self, member: discord.Member, role: discord.Role, delay: int, ctx: Context
+        self, guild_id: int, user_id: int, role_id: int, delay: int, ctx: Context
     ):
+        """Sleep for `delay` seconds, then re-fetch the member and remove the react-mute role."""
         await asyncio.sleep(delay)
+
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return
+        role = guild.get_role(role_id)
+        if not role:
+            return
+        member = guild.get_member(user_id)
+        if not member:
+            return
+
         if role in member.roles:
             try:
                 await member.remove_roles(role, reason="React-mute duration expired")
                 await self.bot.database.add_punishment(
                     user_id=member.id,
-                    guild_id=ctx.guild.id,
+                    guild_id=guild_id,
                     moderator_id=self.bot.user.id,
                     punishment_type=PunishmentType.RUNMUTE,
                     reason="React-mute expired",
@@ -3183,12 +2948,7 @@ class Moderation(commands.Cog, name="Moderation"):
         """
         member = await self._lookup_member(ctx, identifier)
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found with identifier `{identifier}`.",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)
 
         if member.top_role.position >= ctx.author.top_role.position:
             embed = discord.Embed(
@@ -3206,19 +2966,13 @@ class Moderation(commands.Cog, name="Moderation"):
             return
 
         # Normalize prefix-style "!imute @user spoilers" where duration is actually a reason.
-        if duration and not re.match(r"^\d+[smhd]$", duration):
-            if reason:
-                reason = f"{duration} {reason}"
-            else:
-                reason = duration
-            duration = None
-
         duration_seconds: Optional[int] = None
         if duration:
             try:
                 duration_seconds = humanfriendly.parse_timespan(duration)
             except humanfriendly.InvalidTimespan:
-                pass
+                reason = f"{duration} {reason or ''}".strip()
+                duration_seconds = None
         reason = reason or "No reason provided"
 
         mute_settings = await self.bot.database.get_mute_settings(ctx.guild.id)
@@ -3242,7 +2996,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
         desc = f"**{member}** has been image-muted."
         if duration_seconds:
-            desc += f" (for {duration})"
+            desc += f" (for {humanfriendly.format_timespan(duration_seconds)})"
         embed = discord.Embed(description=desc, color=discord.Color.blurple())
         embed.set_author(
             name=f"Moderator: {ctx.author}",
@@ -3253,19 +3007,31 @@ class Moderation(commands.Cog, name="Moderation"):
 
         if duration_seconds:
             asyncio.create_task(
-                self._auto_image_unmute(member, imuted_role, duration_seconds, ctx)
+                self._auto_image_unmute(ctx.guild.id, member.id, imuted_role.id, duration_seconds, ctx)
             )
 
     async def _auto_image_unmute(
-        self, member: discord.Member, role: discord.Role, delay: int, ctx: Context
+        self, guild_id: int, user_id: int, role_id: int, delay: int, ctx: Context
     ):
+        """Sleep for `delay` seconds, then re-fetch the member and remove the image-mute role."""
         await asyncio.sleep(delay)
+
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return
+        role = guild.get_role(role_id)
+        if not role:
+            return
+        member = guild.get_member(user_id)
+        if not member:
+            return
+
         if role in member.roles:
             try:
                 await member.remove_roles(role, reason="Image-mute duration expired")
                 await self.bot.database.add_punishment(
                     user_id=member.id,
-                    guild_id=ctx.guild.id,
+                    guild_id=guild_id,
                     moderator_id=self.bot.user.id,
                     punishment_type=PunishmentType.IUNMUTE,
                     reason="Image-mute expired",
@@ -3462,8 +3228,8 @@ class Moderation(commands.Cog, name="Moderation"):
         )
 
         for punishment in punishments:
-            raw_moderator_id = await self._resolve_id(punishment.moderator_id)
-            raw_user_id = await self._resolve_id(punishment.user_id)
+            raw_moderator_id = await resolve_id(self.bot.database,punishment.moderator_id)
+            raw_user_id = await resolve_id(self.bot.database,punishment.user_id)
             moderator = ctx.guild.get_member(
                 raw_moderator_id
             ) or await self.bot.fetch_user(raw_moderator_id) if raw_moderator_id else None
@@ -3489,7 +3255,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
         notes = await self.bot.database.get_case_notes(case_id, ctx.guild.id)
         note_moderator_ids = [getattr(n, "moderator_id", None) for n in notes]
-        resolved_note_moderators = await self._resolve_ids(note_moderator_ids)
+        resolved_note_moderators = await resolve_ids(self.bot.database,note_moderator_ids)
         notes_lines = []
         for note in notes:
             raw_mod_id = resolved_note_moderators.get(getattr(note, "moderator_id", None))
@@ -3538,7 +3304,7 @@ class Moderation(commands.Cog, name="Moderation"):
                 await ctx.send(f"Case {case_id} not found.")
                 return
 
-            raw_moderator_id = await self._resolve_id(punishment.moderator_id)
+            raw_moderator_id = await resolve_id(self.bot.database,punishment.moderator_id)
             if raw_moderator_id != ctx.author.id:
                 await ctx.send(
                     "You are not authorized to update this case as you were not the original moderator."
@@ -4078,12 +3844,7 @@ class Moderation(commands.Cog, name="Moderation"):
             )
 
         if not member:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description=f"No user found: `{identifier}`",
-                    color=discord.Color.red(),
-                )
-            )
+            return await Embeds.error(ctx, f"No user found: `{identifier}`", reply=False)
 
         guild_id = ctx.guild.id
 
@@ -4249,7 +4010,7 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             return await ctx.send(embed=embed)
 
-        resolved_linked = await self._resolve_ids(linked_ids)
+        resolved_linked = await resolve_ids(self.bot.database,linked_ids)
         linked_members = []
         for uid in linked_ids:
             raw_id = resolved_linked.get(uid)

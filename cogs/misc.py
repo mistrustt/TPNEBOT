@@ -1,22 +1,23 @@
 import discord
 from discord.ext import commands
 from discord.ext.commands import Context
-import logging
 import os
-import aiohttp
-from geopy.geocoders import Nominatim
-from timezonefinder import TimezoneFinder
 import pytz
-from utils.misc import MiscUtils
+import aiohttp
+import logging
 import asyncio
 from faker import Faker
 from typing import Union
+from geopy.geocoders import Nominatim
+from timezonefinder import TimezoneFinder
+from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
+from utils.security import resolve_id, resolve_ids
 
 logger = logging.getLogger("discord.client")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-
 
 class Misc(commands.Cog, name="Misc"):
     def __init__(self, bot: commands.Bot) -> None:
@@ -48,46 +49,6 @@ class Misc(commands.Cog, name="Misc"):
             "thc": "You hit the cart and feel the effects. 🫨😮‍💨",
             "dessert": "You enjoy a hit of dessert flavors. 🍰😮‍💨"
         }
-
-    @staticmethod
-    def _is_hash(value) -> bool:
-        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
-        return (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(c in "0123456789abcdefABCDEF" for c in value)
-        )
-
-    async def _resolve_id(self, value):
-        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
-        if value is None or isinstance(value, int):
-            return value
-        if self._is_hash(value):
-            return await self.bot.database.resolve_user_hash(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    async def _resolve_ids(self, values):
-        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
-        if not values:
-            return {}
-        unique = list(dict.fromkeys(v for v in values if v is not None))
-        hashes = [v for v in unique if self._is_hash(v)]
-        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
-        mapping = {}
-        for v in unique:
-            if isinstance(v, int):
-                mapping[v] = v
-            elif self._is_hash(v):
-                mapping[v] = resolved.get(v)
-            else:
-                try:
-                    mapping[v] = int(v)
-                except (TypeError, ValueError):
-                    mapping[v] = None
-        return mapping
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -266,7 +227,7 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, sobs) in enumerate(top_users):
                 raw_id = resolved_top.get(user_id)
                 if raw_id:
@@ -287,7 +248,7 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
-            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
             for idx, (user_id, sobs) in enumerate(bottom_users):
                 raw_id = resolved_bottom.get(user_id)
                 if raw_id:
@@ -358,7 +319,7 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, skulls) in enumerate(top_users):
                 raw_id = resolved_top.get(user_id)
                 if raw_id:
@@ -379,7 +340,7 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
-            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
             for idx, (user_id, skulls) in enumerate(bottom_users):
                 raw_id = resolved_bottom.get(user_id)
                 if raw_id:
@@ -449,7 +410,7 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, flames) in enumerate(top_users):
                 raw_id = resolved_top.get(user_id)
                 if raw_id:
@@ -470,7 +431,7 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
-            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
             for idx, (user_id, flames) in enumerate(bottom_users):
                 raw_id = resolved_bottom.get(user_id)
                 if raw_id:
@@ -541,7 +502,7 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, hearts) in enumerate(top_users):
                 raw_id = resolved_top.get(user_id)
                 if raw_id:
@@ -562,7 +523,7 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
-            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
             for idx, (user_id, hearts) in enumerate(bottom_users):
                 raw_id = resolved_bottom.get(user_id)
                 if raw_id:
@@ -631,7 +592,7 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, clowns) in enumerate(top_users):
                 raw_id = resolved_top.get(user_id)
                 if raw_id:
@@ -652,7 +613,7 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
-            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
             for idx, (user_id, clowns) in enumerate(bottom_users):
                 raw_id = resolved_bottom.get(user_id)
                 if raw_id:
@@ -844,7 +805,7 @@ class Misc(commands.Cog, name="Misc"):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_top = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, rep) in enumerate(top_users):
                 raw_id = resolved_top.get(user_id)
                 if raw_id:
@@ -865,7 +826,7 @@ class Misc(commands.Cog, name="Misc"):
         if bottom_users:
             bottom_list = []
             rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
-            resolved_bottom = await self._resolve_ids([uid for uid, _ in bottom_users])
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
             for idx, (user_id, rep) in enumerate(bottom_users):
                 raw_id = resolved_bottom.get(user_id)
                 if raw_id:
@@ -966,7 +927,7 @@ class Misc(commands.Cog, name="Misc"):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
         if juul and juul.holder_id:
-            raw_holder_id = await self._resolve_id(juul.holder_id)
+            raw_holder_id = await resolve_id(self.bot.database,juul.holder_id)
             user = ctx.guild.get_member(raw_holder_id) or await self.bot.fetch_user(
                 raw_holder_id
             )
@@ -994,7 +955,7 @@ class Misc(commands.Cog, name="Misc"):
     async def juul_hit(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
-        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
+        if not juul or await resolve_id(self.bot.database,juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to take a hit.",
@@ -1027,7 +988,7 @@ class Misc(commands.Cog, name="Misc"):
                 )
             )
 
-        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
+        if not juul or await resolve_id(self.bot.database,juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="You don't have the juul to pass.",
@@ -1053,7 +1014,7 @@ class Misc(commands.Cog, name="Misc"):
     async def juul_steal(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
-        if juul and await self._resolve_id(juul.holder_id) == ctx.author.id:
+        if juul and await resolve_id(self.bot.database,juul.holder_id) == ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You already have the juul.",
@@ -1078,7 +1039,7 @@ class Misc(commands.Cog, name="Misc"):
         
         await ctx.send(
             embed=discord.Embed(
-                description=f"{ctx.author.mention} has stolen the {flavor} juul {flavor_emoji} from {ctx.guild.get_member(await self._resolve_id(juul.holder_id)).mention if juul and juul.holder_id else 'nobody'}!",
+                description=f"{ctx.author.mention} has stolen the {flavor} juul {flavor_emoji} from {ctx.guild.get_member(await resolve_id(self.bot.database,juul.holder_id)).mention if juul and juul.holder_id else 'nobody'}!",
                 color=discord.Color.green(),
             )
         )
@@ -1088,7 +1049,7 @@ class Misc(commands.Cog, name="Misc"):
     async def juul_lock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
         flavor = await self.bot.database.get_juul_flavor(ctx.guild.id)
-        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
+        if not juul or await resolve_id(self.bot.database,juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to lock it.",
@@ -1112,7 +1073,7 @@ class Misc(commands.Cog, name="Misc"):
     @commands.has_permissions(manage_messages=True)
     async def juul_unlock(self, ctx: Context):
         juul = await self.bot.database.get_juul(ctx.guild.id)
-        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
+        if not juul or await resolve_id(self.bot.database,juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to unlock it.",
@@ -1156,7 +1117,7 @@ class Misc(commands.Cog, name="Misc"):
 
         # Check if user is holding the juul
         juul = await self.bot.database.get_juul(ctx.guild.id)
-        if not juul or await self._resolve_id(juul.holder_id) != ctx.author.id:
+        if not juul or await resolve_id(self.bot.database,juul.holder_id) != ctx.author.id:
             return await ctx.send(
                 embed=discord.Embed(
                     description="🚫 You need to be holding the juul to change its flavor.",
@@ -1169,12 +1130,7 @@ class Misc(commands.Cog, name="Misc"):
         
         # Use centralized flavor bank
         if flavor not in self.JUUL_FLAVORS:
-            embed = discord.Embed(
-                title="Invalid Flavor",
-                description=f"🚫 That flavor doesn't exist!\n\nAvailable flavors: `{'`, `'.join(self.JUUL_FLAVORS)}`",
-                color=discord.Color.red()
-            )
-            await ctx.send(embed=embed)
+            await Embeds.error(ctx, f"🚫 That flavor doesn't exist!\n\nAvailable flavors: `{'`, `'.join(self.JUUL_FLAVORS)}`", title="Invalid Flavor", reply=False)
             return
 
         # Set the new flavor
@@ -1183,12 +1139,7 @@ class Misc(commands.Cog, name="Misc"):
         # Use centralized flavor bank
         flavor_emoji = self.JUUL_FLAVOR_EMOJIS.get(flavor, "-cigarette")
         
-        embed = discord.Embed(
-            title="Flavor Changed!",
-            description=f"The juul flavor has been changed to **{flavor.capitalize()}** {flavor_emoji}",
-            color=discord.Color.green()
-        )
-        await ctx.send(embed=embed)
+        await Embeds.success(ctx, f"The juul flavor has been changed to **{flavor.capitalize()}** {flavor_emoji}", title="Flavor Changed!", reply=False)
 
     @commands.hybrid_command(
         name="tz", aliases=["timezone", "time"], description="Show your current timezone."
@@ -1247,11 +1198,7 @@ class Misc(commands.Cog, name="Misc"):
                 lat = round(float(lat_str), 1)
                 lon = round(float(lon_str), 1)
             except ValueError:
-                embed = discord.Embed(
-                    description="🚫 Invalid coordinates format! Use `latitude,longitude`.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.send(embed=embed)
+                await Embeds.error(ctx, "🚫 Invalid coordinates format! Use `latitude,longitude`.", reply=False)
             standardized_location = f"{lat},{lon}"
             timezone_str = self.timezone_finder.timezone_at(lng=lon, lat=lat)
 
@@ -1261,11 +1208,7 @@ class Misc(commands.Cog, name="Misc"):
         else:
             location_data = self.geolocator.geocode(location, exactly_one=True)
             if location_data is None:
-                embed = discord.Embed(
-                    description=f"🚫 I couldn't find “{location}”. Please try a different place.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.send(embed=embed)
+                await Embeds.error(ctx, f"🚫 I couldn't find “{location}”. Please try a different place.", reply=False)
             lat = round(location_data.latitude, 1)
             lon = round(location_data.longitude, 1)
             standardized_location = f"{lat},{lon}"
@@ -1289,11 +1232,7 @@ class Misc(commands.Cog, name="Misc"):
         show_location = False
 
         if not user_data:
-            embed = discord.Embed(
-                description=f"🚫 You haven't set a location! Use `{prefix}setloc <location>` first.",
-                color=discord.Color.red(),
-            )
-            return await ctx.send(embed=embed)
+            await Embeds.error(ctx, f"🚫 You haven't set a location! Use `{prefix}setloc <location>` first.", reply=False)
 
         location = user_data
 
@@ -1302,11 +1241,7 @@ class Misc(commands.Cog, name="Misc"):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    embed = discord.Embed(
-                        description=f"🚫 Couldn't retrieve weather data from API. Try again later. (HTTP {response.status})",
-                        color=discord.Color.red(),
-                    )
-                    return await ctx.send(embed=embed)
+                    await Embeds.error(ctx, f"🚫 Couldn't retrieve weather data from API. Try again later. (HTTP {response.status})", reply=False)
                 else:
                     weather_data = await response.json()
 

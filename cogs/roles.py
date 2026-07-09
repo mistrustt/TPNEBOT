@@ -5,6 +5,7 @@ from typing import Optional
 import logging
 import asyncio
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")
@@ -1247,17 +1248,17 @@ class RoleTools(commands.Cog, name="Roles"):
     async def autorole_add(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
-            return await ctx.reply(embed=discord.Embed(description=f"🚫 {error}", color=discord.Color.red()), delete_after=5)
+            return await Embeds.error(ctx, f"🚫 {error}", delete_after=5, reply=True)
 
         if role.position >= ctx.me.top_role.position:
-            return await ctx.reply(embed=discord.Embed(description=f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.", color=discord.Color.red()), delete_after=5)
+            return await Embeds.error(ctx, f"🚫 I cannot manage the role '{role.name}' because it is higher or equal to my top role.", delete_after=5, reply=True)
 
         try:
             await self.bot.database.add_auto_role(ctx.guild.id, role.id)
             await ctx.send(embed=discord.Embed(description=f"✅ Added autorole: {role.mention}"))
         except Exception as e:
             logger.error(f"Failed to add autorole: {e}")
-            await ctx.reply(embed=discord.Embed(description="🚫 Failed to add autorole.", color=discord.Color.red()))
+            await Embeds.error(ctx, "🚫 Failed to add autorole.", reply=True)
 
     @autorole.command(name="remove", description="Remove a role from autoroles.")
     @commands.has_permissions(manage_roles=True)
@@ -1267,14 +1268,14 @@ class RoleTools(commands.Cog, name="Roles"):
     async def autorole_remove(self, ctx: Context, *, role_name: str):
         role, error = await self.find_role(ctx, role_name)
         if error:
-            return await ctx.reply(embed=discord.Embed(description=f"🚫 {error}", color=discord.Color.red()), delete_after=5)
+            return await Embeds.error(ctx, f"🚫 {error}", delete_after=5, reply=True)
 
         try:
             await self.bot.database.remove_auto_role(ctx.guild.id, role.id)
             await ctx.send(embed=discord.Embed(description=f"✅ Removed autorole: {role.mention}"))
         except Exception as e:
             logger.error(f"Failed to remove autorole: {e}")
-            await ctx.reply(embed=discord.Embed(description="🚫 Failed to remove autorole.", color=discord.Color.red()))
+            await Embeds.error(ctx, "🚫 Failed to remove autorole.", reply=True)
 
     @autorole.command(name="list", description="List configured autoroles for this server.")
     @commands.has_permissions(manage_roles=True)
@@ -1287,13 +1288,13 @@ class RoleTools(commands.Cog, name="Roles"):
             roles = [ctx.guild.get_role(rid) for rid in ids]
             roles = [r for r in roles if r]
             if not roles:
-                return await ctx.send(embed=discord.Embed(description="No autoroles configured.", color=discord.Color.red()))
+                return await Embeds.error(ctx, "No autoroles configured.", reply=False)
 
             desc = "\n".join(r.mention for r in roles)
             await ctx.send(embed=discord.Embed(title="Autoroles", description=desc, color=discord.Color.blurple()))
         except Exception as e:
             logger.error(f"Failed to list autoroles: {e}")
-            await ctx.reply(embed=discord.Embed(description="🚫 Failed to retrieve autoroles.", color=discord.Color.red()))
+            await Embeds.error(ctx, "🚫 Failed to retrieve autoroles.", reply=True)
 
     @autorole.command(name="clear", description="Clear all autoroles for this server.")
     @commands.has_permissions(manage_roles=True)
@@ -1306,7 +1307,7 @@ class RoleTools(commands.Cog, name="Roles"):
             await ctx.send(embed=discord.Embed(description="✅ Cleared autoroles."))
         except Exception as e:
             logger.error(f"Failed to clear autoroles: {e}")
-            await ctx.reply(embed=discord.Embed(description="🚫 Failed to clear autoroles.", color=discord.Color.red()))
+            await Embeds.error(ctx, "🚫 Failed to clear autoroles.", reply=True)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

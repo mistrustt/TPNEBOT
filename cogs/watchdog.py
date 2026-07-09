@@ -10,6 +10,7 @@ from typing import Optional
 import humanfriendly
 import base64
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")

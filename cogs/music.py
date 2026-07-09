@@ -491,8 +491,8 @@ class Music(commands.Cog, name="Music"):
             title="Last.fm — Available Commands",
             description=description,
             color=discord.Color.blurple(),
+            footer=f"Use {prefix}lastfm <subcommand> for details.",
         )
-        embed.set_footer(text=f"Use {prefix}lastfm <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
     @lastfm.command(name="set", description="Set your Last.fm username.")
@@ -501,11 +501,12 @@ class Music(commands.Cog, name="Music"):
         """Set your Last.fm username"""
         user_id = int(ctx.author.id)
         await self.bot.database.set_lastfm_username(user_id, username)
-        await ctx.reply(
-            embed=discord.Embed(
-                title="Last.fm Username Set",
-                description=f"Your Last.fm username has been set to `{username}`.",
-            )
+        await Embeds.custom(
+            ctx,
+            f"Your Last.fm username has been set to `{username}`.",
+            title="Last.fm Username Set",
+            color=None,
+            reply=True,
         )
 
     @lastfm.command(name="update", description="Manually update your Last.fm recent listening index.")
@@ -560,31 +561,27 @@ class Music(commands.Cog, name="Music"):
             and len(color) == 7
             and all(c in "0123456789ABCDEFabcdef" for c in color[1:])
         ):
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a valid color. Use HEX format (e.g., `#FF5733`) or a color name (e.g., `red`).",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a valid color. Use HEX format (e.g., `#FF5733`) or a color name (e.g., `red`).",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
 
         user_id = int(ctx.author.id)
         try:
             await self.bot.database.set_lastfm_embed_color(user_id, color)
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Color Set",
-                    description=f"Your embed color has been set to `{color}`.",
-                    color=int(color.replace("#", "0x"), 16),
-                )
+            await Embeds.custom(
+                ctx,
+                f"Your embed color has been set to `{color}`.",
+                title="Color Set",
+                color=int(color.replace("#", "0x"), 16),
+                reply=True,
             )
         except ValueError as e:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error", description=str(e), color=discord.Color.red()
-                )
-            )
+            await Embeds.error(ctx, str(e), title="Error", reply=True)
 
     @lastfm.command(name="votes", description="See your Last.fm vote statistics.")
     @unified_cooldown(15)
@@ -625,12 +622,12 @@ class Music(commands.Cog, name="Music"):
             f"Upvotes: {jnp_upvotes}\nDownvotes: {jnp_downvotes}\nRatio: {jnp_ratio:.3g}"
         )
 
-        await ctx.reply(
-            embed=discord.Embed(
-                title="Last.fm Vote Statistics",
-                description=description,
-                color=embed_color,
-            )
+        await Embeds.custom(
+            ctx,
+            description,
+            title="Last.fm Vote Statistics",
+            color=embed_color,
+            reply=True,
         )
 
     @lastfm.command(name="plays", description="Display the play count for the current song on Last.fm.")
@@ -647,12 +644,12 @@ class Music(commands.Cog, name="Music"):
 
         async with ctx.typing():
             if not lastfm_username:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        title="Error",
-                        description=f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
-                        color=0x36393E,
-                    )
+                await Embeds.custom(
+                    ctx,
+                    f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
+                    title="Error",
+                    color=0x36393E,
+                    reply=True,
                 )
                 return
 
@@ -675,12 +672,13 @@ class Music(commands.Cog, name="Music"):
 
         playcount = await get_track_playcount(lastfm_username, artist_name, track_name)
 
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            f"You've listened to **{track_name}** by **{artist_name}** {playcount} times.",
             title="Current Song Plays",
-            description=f"You've listened to **{track_name}** by **{artist_name}** {playcount} times.",
             color=embed_color,
+            reply=True,
         )
-        await ctx.reply(embed=embed)
 
     @lastfm.command(name="toptentracks", aliases=["ttt"], description="Display your top ten tracks on Last.fm.")
     @unified_cooldown(15)
@@ -696,12 +694,12 @@ class Music(commands.Cog, name="Music"):
 
         async with ctx.typing():
             if not lastfm_username:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        title="Error",
-                        description=f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
-                        color=0x36393E,
-                    )
+                await Embeds.custom(
+                    ctx,
+                    f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
+                    title="Error",
+                    color=0x36393E,
+                    reply=True,
                 )
                 return
 
@@ -728,8 +726,8 @@ class Music(commands.Cog, name="Music"):
             title=f"{lastfm_username}'s Top 10 Tracks",
             description=description,
             color=embed_color,
+            footer="Data from Last.fm",
         )
-        embed.set_footer(text="Data from Last.fm")
         await ctx.reply(embed=embed)
 
     @lastfm.command(name="topartists", aliases=["tar"], description="Display your top artists on Last.fm.")
@@ -746,12 +744,12 @@ class Music(commands.Cog, name="Music"):
 
         async with ctx.typing():
             if not lastfm_username:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        title="Error",
-                        description=f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
-                        color=0x36393E,
-                    )
+                await Embeds.custom(
+                    ctx,
+                    f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
+                    title="Error",
+                    color=0x36393E,
+                    reply=True,
                 )
                 return
 
@@ -789,8 +787,8 @@ class Music(commands.Cog, name="Music"):
                         title=f"{lastfm_username}'s Top 10 Artists",
                         description=description,
                         color=embed_color,
+                        footer="Data from Last.fm",
                     )
-                    embed.set_footer(text="Data from Last.fm")
                     await ctx.reply(embed=embed)
                     
             except (aiohttp.ClientError, KeyError, TypeError, ValueError) as e:
@@ -802,12 +800,12 @@ class Music(commands.Cog, name="Music"):
     async def who_knows(self, ctx: Context, artist_name: Optional[str] = None):
         """Show who in the server has listened to the specified artist the most."""
         if not artist_name:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide an artist name.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide an artist name.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         user_id = int(ctx.author.id)
@@ -928,12 +926,12 @@ class Music(commands.Cog, name="Music"):
         embed_color = await self.bot.database.get_lastfm_embed_color(user_id)
         async with ctx.typing():
             if not lastfm_username:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        title="Error",
-                        description=f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
-                        color=0x36393E,
-                    )
+                await Embeds.custom(
+                    ctx,
+                    f"You have not set your Last.fm username. Use `{prefix}lf set <username>` to set it.",
+                    title="Error",
+                    color=0x36393E,
+                    reply=True,
                 )
                 return
 
@@ -981,12 +979,12 @@ class Music(commands.Cog, name="Music"):
 
             recent_tracks = await get_recent_tracks(lastfm_username)
             if not recent_tracks or not recent_tracks.get("recenttracks", {}).get("track"):
-                await ctx.reply(
-                    embed=discord.Embed(
-                        title="Error",
-                        description="No recent tracks found for the user.",
-                        color=0x36393E,
-                    )
+                await Embeds.custom(
+                    ctx,
+                    "No recent tracks found for the user.",
+                    title="Error",
+                    color=0x36393E,
+                    reply=True,
                 )
                 return
 
@@ -999,12 +997,12 @@ class Music(commands.Cog, name="Music"):
             track_info = await get_track_info(artist_name, track_name, lastfm_username)
 
             if not track_info or "track" not in track_info:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        title="Error",
-                        description="Could not retrieve track information from Last.fm.",
-                        color=0x36393E,
-                    )
+                await Embeds.custom(
+                    ctx,
+                    "Could not retrieve track information from Last.fm.",
+                    title="Error",
+                    color=0x36393E,
+                    reply=True,
                 )
                 return
 
@@ -1221,12 +1219,12 @@ class Music(commands.Cog, name="Music"):
             async with ctx.typing():
                 activity = await self.find_spotify_activity(member)
                 if activity is None:
-                    await ctx.reply(
-                        embed=discord.Embed(
-                            title="Error",
-                            description="No Spotify activity found.\n\nMake sure your Spotify is connected to Discord and you are sharing activity status in privacy settings.\n\n**Note:** This command only works if you are listening to a song that is on Spotify. __Not local files.__",
-                            color=0x36393E,
-                        )
+                    await Embeds.custom(
+                        ctx,
+                        "No Spotify activity found.\n\nMake sure your Spotify is connected to Discord and you are sharing activity status in privacy settings.\n\n**Note:** This command only works if you are listening to a song that is on Spotify. __Not local files.__",
+                        title="Error",
+                        color=0x36393E,
+                        reply=True,
                     )
                     return
 
@@ -1452,12 +1450,12 @@ class Music(commands.Cog, name="Music"):
                 logger.debug("Reaction task was cancelled.")
 
         except aiohttp.ClientError:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="There was an error fetching the cover art for the currently playing song. This should not happen. Please try again later.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "There was an error fetching the cover art for the currently playing song. This should not happen. Please try again later.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
 
     @commands.hybrid_group(name="jwapi", description="JuiceWRLD API command group.")
@@ -1491,8 +1489,8 @@ class Music(commands.Cog, name="Music"):
             title="JuiceWRLD API — Available Commands",
             description=description,
             color=discord.Color.blurple(),
+            footer=f"Use {prefix}jwapi <subcommand> for details.",
         )
-        embed.set_footer(text=f"Use {prefix}jwapi <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
     @juicewrld_api.command(name="np", description="View what you are currently playing on JuiceWRLD API desktop app.")
@@ -1514,47 +1512,47 @@ class Music(commands.Cog, name="Music"):
                             try:
                                 error_data = await response.json()
                                 if not error_data.get("is_linked"):
-                                    await ctx.reply(
-                                        embed=discord.Embed(
-                                            title="Account Not Linked",
-                                            description=f"{member.mention}'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to account and generate a device pairing code\n3. Then use the jlink command with your code!",
-                                            color=0x36393E,
-                                        )
+                                    await Embeds.custom(
+                                        ctx,
+                                        f"{member.mention}'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to account and generate a device pairing code\n3. Then use the jlink command with your code!",
+                                        title="Account Not Linked",
+                                        color=0x36393E,
+                                        reply=True,
                                     )
                                     return
                             except:
                                 pass
 
                         if response.status != 200:
-                            await ctx.reply(
-                                embed=discord.Embed(
-                                    title="Error",
-                                    description="Failed to fetch now playing data from JuiceWRLD API.",
-                                    color=0x36393E,
-                                )
+                            await Embeds.custom(
+                                ctx,
+                                "Failed to fetch now playing data from JuiceWRLD API.",
+                                title="Error",
+                                color=0x36393E,
+                                reply=True,
                             )
                             return
 
                         data = await response.json()
 
                         if not data.get("is_linked"):
-                            await ctx.reply(
-                                embed=discord.Embed(
-                                    title="Account Not Linked",
-                                    description=f"🚫 {member.mention}'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to settings and connect your Discord account\n3. Then try this command again!",
-                                    color=0x36393E,
-                                )
+                            await Embeds.custom(
+                                ctx,
+                                f"🚫 {member.mention}'s Discord account is not linked to JuiceWRLD API.\n\n**To link your account:**\n1. Open the JuiceWRLD API desktop app\n2. Go to settings and connect your Discord account\n3. Then try this command again!",
+                                title="Account Not Linked",
+                                color=0x36393E,
+                                reply=True,
                             )
                             return
 
                         now_playing = data.get("now_playing")
                         if not now_playing or not now_playing.get("is_playing"):
-                            await ctx.reply(
-                                embed=discord.Embed(
-                                    title="Now Playing",
-                                    description="No music currently playing.\n\nStart playing music on your desktop app to see it here!",
-                                    color=0x808080,
-                                )
+                            await Embeds.custom(
+                                ctx,
+                                "No music currently playing.\n\nStart playing music on your desktop app to see it here!",
+                                title="Now Playing",
+                                color=0x808080,
+                                reply=True,
                             )
                             return
 
@@ -1807,21 +1805,21 @@ class Music(commands.Cog, name="Music"):
                 logger.debug("Reaction task was cancelled.")
 
         except aiohttp.ClientError:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="There was an error fetching data from JuiceWRLD API. Please try again later.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "There was an error fetching data from JuiceWRLD API. Please try again later.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
         except Exception as e:
             logger.error(f"Error in jnp command: {e}")
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="An unexpected error occurred. Please try again later.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "An unexpected error occurred. Please try again later.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
 
     @juicewrld_api.command(name="link", description="Link your Discord account to JuiceWRLD API using a pairing code.")
@@ -1855,12 +1853,12 @@ class Music(commands.Cog, name="Music"):
             return
 
         if not code:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Missing Code",
-                    description="Please provide a pairing code.",
-                    color=discord.Color.red(),
-                )
+            await Embeds.error(
+                ctx,
+                "Please provide a pairing code.",
+                title="Missing Code",
+                delete_after=None,
+                reply=True,
             )
             return
 
@@ -1880,6 +1878,7 @@ class Music(commands.Cog, name="Music"):
                                 title="Account Linked Successfully",
                                 description=f'Your Discord account has been linked to **{user_data.get("username", "Unknown")}**',
                                 color=0x00FF00,
+                                footer=f"You can now use {prefix}jnp to show your currently playing song!",
                             )
                             embed.add_field(
                                 name="Username",
@@ -1888,9 +1887,6 @@ class Music(commands.Cog, name="Music"):
                             )
                             embed.add_field(
                                 name="Status", value="Active ✓", inline=True
-                            )
-                            embed.set_footer(
-                                text=f"You can now use {prefix}jnp to show your currently playing song!"
                             )
                             await ctx.reply(embed=embed)
                             return
@@ -1919,21 +1915,21 @@ class Music(commands.Cog, name="Music"):
                     await ctx.reply(embed=embed)
 
         except aiohttp.ClientError:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Link Failed",
-                    description="There was an error connecting to JuiceWRLD API. Please try again later.",
-                    color=discord.Color.red(),
-                )
+            await Embeds.error(
+                ctx,
+                "There was an error connecting to JuiceWRLD API. Please try again later.",
+                title="Link Failed",
+                delete_after=None,
+                reply=True,
             )
         except Exception as e:
             logger.error(f"Error in jlink command: {e}")
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Link Failed",
-                    description="An unexpected error occurred. Please try again later.",
-                    color=discord.Color.red(),
-                )
+            await Embeds.error(
+                ctx,
+                "An unexpected error occurred. Please try again later.",
+                title="Link Failed",
+                delete_after=None,
+                reply=True,
             )
 
     async def fetch_song(self, ctx: commands.Context, query: str, allow_unsurfaced: bool = True):
@@ -1942,12 +1938,11 @@ class Music(commands.Cog, name="Music"):
             JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
         ) as response:
             if response.status != 200:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red(),
-                    ),
+                await Embeds.error(
+                    ctx,
+                    "Request failed. Please try again later.",
                     delete_after=5,
+                    reply=True,
                 )
                 return None
 
@@ -1992,12 +1987,11 @@ class Music(commands.Cog, name="Music"):
             JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
         ) as response:
             if response.status != 200:
-                await ctx.reply(
-                    embed=discord.Embed(
-                        description="Request failed. Please try again later.",
-                        color=discord.Color.red(),
-                    ),
+                await Embeds.error(
+                    ctx,
+                    "Request failed. Please try again later.",
                     delete_after=5,
+                    reply=True,
                 )
                 return None
 
@@ -2421,12 +2415,12 @@ class Music(commands.Cog, name="Music"):
     @unified_cooldown(10)
     async def groupbuy(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a song name to search for.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a song name to search for.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         songs = await self.fetch_song(ctx, query, allow_unsurfaced=True)
@@ -2458,7 +2452,7 @@ class Music(commands.Cog, name="Music"):
             view = discord.ui.View(timeout=None)
             view.add_item(GroupbuySongSelect(self, ctx.author, options, song_map))
 
-            embed = discord.Embed(description=f'{ctx.author.mention}: Multiple **selections** found with your **search**')
+            embed = discord.Embed(description=f'{ctx.author.mention}: Multiple **selections** found with your **search**', color=None)
             await ctx.reply(embed=embed, view=view)
         
         else:
@@ -2472,12 +2466,12 @@ class Music(commands.Cog, name="Music"):
     @unified_cooldown(10)
     async def leak(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a song name to search for.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a song name to search for.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         song_list = await self.fetch_song(ctx, query, allow_unsurfaced=True)
@@ -2531,7 +2525,8 @@ class Music(commands.Cog, name="Music"):
             view.add_item(SongSelect(options, song_map, ctx.author, self))
 
             embed = discord.Embed(
-                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**"
+                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**",
+                color=None,
             )
             await ctx.reply(embed=embed, view=view)
 
@@ -2546,12 +2541,12 @@ class Music(commands.Cog, name="Music"):
     @unified_cooldown(10)
     async def session(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a session name to search for.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a session name to search for.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         song_list = await self.fetch_session(ctx, query)
@@ -2619,7 +2614,8 @@ class Music(commands.Cog, name="Music"):
             view.add_item(SongSelect(options, song_map, ctx.author, self))
 
             embed = discord.Embed(
-                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**"
+                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**",
+                color=None,
             )
             await ctx.reply(embed=embed, view=view)
 
@@ -2675,12 +2671,12 @@ class Music(commands.Cog, name="Music"):
     @unified_cooldown(10)
     async def lyrics(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a song name to get lyrics for.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a song name to get lyrics for.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         try:
@@ -2745,11 +2741,10 @@ class Music(commands.Cog, name="Music"):
 
                             embeds = self.cog.build_lyrics_embeds(song)
                             if embeds is None:
-                                return await itn.response.send_message(
-                                    embed=discord.Embed(
-                                        description=f"**{song.get('name', 'That song')}** has no **lyrics** available",
-                                        color=discord.Color.yellow(),
-                                    ),
+                                return await Embeds.custom(
+                                    itn,
+                                    f"**{song.get('name', 'That song')}** has no **lyrics** available",
+                                    color=discord.Color.yellow(),
                                     ephemeral=True,
                                 )
 
@@ -2895,20 +2890,19 @@ class Music(commands.Cog, name="Music"):
         status = await Cache.fetch_songs()
         if status != 200:
             logger.error(f"syncsurfaces cache fetch failed: HTTP {status}")
-            return await ctx.reply(
-                embed=discord.Embed(
-                    title="⚠️ Sync Failed",
-                    description=f"Surface cache sync failed (HTTP {status}). Please try again later.",
-                    color=discord.Color.red(),
-                ),
+            return await Embeds.error(
+                ctx,
+                f"Surface cache sync failed (HTTP {status}). Please try again later.",
+                title="⚠️ Sync Failed",
                 delete_after=10,
+                reply=True,
             )
 
         await self.store_latest_surfaces()
         if ctx.message is not None:
             await ctx.message.add_reaction('✅')
         else:
-            await ctx.reply(embed=discord.Embed(description='Surfaces cache synced successfully.', color=discord.Color.green()))
+            await Embeds.success(ctx, 'Surfaces cache synced successfully.', reply=True)
 
     @commands.command(name='surfaces', aliases=['leaks'], description='Browse the latest Juice WRLD surfaces.')
     async def surfaces(self, ctx: commands.Context):
@@ -2937,12 +2931,12 @@ class Music(commands.Cog, name="Music"):
     @unified_cooldown(15)
     async def snippet(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a song name to search for.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a song name to search for.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         song_list = await self.fetch_song(ctx, query, allow_unsurfaced=False)
@@ -3002,7 +2996,8 @@ class Music(commands.Cog, name="Music"):
             view.add_item(SongSelect(options, song_map, ctx.author, self))
 
             embed = discord.Embed(
-                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**"
+                description=f"{ctx.author.mention}: Multiple **selections** found with your **search**",
+                color=None,
             )
             await ctx.reply(embed=embed, view=view)
 
@@ -3020,11 +3015,9 @@ class Music(commands.Cog, name="Music"):
     async def randomleak(self, ctx: commands.Context):
         data = await self.fetch_random_playable_song()
         if data is None:
-            return await ctx.send(
-                embed=discord.Embed(
-                    description="Request failed. Please try again later.",
-                    color=discord.Color.red(),
-                ),
+            return await Embeds.error(
+                ctx,
+                "Request failed. Please try again later.",
                 delete_after=5,
             )
 
@@ -3398,7 +3391,7 @@ class Music(commands.Cog, name="Music"):
         if ctx.message is not None:
             await ctx.message.add_reaction('✅')
         else:
-            await ctx.reply(embed=discord.Embed(description='Blacktea cache synced successfully.', color=discord.Color.green()))
+            await Embeds.success(ctx, 'Blacktea cache synced successfully.', reply=True)
 
     @commands.hybrid_command(name="blacktea", description="Play blacktea with Juice WRLD songs.")
     @unified_cooldown(60)
@@ -3517,10 +3510,11 @@ class Music(commands.Cog, name="Music"):
                     await guess.add_reaction("✅")
                 except asyncio.TimeoutError:
                     player["lives"] -= 1
-                    loss_message = await ctx.send(embed=discord.Embed(
-                        description=f"💥 {player['mention']} you now have **{player['lives']}** lives. One correct answer was **{song.get('name', 'N/A')}**",
-                        color=discord.Color.red(),
-                    ))
+                    loss_message = await Embeds.error(
+                        ctx,
+                        f"💥 {player['mention']} you now have **{player['lives']}** lives. One correct answer was **{song.get('name', 'N/A')}**",
+                        delete_after=None,
+                    )
                     created_messages.append(loss_message)
                     alive_players = [p for p in players if p["lives"] > 0]
                     if len(alive_players) <= 1:
@@ -3528,10 +3522,12 @@ class Music(commands.Cog, name="Music"):
 
         if len(alive_players) == 1:
             winner = alive_players[0]
-            await ctx.send(embed=discord.Embed(
-                description=f"🏆 {winner['mention']} is the winner of this game of Blacktea with **{winner['lives']}** lives remaining!",
+            await Embeds.custom(
+                ctx,
+                f"🏆 {winner['mention']} is the winner of this game of Blacktea with **{winner['lives']}** lives remaining!",
                 color=discord.Color.gold(),
-            ), delete_after=15)
+                delete_after=15,
+            )
 
         for msg in created_messages:
             try:
@@ -3714,12 +3710,12 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="makesnippet", aliases=["makesnip"], description="Create a snippet from a Juice WRLD song.")
     async def makesnippet(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
-            await ctx.reply(
-                embed=discord.Embed(
-                    title="Error",
-                    description="Please provide a song name to make a snippet from.",
-                    color=0x36393E,
-                )
+            await Embeds.custom(
+                ctx,
+                "Please provide a song name to make a snippet from.",
+                title="Error",
+                color=0x36393E,
+                reply=True,
             )
             return
         debounce = self.snippet_debounce.get(ctx.author.id, False)
@@ -3825,7 +3821,8 @@ class Music(commands.Cog, name="Music"):
                             self.add_item(SongSelect(self, author, songs))
 
                     embed = discord.Embed(
-                        description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below."
+                        description=f"{ctx.author.mention}: Multiple **songs** found with your **search**. Please select one from the dropdown below.",
+                        color=None,
                     )
                     view = SongView(ctx.author.id, safe_items)
                     message = await ctx.reply(embed=embed, view=view)
@@ -3919,7 +3916,8 @@ class Music(commands.Cog, name="Music"):
                 ]
             )
             embed = discord.Embed(
-                description=f"Multiple pledge channels found':\n{role_list}\nPlease reply with the number of the role you want."
+                description=f"Multiple pledge channels found':\n{role_list}\nPlease reply with the number of the role you want.",
+                color=None,
             )
             msg = await ctx.send(embed=embed)
 
@@ -4376,25 +4374,29 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
     async def cover(self, ctx: commands.Context, song_name: Optional[str] = None):
         """Search for song covers in the Juice WRLD API database, grouped by artist."""
         if not song_name:
-            await ctx.send(embed=discord.Embed(
-                description="🚫 Please provide a song name to search for covers.",
-                color=discord.Color.red(),
-            ))
+            await Embeds.error(
+                ctx,
+                "🚫 Please provide a song name to search for covers.",
+                delete_after=None,
+            )
             return
 
         song_name = song_name.strip()
 
         if len(song_name) < 3:
-            await ctx.send(embed=discord.Embed(
-                description="🚫 Please enter at least 3 characters to search for covers.",
-                color=discord.Color.red(),
-            ))
+            await Embeds.error(
+                ctx,
+                "🚫 Please enter at least 3 characters to search for covers.",
+                delete_after=None,
+            )
             return
 
-        progress_msg = await ctx.send(embed=discord.Embed(
-            description=f"🔍 Searching for covers of **{song_name}**...",
+        progress_msg = await Embeds.custom(
+            ctx,
+            f"🔍 Searching for covers of **{song_name}**...",
             color=discord.Color.blurple(),
-        ))
+            delete_after=None,
+        )
 
         try:
             session = await self._get_session()
@@ -4561,12 +4563,18 @@ class GroupbuySongSelect(discord.ui.Select):
 
         if self.author != itn.user:
             if song['groupbuy_info']['price'] == '':
-                embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
-                return await itn.response.send_message(embed=embed, ephemeral=True)
+                return await Embeds.custom(
+                    itn,
+                    f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information',
+                    color=discord.Color.yellow(),
+                    ephemeral=True,
+                )
         
         if song['groupbuy_info']['price'] == '':
-            embed = discord.Embed(description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information', color=discord.Color.yellow())
-            return await itn.response.edit_message(embed=embed, view=None)
+            return await itn.response.edit_message(embed=discord.Embed(
+                description=f'⚠️ {itn.user.mention}: **{song['name']}** has no **groupbuy** information',
+                color=discord.Color.yellow(),
+            ), view=None)
 
         await itn.response.edit_message(view=layout_view, embed=None)
 

@@ -10,6 +10,7 @@ from discord.ext.commands import Context
 from discord.ui import View, button, Button
 from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
 
 logger = logging.getLogger("discord.client")

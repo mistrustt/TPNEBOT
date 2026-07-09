@@ -12,9 +12,11 @@ from discord import Button, Interaction
 from discord.ui import View, Button
 from discord.ext import commands, tasks
 from utils.misc import MiscUtils
+from utils.embeds import Embeds
 from utils.amount import AmountUtils
 from utils.cooldown import unified_cooldown
 from utils.guardrails import check_slash_guardrails
+from utils.security import resolve_id, resolve_ids
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -96,21 +98,14 @@ class DropView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
 
-        embed = discord.Embed(
-            description=(
-                f"**{interaction.user.display_name}** claimed the {self.currency_name} "
-                f"**{await self.cog.formatter(self.amount)}** dropped by **{self.drop_author.display_name}**! 🎉"
-            ),
-            color=discord.Color.green(),
-        )
-
         if self.message is not None and self.message.embeds:
             await self.message.edit(embed=self.message.embeds[0], view=self)
 
-        if not interaction.response.is_done():
-            await interaction.response.send_message(embed=embed)
-        else:
-            await interaction.followup.send(embed=embed)
+        await Embeds.success(
+            interaction,
+            f"**{interaction.user.display_name}** claimed the {self.currency_name} "
+            f"**{await self.cog.formatter(self.amount)}** dropped by **{self.drop_author.display_name}**! 🎉",
+        )
 
         if self.message and self.message.id in self.cog.active_drops:
             del self.cog.active_drops[self.message.id]
@@ -179,11 +174,11 @@ class AirDropView(discord.ui.View):
                         description="AirDrop Refund",
                     )
             try:
-                embed = discord.Embed(
-                    description="Airdrop cancelled! No one joined, so the money was refunded.",
-                    color=discord.Color.red(),
+                await Embeds.error(
+                    self.message.channel,
+                    "Airdrop cancelled! No one joined, so the money was refunded.",
+                    delete_after=None,
                 )
-                await self.message.channel.send(embed=embed)
             except Exception:
                 pass
 
@@ -809,10 +804,12 @@ class TradeRequestView(discord.ui.View):
             # Try to DM the sender
             if from_user:
                 try:
-                    dm_embed = discord.Embed(
+                    dm_embed =await Embeds.custom(
+                        from_user,
+                        f"{to_name} accepted your trade request for {self.item_name} x{self.quantity}",
                         title="Trade Accepted",
-                        description=f"{to_name} accepted your trade request for {self.item_name} x{self.quantity}",
                         color=discord.Color.green(),
+                        delete_after=None,
                     )
                     await from_user.send(embed=dm_embed)
                 except discord.Forbidden:
@@ -856,10 +853,12 @@ class TradeRequestView(discord.ui.View):
             # Try to DM the sender
             if from_user:
                 try:
-                    dm_embed = discord.Embed(
+                    dm_embed = await Embeds.custom(
+                        from_user,
+                        f"{to_name} declined your trade request for {self.item_name}",
                         title="Trade Declined",
-                        description=f"{to_name} declined your trade request for {self.item_name}",
                         color=discord.Color.red(),
+                        delete_after=None,
                     )
                     await from_user.send(embed=dm_embed)
                 except discord.Forbidden:
@@ -1033,7 +1032,7 @@ class TransactionPaginator(discord.ui.View):
         tx_ids = []
         for tx in page_transactions:
             tx_ids.extend([getattr(tx, "from_user_id", None), getattr(tx, "to_user_id", None)])
-        resolved_tx_ids = await self.cog._resolve_ids(tx_ids)
+        resolved_tx_ids = resolve_ids(self.cog.bot.database,tx_ids)
 
         for tx in page_transactions:
             amount = Decimal(tx.amount) if tx.amount else Decimal("0")
@@ -1142,15 +1141,7 @@ class Economy(commands.Cog):
         self.currency_name = "<:coin:1359823671581085847>"
         self.active_drops = {}
         self.active_players = set()
-        self.immune_user_ids = [
-            1277696931816144998,
-            1290501613311496206,
-            1166141915297743010,
-            493432686694629376,
-            1166140569861496853,
-            284439598422163476,
-            1085252140102062210,
-        ]
+        self.immune_user_ids = None
         self.roll_history = defaultdict(list)
         self.games = [
             "gamble",
@@ -1174,6 +1165,15 @@ class Economy(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
+        if self.immune_user_ids is None:
+            try:
+                app_info = await self.application_info()
+                team_members = getattr(
+                    getattr(app_info, "team", None), "members", []
+                )
+                self.immune_user_ids = [int(member.id) for member in team_members]
+            except Exception:
+                self.immune_user_ids = []
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
     def cog_unload(self):
@@ -1342,46 +1342,6 @@ class Economy(commands.Cog):
         num = self._fmt_no_sci(value, max_frac=2)
         return f"-{num}" if negative else num
 
-    @staticmethod
-    def _is_hash(value) -> bool:
-        """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
-        return (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(c in "0123456789abcdefABCDEF" for c in value)
-        )
-
-    async def _resolve_id(self, value):
-        """Resolve a stored user ID to a raw Discord ID when it is a hash."""
-        if value is None or isinstance(value, int):
-            return value
-        if self._is_hash(value):
-            return await self.bot.database.resolve_user_hash(value)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    async def _resolve_ids(self, values):
-        """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
-        if not values:
-            return {}
-        unique = list(dict.fromkeys(v for v in values if v is not None))
-        hashes = [v for v in unique if self._is_hash(v)]
-        resolved = await self.bot.database.resolve_user_hashes(hashes) if hashes else {}
-        mapping = {}
-        for v in unique:
-            if isinstance(v, int):
-                mapping[v] = v
-            elif self._is_hash(v):
-                mapping[v] = resolved.get(v)
-            else:
-                try:
-                    mapping[v] = int(v)
-                except (TypeError, ValueError):
-                    mapping[v] = None
-        return mapping
-
     async def amount_handler(self, amount_input: str, user_balance: Decimal) -> Decimal:
         """
         Process the bet input and return the corresponding bet amount.
@@ -1485,7 +1445,7 @@ class Economy(commands.Cog):
         try:
             employees_to_fire = await self.bot.database.get_employees_for_firing()
             for job in employees_to_fire:
-                raw_user_id = await self._resolve_id(job.user_id)
+                raw_user_id = await resolve_id(self.bot.database,job.user_id)
                 if raw_user_id:
                     await self.bot.database.fire_employee(raw_user_id)
                     logger.info(f"Fired employee {raw_user_id} from {job.title} for inactivity")
@@ -1582,7 +1542,7 @@ class Economy(commands.Cog):
                 tx_ids = []
                 for tx in user_transactions:
                     tx_ids.extend([getattr(tx, "from_user_id", None), getattr(tx, "to_user_id", None)])
-                resolved_tx_ids = await self._resolve_ids(tx_ids)
+                resolved_tx_ids = await resolve_ids(self.bot.database,tx_ids)
 
                 for tx in user_transactions:
                     amount = Decimal(tx.amount) if tx.amount else Decimal("0")
@@ -1623,11 +1583,13 @@ class Economy(commands.Cog):
             else:
                 await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
-            embed.set_author(
-                name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author)
+            await Embeds.error(
+                ctx,
+                str(e.args[0]),
+                delete_after=5,
+                reply=True,
+                author={"name": "Amount Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
             )
-            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.hybrid_command(
         name="leaderboard",
@@ -1649,7 +1611,7 @@ class Economy(commands.Cog):
             rank_emojis = ["<:crown:1360657246165537011>"] + [
                 f"{idx}." for idx in range(2, 11)
             ]
-            resolved_users = await self._resolve_ids([uid for uid, _ in top_users])
+            resolved_users = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
             for idx, (user_id, total_balance) in enumerate(top_users):
                 raw_id = resolved_users.get(user_id)
                 if raw_id:
@@ -1911,10 +1873,13 @@ class Economy(commands.Cog):
                     description="Daily Reward",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                await Embeds.error(
+                    ctx,
+                    f"🚫 Transaction failed: {e}",
+                    delete_after=5,
+                    reply=True,
                 )
-                await ctx.reply(embed=embed, delete_after=5)
+                return
                 return
             color = discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel):
@@ -1944,11 +1909,13 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
-            embed.set_author(
-                name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author)
+            await Embeds.error(
+                ctx,
+                str(e.args[0]),
+                delete_after=5,
+                reply=True,
+                author={"name": "Amount Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
             )
-            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.hybrid_command(name="weekly", description="Claim your weekly reward.")
     @unified_cooldown(604800)
@@ -1970,10 +1937,13 @@ class Economy(commands.Cog):
                     description="Weekly Reward",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                await Embeds.error(
+                    ctx,
+                    f"🚫 Transaction failed: {e}",
+                    delete_after=5,
+                    reply=True,
                 )
-                await ctx.reply(embed=embed, delete_after=5)
+                return
                 return
 
             color = discord.Color.blurple()
@@ -2004,11 +1974,13 @@ class Economy(commands.Cog):
             )
             await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
-            embed.set_author(
-                name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author)
+            await Embeds.error(
+                ctx,
+                str(e.args[0]),
+                delete_after=5,
+                reply=True,
+                author={"name": "Amount Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
             )
-            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.hybrid_command(name="monthly", description="Claim your monthly reward.")
     @unified_cooldown(2592000)
@@ -2026,10 +1998,13 @@ class Economy(commands.Cog):
                     description="Monthly Reward",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                await Embeds.error(
+                    ctx,
+                    f"🚫 Transaction failed: {e}",
+                    delete_after=5,
+                    reply=True,
                 )
-                await ctx.reply(embed=embed, delete_after=5)
+                return
                 return
             color = discord.Color.blurple()
             if isinstance(ctx.channel, discord.DMChannel):
@@ -2059,11 +2034,13 @@ class Economy(commands.Cog):
                 )
             await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
-            embed.set_author(
-                name="Amount Error", icon_url=self.utils.get_avatar_url(ctx.author)
+            await Embeds.error(
+                ctx,
+                str(e.args[0]),
+                delete_after=5,
+                reply=True,
+                author={"name": "Amount Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
             )
-            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.hybrid_command(name="beg", description="Beg for money. Maybe you'll get lucky!")
     @unified_cooldown(3)
@@ -2181,11 +2158,7 @@ class Economy(commands.Cog):
                         wallet_id=wallet_id, amount=amount, description="Beg"
                     )
                 except ValueError as e:
-                    embed = discord.Embed(
-                        description=f"🚫 Transaction failed: {e}",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
                     return
                 color = discord.Color.blurple()
                 if isinstance(ctx.channel, discord.DMChannel):
@@ -2225,8 +2198,7 @@ class Economy(commands.Cog):
                     icon_url=self.utils.get_avatar_url(ctx.author),
                 )
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
 
         await ctx.reply(embed=embed)
 
@@ -2243,19 +2215,20 @@ class Economy(commands.Cog):
     async def job(self, ctx: commands.Context):
         """Group command for jobs."""
         if ctx.invoked_subcommand is None:
-            embed = discord.Embed(
-                description=(
-                    "Available job commands:\n"
-                    "• `!job list` - View all available jobs\n"
-                    "• `!job apply <job>` - Apply for a job\n"
-                    "• `!job work` - Work to earn your salary\n"
-                    "• `!job info` - View your job details\n\n"
-                    "⚠️ **Warning:** If you don't work for more than 48 hours, you'll be fired!"
-                ),
+            await Embeds.custom(
+                ctx,
+                "Available job commands:\n"
+                "• `!job list` - View all available jobs\n"
+                "• `!job apply <job>` - Apply for a job\n"
+                "• `!job work` - Work to earn your salary\n"
+                "• `!job info` - View your job details\n\n"
+                "⚠️ **Warning:** If you don't work for more than 48 hours, you'll be fired!",
                 color=discord.Color.blurple(),
+                author={"name": "Jobs", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(name="Jobs", icon_url=self.utils.get_avatar_url(ctx.author))
-            await ctx.reply(embed=embed)
 
     @job.command(name="list", description="View all available jobs.")
     @unified_cooldown(10)
@@ -2274,13 +2247,16 @@ class Economy(commands.Cog):
         for job_key, job_data in self.JOBS.items():
             lines.append(f"**{job_data['title']}** (`{job_key}`) - Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**")
 
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            "\n".join(lines),
             title="Available Jobs",
-            description="\n".join(lines),
             color=color,
+            footer="Use !job apply <job_name> to apply for a job",
+            delete_after=None,
+            reply=True,
+            mention_author=True,
         )
-        embed.set_footer(text="Use !job apply <job_name> to apply for a job")
-        await ctx.reply(embed=embed)
 
     @job.command(name="apply", description="Apply for a job to earn some money.")
     @unified_cooldown(86400)
@@ -2292,20 +2268,11 @@ class Economy(commands.Cog):
         # Check for existing job first
         existing_job = await self.bot.database.get_job(user_id)
         if existing_job:
-            embed = discord.Embed(
-                description="You already have a job. Use `!job work` to earn your salary.\n"
-                "If you miss work for 48 hours, you'll be fired automatically.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, "You already have a job. Use `!job work` to earn your salary.\nIf you miss work for 48 hours, you'll be fired automatically.", delete_after=5, reply=True)
 
         if job_name not in self.JOBS:
             valid_jobs = ", ".join(self.JOBS.keys())
-            embed = discord.Embed(
-                description=f"Invalid job. Available jobs: {valid_jobs}",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, f"Invalid job. Available jobs: {valid_jobs}", delete_after=5, reply=True)
 
         job_data = self.JOBS[job_name]
 
@@ -2331,30 +2298,34 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             )
-            embed = discord.Embed(
-                description=f"You were hired as a **{job_data['title']}**!\n"
-                f"Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**\n"
-                f"Use `!job work` to collect your salary daily.\n\n"
-                f"⚠️ **Warning:** If you don't work for 48 hours, you'll be fired!",
-                color=color,
-            )
-            embed.set_author(name="Job Applied", icon_url=self.utils.get_avatar_url(ctx.author))
-
             await self.bot.database.apply_for_job(
                 user_id=user_id,
                 job_title=job_data["title"],
                 base_salary=job_data["base_salary"],
             )
-            await ctx.reply(embed=embed)
+            await Embeds.custom(
+                ctx,
+                f"You were hired as a **{job_data['title']}**!\n"
+                f"Base Salary: {self.currency_name} **{await self.formatter(job_data['base_salary'])}**\n"
+                f"Use `!job work` to collect your salary daily.\n\n"
+                f"⚠️ **Warning:** If you don't work for 48 hours, you'll be fired!",
+                color=color,
+                author={"name": "Job Applied", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
+            )
         else:
-            embed = discord.Embed(
-                description=f"Unfortunately, you were not hired as a **{job_data['title']}**. "
+            await Embeds.warning(
+                ctx,
+                f"Unfortunately, you were not hired as a **{job_data['title']}**. "
                 f"The position was filled by another candidate.\n\n"
                 f"You can apply again in 24 hours.",
-                color=discord.Color.orange(),
+                author={"name": "Application Rejected", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(name="Application Rejected", icon_url=self.utils.get_avatar_url(ctx.author))
-            await ctx.reply(embed=embed)
 
     @job.command(name="work", description="Work to earn your salary (24h cooldown).")
     @unified_cooldown(86400)
@@ -2400,20 +2371,19 @@ class Economy(commands.Cog):
                 multiplier_parts.append(f"Econ×{economic_multiplier:.2f}")
             multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
 
-            embed = discord.Embed(
-                description=(
-                    f"You worked as a **{job.title}** and earned {self.currency_name} **{await self.formatter(salary)}**{multiplier_text}\n\n"
-                    f"**Streak:** {job.streak} consecutive days\n"
-                    f"**Tenure:** {job.days_employed} days employed"
-                ),
+            await Embeds.custom(
+                ctx,
+                f"You worked as a **{job.title}** and earned {self.currency_name} **{await self.formatter(salary)}**{multiplier_text}\n\n"
+                f"**Streak:** {job.streak} consecutive days\n"
+                f"**Tenure:** {job.days_employed} days employed",
                 color=color,
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
 
-            await ctx.reply(embed=embed)
-
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
 
     @job.command(name="info", description="View your current job details.")
     @unified_cooldown(10)
@@ -2424,11 +2394,7 @@ class Economy(commands.Cog):
         try:
             job = await self.bot.database.get_job(user_id)
             if not job:
-                embed = discord.Embed(
-                    description="You don't have a job. Use `!job list` to see available jobs.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.reply(embed=embed, delete_after=5)
+                return await Embeds.error(ctx, "You don't have a job. Use `!job list` to see available jobs.", delete_after=5, reply=True)
 
             current_salary = await self.bot.database.calculate_salary(job)
             weeks_employed = job.days_employed / 7
@@ -2512,8 +2478,7 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed)
 
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
 
     @commands.group(name="loan", aliases=["loans"], invoke_without_command=True)
     async def loan(self, ctx: commands.Context):
@@ -2522,11 +2487,7 @@ class Economy(commands.Cog):
             user_id = ctx.author.id
             active_loan = await self.bot.database.get_active_loans_for_user(user_id)
             if not active_loan:
-                embed = discord.Embed(
-                    description="You have no active loans.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.reply(embed=embed, delete_after=5)
+                return await Embeds.error(ctx, "You have no active loans.", delete_after=5, reply=True)
 
             await self.bot.database.date_check_loans()
 
@@ -2576,8 +2537,12 @@ class Economy(commands.Cog):
             try:
                 amount = await self.amount_handler(amount, safe_loan_amount)
             except ValueError as e:
-                embed = discord.Embed(description=f"Loan amount cannot exceed {self.currency_name} **{await self.formatter(safe_loan_amount)}**.", color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(
+                    ctx,
+                    f"Loan amount cannot exceed {self.currency_name} **{await self.formatter(safe_loan_amount)}**.",
+                    delete_after=5,
+                    reply=True,
+                )
                 return
             
             amount_decimal = Decimal(amount)
@@ -2613,19 +2578,19 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             )
-            embed = discord.Embed(
-                description=(
-                    f"You have taken out a loan of {self.currency_name} **{await self.formatter(amount_decimal)}**.\n"
-                    f"Total to repay (with 10% interest): {self.currency_name} **{await self.formatter(total_repay)}**.\n"
-                    f"Please repay your loan within **7 days** to avoid `penalties.`"
-                ),
+            await Embeds.custom(
+                ctx,
+                f"You have taken out a loan of {self.currency_name} **{await self.formatter(amount_decimal)}**.\n"
+                f"Total to repay (with 10% interest): {self.currency_name} **{await self.formatter(total_repay)}**.\n"
+                f"Please repay your loan within **7 days** to avoid `penalties.`",
                 color=color,
+                author={"name": "Loan", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(name="Loan", icon_url=self.utils.get_avatar_url(ctx.author))
-            await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e.args[0]), delete_after=5, reply=True)
 
     @loan.command(name="repay", aliases=["pay"], description="Repay an active loan.")
     @unified_cooldown(10)
@@ -2639,21 +2604,16 @@ class Economy(commands.Cog):
         await self.bot.database.date_check_loans()
 
         if not current_loan:
-            embed = discord.Embed(
-                description="You have no active loans to repay.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, "You have no active loans to repay.", delete_after=5, reply=True)
         loan = current_loan[0]
         try:
             amount = await self.amount_handler(amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
             return
         try:
             amount_decimal = Decimal(amount)
-        
+
             if amount_decimal <= 0:
                 raise ValueError("Repayment amount must be greater than zero.")
             if amount_decimal > Decimal(balance):
@@ -2685,19 +2645,19 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             )
-            embed = discord.Embed(
-                description=(
-                    f"You have repaid {self.currency_name} **{await self.formatter(payment_result['payment_amount'])}** of your loan.\n"
-                    f"Remaining balance to repay: {self.currency_name} **{await self.formatter(payment_result['remaining_balance'])}**.\n"
-                    f"{'**Your loan is now fully repaid!**' if payment_result['loan_status'] == 'paid' else ''}"
-                ),
+            await Embeds.custom(
+                ctx,
+                f"You have repaid {self.currency_name} **{await self.formatter(payment_result['payment_amount'])}** of your loan.\n"
+                f"Remaining balance to repay: {self.currency_name} **{await self.formatter(payment_result['remaining_balance'])}**.\n"
+                f"{'**Your loan is now fully repaid!**' if payment_result['loan_status'] == 'paid' else ''}",
                 color=color,
+                author={"name": "Loan Repayment", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(name="Loan Repayment", icon_url=self.utils.get_avatar_url(ctx.author))
-            await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e.args[0]), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e.args[0]), delete_after=5, reply=True)
 
     @commands.command(
         name="scout",
@@ -2707,7 +2667,7 @@ class Economy(commands.Cog):
         guild_member_ids = {m.id for m in ctx.guild.members}
 
         top_users = await self.bot.database.get_top_wallet_users(limit=50)
-        resolved_users = await self._resolve_ids([uid for uid, _ in top_users])
+        resolved_users = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
 
         eligible = [
             (uid, bal)
@@ -2718,12 +2678,14 @@ class Economy(commands.Cog):
         ]
 
         if not eligible:
-            embed = discord.Embed(
+            return await Embeds.error(
+                ctx,
+                "No eligible guild members with balance ≥ 10,000 were found.",
                 title="Scout Result",
-                description="No eligible guild members with balance ≥ 10,000 were found.",
-                color=discord.Color.red(),
+                delete_after=5,
+                reply=True,
+                mention_author=True,
             )
-            return await ctx.reply(embed=embed, delete_after=5)
 
         user_id, balance = random.choice(eligible)
         raw_id = resolved_users.get(user_id)
@@ -2778,17 +2740,9 @@ class Economy(commands.Cog):
             return await ctx.reply("You cannot rob a bot!", delete_after=5)
 
         if target_balance <= Decimal("10000"):
-            embed = discord.Embed(
-                description=f"{target.display_name} doesn't have enough money to rob.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, f"{target.display_name} doesn't have enough money to rob.", delete_after=5, reply=True)
         if robber_balance < Decimal("100000"):
-            embed = discord.Embed(
-                description="You need at least 100,000 to attempt a robbery.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, "You need at least 100,000 to attempt a robbery.", delete_after=5, reply=True)
 
         outcomes = {
             "critical_success": 10,
@@ -2900,11 +2854,7 @@ class Economy(commands.Cog):
                         description="Fine for failed robbery",
                     )
                 except ValueError as e:
-                    embed = discord.Embed(
-                        description=f"🚫 Transaction failed: {e}",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
                     return
                 bonus = (target_balance * Decimal("0.01")).quantize(
                     Decimal("1"), rounding=ROUND_HALF_UP
@@ -2923,11 +2873,7 @@ class Economy(commands.Cog):
                         description="Bonus for foiling robbery",
                     )
                 except ValueError as e:
-                    embed = discord.Embed(
-                        description=f"🚫 Transaction failed: {e}",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
                     return
             elif result == "bank_robbery":
                 percentage = Decimal(secrets.randbelow(11) + 10) / Decimal("100")
@@ -2947,11 +2893,7 @@ class Economy(commands.Cog):
                             description="Bank Robbery Success",
                         )
                     except ValueError as e:
-                        embed = discord.Embed(
-                            description=f"🚫 Transaction failed: {e}",
-                            color=discord.Color.red(),
-                        )
-                        await ctx.reply(embed=embed, delete_after=5)
+                        await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
                         return
                     result_message = (
                         f"🏦 **You successfully robbed** {target.mention}'s bank account and stole "
@@ -2960,22 +2902,27 @@ class Economy(commands.Cog):
                 else:
                     result_message = f"💥 **You attempted to rob** {target.mention}'s bank account but found nothing to steal!"
 
-            embed = discord.Embed(
-                description=result_message,
-                color=discord.Color.green()
-                if result in ["critical_success", "success", "bank_robbery"]
-                else discord.Color.red(),
+            await Embeds.custom(
+                ctx,
+                result_message,
+                color=(
+                    discord.Color.green()
+                    if result in ["critical_success", "success", "bank_robbery"]
+                    else discord.Color.red()
+                ),
+                author={"name": "Robbery", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(
-                name="Robbery", icon_url=self.utils.get_avatar_url(ctx.author)
-            )
-            await ctx.reply(embed=embed)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            embed.set_author(
-                name="Robbery Error", icon_url=self.utils.get_avatar_url(ctx.author)
+            await Embeds.error(
+                ctx,
+                str(e),
+                delete_after=5,
+                reply=True,
+                author={"name": "Robbery Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
             )
-            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(
         name="drain",
@@ -3003,11 +2950,7 @@ class Economy(commands.Cog):
         )
 
         if target_balance <= Decimal("10000"):
-            embed = discord.Embed(
-                description=f"{target.display_name} doesn't have enough money to drain.",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, f"{target.display_name} doesn't have enough money to drain.", delete_after=5, reply=True)
 
         if robber_balance < Decimal("100000"):
             return await ctx.reply(
@@ -3041,20 +2984,17 @@ class Economy(commands.Cog):
                         f"\nYou also claimed the bounty on {target.display_name}."
                     )
 
-                embed = discord.Embed(
-                    description=result_message, color=discord.Color.green()
+                await Embeds.success(
+                    ctx,
+                    result_message,
+                    author={"name": "Drain", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                    delete_after=None,
+                    reply=True,
+                    mention_author=True,
                 )
-                embed.set_author(
-                    name="Drain", icon_url=self.utils.get_avatar_url(ctx.author)
-                )
-                await ctx.reply(embed=embed)
 
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"An error occurred: {str(e)}",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, f"An error occurred: {str(e)}", delete_after=5, reply=True)
                 return
         else:
             fine_percentage = Decimal("0.05")
@@ -3068,22 +3008,23 @@ class Economy(commands.Cog):
                     description="Fine for failed drain attempt",
                 )
             except ValueError as e:
-                embed = discord.Embed(
-                    description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+                await Embeds.error(
+                    ctx,
+                    f"🚫 Transaction failed: {e}",
+                    delete_after=5,
+                    reply=True,
                 )
-                await ctx.reply(embed=embed, delete_after=5)
                 return
-            embed = discord.Embed(
-                description=(
-                    f"🚨 You attempted to drain {target.mention}'s wallet but got caught! "
-                    f"You were fined {self.currency_name} **{await self.formatter(amount_fined)}**"
-                ),
-                color=discord.Color.red(),
+                return
+            await Embeds.error(
+                ctx,
+                f"🚨 You attempted to drain {target.mention}'s wallet but got caught! "
+                f"You were fined {self.currency_name} **{await self.formatter(amount_fined)}**",
+                author={"name": "Drain", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(
-                name="Drain", icon_url=self.utils.get_avatar_url(ctx.author)
-            )
-            await ctx.reply(embed=embed)
 
     @commands.hybrid_command(
         name="send",
@@ -3125,24 +3066,23 @@ class Economy(commands.Cog):
             try:
                 amount = await self.amount_handler(amount, sender_balance)
             except ValueError as e:
-                embed = discord.Embed(description=str(e), color=discord.Color.red())
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, str(e), delete_after=5, reply=True)
                 return
 
             # Check wealth-tier transfer limit
             max_transfer = await self.bot.database.get_max_transfer_amount(sender.id)
             if amount > max_transfer:
-                embed = discord.Embed(
-                    description=(
-                        f"🚫 Transfer exceeds your wealth-tier limit.\n\n"
-                        f"**Your max transfer:** {self.currency_name} **{await self.formatter(max_transfer)}**\n"
-                        f"**Attempted:** {self.currency_name} **{await self.formatter(amount)}**\n\n"
-                        f"High-wealth users have reduced transfer limits to promote economic balance."
-                    ),
-                    color=discord.Color.red()
+                return await Embeds.error(
+                    ctx,
+                    f"🚫 Transfer exceeds your wealth-tier limit.\n\n"
+                    f"**Your max transfer:** {self.currency_name} **{await self.formatter(max_transfer)}**\n"
+                    f"**Attempted:** {self.currency_name} **{await self.formatter(amount)}**\n\n"
+                    f"High-wealth users have reduced transfer limits to promote economic balance.",
+                    author={"name": "Transfer Limit", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                    delete_after=10,
+                    reply=True,
+                    mention_author=True,
                 )
-                embed.set_author(name="Transfer Limit", icon_url=self.utils.get_avatar_url(ctx.author))
-                await ctx.reply(embed=embed, delete_after=10)
                 return
 
             txid = await self.bot.database.process_p2p_transaction(
@@ -3161,31 +3101,31 @@ class Economy(commands.Cog):
                     if ctx.author.top_role
                     else discord.Color.blurple()
                 )
-            embed = discord.Embed(
-                description=(
-                    f"**{sender.mention}** transferred {self.currency_name} "
-                    f"**{await self.formatter(amount)}** to **{receiver.mention}**.\n"
-                    f"ID: `{txid}`"
-                ),
+            await Embeds.custom(
+                ctx,
+                f"**{sender.mention}** transferred {self.currency_name} "
+                f"**{await self.formatter(amount)}** to **{receiver.mention}**.\n"
+                f"ID: `{txid}`",
                 color=color,
+                author={"name": "Transfer", "icon_url": self.utils.get_avatar_url(ctx.author)},
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            embed.set_author(
-                name="Transfer", icon_url=self.utils.get_avatar_url(ctx.author)
-            )
-            await ctx.reply(embed=embed)
             embed = discord.Embed(
                 description=(
                     f"**{sender.mention}** transferred {self.currency_name} "
                     f"**{await self.formatter(amount)}** to you.\n"
                     f"ID: `{txid}`"
-                )
-            )
+                ), color=None)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            embed.set_author(
-                name="Transfer Error", icon_url=self.utils.get_avatar_url(ctx.author)
+            await Embeds.error(
+                ctx,
+                str(e),
+                delete_after=5,
+                reply=True,
+                author={"name": "Transfer Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
             )
-            await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(name="drop")
     async def drop(self, ctx: commands.Context, amount: str):
@@ -3196,16 +3136,11 @@ class Economy(commands.Cog):
         try:
             amount = await self.amount_handler(amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
             return
 
         if amount < Decimal("100000"):
-            embed = discord.Embed(
-                description=f"You don't have enough in your wallet to do a drop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, f"You don't have enough in your wallet to do a drop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.", delete_after=5, reply=True)
             return
 
         try:
@@ -3213,10 +3148,13 @@ class Economy(commands.Cog):
                 wallet_id=drop_wallet, amount=-amount, description="Money Drop"
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                f"🚫 Transaction failed: {e}",
+                delete_after=5,
+                reply=True,
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            return
             return
 
         symbols = ["💰", "💸", "💳", "💵", "💶", "🪙", "💷", "💴"]
@@ -3257,16 +3195,11 @@ class Economy(commands.Cog):
         try:
             amount_converted = await self.amount_handler(amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
             return
 
         if amount_converted < Decimal("100000"):
-            embed = discord.Embed(
-                description=f"You don't have enough in your wallet to do an airdrop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, f"You don't have enough in your wallet to do an airdrop!\n\nMinimum is {self.currency_name} **{await self.formatter(Decimal('100000'))}**.", delete_after=5, reply=True)
             return
 
         try:
@@ -3274,10 +3207,13 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id, amount=-amount_converted, description="Airdrop"
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                f"🚫 Transaction failed: {e}",
+                delete_after=5,
+                reply=True,
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            return
             return
 
         embed = discord.Embed(
@@ -3306,11 +3242,7 @@ class Economy(commands.Cog):
         # 1. Date Check: Only allow on December 25th
         now = datetime.now(timezone.utc)
         if now.month != 12 or now.day != 25:
-            embed = discord.Embed(
-                description="🎁 **It's not Christmas yet!** This command only works on December 25th.",
-                color=discord.Color.orange()
-            )
-            return await ctx.reply(embed=embed, delete_after=10)
+            return await Embeds.warning(ctx, "🎁 **It's not Christmas yet!** This command only works on December 25th.", delete_after=10, reply=True)
 
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -3324,10 +3256,13 @@ class Economy(commands.Cog):
                 description="Christmas Gift",
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                f"🚫 Transaction failed: {e}",
+                delete_after=5,
+                reply=True,
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            return
             return
 
         # Determine embed color based on role or DM
@@ -3341,15 +3276,15 @@ class Economy(commands.Cog):
             )
         )
 
-        embed = discord.Embed(
-            description=f"🎄 Merry Christmas from TPNE! You received a gift of {self.currency_name} **{await self.formatter(gift_amount)}**!",
+        await Embeds.custom(
+            ctx,
+            f"🎄 Merry Christmas from TPNE! You received a gift of {self.currency_name} **{await self.formatter(gift_amount)}**!",
             color=color,
+            author={"name": "Christmas Gift", "icon_url": self.utils.get_avatar_url(ctx.author)},
+            delete_after=None,
+            reply=True,
+            mention_author=True,
         )
-        embed.set_author(
-            name="Christmas Gift", icon_url=self.utils.get_avatar_url(ctx.author)
-        )
-
-        await ctx.reply(embed=embed)
 
     @commands.command(name="newyear")
     async def newyear(self, ctx: commands.Context):
@@ -3358,11 +3293,7 @@ class Economy(commands.Cog):
         # 1. Date Check: Only allow on January 1st
         now = datetime.now(timezone.utc)
         if now.month != 1 or now.day != 1:
-            embed = discord.Embed(
-                description="🎉 **It's not New Year's Day yet!** This command only works on January 1st.",
-                color=discord.Color.orange()
-            )
-            return await ctx.reply(embed=embed, delete_after=10)
+            return await Embeds.warning(ctx, "🎉 **It's not New Year's Day yet!** This command only works on January 1st.", delete_after=10, reply=True)
 
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
@@ -3374,10 +3305,13 @@ class Economy(commands.Cog):
                 description="New Year's Gift",
             )
         except ValueError as e:
-            embed = discord.Embed(
-                description=f"🚫 Transaction failed: {e}", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                f"🚫 Transaction failed: {e}",
+                delete_after=5,
+                reply=True,
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            return
             return
 
     @commands.group(name="crypto", aliases=["coin","coins"], invoke_without_command=True)
@@ -3405,13 +3339,16 @@ class Economy(commands.Cog):
 
         description = "\n".join(lines) if lines else "No subcommands available."
 
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            description,
             title="Crypto — Available Commands",
-            description=description,
             color=discord.Color.blurple(),
+            footer=f"Use {prefix}crypto <subcommand> for details.",
+            delete_after=None,
+            reply=True,
+            mention_author=False,
         )
-        embed.set_footer(text=f"Use {prefix}crypto <subcommand> for details.")
-        await ctx.reply(embed=embed, mention_author=False)
 
     @crypto.command(name="buy", description="Buy cryptocurrency with your balance")
     @unified_cooldown(10)
@@ -3684,8 +3621,7 @@ class Economy(commands.Cog):
         try:
             amount = await self.amount_handler(amount, balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
             return
 
         async with self.bot.database.get_session() as session:
@@ -3695,24 +3631,18 @@ class Economy(commands.Cog):
                         wallet_id, amount, "Bank Deposit"
                     )
 
-                    embed = discord.Embed(
-                        description=f"You successfully deposited {self.currency_name} **{await self.formatter(amount)}**.",
-                        color=discord.Color.green(),
-                    )
-                    await ctx.reply(embed=embed)
+                    await Embeds.success(ctx, f"You successfully deposited {self.currency_name} **{await self.formatter(amount)}**.", reply=True)
 
                 except ValueError as e:
                     await session.rollback()
-                    embed = discord.Embed(
-                        description="An error occurred during deposit.",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    await Embeds.error(ctx, "An error occurred during deposit.", delete_after=5, reply=True)
                 except commands.UnexpectedQuoteError:
-                    embed = discord.Embed(
-                        description="Lol dumbass.", color=discord.Color.red()
+                    await Embeds.error(
+                        ctx,
+                        "Lol dumbass.",
+                        delete_after=5,
+                        reply=True,
                     )
-                    await ctx.reply(embed=embed, delete_after=5)
 
     @commands.command(
         name="withdraw",
@@ -3728,8 +3658,7 @@ class Economy(commands.Cog):
         try:
             amount = await self.amount_handler(amount, bank_balance)
         except ValueError as e:
-            embed = discord.Embed(description=str(e), color=discord.Color.red())
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, str(e), delete_after=5, reply=True)
             return
 
         async with self.bot.database.get_session() as session:
@@ -3739,26 +3668,14 @@ class Economy(commands.Cog):
                         wallet_id, amount, "Bank Withdrawal"
                     )
 
-                    embed = discord.Embed(
-                        description=f"You successfully withdrew {self.currency_name} **{await self.formatter(amount)}**.",
-                        color=discord.Color.green(),
-                    )
-                    await ctx.reply(embed=embed)
+                    await Embeds.success(ctx, f"You successfully withdrew {self.currency_name} **{await self.formatter(amount)}**.", reply=True)
 
                 except ValueError as e:
                     await session.rollback()
-                    embed = discord.Embed(
-                        description="An error occurred during withdrawal.",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
-                    embed = discord.Embed(description=str(e), color=discord.Color.red())
-                    await ctx.reply(embed=embed, delete_after=5)
+                    await Embeds.error(ctx, "An error occurred during withdrawal.", delete_after=5, reply=True)
+                    await Embeds.error(ctx, str(e), delete_after=5, reply=True)
                 except commands.UnexpectedQuoteError:
-                    embed = discord.Embed(
-                        description="Lol dumbass.", color=discord.Color.red()
-                    )
-                    await ctx.reply(embed=embed, delete_after=5)
+                    await Embeds.error(ctx, "Lol dumbass.", delete_after=5, reply=True)
 
     @commands.command(
         name="treasury",
@@ -3780,10 +3697,13 @@ class Economy(commands.Cog):
             await ctx.reply(embed=embed)
 
         except Exception as e:
-            embed = discord.Embed(
-                description="Error fetching treasury info.", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                "Error fetching treasury info.",
+                delete_after=5,
+                reply=True,
             )
-            await ctx.reply(embed=embed, delete_after=5)
+            logger.error(f"Error fetching treasury info: {str(e)}")
             logger.error(f"Error fetching treasury info: {str(e)}")
 
     @commands.command(
@@ -3802,10 +3722,13 @@ class Economy(commands.Cog):
         )
 
         if not user_transactions:
-            embed = discord.Embed(
-                description="No transactions found.", color=discord.Color.red()
+            await Embeds.error(
+                ctx,
+                "No transactions found.",
+                delete_after=None,
+                reply=True,
+                mention_author=True,
             )
-            await ctx.reply(embed=embed)
         else:
             paginator = TransactionPaginator(
                 self, user_transactions, member, requesting_user
@@ -3838,8 +3761,8 @@ class Economy(commands.Cog):
                 await ctx.reply("🔍 No transaction found with that ID.", delete_after=5)
                 return
 
-            raw_from_id = await self._resolve_id(getattr(transaction, "from_user_id", None))
-            raw_to_id = await self._resolve_id(getattr(transaction, "to_user_id", None))
+            raw_from_id = await resolve_id(self.bot.database,getattr(transaction, "from_user_id", None))
+            raw_to_id = await resolve_id(self.bot.database,getattr(transaction, "to_user_id", None))
 
             async def resolve_user(uid):
                 if not uid:
@@ -4000,13 +3923,16 @@ class Economy(commands.Cog):
 
         description = "\n".join(lines) if lines else "No subcommands available."
 
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            description,
             title="Bounty — Available Commands",
-            description=description,
             color=discord.Color.blurple(),
+            footer=f"Use {prefix}bounty <subcommand> for details.",
+            delete_after=None,
+            reply=True,
+            mention_author=False,
         )
-        embed.set_footer(text=f"Use {prefix}bounty <subcommand> for details.")
-        await ctx.reply(embed=embed, mention_author=False)
 
     @bounty.command(name="set", description="Set a bounty on another user")
     @unified_cooldown(10)
@@ -4039,8 +3965,13 @@ class Economy(commands.Cog):
             )
 
         desc = f"{user.mention} has placed a bounty of {self.currency_name} **{await self.short_formatter(amt)}** on {member.mention}!"
-        embed = discord.Embed(description=desc, color=discord.Color.green())
-        await ctx.reply(embed=embed)
+        await Embeds.success(
+            ctx,
+            desc,
+            delete_after=None,
+            reply=True,
+            mention_author=True,
+        )
 
     @bounty.command(name="list", description="List top active bounties")
     @unified_cooldown(10)
@@ -4053,7 +3984,7 @@ class Economy(commands.Cog):
             )
 
         embed = discord.Embed(title="🎯 Top Bounties", color=discord.Color.blurple())
-        resolved_bounties = await self._resolve_ids([uid for uid, _ in top_bounties])
+        resolved_bounties = await resolve_ids(self.bot.database,[uid for uid, _ in top_bounties])
         for user_id, total in top_bounties:
             raw_id = resolved_bounties.get(user_id)
             member = ctx.guild.get_member(raw_id) if raw_id else None
@@ -4078,11 +4009,11 @@ class Economy(commands.Cog):
     async def shop(self, interaction: Interaction):
         shop_items = await self.bot.database.list_shop_items()
         if not shop_items:
-            embed = discord.Embed(
-                description="There are no items in the shop currently. Check back later!",
-                color=discord.Color.red(),
+            await Embeds.error(
+                interaction,
+                "There are no items in the shop currently. Check back later!",
+                ephemeral=True,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
         else:
             view = ShopView(
                 bot=self.bot,
@@ -4120,12 +4051,12 @@ class Economy(commands.Cog):
 
         entries = await self.bot.database.get_user_inventory_grouped(member.id)
         if not entries:
-            embed = discord.Embed(
+            await Embeds.error(
+                interaction,
+                "Your inventory is empty.",
                 title="Inventory",
-                description="Your inventory is empty.",
-                color=discord.Color.red(),
+                ephemeral=True,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         paginator = ItemPaginator(
@@ -4154,12 +4085,12 @@ class Economy(commands.Cog):
                 usable_entries.append(entry)
 
         if not usable_entries:
-            embed = discord.Embed(
+            await Embeds.warning(
+                interaction,
+                "You have no usable items (consumables or redeemables).",
                 title="Inventory",
-                description="You have no usable items (consumables or redeemables).",
-                color=discord.Color.orange(),
+                ephemeral=True,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         paginator = UseItemPaginator(
@@ -4257,12 +4188,12 @@ class Economy(commands.Cog):
         effects = await self.bot.database.get_user_active_effects(interaction.user.id)
 
         if not effects:
-            embed = discord.Embed(
+            await Embeds.warning(
+                interaction,
+                "You have no active effects.",
                 title="Active Effects",
-                description="You have no active effects.",
-                color=discord.Color.orange(),
+                ephemeral=True,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -4307,12 +4238,12 @@ class Economy(commands.Cog):
         trades = await self.bot.database.get_pending_trades(interaction.user.id)
 
         if not trades:
-            embed = discord.Embed(
+            await Embeds.warning(
+                interaction,
+                "You have no pending trade requests.",
                 title="Pending Trades",
-                description="You have no pending trade requests.",
-                color=discord.Color.orange(),
+                ephemeral=True,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -4323,7 +4254,7 @@ class Economy(commands.Cog):
         trade_user_ids = []
         for t in trades:
             trade_user_ids.extend([getattr(t, "from_user_id", None), getattr(t, "to_user_id", None)])
-        resolved_trade_ids = await self._resolve_ids(trade_user_ids)
+        resolved_trade_ids = await resolve_ids(self.bot.database,trade_user_ids)
 
         incoming = [t for t in trades if resolved_trade_ids.get(getattr(t, "to_user_id", None)) == interaction.user.id]
         outgoing = [t for t in trades if resolved_trade_ids.get(getattr(t, "from_user_id", None)) == interaction.user.id]
@@ -4376,13 +4307,16 @@ class Economy(commands.Cog):
 
         description = "\n".join(lines) if lines else "No subcommands available."
 
-        embed = discord.Embed(
+        await Embeds.custom(
+            ctx,
+            description,
             title="VIP — Available Commands",
-            description=description,
             color=discord.Color.gold(),
+            footer=f"Use {prefix}vip <subcommand> for details.",
+            delete_after=None,
+            reply=True,
+            mention_author=False,
         )
-        embed.set_footer(text=f"Use {prefix}vip <subcommand> for details.")
-        await ctx.reply(embed=embed, mention_author=False)
 
     @vip_group.command(name="status", aliases=["stat"], description="View your VIP tier status and progress")
     @unified_cooldown(10)
@@ -4573,7 +4507,7 @@ class Economy(commands.Cog):
 
             description_lines = []
             user_ids = [entry.get("user_id") for entry in leaderboard]
-            resolved_vip_ids = await self._resolve_ids(user_ids)
+            resolved_vip_ids = await resolve_ids(self.bot.database,user_ids)
             for i, entry in enumerate(leaderboard, 1):
                 user_id = entry.get("user_id")
                 total_wagered = entry["total_wagered"]
@@ -4607,24 +4541,28 @@ class Economy(commands.Cog):
             balance = await self.bot.database.get_rakeback_balance(ctx.author.id)
 
             if balance <= Decimal("0"):
-                embed = discord.Embed(
+                await Embeds.warning(
+                    ctx,
+                    "You have no accumulated rakeback to claim.\n\nPlay more games to earn rakeback on your wagers!",
                     title="Rakeback",
-                    description="You have no accumulated rakeback to claim.\n\nPlay more games to earn rakeback on your wagers!",
-                    color=discord.Color.orange(),
+                    ephemeral=True,
+                    delete_after=None,
+                    reply=True,
                 )
-                await ctx.reply(embed=embed, ephemeral=True)
                 return
 
             claimed = await self.bot.database.claim_rakeback(ctx.author.id)
 
             if claimed > 0:
                 formatted_amount = await self.formatter(claimed)
-                embed = discord.Embed(
+                await Embeds.success(
+                    ctx,
+                    f"You claimed **{formatted_amount}** {self.currency_name}!",
                     title="💸 Rakeback Claimed!",
-                    description=f"You claimed **{formatted_amount}** {self.currency_name}!",
-                    color=discord.Color.green(),
+                    delete_after=None,
+                    reply=True,
+                    mention_author=True,
                 )
-                await ctx.reply(embed=embed)
             else:
                 await ctx.reply(
                     "No rakeback available to claim.",

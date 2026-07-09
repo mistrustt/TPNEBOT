@@ -5,12 +5,16 @@ with improved styling and visualization options.
 """
 
 import io
+import logging
 from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 import discord
+
+# Suppress noisy matplotlib INFO logging
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
 # Color palette for consistent styling

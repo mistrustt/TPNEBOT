@@ -1,5 +1,6 @@
 """Deterministic one-way hashing for Discord user IDs and location encryption."""
 
+from typing import Any, Dict, Iterable, Optional
 import hashlib
 import hmac
 import logging
@@ -68,6 +69,46 @@ def hash_user_id_analytics(user_id: int) -> str:
     key = salt.encode("utf-8")
     return hmac.new(key, str(int(user_id)).encode("utf-8"), hashlib.sha256).hexdigest()
 
+def is_hash(value: Any) -> bool:
+    """Return True if a stored user ID value is a HMAC-SHA256 hex hash."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(c in "0123456789abcdefABCDEF" for c in value)
+    )
+
+
+async def resolve_id(database, value: Any) -> Optional[int]:
+    """Resolve a stored user ID to a raw Discord ID when it is a hash."""
+    if value is None or isinstance(value, int):
+        return value
+    if is_hash(value):
+        return await database.resolve_user_hash(value)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def resolve_ids(database, values: Iterable[Any]) -> Dict[Any, Optional[int]]:
+    """Batch-resolve stored user IDs, leaving raw IDs unchanged."""
+    if not values:
+        return {}
+    unique = list(dict.fromkeys(v for v in values if v is not None))
+    hashes = [v for v in unique if is_hash(v)]
+    resolved = await database.resolve_user_hashes(hashes) if hashes else {}
+    mapping: Dict[Any, Optional[int]] = {}
+    for v in unique:
+        if isinstance(v, int):
+            mapping[v] = v
+        elif is_hash(v):
+            mapping[v] = resolved.get(v)
+        else:
+            try:
+                mapping[v] = int(v)
+            except (TypeError, ValueError):
+                mapping[v] = None
+    return mapping
 
 _location_fernet: Fernet | None = None
 

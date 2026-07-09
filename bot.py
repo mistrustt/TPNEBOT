@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.cooldown import CooldownUtils, UnifiedCooldownManager
+from utils.embeds import Embeds
 from utils.infisical import InfisicalSecretsManager
 from database.manager import DatabaseManager
 from sqlalchemy import text
@@ -217,7 +218,7 @@ class DiscordBot(commands.Bot):
         self._interaction_start_times: dict[int, float] = {}
         self.config = self.database.load_config()
         self.debug_mode_active = False
-        self.version = "2026.07.08"
+        self.version = "v2026.07.09"
         self.cool_guys = None
         # Discord privileged intents we require and why:
         # - message_content: spam-channel enforcement, automated moderation
@@ -404,28 +405,21 @@ class DiscordBot(commands.Bot):
                 return
 
             if self.debug_mode_active and ctx.author.id not in self.cool_guys:
-                embed = discord.Embed(
-                    description="The bot is currently in maintenance mode. Please try again later.",
-                    color=discord.Color.red(),
+                return await Embeds.error(
+                    ctx,
+                    "The bot is currently in maintenance mode. Please try again later.",
+                    delete_after=5,
+                    reply=True,
                 )
-                return await ctx.reply(embed=embed, delete_after=5)
 
             is_blacklisted = await self.database.is_user_blacklisted(ctx.author.id)
             if is_blacklisted and ctx.author.id not in self.owner_ids:
-                embed = discord.Embed(
-                    description="You are blacklisted from using this bot.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "You are blacklisted from using this bot.", delete_after=5, reply=True)
                 return
 
             # Block DM commands (owners exempt)
             if ctx.guild is None and ctx.author.id not in self.owner_ids:
-                embed = discord.Embed(
-                    description="Commands can only be used in a server.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "Commands can only be used in a server.", delete_after=5, reply=True)
                 return
 
             # Block commands for accounts newer than 30 days
@@ -433,12 +427,13 @@ class DiscordBot(commands.Bot):
             account_age = datetime.now(timezone.utc) - ctx.author.created_at
             if account_age < account_age_threshold and ctx.author.id not in self.owner_ids:
                 days_remaining = 30 - account_age.days
-                embed = discord.Embed(
-                    description=f"Your account must be at least 30 days old to use commands. "
-                                f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
-                    color=discord.Color.red(),
+                await Embeds.error(
+                    ctx,
+                    f"Your account must be at least 30 days old to use commands. "
+                    f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
+                    delete_after=10,
+                    reply=True,
                 )
-                await ctx.reply(embed=embed, delete_after=10)
                 return
 
             user_id = ctx.author.id
@@ -450,19 +445,21 @@ class DiscordBot(commands.Bot):
             )
             if command_enabled is False:
                 if ctx.author.id in self.owner_ids:
-                    embed = discord.Embed(
+                    await Embeds.warning(
+                        ctx,
+                        f"The `{command_name}` command is disabled in this channel by staff, but you are an owner and can still use it.",
                         title="Notice",
-                        description=f"The `{command_name}` command is disabled in this channel by staff, but you are an owner and can still use it.",
-                        color=discord.Color.orange(),
+                        delete_after=5,
+                        reply=False,
                     )
-                    await ctx.send(embed=embed, delete_after=5)
                 else:
-                    embed = discord.Embed(
+                    await Embeds.warning(
+                        ctx,
+                        f"The `{command_name}` command is disabled in this channel by staff.",
                         title="Error!",
-                        description=f"The `{command_name}` command is disabled in this channel by staff.",
-                        color=discord.Color.orange(),
+                        delete_after=5,
+                        reply=False,
                     )
-                    await ctx.send(embed=embed, delete_after=5)
                     return
 
             command_enabled_global = await self.database.get_command_status(
@@ -470,19 +467,21 @@ class DiscordBot(commands.Bot):
             )
             if command_enabled_global is False:
                 if ctx.author.id in self.owner_ids:
-                    embed = discord.Embed(
+                    await Embeds.warning(
+                        ctx,
+                        f"The `{command_name}` command is currently disabled for maintenance, but you are an owner and can still use it.",
                         title="Notice",
-                        description=f"The `{command_name}` command is currently disabled for maintenance, but you are an owner and can still use it.",
-                        color=discord.Color.orange(),
+                        delete_after=5,
+                        reply=False,
                     )
-                    await ctx.send(embed=embed, delete_after=5)
                 else:
-                    embed = discord.Embed(
+                    await Embeds.warning(
+                        ctx,
+                        f"The `{command_name}` command is currently disabled for maintenance.",
                         title="Error!",
-                        description=f"The `{command_name}` command is currently disabled for maintenance.",
-                        color=discord.Color.orange(),
+                        delete_after=5,
+                        reply=False,
                     )
-                    await ctx.send(embed=embed, delete_after=5)
                     return
 
             if ctx.guild:
@@ -504,12 +503,12 @@ class DiscordBot(commands.Bot):
                         break
 
                 if not has_permission:
-                    embed = discord.Embed(
-                        title="",
-                        description=f"{ctx.author.mention}: You don't have the required role to use `{command_name}`",
-                        color=discord.Color.red(),
+                    await Embeds.error(
+                        ctx,
+                        f"{ctx.author.mention}: You don't have the required role to use `{command_name}`",
+                        delete_after=5,
+                        reply=False,
                     )
-                    await ctx.send(embed=embed, delete_after=5)
                     return
 
             self._context_start_times[id(ctx)] = time.perf_counter()
@@ -897,51 +896,36 @@ class DiscordBot(commands.Bot):
         elif isinstance(error, commands.errors.UnexpectedQuoteError):
             return
         elif isinstance(error, commands.NoPrivateMessage):
-            embed = discord.Embed(
-                description="This command cannot be used in DMs!",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, "This command cannot be used in DMs!", delete_after=5, reply=True)
         elif isinstance(error, commands.MissingPermissions):
-            embed = discord.Embed(
-                description="You are missing the permission(s) `"
-                + ", ".join(error.missing_permissions)
-                + "` to execute this command!",
-                color=discord.Color.red(),
+            return await Embeds.error(
+                ctx,
+                "You are missing the permission(s) `" + ", ".join(error.missing_permissions) + "` to execute this command!",
+                delete_after=5,
+                reply=True,
             )
-            return await ctx.reply(embed=embed, delete_after=5)
         elif isinstance(error, commands.BotMissingPermissions):
-            embed = discord.Embed(
-                description="I am missing the permission(s) `"
-                + ", ".join(error.missing_permissions)
-                + "` to fully perform this command!",
-                color=discord.Color.red(),
+            return await Embeds.error(
+                ctx,
+                "I am missing the permission(s) `" + ", ".join(error.missing_permissions) + "` to fully perform this command!",
+                delete_after=5,
+                reply=True,
             )
-            return await ctx.reply(embed=embed, delete_after=5)
         elif isinstance(error, commands.MemberNotFound):
-            embed = discord.Embed(
-                title="Error!",
-                description=f"**Member not found:** {error}",
-                color=discord.Color.red(),
-            )
-            return await ctx.reply(embed=embed, delete_after=5)
+            return await Embeds.error(ctx, f"**Member not found:** {error}", title="Error!", delete_after=5, reply=True)
         elif isinstance(error, commands.MissingRequiredArgument):
             prefix = await self.database.get_prefix(ctx.guild.id)
             usage = f"`{prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
-            embed = discord.Embed(
-                title="Error!",
-                description=f"**Missing argument:** {error.param.name}\n**Usage:** {usage}",
-                color=discord.Color.red(),
-            )
             ctx.command.reset_cooldown(ctx)
-            return await ctx.reply(embed=embed, delete_after=5)
-        elif isinstance(error, commands.BadArgument):
-            embed = discord.Embed(
+            return await Embeds.error(
+                ctx,
+                f"**Missing argument:** {error.param.name}\n**Usage:** {usage}",
                 title="Error!",
-                description=f"**Bad argument:** {error}",
-                color=discord.Color.red(),
+                delete_after=5,
+                reply=True,
             )
-            return await ctx.reply(embed=embed, delete_after=5)
+        elif isinstance(error, commands.BadArgument):
+            return await Embeds.error(ctx, f"**Bad argument:** {error}", title="Error!", delete_after=5, reply=True)
         elif isinstance(error, commands.NotOwner):
             if ctx.guild:
                 self.logger.warning(
@@ -958,28 +942,28 @@ class DiscordBot(commands.Bot):
             pass
         elif _is_url_validation_error(error):
             original = getattr(error, "original", error)
-            embed = discord.Embed(
-                title="🚫 Invalid Input",
-                description=str(original),
-                color=discord.Color.red(),
-            )
             ctx.command.reset_cooldown(ctx)
-            return await ctx.reply(embed=embed, delete_after=10)
+            return await Embeds.error(
+                ctx,
+                str(original),
+                title="🚫 Invalid Input",
+                delete_after=10,
+                reply=True,
+            )
         elif _root_cause_is_db_error(error):
             original = getattr(error, "original", error)
             self.logger.warning(
                 f"Database error in command {ctx.command.qualified_name}: "
                 f"{type(original).__name__}: {original}"
             )
-            embed = discord.Embed(
+            return await Embeds.warning(
+                ctx,
+                "The database connection dropped. Your command was not processed. "
+                "Please try again in a moment.",
                 title="⚠️ Database Temporarily Unavailable",
-                description=(
-                    "The database connection dropped. Your command was not processed. "
-                    "Please try again in a moment."
-                ),
-                color=discord.Color.orange(),
+                delete_after=10,
+                reply=True,
             )
-            return await ctx.reply(embed=embed, delete_after=10)
         elif self._is_transient_discord_api_error(error):
             self.logger.warning(
                 f"Discord API error in command {ctx.command.qualified_name}: "
@@ -1121,14 +1105,14 @@ class DiscordBot(commands.Bot):
                 self.logger.error(
                     "Developer channel not found. Full error:\n" + detailed_error
                 )
-                user_embed = discord.Embed(
-                    title="Error!",
-                    description="An unexpected error occurred. Please try again later.",
-                    color=discord.Color.red(),
-                )
-                user_embed.set_footer(text="The developer has been notified.")
-                await ctx.send(embed=user_embed, delete_after=10)
                 ctx.command.reset_cooldown(ctx)
+                await Embeds.error(
+                    ctx,
+                    "An unexpected error occurred. Please try again later.",
+                    title="Error!",
+                    delete_after=10,
+                    reply=False,
+                )
                 raise error
         else:
             return

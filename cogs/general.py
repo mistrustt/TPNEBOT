@@ -18,6 +18,7 @@ from discord import ui, Interaction, SelectOption, ButtonStyle, app_commands
 from discord.ext import commands
 from utils.misc import MiscUtils
 from utils.cooldown import unified_cooldown
+from utils.embeds import Embeds
 from urllib.parse import urlparse
 from typing import List, Optional
 from discord.ext.commands import Context
@@ -798,11 +799,7 @@ class General(commands.Cog, name="General"):
             previous_time = self.afk_users[user_id]["start_time"]
             duration = discord.utils.utcnow() - previous_time
 
-            embed = discord.Embed(
-                description=f"You are already AFK:\n**Reason:** {previous_reason}\n**Duration:** {humanfriendly.format_timespan(duration, False)}",
-                color=discord.Color.yellow(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.warning(ctx, f"You are already AFK:\n**Reason:** {previous_reason}\n**Duration:** {humanfriendly.format_timespan(duration, False)}", delete_after=5, reply=True)
             return
 
         try:
@@ -970,11 +967,7 @@ class General(commands.Cog, name="General"):
             cleared = True
 
         if cleared:
-            embed = discord.Embed(
-                description="Cleared snipe history for this channel.",
-                color=discord.Color.green(),
-            )
-            await ctx.reply(embed=embed)
+            await Embeds.success(ctx, "Cleared snipe history for this channel.", reply=True)
         else:
             await ctx.send("No snipe history to clear!", delete_after=5)
 
@@ -1120,10 +1113,7 @@ class General(commands.Cog, name="General"):
     async def set_prefix(self, ctx: Context, prefix: str):
         try:
             await self.bot.database.set_prefix(ctx.guild.id, prefix)
-            embed = discord.Embed(
-                description=f"Prefix set to: `{prefix}`", color=discord.Color.green()
-            )
-            await ctx.send(embed=embed)
+            await Embeds.success(ctx, f"Prefix set to: `{prefix}`", reply=False)
         except Exception as e:
             await ctx.send(
                 f"An error occurred while setting the prefix. Please try again later."
@@ -1160,11 +1150,7 @@ class General(commands.Cog, name="General"):
             )
 
         if not member:
-            embed = discord.Embed(
-                description=f"No user found with the identifier: {identifier}. Please try again.",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed)
+            await Embeds.error(ctx, f"No user found with the identifier: {identifier}. Please try again.", reply=False)
             return
 
         # Check if this is a server member or just a User (non-server member)
@@ -1302,11 +1288,7 @@ class General(commands.Cog, name="General"):
             return
 
         if not name_history:
-            embed = discord.Embed(
-                description=f"No history found for {user.display_name}.",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed, delete_after=10)
+            await Embeds.error(ctx, f"No history found for {user.display_name}.", delete_after=10, reply=False)
             return
 
         view = NamesPaginationView(name_history, per_page=per_page)
@@ -1321,20 +1303,12 @@ class General(commands.Cog, name="General"):
 
         user = ctx.author
         if not await self.bot.database.has_name_history(user.id):
-            embed = discord.Embed(
-                description=f"No history found for {user.display_name}.",
-                color=discord.Color.red(),
-            )
-            await ctx.send(embed=embed, delete_after=10)
+            await Embeds.error(ctx, f"No history found for {user.display_name}.", delete_after=10, reply=False)
             return
 
         await self.bot.database.clear_name_history(user.id)
 
-        embed = discord.Embed(
-            description=f"Cleared name history for {user.display_name}.",
-            color=discord.Color.green(),
-        )
-        await ctx.send(embed=embed, delete_after=10)
+        await Embeds.success(ctx, f"Cleared name history for {user.display_name}.", delete_after=10, reply=False)
 
     @commands.hybrid_command(
         name="serverinfo", aliases=["si"], description="View information about the server."
@@ -1492,11 +1466,7 @@ class General(commands.Cog, name="General"):
             embed.set_image(url=server_avatar_url)
             await ctx.reply(embed=embed)
         else:
-            embed = discord.Embed(
-                description=f"{member.display_name} does not have a server-specific avatar. Here's their global avatar: {member.display_avatar.url}",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed)
+            await Embeds.error(ctx, f"{member.display_name} does not have a server-specific avatar. Here's their global avatar: {member.display_avatar.url}", reply=True)
 
     @commands.command(
         name="invite",
@@ -1595,11 +1565,7 @@ Question: {question}"""
         """Ask the AI a question and get a response."""
         # Disallow questions longer than 100 characters (admins bypass)
         if len(question) > 100 and not ctx.author.guild_permissions.administrator:
-            embed = discord.Embed(
-                description="🚫 Your question must be 100 characters or fewer.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "🚫 Your question must be 100 characters or fewer.", delete_after=5, reply=True)
             return
 
         system_msg = {
@@ -2615,22 +2581,13 @@ Question: {question}"""
         async with aiohttp.ClientSession() as session:
             async with session.get(f"https://ipapi.co/{ip_address}/json/") as response:
                 if response.status == 429:
-                    embed = discord.Embed(
-                        description="⚠️ API Rate limit reached. Please try again later.",
-                        color=discord.Color.orange(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=10)
+                    await Embeds.warning(ctx, "⚠️ API Rate limit reached. Please try again later.", delete_after=10, reply=True)
                     return
                 if response.status != 200:
                     logger.error(
                         f"ipapi error: HTTP {response.status} for {ip_address}"
                     )
-                    embed = discord.Embed(
-                        title="⚠️ Lookup Failed",
-                        description=f"The IP lookup service returned an error (HTTP {response.status}). Please try again later.",
-                        color=discord.Color.red(),
-                    )
-                    await ctx.reply(embed=embed, delete_after=10)
+                    await Embeds.error(ctx, f"The IP lookup service returned an error (HTTP {response.status}). Please try again later.", title="⚠️ Lookup Failed", delete_after=10, reply=True)
                     return
                 if response.status == 200:
                     data = await response.json()
@@ -2693,25 +2650,13 @@ Question: {question}"""
         try:
             time = humanfriendly.parse_timespan(time)
             if time < 30:
-                embed = discord.Embed(
-                    description="Reminder time must be at least 30 seconds.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "Reminder time must be at least 30 seconds.", delete_after=5, reply=True)
                 return
             if not isinstance(time, (int, float)) or str(time) == "nan":
-                embed = discord.Embed(
-                    description="Invalid time period. Please provide a valid time period.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "Invalid time period. Please provide a valid time period.", delete_after=5, reply=True)
                 return
         except humanfriendly.InvalidTimespan:
-            embed = discord.Embed(
-                description="Invalid time period. Please provide a valid time period.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "Invalid time period. Please provide a valid time period.", delete_after=5, reply=True)
             return
 
         safe_reminder = discord.utils.escape_mentions(reminder)
@@ -2758,12 +2703,7 @@ Question: {question}"""
                 logger.error(
                     f"NASA APOD API error: HTTP {status} {data.get('msg', 'Unknown error')}"
                 )
-                embed = discord.Embed(
-                    title="⚠️ NASA API Error",
-                    description=f"The NASA API returned an error (HTTP {status}). Please try again later.",
-                    color=discord.Color.red(),
-                )
-                await ctx.reply(embed=embed, delete_after=10)
+                await Embeds.error(ctx, f"The NASA API returned an error (HTTP {status}). Please try again later.", title="⚠️ NASA API Error", delete_after=10, reply=True)
                 return
 
             apod_title = data.get("title", "No Title")
@@ -2839,20 +2779,10 @@ Question: {question}"""
             await message.add_reaction("👎")
         except aiohttp.ClientError as e:
             logger.exception(f"Error fetching APOD: {e}")
-            embed = discord.Embed(
-                title="Error",
-                description="There was an error fetching from the NASA API.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "There was an error fetching from the NASA API.", title="Error", delete_after=5, reply=True)
         except Exception as e:
             logger.exception(f"Unexpected error: {e}")
-            embed = discord.Embed(
-                title="Error",
-                description="An unexpected error occurred.",
-                color=discord.Color.red(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.error(ctx, "An unexpected error occurred.", title="Error", delete_after=5, reply=True)
 
     @commands.command(
         name="quote", help="Quote a message, message link, or text."
@@ -2903,12 +2833,7 @@ Question: {question}"""
                 author_name = ctx.author.display_name
                 avatar_user = ctx.author
             else:
-                embed = discord.Embed(
-                    title="Quote",
-                    description="Please provide a message link, ID, reply to a message, or provide some text to quote.",
-                    color=discord.Color.red(),
-                )
-                return await ctx.reply(embed=embed, delete_after=5)
+                await Embeds.error(ctx, "Please provide a message link, ID, reply to a message, or provide some text to quote.", title="Quote", delete_after=5, reply=True)
 
             avatar_asset = avatar_user.display_avatar.with_format("png").with_size(256)
             avatar_bytes = await avatar_asset.read()
@@ -3130,12 +3055,7 @@ Question: {question}"""
             await ctx.reply(file=discord.File(out, "quote.jpg"))
         except discord.app_commands.errors.CommandOnCooldown as e:
             retry_after = e.retry_after
-            embed = discord.Embed(
-                title="Cooldown",
-                description=f"Please wait {retry_after:.1f} seconds before using this command again.",
-                color=discord.Color.orange(),
-            )
-            await ctx.reply(embed=embed, delete_after=5)
+            await Embeds.warning(ctx, f"Please wait {retry_after:.1f} seconds before using this command again.", title="Cooldown", delete_after=5, reply=True)
 
     def wrap_text(
         self,

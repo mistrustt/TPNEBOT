@@ -4,6 +4,7 @@ import datetime
 from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
+from utils.embeds import Embeds
 from utils.cooldown import unified_cooldown
 from utils.guardrails import check_slash_guardrails
 
@@ -185,10 +186,13 @@ class Community(commands.Cog, name="Community"):
                 if ctx.author.top_role
                 else discord.Color.blurple()
             )
-        embed = discord.Embed(
-            description=f"Added **{song_title}** to your grail list.", color=color
+        await Embeds.custom(
+            ctx,
+            f"Added **{song_title}** to your grail list.",
+            color=color,
+            reply=True,
+            delete_after=None,
         )
-        await ctx.reply(embed=embed)
 
     @grail.command(name="remove")
     async def grail_remove(self, ctx: Context, *, song_title: str):
@@ -216,16 +220,20 @@ class Community(commands.Cog, name="Community"):
             await self.bot.database.remove_favorite_song(
                 ctx.author.id, song_to_remove.song_title
             )
-            embed = discord.Embed(
-                description=f"Removed **{song_title}** from your grail list.",
+            await Embeds.custom(
+                ctx,
+                f"Removed **{song_title}** from your grail list.",
                 color=color,
+                reply=True,
+                delete_after=None,
             )
         else:
-            embed = discord.Embed(
-                description=f"Could not find **{song_title}** in your grail list.",
-                color=discord.Color.red(),
+            await Embeds.error(
+                ctx,
+                f"Could not find **{song_title}** in your grail list.",
+                reply=True,
+                delete_after=None,
             )
-        await ctx.reply(embed=embed)
 
     @grail.command(name="list")
     async def grail_list(self, ctx: commands.Context, member: discord.Member = None):
@@ -262,10 +270,13 @@ class Community(commands.Cog, name="Community"):
                 if ctx.author.top_role
                 else discord.Color.blurple()
             )
-        embed = discord.Embed(
-            description=f"Removed **all songs** from your grail list.", color=color
+        await Embeds.custom(
+            ctx,
+            f"Removed **all songs** from your grail list.",
+            color=color,
+            reply=True,
+            delete_after=None,
         )
-        await ctx.reply(embed=embed)
 
     @commands.hybrid_command(
         name="setspamchannel",
@@ -283,12 +294,13 @@ class Community(commands.Cog, name="Community"):
             return
 
         await self.bot.database.set_spam_channel(ctx.guild.id, channel.id)
-        embed = discord.Embed(
+        await Embeds.success(
+            ctx,
+            f"Spam channel set to: {channel.mention}",
             title="Spam Channel Set",
-            description=f"Spam channel set to: {channel.mention}",
-            color=discord.Color.green(),
+            reply=True,
+            delete_after=None,
         )
-        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
