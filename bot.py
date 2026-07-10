@@ -400,6 +400,133 @@ class DiscordBot(commands.Bot):
             self.logger.error(f"An error occurred during setup: {e}")
             raise
 
+    async def _check_slash_guardrails(self, interaction: discord.Interaction) -> bool:
+        """
+        Enforce prefix-equivalent guardrails on slash/app command invocations.
+
+        This is called from ``on_interaction`` before any application command is
+        dispatched to the tree, so command disable / maintenance mode checks apply
+        to slash and hybrid invocations even when a cog's ``interaction_check``
+        does not run or is bypassed. Cog ``interaction_check`` methods may still
+        call this method directly via ``utils.guardrails.check_slash_guardrails``.
+        """
+        if interaction.type != discord.InteractionType.application_command:
+            return True
+
+        # Avoid re-running the same checks when cog interaction_check also
+        # delegates here after the centralized on_interaction check has passed.
+        if getattr(interaction, "_tpne_guardrails_checked", False):
+            return True
+
+        user = interaction.user
+
+        # Global maintenance mode (prefix debug mode) blocks everyone except
+        # the configured cool_guys team, matching the prefix invoke behavior.
+        if getattr(self, "debug_mode_active", False):
+            cool_guys = getattr(self, "cool_guys", None) or []
+            if user.id not in cool_guys:
+                try:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "The bot is currently in maintenance mode. Please try again later.",
+                            ephemeral=True,
+                        )
+                except Exception:
+                    pass
+                return False
+
+        # Owners bypass the remaining checks.
+        if getattr(self, "owner_ids", None) and user.id in self.owner_ids:
+            return True
+
+        try:
+            if not interaction.response.is_done():
+                if await self.database.is_user_blacklisted(user.id):
+                    await interaction.response.send_message(
+                        "You are blacklisted from using this bot.", ephemeral=True
+                    )
+                    return False
+        except Exception:
+            pass
+
+        if interaction.guild is None:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Commands can only be used in a server.", ephemeral=True
+                    )
+            except Exception:
+                pass
+            return False
+
+        account_age_threshold = timedelta(days=30)
+        account_age = discord.utils.utcnow() - user.created_at
+        if account_age < account_age_threshold:
+            days_remaining = 30 - account_age.days
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"Your account must be at least 30 days old to use commands. "
+                        f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
+            return False
+
+        command = interaction.command
+        command_name = (
+            getattr(command, "qualified_name", None)
+            or getattr(command, "name", None)
+            or "unknown"
+        )
+
+        try:
+            channel_id = interaction.channel_id
+            enabled = await self.database.get_command_status(command_name, channel_id)
+            if enabled is False:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"The `/{command_name}` command is disabled in this channel by staff.",
+                        ephemeral=True,
+                    )
+                return False
+            enabled_global = await self.database.get_command_status(command_name)
+            if enabled_global is False:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"The `/{command_name}` command is currently disabled for maintenance.",
+                        ephemeral=True,
+                    )
+                return False
+        except Exception:
+            pass
+
+        try:
+            if interaction.guild and getattr(interaction.user, "roles", None):
+                command_names = [command_name]
+                aliases = getattr(command, "aliases", None) or []
+                command_names.extend(a.lower() for a in aliases)
+                has_permission = True
+                for cmd_name in command_names:
+                    if not await self.database.check_command_role_restriction(
+                        interaction.guild.id, cmd_name, interaction.user.roles
+                    ):
+                        has_permission = False
+                        break
+                if not has_permission:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"You don't have the required role to use `/{command_name}`.",
+                            ephemeral=True,
+                        )
+                    return False
+        except Exception:
+            pass
+
+        interaction._tpne_guardrails_checked = True
+        return True
+
     async def invoke(self, ctx: Context) -> None:
         try:
             if ctx.command is None:
@@ -575,7 +702,6 @@ class DiscordBot(commands.Bot):
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type == discord.InteractionType.application_command:
-            self._interaction_start_times[id(interaction)] = time.perf_counter()
             # Discord can dispatch the same application command interaction more
             # than once (retries / duplicate registrations). Drop exact duplicates
             # before they reach the command tree to avoid "already acknowledged".
@@ -590,6 +716,12 @@ class DiscordBot(commands.Bot):
                 await self.database.ensure_user_identity(interaction.user.id)
             except Exception:
                 pass
+            # Enforce the same guardrails used for prefix commands (maintenance
+            # mode, blacklist, DM block, account age, command status, role
+            # restrictions) centrally so slash/hybrid commands cannot bypass them.
+            if not await self._check_slash_guardrails(interaction):
+                return
+            self._interaction_start_times[id(interaction)] = time.perf_counter()
 
         base = super()
         if hasattr(base, "on_interaction"):

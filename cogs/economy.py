@@ -1515,14 +1515,13 @@ class Economy(commands.Cog):
 
 
             color = discord.Color.blurple()
-            if isinstance(ctx.channel, discord.DMChannel):
-                color = discord.Color.blurple()
-            else:
-                color = (
-                    ctx.author.top_role.color
-                    if ctx.author.top_role
-                    else discord.Color.blurple()
-                )
+            if not isinstance(ctx.channel, discord.DMChannel):
+                try:
+                    top_role = ctx.author.top_role
+                    if top_role and top_role.color:
+                        color = top_role.color
+                except Exception:
+                    color = discord.Color.blurple()
             embed = discord.Embed(
 
                 color=color,
