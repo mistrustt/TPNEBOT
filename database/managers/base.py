@@ -245,21 +245,25 @@ class BaseManager:
                 "cosmetic", "redeemable", "collectible",
             },
             "itemrarity": {"common", "uncommon", "rare", "epic", "legendary"},
-            "effecttype": {
-                "currency", "gambling_multiplier", "luck_boost", "earning_boost",
-                "cooldown_reduction", "rtp_boost", "anti_rob", "anti_bank_rob",
-                "rob_shield", "robbery_debuff", "fee_increase", "cooldown_increase",
-                "earning_debuff", "luck_shield",
-            },
         }
 
         async with self.engine.begin() as conn:
             for enum_name, expected_values in enum_fixes.items():
                 try:
                     for value in expected_values:
+                        # Add the canonical lowercase value...
                         await conn.execute(
                             text(
                                 f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{value}'"
+                            )
+                        )
+                        # ...and the uppercase name form. SQLAlchemy sometimes
+                        # binds enum members by name depending on how the type
+                        # was originally created, so accepting both avoids startup
+                        # failures after enum expansion.
+                        await conn.execute(
+                            text(
+                                f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{value.upper()}'"
                             )
                         )
                     logger.info(f"Repaired enum: {enum_name}")
