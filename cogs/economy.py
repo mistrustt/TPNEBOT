@@ -4172,7 +4172,7 @@ class Economy(commands.Cog):
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     @unified_cooldown(10)
     @app_commands.describe(
-        item="The item to use (find the ID with /inventory)",
+        item_id="The item to use (find the ID with /inventory)",
         target="Target user for targetable/offensive items",
     )
     async def use_item(
