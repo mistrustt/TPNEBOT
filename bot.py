@@ -199,6 +199,22 @@ setup_logging()
 logger = logging.getLogger("discord.client")
 
 
+class GuardrailCommandTree(app_commands.CommandTree):
+    """Custom command tree that suppresses guardrail CheckFailure noise."""
+
+    async def on_error(self, interaction: discord.Interaction, error, /) -> None:
+        # When our global guardrail check blocks a slash command it returns False,
+        # which discord.py turns into a CheckFailure. We already sent an ephemeral
+        # explanation, so don't log a noisy exception or dispatch a generic error.
+        bot = self.client
+        if isinstance(error, app_commands.CheckFailure):
+            status = getattr(bot, "_guardrail_status", {}).get(interaction.id)
+            if status is not None and not status[1]:
+                bot._guardrail_status.pop(interaction.id, None)
+                return
+        await super().on_error(interaction, error)
+
+
 class DiscordBot(commands.Bot):
     def __init__(self) -> None:
         self.logger = logger
@@ -220,6 +236,11 @@ class DiscordBot(commands.Bot):
         self.debug_mode_active = False
         self.version = "2026.07.10"
         self.cool_guys = None
+        # Track which slash interactions have already passed/failed guardrails so
+        # the centralized tree check and per-cog interaction_check don't duplicate
+        # database work or send multiple responses. Value is (timestamp, passed).
+        self._guardrail_status: dict[int, tuple[float, bool]] = {}
+        self._guardrail_status_ttl = 300.0
         # Discord privileged intents we require and why:
         # - message_content: spam-channel enforcement, automated moderation
         #   (PII/card/token detection), message delete/edit logging, attachment
@@ -240,6 +261,7 @@ class DiscordBot(commands.Bot):
             help_command=None,
             case_insensitive=True,
             allowed_mentions=discord.AllowedMentions(everyone=False),
+            tree_cls=GuardrailCommandTree,
         )
 
     async def get_prefix(self, message: discord.Message) -> str:
@@ -372,6 +394,18 @@ class DiscordBot(commands.Bot):
             self.logger.info(
                 "Commands have been synced successfully to the global command tree."
             )
+            # Install a global guardrail check on every application command so
+            # maintenance mode, blacklist, DM block, account age, command status,
+            # and role restrictions are enforced for slash/hybrid invocations
+            # regardless of whether a cog's interaction_check is wired.
+            async def _guardrail_check(interaction: discord.Interaction) -> bool:
+                return await self._check_slash_guardrails(interaction)
+
+            for cmd in self.tree.walk_commands():
+                if isinstance(cmd, app_commands.Command):
+                    # Run guardrails before any other command checks so disabled
+                    # commands and maintenance mode are evaluated first.
+                    cmd.checks.insert(0, _guardrail_check)
             self.logger.info("-------------------")
             self.logger.info("Starting background tasks...")
             self.status_task.start()
@@ -400,23 +434,42 @@ class DiscordBot(commands.Bot):
             self.logger.error(f"An error occurred during setup: {e}")
             raise
 
+    def _guardrail_status_done(self, interaction_id: int) -> bool | None:
+        """Return cached guardrail result for an interaction, or None if unknown."""
+        now = time.perf_counter()
+        cutoff = now - self._guardrail_status_ttl
+        stale = [
+            iid
+            for iid, (ts, _) in self._guardrail_status.items()
+            if ts < cutoff
+        ]
+        for iid in stale:
+            self._guardrail_status.pop(iid, None)
+        entry = self._guardrail_status.get(interaction_id)
+        return entry[1] if entry else None
+
+    def _mark_guardrail(self, interaction_id: int, passed: bool) -> None:
+        """Cache the guardrail result for an interaction."""
+        self._guardrail_status[interaction_id] = (time.perf_counter(), passed)
+
     async def _check_slash_guardrails(self, interaction: discord.Interaction) -> bool:
         """
         Enforce prefix-equivalent guardrails on slash/app command invocations.
 
-        This is called from ``on_interaction`` before any application command is
-        dispatched to the tree, so command disable / maintenance mode checks apply
-        to slash and hybrid invocations even when a cog's ``interaction_check``
-        does not run or is bypassed. Cog ``interaction_check`` methods may still
-        call this method directly via ``utils.guardrails.check_slash_guardrails``.
+        This is used both as a global application-command check and as the
+        implementation behind ``utils.guardrails.check_slash_guardrails``, so
+        per-cog ``interaction_check`` methods delegate here as well. The result
+        is cached per-interaction to avoid duplicate database work or double
+        responses.
         """
         if interaction.type != discord.InteractionType.application_command:
             return True
 
-        # Avoid re-running the same checks when cog interaction_check also
-        # delegates here after the centralized on_interaction check has passed.
-        if getattr(interaction, "_tpne_guardrails_checked", False):
+        cached = self._guardrail_status_done(interaction.id)
+        if cached is True:
             return True
+        if cached is False:
+            return False
 
         user = interaction.user
 
@@ -433,10 +486,12 @@ class DiscordBot(commands.Bot):
                         )
                 except Exception:
                     pass
+                self._mark_guardrail(interaction.id, False)
                 return False
 
         # Owners bypass the remaining checks.
         if getattr(self, "owner_ids", None) and user.id in self.owner_ids:
+            self._mark_guardrail(interaction.id, True)
             return True
 
         try:
@@ -445,6 +500,7 @@ class DiscordBot(commands.Bot):
                     await interaction.response.send_message(
                         "You are blacklisted from using this bot.", ephemeral=True
                     )
+                    self._mark_guardrail(interaction.id, False)
                     return False
         except Exception:
             pass
@@ -457,6 +513,7 @@ class DiscordBot(commands.Bot):
                     )
             except Exception:
                 pass
+            self._mark_guardrail(interaction.id, False)
             return False
 
         account_age_threshold = timedelta(days=30)
@@ -472,6 +529,7 @@ class DiscordBot(commands.Bot):
                     )
             except Exception:
                 pass
+            self._mark_guardrail(interaction.id, False)
             return False
 
         command = interaction.command
@@ -490,6 +548,7 @@ class DiscordBot(commands.Bot):
                         f"The `/{command_name}` command is disabled in this channel by staff.",
                         ephemeral=True,
                     )
+                self._mark_guardrail(interaction.id, False)
                 return False
             enabled_global = await self.database.get_command_status(command_name)
             if enabled_global is False:
@@ -498,6 +557,7 @@ class DiscordBot(commands.Bot):
                         f"The `/{command_name}` command is currently disabled for maintenance.",
                         ephemeral=True,
                     )
+                self._mark_guardrail(interaction.id, False)
                 return False
         except Exception:
             pass
@@ -520,11 +580,12 @@ class DiscordBot(commands.Bot):
                             f"You don't have the required role to use `/{command_name}`.",
                             ephemeral=True,
                         )
+                    self._mark_guardrail(interaction.id, False)
                     return False
         except Exception:
             pass
 
-        interaction._tpne_guardrails_checked = True
+        self._mark_guardrail(interaction.id, True)
         return True
 
     async def invoke(self, ctx: Context) -> None:
@@ -716,11 +777,6 @@ class DiscordBot(commands.Bot):
                 await self.database.ensure_user_identity(interaction.user.id)
             except Exception:
                 pass
-            # Enforce the same guardrails used for prefix commands (maintenance
-            # mode, blacklist, DM block, account age, command status, role
-            # restrictions) centrally so slash/hybrid commands cannot bypass them.
-            if not await self._check_slash_guardrails(interaction):
-                return
             self._interaction_start_times[id(interaction)] = time.perf_counter()
 
         base = super()
@@ -867,6 +923,8 @@ class DiscordBot(commands.Bot):
             f"(ID:{interaction.user.id}) in #{interaction.channel} "
             f"(ID:{interaction.channel_id})"
         )
+        # Free the guardrail cache entry now that the command completed.
+        self._guardrail_status.pop(interaction.id, None)
 
     def _get_cooldown_retry_after(self, error) -> float | None:
         """Extract retry_after from app command cooldown errors or wrappers."""
@@ -887,6 +945,13 @@ class DiscordBot(commands.Bot):
         root_error = error
         if isinstance(error, (app_commands.CommandInvokeError, commands.HybridCommandError)):
             root_error = error.original
+
+        # If our global guardrail check blocked this command we already sent an
+        # ephemeral explanation. Don't record it as an error or show a generic one.
+        if isinstance(root_error, app_commands.CheckFailure):
+            status = self._guardrail_status.pop(interaction.id, None)
+            if status is not None and not status[1]:
+                return
 
         retry_after = self._get_cooldown_retry_after(error)
         is_cooldown = retry_after is not None
