@@ -220,6 +220,7 @@ class BaseManager:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             await self.create_tables()
+            await self._repair_postgres_enums()
             await self._repair_daily_user_hash_columns()
             await self._repair_command_cooldowns_constraint()
             await self._repair_item_shop_columns()
@@ -228,6 +229,42 @@ class BaseManager:
             await self._db_retry(_init, retries=self._db_retry_count, base_delay=2.0)
         except SQLAlchemyError as e:
             logger.error(f"Error initializing database: {e}")
+
+    async def _repair_postgres_enums(self):
+        """
+        Add any missing labels to PostgreSQL enums created by SQLAlchemy Enum
+        columns. This prevents errors like 'invalid input value for enum itemtype'
+        when a Python enum gains new members but the database enum was created
+        by an older Base.metadata.create_all().
+        """
+
+        enum_fixes = {
+            "itemtype": {"collectible", "redeemable", "consumable", "defensive", "offensive"},
+            "itemcategory": {
+                "consumable", "defensive", "offensive", "utility",
+                "cosmetic", "redeemable", "collectible",
+            },
+            "itemrarity": {"common", "uncommon", "rare", "epic", "legendary"},
+            "effecttype": {
+                "currency", "gambling_multiplier", "luck_boost", "earning_boost",
+                "cooldown_reduction", "rtp_boost", "anti_rob", "anti_bank_rob",
+                "rob_shield", "robbery_debuff", "fee_increase", "cooldown_increase",
+                "earning_debuff", "luck_shield",
+            },
+        }
+
+        async with self.engine.begin() as conn:
+            for enum_name, expected_values in enum_fixes.items():
+                try:
+                    for value in expected_values:
+                        await conn.execute(
+                            text(
+                                f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{value}'"
+                            )
+                        )
+                    logger.info(f"Repaired enum: {enum_name}")
+                except SQLAlchemyError as e:
+                    logger.warning(f"Enum repair for {enum_name} failed: {e}")
 
     async def _repair_daily_user_hash_columns(self):
         """
