@@ -349,6 +349,26 @@ class ItemType(enum.Enum):
     COLLECTIBLE = "collectible"
     REDEEMABLE = "redeemable"
     CONSUMABLE = "consumable"
+    DEFENSIVE = "defensive"
+    OFFENSIVE = "offensive"
+
+
+class ItemCategory(enum.Enum):
+    CONSUMABLE = "consumable"
+    DEFENSIVE = "defensive"
+    OFFENSIVE = "offensive"
+    UTILITY = "utility"
+    COSMETIC = "cosmetic"
+    REDEEMABLE = "redeemable"
+    COLLECTIBLE = "collectible"
+
+
+class ItemRarity(enum.Enum):
+    COMMON = "common"
+    UNCOMMON = "uncommon"
+    RARE = "rare"
+    EPIC = "epic"
+    LEGENDARY = "legendary"
 
 
 class EffectType(enum.Enum):
@@ -358,6 +378,14 @@ class EffectType(enum.Enum):
     EARNING_BOOST = "earning_boost"  # General earning multiplier
     COOLDOWN_REDUCTION = "cooldown_reduction"  # Reduce cooldown times
     RTP_BOOST = "rtp_boost"  # Temporary RTP percentage boost
+    ANTI_ROB = "anti_rob"  # Block wallet robbery attempts
+    ANTI_BANK_ROB = "anti_bank_rob"  # Block bank robbery attempts
+    ROB_SHIELD = "rob_shield"  # Single-use robbery shield
+    ROBBERY_DEBUFF = "robbery_debuff"  # Reduce target robbery success/payout
+    FEE_INCREASE = "fee_increase"  # Increase fees target pays
+    COOLDOWN_INCREASE = "cooldown_increase"  # Increase target cooldowns
+    EARNING_DEBUFF = "earning_debuff"  # Reduce target earnings
+    LUCK_SHIELD = "luck_shield"  # Block luck-based second chances for target
 
 
 class Item(Base):
@@ -370,10 +398,20 @@ class Item(Base):
     description = Column(String, nullable=True)
     quantity = Column(Integer, default=1, nullable=False)
     item_type = Column(Enum(ItemType), nullable=False, default=ItemType.COLLECTIBLE)
+    category = Column(
+        Enum(ItemCategory), nullable=True, default=ItemCategory.COLLECTIBLE
+    )
+    rarity = Column(Enum(ItemRarity), nullable=True, default=ItemRarity.COMMON)
     effect = Column(String, nullable=True)
     effect_value = Column(Integer, nullable=True)
     effect_duration = Column(Integer, nullable=True)
     cooldown_seconds = Column(Integer, nullable=True)
+    targetable = Column(Boolean, default=False, nullable=False)
+    daily_limit = Column(Integer, nullable=True)  # Per-user daily purchase cap
+    global_daily_limit = Column(Integer, nullable=True)  # Server-wide daily stock
+    tradable = Column(Boolean, default=True, nullable=False)
+    durability = Column(Integer, nullable=True)  # Optional durability/hits remaining
+    max_uses = Column(Integer, nullable=True)  # Optional max uses before consumed
 
     def __repr__(self):
         return f"<Item(user_id={self.user_id}, name='{self.name}', quantity={self.quantity})>"
@@ -389,10 +427,18 @@ class ShopItem(Base):
     quantity = Column(Integer, default=1, nullable=False)
     unlimited = Column(Boolean, default=False)
     item_type = Column(Enum(ItemType), nullable=False, default=ItemType.COLLECTIBLE)
+    category = Column(
+        Enum(ItemCategory), nullable=True, default=ItemCategory.COLLECTIBLE
+    )
+    rarity = Column(Enum(ItemRarity), nullable=True, default=ItemRarity.COMMON)
     effect = Column(String, nullable=True)
     effect_value = Column(Integer, nullable=True)
     effect_duration = Column(Integer, nullable=True)
     cooldown_seconds = Column(Integer, nullable=True)
+    targetable = Column(Boolean, default=False, nullable=False)
+    daily_limit = Column(Integer, nullable=True)
+    global_daily_limit = Column(Integer, nullable=True)
+    tradable = Column(Boolean, default=True, nullable=False)
 
     def __repr__(self):
         return (
@@ -457,6 +503,24 @@ class TradeLog(Base):
 
     def __repr__(self):
         return f"<TradeLog(id={self.id}, from={self.from_user_id}, to={self.to_user_id}, item={self.item_name}, status={self.status})>"
+
+
+class ShopPurchaseLog(Base):
+    """Track per-user shop purchases for daily purchase limits."""
+
+    __tablename__ = "shop_purchase_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    shop_item_id = Column(Integer, nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=1)
+    purchase_date = Column(Date, nullable=False, default=discord.utils.utcnow().date)
+
+    def __repr__(self):
+        return (
+            f"<ShopPurchaseLog(user_id={self.user_id}, shop_item_id={self.shop_item_id}, "
+            f"quantity={self.quantity}, purchase_date={self.purchase_date})>"
+        )
 
 
 class Bounty(Base):

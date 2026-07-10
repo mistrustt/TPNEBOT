@@ -2,8 +2,9 @@ from .base import BaseManager
 
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy import func, case, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import List, Optional
 from utils.security import raise_if_url
 from ..models import (
@@ -275,24 +276,23 @@ class CoreMixin(BaseManager):
                 seen_at = seen_at.replace(tzinfo=timezone.utc)
             bucket_date = seen_at.date()
             async with self.async_sessionmaker() as session:
-                stmt = select(DailyUserExposure).where(
-                    DailyUserExposure.bucket_date == bucket_date,
-                    DailyUserExposure.guild_id == guild_id,
-                    DailyUserExposure.user_hash == user_hash,
-                )
-                result = await session.execute(stmt)
-                row = result.scalar_one_or_none()
-                if row:
-                    return
-                session.add(
-                    DailyUserExposure(
+                stmt = (
+                    pg_insert(DailyUserExposure)
+                    .values(
                         bucket_date=bucket_date,
                         guild_id=guild_id,
                         user_hash=user_hash,
                         first_seen_at=seen_at,
                     )
+                    .on_conflict_do_nothing(
+                        index_elements=["bucket_date", "guild_id", "user_hash"]
+                    )
                 )
+                await session.execute(stmt)
                 await session.commit()
+        except IntegrityError:
+            # Another concurrent insert won the race; this is harmless.
+            pass
         except SQLAlchemyError as e:
             logging.error(f"Error recording user exposure: {str(e)}")
 

@@ -2464,7 +2464,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.hybrid_command("leak", description="Search for a Juice WRLD leak by name")
     @unified_cooldown(10)
-    async def leak(self, ctx: commands.Context, query: Optional[str] = None):
+    async def leak(self, ctx: commands.Context, query: str):
         if not query:
             await Embeds.custom(
                 ctx,
@@ -2539,7 +2539,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.hybrid_command("session", description="Search for a Juice WRLD session by name")
     @unified_cooldown(10)
-    async def session(self, ctx: commands.Context, query: Optional[str] = None):
+    async def session(self, ctx: commands.Context, query: str):
         if not query:
             await Embeds.custom(
                 ctx,
@@ -2665,9 +2665,7 @@ class Music(commands.Cog, name="Music"):
 
         return embeds
 
-    @commands.hybrid_command(
-        name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song"
-    )
+    @commands.hybrid_command(name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song")
     @unified_cooldown(10)
     async def lyrics(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:

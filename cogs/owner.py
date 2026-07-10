@@ -28,7 +28,7 @@ from database.models import (
     CommandErrorDaily,
     DailyUserExposure,
 )
-from database.manager import ItemType
+from database.manager import ItemType, ItemCategory, ItemRarity, EffectType
 import importlib.util
 from utils.embeds import Embeds
 
@@ -534,6 +534,331 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = discord.utils.utcnow()
+
+    shopadmin = app_commands.Group(
+        name="shopadmin", description="Owner-only shop lifecycle commands"
+    )
+
+    def _parse_shop_enum(self, enum_cls, value: str, default):
+        """Safely parse a user-provided enum value."""
+
+        if not value:
+            return default
+        try:
+            return enum_cls[value.upper()]
+        except KeyError:
+            try:
+                return enum_cls(value.lower())
+            except ValueError:
+                return default
+
+    @shopadmin.command(name="seed", description="Seed the default shop catalog")
+    @app_commands.check(_owner_check)
+    async def shopadmin_seed(self, interaction: discord.Interaction):
+        """Create any missing default shop items."""
+
+        result = await self.bot.database.seed_default_shop_items()
+        embed = discord.Embed(
+            title="Shop Catalog Seeded",
+            description=(
+                f"Created **{result['created']}** new items, "
+                f"skipped **{result['skipped']}** existing items."
+            ),
+            color=discord.Color.green(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @shopadmin.command(name="create", description="Create a new shop item")
+    @app_commands.check(_owner_check)
+    @app_commands.describe(
+        name="Item name",
+        description="Item description",
+        price="Price in coins",
+        quantity="Stock quantity, or 'unlimited'",
+        item_type="collectible / redeemable / consumable / defensive / offensive",
+        category="consumable / defensive / offensive / utility / cosmetic / redeemable / collectible",
+        rarity="common / uncommon / rare / epic / legendary",
+        effect="Effect type (optional)",
+        effect_value="Effect value (optional)",
+        effect_duration="Effect duration in seconds (optional)",
+        cooldown_seconds="Cooldown between uses in seconds (optional)",
+        targetable="Whether the item targets another user",
+        daily_limit="Per-user daily purchase limit (optional)",
+        global_daily_limit="Server-wide daily stock limit (optional)",
+        tradable="Whether the item can be traded",
+        unlimited="Whether stock is unlimited",
+    )
+    @app_commands.choices(
+        item_type=[
+            app_commands.Choice(name=t.value, value=t.value)
+            for t in ItemType
+        ],
+        category=[
+            app_commands.Choice(name=t.value, value=t.value)
+            for t in ItemCategory
+        ],
+        rarity=[
+            app_commands.Choice(name=t.value, value=t.value)
+            for t in ItemRarity
+        ],
+        effect=[
+            app_commands.Choice(name=e.value, value=e.value)
+            for e in EffectType
+        ],
+    )
+    async def shopadmin_create(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        price: int,
+        description: str = "",
+        quantity: str = "1",
+        item_type: app_commands.Choice[str] = None,
+        category: app_commands.Choice[str] = None,
+        rarity: app_commands.Choice[str] = None,
+        effect: str = "",
+        effect_value: int = None,
+        effect_duration: int = None,
+        cooldown_seconds: int = None,
+        targetable: bool = False,
+        daily_limit: int = None,
+        global_daily_limit: int = None,
+        tradable: bool = True,
+        unlimited: bool = False,
+    ):
+        """Create a fully-configured shop item."""
+
+        quantity_str = quantity.strip().lower()
+        is_unlimited = quantity_str == "unlimited"
+        stock_quantity = 1 if is_unlimited else int(quantity_str)
+
+        item_type_enum = self._parse_shop_enum(
+            ItemType, item_type.value if item_type else None, ItemType.COLLECTIBLE
+        )
+        category_enum = self._parse_shop_enum(
+            ItemCategory,
+            category.value if category else None,
+            ItemCategory.COLLECTIBLE,
+        )
+        rarity_enum = self._parse_shop_enum(
+            ItemRarity, rarity.value if rarity else None, ItemRarity.COMMON
+        )
+
+        effect_clean = effect.strip().lower() or None
+
+        item = await self.bot.database.add_shop_item(
+            name=name.strip(),
+            description=description.strip() or None,
+            price=price,
+            quantity=stock_quantity,
+            item_type=item_type_enum,
+            category=category_enum,
+            rarity=rarity_enum,
+            unlimited=is_unlimited or unlimited,
+            effect=effect_clean,
+            effect_value=effect_value,
+            effect_duration=effect_duration,
+            cooldown_seconds=cooldown_seconds,
+            targetable=targetable,
+            daily_limit=daily_limit,
+            global_daily_limit=global_daily_limit,
+            tradable=tradable,
+        )
+
+        embed = discord.Embed(
+            title="Shop Item Created",
+            description=f"Added **{item.name}** (ID: `{item.id}`) for {item.price} coins.",
+            color=discord.Color.green(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @shopadmin.command(name="edit", description="Edit an existing shop item")
+    @app_commands.check(_owner_check)
+    @app_commands.describe(
+        item_id="The shop item ID to edit",
+        name="New name",
+        description="New description",
+        price="New price",
+        quantity="New stock quantity or 'unlimited'",
+        unlimited="Set unlimited stock",
+        item_type="New item type",
+        category="New category",
+        rarity="New rarity",
+        effect="New effect type",
+        effect_value="New effect value",
+        effect_duration="New effect duration",
+        cooldown_seconds="New cooldown",
+        targetable="Targetable setting",
+        daily_limit="Per-user daily purchase limit",
+        global_daily_limit="Server-wide daily stock limit",
+        tradable="Tradable setting",
+    )
+    @app_commands.choices(
+        item_type=[
+            app_commands.Choice(name=t.value, value=t.value)
+            for t in ItemType
+        ],
+        category=[
+            app_commands.Choice(name=t.value, value=t.value)
+            for t in ItemCategory
+        ],
+        rarity=[
+            app_commands.Choice(name=t.value, value=t.value)
+            for t in ItemRarity
+        ],
+    )
+    async def shopadmin_edit(
+        self,
+        interaction: discord.Interaction,
+        item_id: int,
+        name: str = None,
+        description: str = None,
+        price: int = None,
+        quantity: str = None,
+        unlimited: bool = None,
+        item_type: app_commands.Choice[str] = None,
+        category: app_commands.Choice[str] = None,
+        rarity: app_commands.Choice[str] = None,
+        effect: str = None,
+        effect_value: int = None,
+        effect_duration: int = None,
+        cooldown_seconds: int = None,
+        targetable: bool = None,
+        daily_limit: int = None,
+        global_daily_limit: int = None,
+        tradable: bool = None,
+    ):
+        """Edit metadata for an existing shop item."""
+
+        shop_item = await self.bot.database.get_shop_item_by_id(item_id)
+        if not shop_item:
+            await Embeds.error(
+                interaction,
+                f"No shop item found with ID `{item_id}`.",
+                title="Shop Admin",
+                ephemeral=True,
+            )
+            return
+
+        updates = {}
+        if name is not None:
+            updates["name"] = name.strip()
+        if description is not None:
+            updates["description"] = description.strip() or None
+        if price is not None:
+            updates["price"] = price
+        if quantity is not None:
+            quantity_str = quantity.strip().lower()
+            updates["unlimited"] = quantity_str == "unlimited"
+            updates["quantity"] = 1 if updates["unlimited"] else int(quantity_str)
+        if unlimited is not None:
+            updates["unlimited"] = unlimited
+        if item_type is not None:
+            updates["item_type"] = self._parse_shop_enum(
+                ItemType, item_type.value, shop_item.item_type
+            )
+        if category is not None:
+            updates["category"] = self._parse_shop_enum(
+                ItemCategory, category.value, shop_item.category
+            )
+        if rarity is not None:
+            updates["rarity"] = self._parse_shop_enum(
+                ItemRarity, rarity.value, shop_item.rarity
+            )
+        if effect is not None:
+            updates["effect"] = effect.strip().lower() or None
+        if effect_value is not None:
+            updates["effect_value"] = effect_value
+        if effect_duration is not None:
+            updates["effect_duration"] = effect_duration
+        if cooldown_seconds is not None:
+            updates["cooldown_seconds"] = cooldown_seconds
+        if targetable is not None:
+            updates["targetable"] = targetable
+        if daily_limit is not None:
+            updates["daily_limit"] = daily_limit
+        if global_daily_limit is not None:
+            updates["global_daily_limit"] = global_daily_limit
+        if tradable is not None:
+            updates["tradable"] = tradable
+
+        updated = await self.bot.database.update_shop_item(item_id, **updates)
+        embed = discord.Embed(
+            title="Shop Item Updated",
+            description=f"Updated **{updated.name}** (ID: `{updated.id}`).",
+            color=discord.Color.green(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @shopadmin.command(name="remove", description="Remove a shop item")
+    @app_commands.check(_owner_check)
+    @app_commands.describe(item_id="The shop item ID to remove")
+    async def shopadmin_remove(
+        self, interaction: discord.Interaction, item_id: int
+    ):
+        """Delete a shop item from the catalog."""
+
+        removed = await self.bot.database.remove_shop_item(item_id)
+        if removed:
+            embed = discord.Embed(
+                title="Shop Item Removed",
+                description=f"Removed shop item ID `{item_id}`.",
+                color=discord.Color.green(),
+            )
+        else:
+            embed = discord.Embed(
+                title="Not Found",
+                description=f"No shop item found with ID `{item_id}`.",
+                color=discord.Color.red(),
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @shopadmin.command(name="list", description="List all shop items")
+    @app_commands.check(_owner_check)
+    async def shopadmin_list(self, interaction: discord.Interaction):
+        """List every item currently in the shop."""
+
+        items = await self.bot.database.list_shop_items()
+        if not items:
+            await Embeds.warning(
+                interaction,
+                "No items in the shop.",
+                title="Shop Admin",
+                ephemeral=True,
+            )
+            return
+
+        lines = []
+        for item in items:
+            stock = "∞" if item.unlimited else str(item.quantity)
+            limits = ""
+            if item.daily_limit or item.global_daily_limit:
+                limits = f" | Daily: {item.daily_limit or '-'} / Global: {item.global_daily_limit or '-'}"
+            lines.append(
+                f"`{item.id}` **{item.name}** — {item.price} coins — stock {stock}{limits}"
+            )
+
+        # Paginate into chunks that fit Discord embed description
+        chunks = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) + 1 > 4000:
+                chunks.append(current)
+                current = line
+            else:
+                current += "\n" + line if current else line
+        if current:
+            chunks.append(current)
+
+        page = chunks[0] if chunks else "No items."
+        embed = discord.Embed(
+            title=f"Shop Items ({len(items)} total)",
+            description=page,
+            color=discord.Color.blurple(),
+        )
+        if len(chunks) > 1:
+            embed.set_footer(text=f"Page 1 / {len(chunks)} (truncated)")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""
@@ -4331,9 +4656,24 @@ class Owner(commands.Cog, name="Owner"):
                 if item.cooldown_seconds:
                     effect_str += f" | CD: {item.cooldown_seconds}s"
 
+            meta = []
+            if item.category:
+                meta.append(f"cat: {item.category.value}")
+            if item.rarity:
+                meta.append(f"rarity: {item.rarity.value}")
+            if item.targetable:
+                meta.append("targetable")
+            if not item.tradable:
+                meta.append("untradable")
+            if item.daily_limit:
+                meta.append(f"daily: {item.daily_limit}")
+            if item.global_daily_limit:
+                meta.append(f"global: {item.global_daily_limit}")
+            meta_str = f" | {', '.join(meta)}" if meta else ""
+
             embed.add_field(
                 name=f"ID: {item.id} | {item.name}",
-                value=f"**Price:** {item.price} | **Stock:** {stock} | **Type:** {item.item_type.value}{effect_str}",
+                value=f"**Price:** {item.price} | **Stock:** {stock} | **Type:** {item.item_type.value}{meta_str}{effect_str}",
                 inline=False,
             )
 
@@ -4372,10 +4712,16 @@ class Owner(commands.Cog, name="Owner"):
                 description=shop_item.description,
                 quantity=1,
                 item_type=shop_item.item_type,
+                category=shop_item.category,
+                rarity=shop_item.rarity,
                 effect=shop_item.effect,
                 effect_value=shop_item.effect_value,
                 effect_duration=shop_item.effect_duration,
                 cooldown_seconds=shop_item.cooldown_seconds,
+                targetable=shop_item.targetable,
+                daily_limit=shop_item.daily_limit,
+                global_daily_limit=shop_item.global_daily_limit,
+                tradable=shop_item.tradable,
             )
 
         embed = discord.Embed(

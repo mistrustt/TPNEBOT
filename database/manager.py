@@ -33,8 +33,11 @@ from .models import (
     LoanPayment,
     Item,
     ItemType,
+    ItemCategory,
+    ItemRarity,
     EffectType,
     ShopItem,
+    ShopPurchaseLog,
     ItemCooldown,
     ActiveEffect,
     TradeLog,
@@ -98,3 +101,5 @@ class DatabaseManager(
         await self.ensure_default_vip_tiers()
         # Economy supply record must exist for the circuit breaker and rebalancing.
         await self.initialize_supply_record()
+        # Seed the default item shop catalog if it hasn't been created yet.
+        await self.seed_default_shop_items()

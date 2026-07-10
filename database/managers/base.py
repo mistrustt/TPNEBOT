@@ -222,6 +222,7 @@ class BaseManager:
             await self.create_tables()
             await self._repair_daily_user_hash_columns()
             await self._repair_command_cooldowns_constraint()
+            await self._repair_item_shop_columns()
 
         try:
             await self._db_retry(_init, retries=self._db_retry_count, base_delay=2.0)
@@ -339,6 +340,56 @@ class BaseManager:
                 logger.info("Repaired command_cooldowns unique constraint/index")
             except SQLAlchemyError as e:
                 logger.warning(f"command_cooldowns constraint repair failed: {e}")
+
+    async def _repair_item_shop_columns(self):
+        """
+        Add item-shop expansion columns if they are missing on an older schema.
+        New deployments get these from Base.metadata.create_all().
+        """
+
+        async with self.engine.begin() as conn:
+            item_columns = [
+                ("category", "VARCHAR(50)"),
+                ("rarity", "VARCHAR(50)"),
+                ("targetable", "BOOLEAN DEFAULT FALSE"),
+                ("daily_limit", "INTEGER"),
+                ("global_daily_limit", "INTEGER"),
+                ("tradable", "BOOLEAN DEFAULT TRUE"),
+                ("durability", "INTEGER"),
+                ("max_uses", "INTEGER"),
+            ]
+            shop_columns = [
+                ("category", "VARCHAR(50)"),
+                ("rarity", "VARCHAR(50)"),
+                ("targetable", "BOOLEAN DEFAULT FALSE"),
+                ("daily_limit", "INTEGER"),
+                ("global_daily_limit", "INTEGER"),
+                ("tradable", "BOOLEAN DEFAULT TRUE"),
+            ]
+
+            for column, col_type in item_columns:
+                try:
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE items ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                        )
+                    )
+                except SQLAlchemyError as e:
+                    logger.warning(f"Schema repair for items.{column} failed: {e}")
+
+            for column, col_type in shop_columns:
+                try:
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                        )
+                    )
+                except SQLAlchemyError as e:
+                    logger.warning(
+                        f"Schema repair for shop_items.{column} failed: {e}"
+                    )
+
+            logger.info("Repaired item/shop item expansion columns")
 
     def get_session(self):
         """Provide a transactional scope around a series of operations."""

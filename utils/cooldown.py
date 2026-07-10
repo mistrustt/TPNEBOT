@@ -179,7 +179,21 @@ class UnifiedCooldownManager:
         if not name:
             raise ValueError("Could not determine command name for cooldown")
 
-        await self.bot.database.set_cooldown(user_id, name, int(seconds))
+        # Apply active cooldown reduction/penalty effects purchased from the shop.
+        # Values below 1.0 reduce cooldowns; values above 1.0 increase them.
+        # The minimum enforced cooldown is 1 second to avoid instant re-use.
+        adjusted_seconds = seconds
+        if seconds > 0:
+            try:
+                multiplier = await self.bot.database.get_cooldown_multiplier(user_id)
+                adjusted_seconds = max(1.0, float(seconds) * float(multiplier))
+            except Exception as e:
+                logger.warning(
+                    "Could not apply cooldown multiplier for user %s / %s: %s",
+                    user_id, name, e
+                )
+
+        await self.bot.database.set_cooldown(user_id, name, int(adjusted_seconds))
         self._cooldown_started_at[self._key(user_id, name)] = time.perf_counter()
 
     async def get_cooldown_embed(self, remaining_cooldown: float) -> discord.Embed:

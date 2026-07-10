@@ -218,7 +218,7 @@ class DiscordBot(commands.Bot):
         self._interaction_start_times: dict[int, float] = {}
         self.config = self.database.load_config()
         self.debug_mode_active = False
-        self.version = "v2026.07.09"
+        self.version = "2026.07.10"
         self.cool_guys = None
         # Discord privileged intents we require and why:
         # - message_content: spam-channel enforcement, automated moderation
@@ -287,10 +287,11 @@ class DiscordBot(commands.Bot):
     async def status_task(self) -> None:
         await self.wait_until_ready()
         statuses = [
-            f".gg/TPNE",
-            f"over {len(set(self.get_all_members())):,} members",
+            f"{len(set(self.get_all_members())):,} members",
             f"{len(self.guilds):,} servers",
             f"for {len(self.commands):,} commands",
+            f"v{self.version} | .gg/TPNE",
+            f"for !help | .gg/TPNE",
         ]
         await self.change_presence(
             activity=discord.Activity(

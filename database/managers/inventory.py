@@ -17,13 +17,16 @@ from ..models import (
     Wallet,
     Item,
     ItemType,
+    ItemCategory,
+    ItemRarity,
     ShopItem,
+    ShopPurchaseLog,
     ItemCooldown,
     ActiveEffect,
     TradeLog,
     Bounty,
 )
-from datetime import timedelta
+from datetime import timedelta, date
 import discord
 import uuid
 import logging
@@ -341,12 +344,40 @@ class InventoryMixin(BaseManager):
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
             result = await session.execute(
-                select(Item.name, Item.description, func.count(Item.id).label("qty"))
+                select(
+                    Item.name,
+                    Item.description,
+                    Item.item_type,
+                    Item.category,
+                    Item.rarity,
+                    Item.targetable,
+                    func.min(Item.id).label("id"),
+                    func.count(Item.id).label("qty"),
+                )
                 .where(Item.user_id == user_id)
-                .group_by(Item.name, Item.description)
+                .group_by(
+                    Item.name,
+                    Item.description,
+                    Item.item_type,
+                    Item.category,
+                    Item.rarity,
+                    Item.targetable,
+                )
             )
             rows = result.all()
-            return [{"name": r[0], "description": r[1], "quantity": r[2]} for r in rows]
+            return [
+                {
+                    "name": r[0],
+                    "description": r[1],
+                    "item_type": r[2].value if r[2] else None,
+                    "category": r[3].value if r[3] else None,
+                    "rarity": r[4].value if r[4] else None,
+                    "targetable": bool(r[5]),
+                    "id": r[6],
+                    "quantity": r[7],
+                }
+                for r in rows
+            ]
 
     async def get_user_item(self, user_id: int, item_id: int) -> Item:
         """
@@ -449,10 +480,18 @@ class InventoryMixin(BaseManager):
                             description=source_item.description,
                             quantity=1,
                             item_type=source_item.item_type,
+                            category=source_item.category,
+                            rarity=source_item.rarity,
                             effect=source_item.effect,
                             effect_value=source_item.effect_value,
                             effect_duration=source_item.effect_duration,
                             cooldown_seconds=source_item.cooldown_seconds,
+                            targetable=source_item.targetable,
+                            daily_limit=source_item.daily_limit,
+                            global_daily_limit=source_item.global_daily_limit,
+                            tradable=source_item.tradable,
+                            durability=source_item.durability,
+                            max_uses=source_item.max_uses,
                         )
                         session.add(new_item)
 
@@ -483,7 +522,20 @@ class InventoryMixin(BaseManager):
                 if not item:
                     return False
 
-                allowed_props = ["name", "description", "quantity", "item_type"]
+                allowed_props = [
+                    "name",
+                    "description",
+                    "quantity",
+                    "item_type",
+                    "category",
+                    "rarity",
+                    "targetable",
+                    "daily_limit",
+                    "global_daily_limit",
+                    "tradable",
+                    "durability",
+                    "max_uses",
+                ]
                 for prop, value in kwargs.items():
                     if prop in allowed_props and hasattr(item, prop):
                         setattr(item, prop, value)
@@ -547,6 +599,18 @@ class InventoryMixin(BaseManager):
         description: str,
         quantity: int = 1,
         item_type: ItemType = ItemType.COLLECTIBLE,
+        category: ItemCategory = ItemCategory.COLLECTIBLE,
+        rarity: ItemRarity = ItemRarity.COMMON,
+        effect: str = None,
+        effect_value: int = None,
+        effect_duration: int = None,
+        cooldown_seconds: int = None,
+        targetable: bool = False,
+        daily_limit: int = None,
+        global_daily_limit: int = None,
+        tradable: bool = True,
+        durability: int = None,
+        max_uses: int = None,
     ) -> Item:
         """
         Create a new item directly in a user's inventory (not from shop).
@@ -573,10 +637,66 @@ class InventoryMixin(BaseManager):
                 description=description,
                 quantity=quantity,
                 item_type=item_type,
+                category=category,
+                rarity=rarity,
+                effect=effect,
+                effect_value=effect_value,
+                effect_duration=effect_duration,
+                cooldown_seconds=cooldown_seconds,
+                targetable=targetable,
+                daily_limit=daily_limit,
+                global_daily_limit=global_daily_limit,
+                tradable=tradable,
+                durability=durability,
+                max_uses=max_uses,
             )
             session.add(item)
             await session.commit()
             return item
+
+    async def add_item_to_inventory(
+        self,
+        user_id: int,
+        name: str,
+        description: str = None,
+        quantity: int = 1,
+        item_type: ItemType = ItemType.COLLECTIBLE,
+        category: ItemCategory = ItemCategory.COLLECTIBLE,
+        rarity: ItemRarity = ItemRarity.COMMON,
+        effect: str = None,
+        effect_value: int = None,
+        effect_duration: int = None,
+        cooldown_seconds: int = None,
+        targetable: bool = False,
+        daily_limit: int = None,
+        global_daily_limit: int = None,
+        tradable: bool = True,
+        durability: int = None,
+        max_uses: int = None,
+    ) -> Item:
+        """
+        Alias for create_user_item that mirrors the legacy give-item signature.
+        """
+
+        return await self.create_user_item(
+            user_id=user_id,
+            name=name,
+            description=description,
+            quantity=quantity,
+            item_type=item_type,
+            category=category,
+            rarity=rarity,
+            effect=effect,
+            effect_value=effect_value,
+            effect_duration=effect_duration,
+            cooldown_seconds=cooldown_seconds,
+            targetable=targetable,
+            daily_limit=daily_limit,
+            global_daily_limit=global_daily_limit,
+            tradable=tradable,
+            durability=durability,
+            max_uses=max_uses,
+        )
 
     async def merge_duplicate_items(self, user_id: int) -> int:
         """
@@ -618,38 +738,6 @@ class InventoryMixin(BaseManager):
                 await session.commit()
                 return merged_count
 
-    async def add_shop_item(
-        self,
-        name: str,
-        description: str,
-        price: Decimal,
-        quantity: int,
-        item_type: ItemType = ItemType.COLLECTIBLE,
-        unlimited: bool = False,
-        effect: str = None,
-        effect_value: int = None,
-        effect_duration: int = None,
-        cooldown_seconds: int = None,
-    ) -> ShopItem:
-        """Create and store a new shop item."""
-        async with self.async_sessionmaker() as session:
-            async with session.begin():
-                new_shop_item = ShopItem(
-                    name=name,
-                    description=description,
-                    price=price,
-                    quantity=quantity,
-                    unlimited=unlimited,
-                    item_type=item_type,
-                    effect=effect,
-                    effect_value=effect_value,
-                    effect_duration=effect_duration,
-                    cooldown_seconds=cooldown_seconds,
-                )
-                session.add(new_shop_item)
-            await session.commit()
-            return new_shop_item
-
     async def update_shop_item_quantity(
         self, item_id: int, quantity_change: int
     ) -> bool:
@@ -674,6 +762,52 @@ class InventoryMixin(BaseManager):
                 shop_item.quantity = new_quantity
             await session.commit()
             return True
+
+    async def update_shop_item(
+        self, item_id: int, **kwargs
+    ) -> Optional[ShopItem]:
+        """
+        Update arbitrary fields on a shop item.
+        Allowed fields: name, description, price, quantity, unlimited, item_type,
+        category, rarity, effect, effect_value, effect_duration, cooldown_seconds,
+        targetable, daily_limit, global_daily_limit, tradable.
+        Returns the updated ShopItem or None if not found.
+        """
+
+        allowed = {
+            "name",
+            "description",
+            "price",
+            "quantity",
+            "unlimited",
+            "item_type",
+            "category",
+            "rarity",
+            "effect",
+            "effect_value",
+            "effect_duration",
+            "cooldown_seconds",
+            "targetable",
+            "daily_limit",
+            "global_daily_limit",
+            "tradable",
+        }
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return await self.get_shop_item_by_id(item_id)
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(ShopItem).where(ShopItem.id == item_id)
+                )
+                shop_item = result.scalar_one_or_none()
+                if not shop_item:
+                    return None
+                for key, value in updates.items():
+                    setattr(shop_item, key, value)
+            await session.commit()
+            return shop_item
 
     async def remove_shop_item(self, item_id: int) -> bool:
         """
@@ -717,11 +851,12 @@ class InventoryMixin(BaseManager):
     ) -> dict:
         """
         Purchase a shop item by:
-          - Verifying available stock.
+          - Verifying available stock and daily purchase limits.
           - Checking if the buyer’s wallet has enough funds.
           - Deducting the total cost from the user’s wallet.
           - Reducing the shop’s stock.
           - Adding the purchased item to the user’s inventory.
+          - Recording the purchase for daily limit tracking.
         Returns a dict containing purchase details.
         """
 
@@ -736,8 +871,17 @@ class InventoryMixin(BaseManager):
                 shop_item = result.scalar_one_or_none()
                 if not shop_item:
                     raise ValueError("Shop item not found.")
+                if quantity <= 0:
+                    raise ValueError("Quantity must be positive.")
                 if not shop_item.unlimited and shop_item.quantity < quantity:
                     raise ValueError("Insufficient stock available.")
+
+                # Enforce daily purchase limits
+                limit_check = await self.check_purchase_limits(
+                    raw_user_id, shop_item, quantity
+                )
+                if not limit_check["allowed"]:
+                    raise ValueError(limit_check["reason"])
 
                 total_cost = Decimal(str(shop_item.price * quantity))
 
@@ -770,12 +914,28 @@ class InventoryMixin(BaseManager):
                         description=shop_item.description,
                         quantity=1,
                         item_type=shop_item.item_type,
+                        category=shop_item.category,
+                        rarity=shop_item.rarity,
                         effect=shop_item.effect,
                         effect_value=shop_item.effect_value,
                         effect_duration=shop_item.effect_duration,
                         cooldown_seconds=shop_item.cooldown_seconds,
+                        targetable=shop_item.targetable,
+                        daily_limit=shop_item.daily_limit,
+                        global_daily_limit=shop_item.global_daily_limit,
+                        tradable=shop_item.tradable,
                     )
                     session.add(new_inventory_item)
+
+                # Record purchase for daily limits
+                session.add(
+                    ShopPurchaseLog(
+                        user_id=user_id,
+                        shop_item_id=shop_item.id,
+                        quantity=quantity,
+                        purchase_date=date.today(),
+                    )
+                )
             await session.commit()
             return {
                 "success": True,
@@ -1000,6 +1160,35 @@ class InventoryMixin(BaseManager):
             combined *= effect.effect_value
         return combined
 
+    async def get_earning_multiplier(self, user_id: int) -> Decimal:
+        """Return the combined active earning multiplier for a user.
+
+        Positive earning_boost effects and negative earning_debuff effects are
+        multiplied together, so a debuff value of 0.8 reduces earnings by 20%.
+        """
+
+        boost = await self.get_effect_multiplier(user_id, "earning_boost")
+        debuff = await self.get_effect_multiplier(user_id, "earning_debuff")
+        return max(Decimal("0.1"), min(Decimal("5.0"), boost * debuff))
+
+    async def get_gambling_multiplier(self, user_id: int) -> Decimal:
+        """Return the combined active gambling win multiplier for a user."""
+        return await self.get_effect_multiplier(user_id, "gambling_multiplier")
+
+    async def get_luck_multiplier(self, user_id: int) -> Decimal:
+        """Return the combined active luck multiplier for a user."""
+        return await self.get_effect_multiplier(user_id, "luck_boost")
+
+    async def get_cooldown_multiplier(self, user_id: int) -> Decimal:
+        """Return the combined active cooldown multiplier for a user."""
+        # Values below 1.0 reduce cooldowns (e.g., 0.8 = 20% faster).
+        # Values above 1.0 increase cooldowns (e.g., cooldown_increase debuffs).
+        # Guard against broken values by clamping to a safe range.
+        reduction = await self.get_effect_multiplier(user_id, "cooldown_reduction")
+        increase = await self.get_effect_multiplier(user_id, "cooldown_increase")
+        multiplier = reduction * increase
+        return max(Decimal("0.25"), min(Decimal("2.0"), multiplier))
+
     async def remove_active_effect(self, effect_id: int) -> bool:
         """Remove a specific active effect by ID. Returns True if removed."""
         async with self.async_sessionmaker() as session:
@@ -1033,6 +1222,8 @@ class InventoryMixin(BaseManager):
                     raise ValueError("Item not found.")
                 if item.user_id != from_user_id:
                     raise ValueError("You don't own this item.")
+                if not item.tradable:
+                    raise ValueError("This item is not tradable.")
                 if item.quantity < quantity:
                     raise ValueError(
                         f"Insufficient quantity. You have {item.quantity}, need {quantity}."
@@ -1088,10 +1279,18 @@ class InventoryMixin(BaseManager):
                         description=item.description,
                         quantity=trade.quantity,
                         item_type=item.item_type,
+                        category=item.category,
+                        rarity=item.rarity,
                         effect=item.effect,
                         effect_value=item.effect_value,
                         effect_duration=item.effect_duration,
                         cooldown_seconds=item.cooldown_seconds,
+                        targetable=item.targetable,
+                        daily_limit=item.daily_limit,
+                        global_daily_limit=item.global_daily_limit,
+                        tradable=item.tradable,
+                        durability=item.durability,
+                        max_uses=item.max_uses,
                     )
                     session.add(new_item)
 
@@ -1207,6 +1406,8 @@ class InventoryMixin(BaseManager):
                 "earning_boost",
                 "cooldown_reduction",
                 "rtp_boost",
+                "anti_rob",
+                "anti_bank_rob",
             ):
                 # Create timed effect
                 if effect_duration:
@@ -1231,6 +1432,8 @@ class InventoryMixin(BaseManager):
                         "earning_boost": f"{effect_value}x earning boost",
                         "cooldown_reduction": f"{effect_value}% cooldown reduction",
                         "rtp_boost": f"{effect_value}% RTP boost",
+                        "anti_rob": "Anti-Rob aura",
+                        "anti_bank_rob": "Anti-Bank-Rob aura",
                     }
                     response[
                         "message"
@@ -1255,12 +1458,14 @@ class InventoryMixin(BaseManager):
                 )
                 response["cooldown_seconds"] = item.cooldown_seconds
 
-            # Handle quantity reduction based on item type
-            if item.item_type == ItemType.CONSUMABLE:
+            # Handle quantity/durability/uses reduction
+            if item.item_type in (
+                ItemType.CONSUMABLE,
+                ItemType.DEFENSIVE,
+                ItemType.OFFENSIVE,
+            ):
                 async with session.begin():
-                    item.quantity -= 1
-                    if item.quantity <= 0:
-                        await session.delete(item)
+                    await self._consume_item_use(session, item)
                 await session.commit()
             elif item.item_type == ItemType.REDEEMABLE:
                 async with session.begin():
@@ -1420,3 +1625,520 @@ class InventoryMixin(BaseManager):
             bounty.active = False
             bounty.claimer_id = claimer_id
             return bounty
+
+    # ------------------------------------------------------------------
+    # Shop purchase limits
+    # ------------------------------------------------------------------
+
+    async def get_user_daily_purchase_count(
+        self, user_id: int, shop_item_id: int, purchase_date: date = None
+    ) -> int:
+        """Return how many of a shop item a user has bought on a given date."""
+
+        user_id = self.hash_user_id(user_id)
+        if purchase_date is None:
+            purchase_date = discord.utils.utcnow().date()
+        async with self.async_sessionmaker() as session:
+            stmt = select(
+                func.coalesce(func.sum(ShopPurchaseLog.quantity), 0)
+            ).where(
+                ShopPurchaseLog.user_id == user_id,
+                ShopPurchaseLog.shop_item_id == shop_item_id,
+                ShopPurchaseLog.purchase_date == purchase_date,
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one())
+
+    async def get_global_daily_purchase_count(
+        self, shop_item_id: int, purchase_date: date = None
+    ) -> int:
+        """Return how many of a shop item have been bought server-wide today."""
+
+        if purchase_date is None:
+            purchase_date = discord.utils.utcnow().date()
+        async with self.async_sessionmaker() as session:
+            stmt = select(
+                func.coalesce(func.sum(ShopPurchaseLog.quantity), 0)
+            ).where(
+                ShopPurchaseLog.shop_item_id == shop_item_id,
+                ShopPurchaseLog.purchase_date == purchase_date,
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one())
+
+    async def check_purchase_limits(
+        self, user_id: int, shop_item: ShopItem, quantity: int
+    ) -> dict:
+        """
+        Check whether a purchase would violate per-user or global daily limits.
+        Returns {"allowed": bool, "reason": str | None}.
+        """
+
+        if quantity <= 0:
+            return {"allowed": False, "reason": "Quantity must be positive."}
+
+        today = discord.utils.utcnow().date()
+        if shop_item.daily_limit is not None:
+            bought = await self.get_user_daily_purchase_count(
+                user_id, shop_item.id, today
+            )
+            if bought + quantity > shop_item.daily_limit:
+                remaining = max(0, shop_item.daily_limit - bought)
+                return {
+                    "allowed": False,
+                    "reason": (
+                        f"You can only buy **{remaining}** more "
+                        f"**{shop_item.name}** today."
+                    ),
+                }
+
+        if shop_item.global_daily_limit is not None:
+            bought = await self.get_global_daily_purchase_count(shop_item.id, today)
+            if bought + quantity > shop_item.global_daily_limit:
+                remaining = max(0, shop_item.global_daily_limit - bought)
+                return {
+                    "allowed": False,
+                    "reason": (
+                        f"Global daily stock for **{shop_item.name}** is "
+                        f"nearly gone (**{remaining}** remaining today)."
+                    ),
+                }
+
+        return {"allowed": True, "reason": None}
+
+    # ------------------------------------------------------------------
+    # Defensive robbery helpers
+    # ------------------------------------------------------------------
+
+    async def has_active_defensive_effect(self, user_id: int, effect_type: str) -> bool:
+        """Return True if the user has an active effect of the given type."""
+
+        effects = await self.get_active_effects_by_type(user_id, effect_type)
+        return bool(effects)
+
+    async def _consume_defensive_item(
+        self, user_id: int, effect: str
+    ) -> Optional[Item]:
+        """
+        Consume one defensive item with the matching effect.
+        Returns the consumed item (or None if no matching item was available).
+        """
+
+        user_id = self.hash_user_id(user_id)
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Item)
+                    .where(
+                        Item.user_id == user_id,
+                        Item.item_type == ItemType.DEFENSIVE,
+                        Item.effect == effect,
+                        Item.quantity > 0,
+                    )
+                    .order_by(Item.id)
+                    .limit(1)
+                )
+                item = result.scalar_one_or_none()
+                if not item:
+                    return None
+                await self._consume_item_use(session, item)
+            await session.commit()
+            return item
+
+    async def check_robbery_defense(
+        self, target_id: int, robbery_type: str = "wallet"
+    ) -> tuple[bool, str]:
+        """
+        Check whether a robbery against target_id is blocked.
+        robbery_type may be "wallet", "bank", or "any".
+        Returns (blocked: bool, message: str).
+        """
+
+        if robbery_type in ("wallet", "any"):
+            if await self.has_active_defensive_effect(target_id, "anti_rob"):
+                return True, "🛡️ Your target is protected by an **Anti-Rob** aura."
+
+        if robbery_type in ("bank", "any"):
+            if await self.has_active_defensive_effect(target_id, "anti_bank_rob"):
+                return True, "🏦 Your target's bank is protected by an **Anti-Bank-Rob** aura."
+
+        shield = await self._consume_defensive_item(target_id, "rob_shield")
+        if shield:
+            return True, "🛡️ Your target's **Rob Shield** shattered and blocked the robbery!"
+
+        return False, ""
+
+    async def get_robbery_debuff_multiplier(self, user_id: int) -> Decimal:
+        """
+        Return the combined robbery debuff multiplier for a user.
+        Values below 1.0 reduce the payout a robber receives from this target.
+        """
+
+        effects = await self.get_active_effects_by_type(user_id, "robbery_debuff")
+        if not effects:
+            return Decimal("1.0")
+
+        multiplier = Decimal("1.0")
+        for effect in effects:
+            val = effect.effect_value
+            if val is not None and val > 0:
+                # Debuff values are interpreted as a multiplier (e.g. 0.75 = -25%).
+                multiplier *= min(val, Decimal("1.0"))
+        return max(Decimal("0.1"), min(Decimal("1.0"), multiplier))
+
+    # ------------------------------------------------------------------
+    # Targeted/offensive item usage
+    # ------------------------------------------------------------------
+
+    async def use_targeted_item(
+        self, user_id: int, item_id: int, target_user_id: int
+    ) -> dict:
+        """
+        Use a targetable item on another user.
+        Applies a negative/timed effect to the target and consumes the item.
+        Returns a dict with result details.
+        """
+
+        raw_user_id = user_id
+        raw_target_id = target_user_id
+        await self.ensure_user_identity(user_id)
+        await self.ensure_user_identity(target_user_id)
+        user_id_h = self.hash_user_id(user_id)
+
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Item).where(Item.user_id == user_id_h, Item.id == item_id)
+            )
+            item = result.scalar_one_or_none()
+            if not item:
+                raise ValueError("Item not found in your inventory.")
+            if not item.targetable:
+                raise ValueError(f"**{item.name}** is not targetable.")
+            if item.cooldown_seconds:
+                remaining = await self.get_item_cooldown(raw_user_id, item.name)
+                if remaining > 0:
+                    raise ValueError(
+                        f"This item is on cooldown. {remaining} seconds remaining."
+                    )
+
+            effect = item.effect
+            effect_value = item.effect_value
+            effect_duration = item.effect_duration
+            if not effect or not effect_duration:
+                raise ValueError("That item has no usable targeted effect.")
+
+            supported_target_effects = {
+                "robbery_debuff",
+                "fee_increase",
+                "cooldown_increase",
+                "earning_debuff",
+                "luck_shield",
+            }
+            if effect not in supported_target_effects:
+                raise ValueError(f"**{item.name}** cannot be used on another user.")
+
+            # Apply effect to target
+            await self.create_active_effect(
+                raw_target_id,
+                effect,
+                Decimal(str(effect_value)) if effect_value else Decimal("1.0"),
+                effect_duration,
+                item.name,
+            )
+
+            if item.cooldown_seconds:
+                await self.set_item_cooldown(
+                    raw_user_id, item.name, item.cooldown_seconds
+                )
+
+            async with session.begin():
+                await self._consume_item_use(session, item)
+            await session.commit()
+
+            duration_minutes = effect_duration // 60
+            return {
+                "message": (
+                    f"You used **{item.name}** on <@{raw_target_id}>. "
+                    f"They now suffer `{effect}` for {duration_minutes}m."
+                ),
+                "target_id": raw_target_id,
+                "effect": effect,
+                "effect_value": effect_value,
+                "duration_seconds": effect_duration,
+            }
+
+    async def _consume_item_use(self, session, item: Item) -> None:
+        """
+        Reduce an item's uses/durability/quantity after it is used.
+        Deletes the row if its quantity drops to 0.
+        """
+
+        depleted = False
+        if item.max_uses is not None:
+            item.max_uses -= 1
+            if item.max_uses <= 0:
+                depleted = True
+                item.max_uses = None
+        elif item.durability is not None:
+            item.durability -= 1
+            if item.durability <= 0:
+                depleted = True
+                item.durability = None
+
+        if depleted:
+            item.quantity -= 1
+        elif item.item_type == ItemType.CONSUMABLE:
+            item.quantity -= 1
+        elif item.item_type in (ItemType.DEFENSIVE, ItemType.OFFENSIVE):
+            # Offensive/defensive items without explicit uses/durability still
+            # consume one quantity per use.
+            item.quantity -= 1
+
+        if item.quantity <= 0:
+            await session.delete(item)
+
+    # ------------------------------------------------------------------
+    # Shop catalog helpers
+    # ------------------------------------------------------------------
+
+    async def get_shop_items_by_category(
+        self, category: ItemCategory
+    ) -> List[ShopItem]:
+        """Return in-stock shop items in a specific category."""
+
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(ShopItem).where(
+                    ShopItem.category == category,
+                    (ShopItem.quantity > 0) | (ShopItem.unlimited == True),
+                )
+            )
+            return result.scalars().all()
+
+    async def get_shop_items_by_rarity(
+        self, rarity: ItemRarity
+    ) -> List[ShopItem]:
+        """Return in-stock shop items of a specific rarity."""
+
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(ShopItem).where(
+                    ShopItem.rarity == rarity,
+                    (ShopItem.quantity > 0) | (ShopItem.unlimited == True),
+                )
+            )
+            return result.scalars().all()
+
+    async def add_shop_item(
+        self,
+        name: str,
+        description: str,
+        price: Decimal,
+        quantity: int,
+        item_type: ItemType = ItemType.COLLECTIBLE,
+        category: ItemCategory = ItemCategory.COLLECTIBLE,
+        rarity: ItemRarity = ItemRarity.COMMON,
+        unlimited: bool = False,
+        effect: str = None,
+        effect_value: int = None,
+        effect_duration: int = None,
+        cooldown_seconds: int = None,
+        targetable: bool = False,
+        daily_limit: int = None,
+        global_daily_limit: int = None,
+        tradable: bool = True,
+    ) -> ShopItem:
+        """Create and store a new shop item with full catalog metadata."""
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                new_shop_item = ShopItem(
+                    name=name,
+                    description=description,
+                    price=price,
+                    quantity=quantity,
+                    unlimited=unlimited,
+                    item_type=item_type,
+                    category=category,
+                    rarity=rarity,
+                    effect=effect,
+                    effect_value=effect_value,
+                    effect_duration=effect_duration,
+                    cooldown_seconds=cooldown_seconds,
+                    targetable=targetable,
+                    daily_limit=daily_limit,
+                    global_daily_limit=global_daily_limit,
+                    tradable=tradable,
+                )
+                session.add(new_shop_item)
+            await session.commit()
+            return new_shop_item
+
+    async def seed_default_shop_items(self) -> dict:
+        """
+        Seed the shop with the default Dank Memer-style mixed-scarcity catalog.
+        Only creates items that do not already exist by name.
+        Returns a summary dict with counts.
+        """
+
+        catalog = [
+            # Defensive
+            {
+                "name": "Padlock",
+                "description": "Protects your wallet from one robbery attempt.",
+                "price": 2500,
+                "quantity": 10000,
+                "item_type": ItemType.DEFENSIVE,
+                "category": ItemCategory.DEFENSIVE,
+                "rarity": ItemRarity.COMMON,
+                "effect": "rob_shield",
+                "daily_limit": 10,
+                "global_daily_limit": 5000,
+            },
+            {
+                "name": "Anti-Rob Aura",
+                "description": "Timed aura that blocks all wallet robberies.",
+                "price": 15000,
+                "quantity": 2000,
+                "item_type": ItemType.DEFENSIVE,
+                "category": ItemCategory.DEFENSIVE,
+                "rarity": ItemRarity.UNCOMMON,
+                "effect": "anti_rob",
+                "effect_value": 1,
+                "effect_duration": 3600,
+                "daily_limit": 5,
+                "global_daily_limit": 1000,
+            },
+            {
+                "name": "Bank Insurance",
+                "description": "Timed aura that blocks all bank robberies.",
+                "price": 25000,
+                "quantity": 1500,
+                "item_type": ItemType.DEFENSIVE,
+                "category": ItemCategory.DEFENSIVE,
+                "rarity": ItemRarity.RARE,
+                "effect": "anti_bank_rob",
+                "effect_value": 1,
+                "effect_duration": 3600,
+                "daily_limit": 3,
+                "global_daily_limit": 500,
+            },
+            # Offensive / targeted
+            {
+                "name": "Handcuffs",
+                "description": "Handcuff a user, reducing their robbery payouts for 30m.",
+                "price": 10000,
+                "quantity": 3000,
+                "item_type": ItemType.OFFENSIVE,
+                "category": ItemCategory.OFFENSIVE,
+                "rarity": ItemRarity.UNCOMMON,
+                "effect": "robbery_debuff",
+                "effect_value": 0.75,
+                "effect_duration": 1800,
+                "targetable": True,
+                "daily_limit": 5,
+                "global_daily_limit": 1000,
+            },
+            {
+                "name": "Cursed Coin",
+                "description": "Hex a user so their earnings are reduced for 1h.",
+                "price": 20000,
+                "quantity": 1500,
+                "item_type": ItemType.OFFENSIVE,
+                "category": ItemCategory.OFFENSIVE,
+                "rarity": ItemRarity.RARE,
+                "effect": "earning_debuff",
+                "effect_value": 0.8,
+                "effect_duration": 3600,
+                "targetable": True,
+                "daily_limit": 3,
+                "global_daily_limit": 500,
+            },
+            # Utility / earning
+            {
+                "name": "Lucky Clover",
+                "description": "Boosts your luck for 1h.",
+                "price": 5000,
+                "quantity": 5000,
+                "item_type": ItemType.CONSUMABLE,
+                "category": ItemCategory.UTILITY,
+                "rarity": ItemRarity.COMMON,
+                "effect": "luck_boost",
+                "effect_value": 1.25,
+                "effect_duration": 3600,
+                "daily_limit": 10,
+                "global_daily_limit": 3000,
+            },
+            {
+                "name": "Money Multiplier",
+                "description": "Increases gambling payouts for 1h.",
+                "price": 7500,
+                "quantity": 4000,
+                "item_type": ItemType.CONSUMABLE,
+                "category": ItemCategory.UTILITY,
+                "rarity": ItemRarity.COMMON,
+                "effect": "gambling_multiplier",
+                "effect_value": 1.5,
+                "effect_duration": 3600,
+                "daily_limit": 10,
+                "global_daily_limit": 2500,
+            },
+            {
+                "name": "Energy Drink",
+                "description": "Reduces command cooldowns for 30m.",
+                "price": 4000,
+                "quantity": 5000,
+                "item_type": ItemType.CONSUMABLE,
+                "category": ItemCategory.UTILITY,
+                "rarity": ItemRarity.COMMON,
+                "effect": "cooldown_reduction",
+                "effect_value": 0.75,
+                "effect_duration": 1800,
+                "daily_limit": 10,
+                "global_daily_limit": 3000,
+            },
+            # Redeemable
+            {
+                "name": "Instant Cash Crate",
+                "description": "Redeem for an instant currency grant.",
+                "price": 1000,
+                "quantity": 50000,
+                "item_type": ItemType.REDEEMABLE,
+                "category": ItemCategory.REDEEMABLE,
+                "rarity": ItemRarity.COMMON,
+                "effect": "currency",
+                "effect_value": 2500,
+                "daily_limit": 20,
+                "global_daily_limit": 20000,
+            },
+            # Collectible / cosmetic
+            {
+                "name": "Golden Pepe",
+                "description": "A rare cosmetic collectible.",
+                "price": 500000,
+                "quantity": 50,
+                "item_type": ItemType.COLLECTIBLE,
+                "category": ItemCategory.COLLECTIBLE,
+                "rarity": ItemRarity.LEGENDARY,
+                "daily_limit": 1,
+                "global_daily_limit": 3,
+            },
+        ]
+
+        created = 0
+        skipped = 0
+        async with self.async_sessionmaker() as session:
+            for data in catalog:
+                result = await session.execute(
+                    select(ShopItem).where(ShopItem.name == data["name"])
+                )
+                if result.scalar_one_or_none():
+                    skipped += 1
+                    continue
+
+                shop_item = ShopItem(**data)
+                session.add(shop_item)
+                created += 1
+            await session.commit()
+
+        return {"created": created, "skipped": skipped, "total": len(catalog)}

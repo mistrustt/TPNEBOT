@@ -547,8 +547,29 @@ class ItemPaginator(View):
                 name = item.get("name", "Unnamed")
                 quantity = item.get("quantity", 0)
                 description = item.get("description", "No description available")
+                item_id = item.get("id")
+                item_type = item.get("item_type", "unknown")
+                category = item.get("category")
+                rarity = item.get("rarity")
+                targetable = item.get("targetable", False)
+
+                header = f"{name} (x{quantity})"
+                if item_id is not None:
+                    header += f" — ID: `{item_id}`"
+
+                details_parts = [f"**Type:** {item_type}"]
+                if category:
+                    details_parts.append(f"**Category:** {category}")
+                if rarity:
+                    details_parts.append(f"**Rarity:** {rarity}")
+                if targetable:
+                    details_parts.append("🎯 **Targetable**")
+                details = " | ".join(details_parts)
+
                 embed.add_field(
-                    name=f"{name} (x{quantity})", value=f"{description}", inline=False
+                    name=header,
+                    value=f"{description}\n{details}",
+                    inline=False,
                 )
 
         embed.set_footer(text=f"Page {self.current_page + 1} of {self.max_page + 1}")
@@ -1162,6 +1183,7 @@ class Economy(commands.Cog):
         self.exchange_rate = Decimal("1000000000000")
         self.validate_economy_task.start()
         self.fire_inactive_employees_task.start()
+        self.use_item.autocomplete("item_id")(self.use_item_autocomplete)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -1863,8 +1885,9 @@ class Economy(commands.Cog):
             
             # Apply dynamic reward multiplier based on economic conditions
             multiplier = await self.bot.database.get_dynamic_reward_multiplier()
-            daily_amount = int((Decimal(base_amount) * multiplier).quantize(Decimal("1")))
-            
+            earning_multiplier = await self.bot.database.get_earning_multiplier(ctx.author.id)
+            daily_amount = int((Decimal(base_amount) * multiplier * earning_multiplier).quantize(Decimal("1")))
+
             wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -1893,15 +1916,24 @@ class Economy(commands.Cog):
             await self.bot.database.add_reputation_score(ctx.author.id, 1)
 
             # Build embed with multiplier info
-            multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
+            multiplier_parts = []
+            if multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Econ ×{multiplier:.2f}")
+            if earning_multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Boost ×{earning_multiplier:.2f}")
+            multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
             embed = discord.Embed(
                 description=f"You received your daily reward of {self.currency_name} **{await self.formatter(daily_amount)}**{multiplier_text}!",
                 color=color,
             )
-            if multiplier != Decimal("1.0"):
+            if multiplier_parts:
                 embed.add_field(
-                    name="Economic Multiplier",
-                    value=f"Base: {self.currency_name} {await self.formatter(base_amount)} × {multiplier:.2f}",
+                    name="Multipliers",
+                    value=f"Base: {self.currency_name} {await self.formatter(base_amount)}" + (
+                        f" × {multiplier:.2f}" if multiplier != Decimal("1.0") else ""
+                    ) + (
+                        f" × {earning_multiplier:.2f}" if earning_multiplier != Decimal("1.0") else ""
+                    ),
                     inline=False,
                 )
             embed.set_author(
@@ -1927,8 +1959,9 @@ class Economy(commands.Cog):
             
             # Apply dynamic reward multiplier based on economic conditions
             multiplier = await self.bot.database.get_dynamic_reward_multiplier()
-            weekly_amount = int((Decimal(base_amount) * multiplier).quantize(Decimal("1")))
-            
+            earning_multiplier = await self.bot.database.get_earning_multiplier(ctx.author.id)
+            weekly_amount = int((Decimal(base_amount) * multiplier * earning_multiplier).quantize(Decimal("1")))
+
             wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -1958,15 +1991,24 @@ class Economy(commands.Cog):
             await self.bot.database.add_reputation_score(ctx.author.id, 2)
 
             # Build embed with multiplier info
-            multiplier_text = f" (×{multiplier:.2f})" if multiplier != Decimal("1.0") else ""
+            multiplier_parts = []
+            if multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Econ ×{multiplier:.2f}")
+            if earning_multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Boost ×{earning_multiplier:.2f}")
+            multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
             embed = discord.Embed(
                 description=f"You received your weekly reward of {self.currency_name} **{await self.formatter(weekly_amount)}**{multiplier_text}!",
                 color=color,
             )
-            if multiplier != Decimal("1.0"):
+            if multiplier_parts:
                 embed.add_field(
-                    name="Economic Multiplier",
-                    value=f"Base: {self.currency_name} {await self.formatter(base_amount)} × {multiplier:.2f}",
+                    name="Multipliers",
+                    value=f"Base: {self.currency_name} {await self.formatter(base_amount)}" + (
+                        f" × {multiplier:.2f}" if multiplier != Decimal("1.0") else ""
+                    ) + (
+                        f" × {earning_multiplier:.2f}" if earning_multiplier != Decimal("1.0") else ""
+                    ),
                     inline=False,
                 )
             embed.set_author(
@@ -1989,7 +2031,8 @@ class Economy(commands.Cog):
         try:
             base_amount = secrets.randbelow(9799990 - 3399990) + 3399990
             multiplier = await self.bot.database.get_dynamic_reward_multiplier()
-            monthly_amount = int((Decimal(base_amount) * multiplier).quantize(Decimal("1")))
+            earning_multiplier = await self.bot.database.get_earning_multiplier(ctx.author.id)
+            monthly_amount = int((Decimal(base_amount) * multiplier * earning_multiplier).quantize(Decimal("1")))
             wallet_id = await self.bot.database.get_wallet_id_for_user(ctx.author.id)
             try:
                 await self.bot.database.process_treasury_transaction(
@@ -2016,9 +2059,12 @@ class Economy(commands.Cog):
                     else discord.Color.blurple()
                 )
             await self.bot.database.add_reputation_score(ctx.author.id, 5)
-            multiplier_text = ""
+            multiplier_parts = []
             if multiplier != Decimal("1.0"):
-                multiplier_text = f" (Economic Multiplier: {float(multiplier):.3f}x)"
+                multiplier_parts.append(f"Econ ×{multiplier:.3f}")
+            if earning_multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Boost ×{earning_multiplier:.3f}")
+            multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
             embed = discord.Embed(
                 description=f"Your monthly reward is **{self.currency_name} {await self.formatter(monthly_amount)}**.{multiplier_text}",
                 color=color,
@@ -2026,10 +2072,14 @@ class Economy(commands.Cog):
             embed.set_author(
                 name="Monthly", icon_url=self.utils.get_avatar_url(ctx.author)
             )
-            if multiplier != Decimal("1.0"):
+            if multiplier_parts:
                 embed.add_field(
-                    name="Economic Multiplier",
-                    value=f"Base: {await self.formatter(base_amount)} | Multiplier: {float(multiplier):.3f}x",
+                    name="Multipliers",
+                    value=f"Base: {await self.formatter(base_amount)}" + (
+                        f" × {multiplier:.3f}" if multiplier != Decimal("1.0") else ""
+                    ) + (
+                        f" × {earning_multiplier:.3f}" if earning_multiplier != Decimal("1.0") else ""
+                    ),
                     inline=False
                 )
             await ctx.reply(embed=embed)
@@ -2336,9 +2386,10 @@ class Economy(commands.Cog):
         try:
             job, salary = await self.bot.database.work_job(user_id)
 
-            # Apply dynamic economic multiplier
+            # Apply dynamic economic multiplier and earning boost
             economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
-            salary = salary * economic_multiplier
+            earning_multiplier = await self.bot.database.get_earning_multiplier(user_id)
+            salary = salary * economic_multiplier * earning_multiplier
             salary = salary.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
             # Pay the user via treasury
@@ -2369,6 +2420,8 @@ class Economy(commands.Cog):
                 multiplier_parts.append(f"×{salary_multiplier:.2f}")
             if economic_multiplier != Decimal("1.0"):
                 multiplier_parts.append(f"Econ×{economic_multiplier:.2f}")
+            if earning_multiplier != Decimal("1.0"):
+                multiplier_parts.append(f"Boost×{earning_multiplier:.2f}")
             multiplier_text = f" ({', '.join(multiplier_parts)})" if multiplier_parts else ""
 
             await Embeds.custom(
@@ -2744,6 +2797,17 @@ class Economy(commands.Cog):
         if robber_balance < Decimal("100000"):
             return await Embeds.error(ctx, "You need at least 100,000 to attempt a robbery.", delete_after=5, reply=True)
 
+        blocked, defense_message = await self.bot.database.check_robbery_defense(
+            target.id, robbery_type="wallet"
+        )
+        if blocked:
+            return await Embeds.error(
+                ctx,
+                defense_message,
+                delete_after=5,
+                reply=True,
+            )
+
         outcomes = {
             "critical_success": 10,
             "success": 40,
@@ -2759,15 +2823,19 @@ class Economy(commands.Cog):
                 result = outcome
                 break
 
+        robbery_debuff = await self.bot.database.get_robbery_debuff_multiplier(
+            target.id
+        )
+
         result_message = ""
         cooldown_seconds = 1800
         try:
             if result == "critical_success":
                 percentage = Decimal(secrets.randbelow(21) + 40) / Decimal("100")
-                amount_stolen = (target_balance * percentage).quantize(
+                amount_stolen = (target_balance * percentage * robbery_debuff).quantize(
                     Decimal("1"), rounding=ROUND_HALF_UP
                 )
-                counter_loss = (target_balance * Decimal("0.10")).quantize(
+                counter_loss = (target_balance * Decimal("0.10") * robbery_debuff).quantize(
                     Decimal("1"), rounding=ROUND_HALF_UP
                 )
                 total_theft = amount_stolen + counter_loss
@@ -2795,7 +2863,7 @@ class Economy(commands.Cog):
                 )
             elif result == "success":
                 percentage = Decimal(secrets.randbelow(16) + 20) / Decimal("100")
-                amount_stolen = (target_balance * percentage).quantize(
+                amount_stolen = (target_balance * percentage * robbery_debuff).quantize(
                     Decimal("1"), rounding=ROUND_HALF_UP
                 )
 
@@ -2823,7 +2891,7 @@ class Economy(commands.Cog):
                 )
             elif result == "partial_failure":
                 percentage = Decimal(secrets.randbelow(6) + 10) / Decimal("100")
-                stolen = (target_balance * percentage).quantize(
+                stolen = (target_balance * percentage * robbery_debuff).quantize(
                     Decimal("1"), rounding=ROUND_HALF_UP
                 )
                 recoup = (stolen * Decimal("0.50")).quantize(
@@ -2876,10 +2944,23 @@ class Economy(commands.Cog):
                     await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
                     return
             elif result == "bank_robbery":
-                percentage = Decimal(secrets.randbelow(11) + 10) / Decimal("100")
-                amount_stolen = (target_bank_balance * percentage).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                bank_blocked, bank_defense_message = (
+                    await self.bot.database.check_robbery_defense(
+                        target.id, robbery_type="bank"
+                    )
                 )
+                if bank_blocked:
+                    return await Embeds.error(
+                        ctx,
+                        bank_defense_message,
+                        delete_after=5,
+                        reply=True,
+                    )
+
+                percentage = Decimal(secrets.randbelow(11) + 10) / Decimal("100")
+                amount_stolen = (
+                    target_bank_balance * percentage * robbery_debuff
+                ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
                 if amount_stolen > 0:
                     await self.bot.database.withdraw_from_bank(
                         wallet_id=target_wallet_id,
@@ -2958,22 +3039,40 @@ class Economy(commands.Cog):
                 delete_after=5,
             )
 
+        blocked, defense_message = await self.bot.database.check_robbery_defense(
+            target.id, robbery_type="wallet"
+        )
+        if blocked:
+            return await Embeds.error(
+                ctx,
+                defense_message,
+                delete_after=5,
+                reply=True,
+            )
+
         outcome_roll = secrets.randbelow(100)
         success_threshold = 80
 
+        robbery_debuff = await self.bot.database.get_robbery_debuff_multiplier(
+            target.id
+        )
+
         if outcome_roll < success_threshold:
+            drain_amount = (target_balance * robbery_debuff).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
             try:
                 await self.bot.database.process_p2p_transaction(
                     sender_wallet_id=target_wallet,
                     receiver_wallet_id=robber_wallet,
-                    amount=target_balance,
+                    amount=drain_amount,
                     description=f"Drained by {ctx.author.name}",
                     guild_id=ctx.guild.id if ctx.guild else None,
                     fee_from_amount=True,
                 )
 
                 result_message = (
-                    f"💰 You successfully drained {self.currency_name} **{await self.formatter(target_balance)}**"
+                    f"💰 You successfully drained {self.currency_name} **{await self.formatter(drain_amount)}**"
                     f"from {target.mention}'s wallet!"
                 )
 
@@ -4069,39 +4168,125 @@ class Economy(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=paginator)
 
-    @app_commands.command(name="use", description="Browse and use items from your inventory")
+    @app_commands.command(name="use", description="Use an item from your inventory")
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)
     @unified_cooldown(10)
-    async def use_item(self, interaction: Interaction):
-        # Get usable items (CONSUMABLE and REDEEMABLE types)
-        entries = await self.bot.database.get_user_inventory_grouped(
-            interaction.user.id
+    @app_commands.describe(
+        item="The item to use (find the ID with /inventory)",
+        target="Target user for targetable/offensive items",
+    )
+    async def use_item(
+        self,
+        interaction: Interaction,
+        item_id: int,
+        target: discord.Member = None,
+    ):
+        item = await self.bot.database.get_user_item(
+            interaction.user.id, item_id
         )
-        # Filter to only show usable items
-        usable_entries = []
-        for entry in entries:
-            item_type = entry.get("item_type")
-            if item_type in ("consumable", "redeemable"):
-                usable_entries.append(entry)
-
-        if not usable_entries:
+        if not item:
             await Embeds.warning(
                 interaction,
-                "You have no usable items (consumables or redeemables).",
-                title="Inventory",
+                "You don't own that item or the ID is invalid.",
+                title="Use Item",
                 ephemeral=True,
             )
             return
 
-        paginator = UseItemPaginator(
-            bot=self.bot,
-            entries=usable_entries,
-            user_id=interaction.user.id,
-            title="Your Inventory — Use an item",
-        )
-        embed = await paginator.send_page()
+        # Targetable/offensive items require a valid target
+        if item.targetable or item.item_type.value in ("offensive",):
+            if target is None or target.bot or target.id == interaction.user.id:
+                await Embeds.warning(
+                    interaction,
+                    f"**{item.name}** must be used on another user. "
+                    "Provide the `target` option.",
+                    title="Use Item",
+                    ephemeral=True,
+                )
+                return
 
-        await interaction.response.send_message(embed=embed, view=paginator)
+            try:
+                result = await self.bot.database.use_targeted_item(
+                    interaction.user.id, item_id, target.id
+                )
+                embed = discord.Embed(
+                    title="Item Used",
+                    description=result["message"],
+                    color=discord.Color.red(),
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            except Exception as e:
+                await Embeds.error(
+                    interaction,
+                    str(e),
+                    title="Use Item",
+                    ephemeral=True,
+                )
+            return
+
+        # Self-use path for consumables, redeemables, defensive auras, collectibles
+        try:
+            remaining = await self.bot.database.get_item_cooldown(
+                interaction.user.id, item.name
+            )
+            if remaining > 0:
+                mins, secs = divmod(remaining, 60)
+                await Embeds.warning(
+                    interaction,
+                    f"**{item.name}** is on cooldown. Time remaining: {mins}m {secs}s",
+                    title="Use Item",
+                    ephemeral=True,
+                )
+                return
+
+            result = await self.bot.database.use_inventory_item_with_effects(
+                interaction.user.id, item_id
+            )
+
+            message = result.get("message", "Item used successfully!")
+            if result.get("cooldown_seconds"):
+                mins, secs = divmod(result["cooldown_seconds"], 60)
+                message += f"\nCooldown: {mins}m {secs}s"
+
+            embed = discord.Embed(
+                title="Item Used",
+                description=message,
+                color=discord.Color.green(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except Exception as e:
+            await Embeds.error(
+                interaction,
+                str(e),
+                title="Use Item",
+                ephemeral=True,
+            )
+
+    async def use_item_autocomplete(
+        self,
+        interaction: Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[int]]:
+        """Autocomplete item names for the /use command."""
+
+        entries = await self.bot.database.get_user_inventory_grouped(
+            interaction.user.id
+        )
+        choices = []
+        for entry in entries:
+            name = entry.get("name", "Unknown")
+            item_id = entry.get("id")
+            if item_id is None:
+                continue
+            quantity = entry.get("quantity", 1)
+            display = f"{name} (x{quantity})"
+            if current.lower() in name.lower() or not current:
+                choices.append(
+                    app_commands.Choice(name=display[:100], value=item_id)
+                )
+            if len(choices) >= 25:
+                break
+        return choices
 
     @app_commands.command(name="trade", description="Trade an item to another user")
     @app_commands.checks.bot_has_permissions(embed_links=True, send_messages=True)

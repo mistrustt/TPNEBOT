@@ -1422,9 +1422,12 @@ class EconomyMixin(BaseManager):
             else Decimal("0")
         )
 
-        # Volatility should reflect current wealth inequality, not a stale default.
-        # Compute it fresh from total user wealth (wallet + bank + crypto).
-        volatility_index = await self._calculate_wealth_gini()
+        # Wealth-inequality Gini is not a useful signal for this economy because
+        # a small number of active players hold multi-hundred-trillion balances
+        # while most users hold little or nothing. It stays pinned near 1.0 and
+        # skews fees/health scores without indicating real instability. Keep the
+        # value at 0 so existing consumers and the DB column stay compatible.
+        volatility_index = Decimal("0")
 
         # Calculate velocity of money with protection against division by zero
         async with self.async_sessionmaker() as session:
@@ -1786,22 +1789,17 @@ class EconomyMixin(BaseManager):
         # ---- dynamic economic factors ----------------------------------------
         factors = await self.get_economic_factors()
         health = factors["treasury_health"]
-        volatility_index = factors.get("volatility_index", Decimal("0.02"))
         liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.50"))
         transaction_volume = factors.get("transaction_volume", Decimal("0.00"))
         active_users = factors.get("active_users", 1)
 
         # ---- dynamic base coefficient ---------------------------------------
-        # Scale base coefficient inversely with volatility
-        VOLATILITY_SENSITIVITY = Decimal("0.5")
-        adjusted_health = max(
-            Decimal("0.0"), health - (volatility_index * VOLATILITY_SENSITIVITY)
-        )
-
-        if adjusted_health >= Decimal("0.60"):
+        # Wealth-inequality "volatility" is no longer used; bet limits scale
+        # directly off treasury health.
+        if health >= Decimal("0.60"):
             base_coeff = Decimal("0.01")  # 1%
-        elif adjusted_health >= Decimal("0.30"):
-            t = (adjusted_health - Decimal("0.30")) / Decimal("0.30")
+        elif health >= Decimal("0.30"):
+            t = (health - Decimal("0.30")) / Decimal("0.30")
             base_coeff = Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (
                 t**2
             )
@@ -2026,10 +2024,9 @@ class EconomyMixin(BaseManager):
             row = active_users_result.fetchone()
             active_users = (row.senders or 0) + (row.receivers or 0)
 
-            # Volatility estimate using Gini coefficient (bounded 0-1)
-            # Gini = 0 means perfect equality, Gini = 1 means maximum inequality
-            # Wealth includes wallet, bank, and crypto at latest prices; treasury excluded.
-            volatility_index = await self._calculate_wealth_gini()
+            # Wealth-inequality Gini is kept at 0 for this economy; see
+            # get_economic_factors() for the rationale.
+            volatility_index = Decimal("0")
 
             # Calculate additional economic metrics
             liquidity_ratio = (
@@ -2275,7 +2272,6 @@ class EconomyMixin(BaseManager):
         # Generate recommendations based on conditions
         liquidity_ratio = float(factors.get("liquidity_ratio", 0))
         velocity_of_money = float(factors.get("velocity_of_money", 0))
-        volatility_index = float(factors.get("volatility_index", 0))
 
         # Liquidity-based recommendations (tiered to match scoring)
         # Scoring: 0.3-0.8 = 25pts (perfect), <0.3 scales down: 25 * (ratio/0.3)
@@ -2336,27 +2332,6 @@ class EconomyMixin(BaseManager):
                     "priority": "info",
                     "message": "High economic activity. Markets are very active.",
                     "action": "increase_activity",
-                }
-            )
-
-        # Volatility-based recommendations using Gini (0-1 scale)
-        # Gini > 0.6 = high inequality, > 0.4 = moderate
-        if volatility_index > 0.6:
-            recommendations["recommendations"].append(
-                {
-                    "type": "volatility",
-                    "priority": "high",
-                    "message": "High wealth inequality detected. Consider economic balancing.",
-                    "action": "monitor_distribution",
-                }
-            )
-        elif volatility_index > 0.4:
-            recommendations["recommendations"].append(
-                {
-                    "type": "volatility",
-                    "priority": "medium",
-                    "message": "Moderate wealth inequality present.",
-                    "action": "track_distribution",
                 }
             )
 
@@ -2479,40 +2454,37 @@ class EconomyMixin(BaseManager):
         treasury_health = float(factors.get("treasury_health", 0))
         liquidity_ratio = float(factors.get("liquidity_ratio", 0))
         velocity_of_money = float(factors.get("velocity_of_money", 0))
-        volatility_index = float(factors.get("volatility_index", 0))
 
         # Weighted scoring system
-        # Treasury health (30% weight)
-        treasury_score = treasury_health * 30
+        # Volatility/wealth-inequality is not used; its 20% weight is redistributed
+        # proportionally to the remaining three components:
+        #   treasury: 30% → 37.5%
+        #   liquidity: 25% → 31.25%
+        #   velocity: 25% → 31.25%
+        treasury_score = treasury_health * Decimal("37.5")
 
-        # Liquidity ratio (25% weight) - ideal is around 0.5-0.8
+        # Liquidity ratio (31.25% weight) - ideal is around 0.5-0.8
         if 0.3 <= liquidity_ratio <= 0.8:
-            liquidity_score = 25  # Perfect score for healthy liquidity
+            liquidity_score = Decimal("31.25")  # Perfect score for healthy liquidity
         elif liquidity_ratio > 0.8:
-            liquidity_score = 25 * (
-                0.8 / liquidity_ratio
+            liquidity_score = Decimal("31.25") * (
+                Decimal("0.8") / Decimal(str(liquidity_ratio))
             )  # Decrease score for too much liquidity
         else:
-            liquidity_score = 25 * (
-                liquidity_ratio / 0.3
+            liquidity_score = Decimal("31.25") * (
+                Decimal(str(liquidity_ratio)) / Decimal("0.3")
             )  # Decrease score for too little liquidity
 
-        # Velocity of money (25% weight) - higher is generally better.
+        # Velocity of money (31.25% weight) - higher is generally better.
         # Daily velocity of 0.1 (10% of circulating supply transacted per day)
         # is a healthy, active Discord economy; scale so that reaches full points.
-        velocity_score = min(25, velocity_of_money * 250)  # Cap at 25 points
-
-        # Volatility index (20% weight) - Gini coefficient (0-1), lower is better
-        # Score decreases linearly from 20 to 0 as inequality increases from 0 to 1
-        volatility_score = 20 * (1 - volatility_index)
+        velocity_score = min(Decimal("31.25"), Decimal(str(velocity_of_money)) * Decimal("312.5"))  # Cap at 31.25 points
 
         # Calculate total score (0-100)
-        total_score = (
-            treasury_score + liquidity_score + velocity_score + volatility_score
-        )
+        total_score = treasury_score + liquidity_score + velocity_score
 
         # Normalize to 0-100 range
-        health_score = max(0, min(100, total_score))
+        health_score = max(0, min(100, float(total_score)))
 
         # Determine health status
         if health_score >= 80:
@@ -2532,23 +2504,18 @@ class EconomyMixin(BaseManager):
             "components": {
                 "treasury_health": {
                     "value": round(treasury_health * 100, 2),
-                    "score": round(treasury_score, 2),
-                    "weight": 30,
+                    "score": round(float(treasury_score), 2),
+                    "weight": Decimal("37.5"),
                 },
                 "liquidity_ratio": {
                     "value": round(liquidity_ratio * 100, 2),
-                    "score": round(liquidity_score, 2),
-                    "weight": 25,
+                    "score": round(float(liquidity_score), 2),
+                    "weight": Decimal("31.25"),
                 },
                 "velocity_of_money": {
                     "value": round(velocity_of_money, 4),
-                    "score": round(velocity_score, 2),
-                    "weight": 25,
-                },
-                "volatility_index": {
-                    "value": round(volatility_index * 100, 2),
-                    "score": round(volatility_score, 2),
-                    "weight": 20,
+                    "score": round(float(velocity_score), 2),
+                    "weight": Decimal("31.25"),
                 },
             },
         }
