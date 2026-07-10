@@ -200,19 +200,45 @@ logger = logging.getLogger("discord.client")
 
 
 class GuardrailCommandTree(app_commands.CommandTree):
-    """Custom command tree that suppresses guardrail CheckFailure noise."""
+    """Command tree that enforces prefix-equivalent guardrails on slash commands."""
 
-    async def on_error(self, interaction: discord.Interaction, error, /) -> None:
-        # When our global guardrail check blocks a slash command it returns False,
-        # which discord.py turns into a CheckFailure. We already sent an ephemeral
-        # explanation, so don't log a noisy exception or dispatch a generic error.
-        bot = self.client
-        if isinstance(error, app_commands.CheckFailure):
-            status = getattr(bot, "_guardrail_status", {}).get(interaction.id)
-            if status is not None and not status[1]:
-                bot._guardrail_status.pop(interaction.id, None)
-                return
-        await super().on_error(interaction, error)
+    async def _call(self, interaction: discord.Interaction) -> None:
+        # Non-application-command interactions (views, buttons, etc.) are not
+        # guarded here; their own interaction_check handles authorization.
+        if interaction.type != discord.InteractionType.application_command:
+            return await super()._call(interaction)
+
+        # Let the tree-level interaction_check run first (default returns True).
+        if not await self.interaction_check(interaction):
+            interaction.command_failed = True
+            return
+
+        data: dict = interaction.data  # type: ignore
+        type_ = data.get("type", 1)
+        if type_ != 1:
+            # Context menu commands are left to the default flow.
+            return await super()._call(interaction)
+
+        # Pre-resolve the target command and namespace so the guardrail check
+        # can use interaction.command. Cached slots prevent re-computation when
+        # super()._call runs.
+        command, options = self._get_app_command_options(data)
+        interaction._cs_command = command
+        namespace = app_commands.Namespace(
+            interaction, data.get("resolved", {}), options
+        )
+        interaction._cs_namespace = namespace
+
+        if interaction.type is discord.InteractionType.autocomplete:
+            return await super()._call(interaction)
+
+        # Enforce maintenance mode, blacklist, DM block, account age, command
+        # status, and role restrictions before the command body is invoked.
+        if not await self.client._check_slash_guardrails(interaction):
+            interaction.command_failed = True
+            return
+
+        return await super()._call(interaction)
 
 
 class DiscordBot(commands.Bot):
@@ -236,9 +262,8 @@ class DiscordBot(commands.Bot):
         self.debug_mode_active = False
         self.version = "2026.07.10"
         self.cool_guys = None
-        # Track which slash interactions have already passed/failed guardrails so
-        # the centralized tree check and per-cog interaction_check don't duplicate
-        # database work or send multiple responses. Value is (timestamp, passed).
+        # Per-interaction guardrail cache so centralized tree checks and per-cog
+        # interaction_check don't duplicate DB work or send double responses.
         self._guardrail_status: dict[int, tuple[float, bool]] = {}
         self._guardrail_status_ttl = 300.0
         # Discord privileged intents we require and why:
@@ -394,18 +419,6 @@ class DiscordBot(commands.Bot):
             self.logger.info(
                 "Commands have been synced successfully to the global command tree."
             )
-            # Install a global guardrail check on every application command so
-            # maintenance mode, blacklist, DM block, account age, command status,
-            # and role restrictions are enforced for slash/hybrid invocations
-            # regardless of whether a cog's interaction_check is wired.
-            async def _guardrail_check(interaction: discord.Interaction) -> bool:
-                return await self._check_slash_guardrails(interaction)
-
-            for cmd in self.tree.walk_commands():
-                if isinstance(cmd, app_commands.Command):
-                    # Run guardrails before any other command checks so disabled
-                    # commands and maintenance mode are evaluated first.
-                    cmd.checks.insert(0, _guardrail_check)
             self.logger.info("-------------------")
             self.logger.info("Starting background tasks...")
             self.status_task.start()
