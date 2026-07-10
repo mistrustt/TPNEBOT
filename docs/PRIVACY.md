@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-07-02
 
-This Privacy Policy describes how TPNEBOT ("the bot", "we", "us") collects, uses, stores, and deletes data when you interact with it on Discord. By adding or using TPNEBOT in a Discord server, you acknowledge this policy.
+This Privacy Policy describes how TPNEBOT ("the bot", "we", "us") collects, uses, stores, and deletes data when you interact with it on Discord. By adding or using TPNEBOT in a Discord server, you acknowledge this policy and agree to the [Terms of Service](TERMS.md).
 
 TPNEBOT is operated as a hobby/community project. **We do not charge for use of the bot and we do not monetize user data in any way.**
 
@@ -55,7 +55,6 @@ We store data needed for the bot's economy, casino, games, music, and community 
 
 ### 1.7 Third-party service data
 - **Last.fm username:** stored when you link your Last.fm account.
-- **OpenRouter:** when you use `!ai` or `!8ball`, your question/prompt text is sent to OpenRouter's API to generate a response. We do not retain the response beyond sending it back to you.
 
 ---
 
@@ -70,7 +69,7 @@ We use collected data solely to operate the bot's stated features:
 We do **not**:
 - Sell, license, rent, or commercialize user data.
 - Share user data with data brokers, advertising networks, or monetization services.
-- Use message content to train machine-learning or large-language models.
+- Use message content for automated profiling, behavioral inference, or model training.
 - Profile users, discriminate, or make decisions about employment, housing, insurance, etc.
 - Contact users outside Discord using API data.
 - Send unsolicited direct messages for marketing.
@@ -84,16 +83,13 @@ We share data only in the following limited circumstances:
 ### 3.1 Discord
 Data is processed through Discord's APIs according to Discord's Terms of Service and Developer Policy.
 
-### 3.2 OpenRouter
-User-provided prompts for `!ai` and `!8ball` are sent to [OpenRouter](https://openrouter.ai/) for response generation. OpenRouter's privacy practices are governed by their own policies.
-
-### 3.3 Last.fm
+### 3.2 Last.fm
 Linked Last.fm usernames and requested Last.fm data are sent to [Last.fm](https://www.last.fm/) APIs.
 
-### 3.4 Service providers
+### 3.3 Service providers
 We do not use additional service providers for data processing beyond the services listed above.
 
-### 3.5 Legal requirements
+### 3.4 Legal requirements
 We may disclose data if required by applicable law or a valid court order.
 
 ---

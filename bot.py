@@ -287,9 +287,9 @@ class DiscordBot(commands.Bot):
     async def status_task(self) -> None:
         await self.wait_until_ready()
         statuses = [
-            f"{len(set(self.get_all_members())):,} members",
-            f"{len(self.guilds):,} servers",
-            f"for {len(self.commands):,} commands",
+            f"{len(set(self.get_all_members())):,} members | .gg/TPNE",
+            f"{len(self.guilds):,} servers | .gg/TPNE",
+            f"{len(self.commands):,} commands | .gg/TPNE",
             f"v{self.version} | .gg/TPNE",
             f"for !help | .gg/TPNE",
         ]
@@ -1145,7 +1145,6 @@ async def main() -> None:
             "STATS_SALT": "STATS_SALT",
             "LOCATION_ENCRYPTION_KEY": "LOCATION_ENCRYPTION_KEY",
             # Third-party API keys
-            "OPENROUTER_API_KEY": "OPENROUTER_API_KEY",
             "API_NINJAS_KEY": "API_NINJAS_KEY",
             "COINMARKETCAP_API_KEY": "COINMARKETCAP_API_KEY",
             "NASA_API_KEY": "NASA_API_KEY",

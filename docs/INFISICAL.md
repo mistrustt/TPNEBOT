@@ -21,7 +21,6 @@ TPNEBOT fetches all runtime secrets from [Infisical](https://infisical.com/). `.
    - `USER_ID_HASH_KEY`
    - `STATS_SALT`
    - `LOCATION_ENCRYPTION_KEY`
-   - `OPENROUTER_API_KEY`
    - `API_NINJAS_KEY`
    - `COINMARKETCAP_API_KEY`
    - `NASA_API_KEY`
