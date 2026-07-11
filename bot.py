@@ -435,6 +435,31 @@ class DiscordBot(commands.Bot):
         """Cache the guardrail result for an interaction."""
         self._guardrail_status[interaction_id] = (time.perf_counter(), passed)
 
+    async def _safe_guardrail_response(
+        self, interaction: discord.Interaction, content: str
+    ) -> bool:
+        """Send an ephemeral guardrail explanation, using followup if needed.
+
+        Returns True if a message was successfully sent, False otherwise.
+        """
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(content, ephemeral=True)
+                return True
+            else:
+                await interaction.followup.send(content, ephemeral=True)
+                return True
+        except discord.InteractionResponded:
+            try:
+                await interaction.followup.send(content, ephemeral=True)
+                return True
+            except Exception as e:
+                self.logger.debug(f"Guardrail followup failed: {e}")
+                return False
+        except Exception as e:
+            self.logger.debug(f"Guardrail response failed: {e}")
+            return False
+
     async def _check_slash_guardrails(self, interaction: discord.Interaction) -> bool:
         """
         Enforce prefix-equivalent guardrails on slash/app command invocations.
@@ -469,106 +494,102 @@ class DiscordBot(commands.Bot):
             self._mark_guardrail(interaction.id, False)
             return False
 
-        # Global maintenance mode (prefix debug mode) blocks everyone except
-        # the configured cool_guys team, matching the prefix invoke behavior.
-        if getattr(self, "debug_mode_active", False):
-            cool_guys = getattr(self, "cool_guys", None) or []
-            if user.id not in cool_guys:
-                try:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "The bot is currently in maintenance mode. Please try again later.",
-                            ephemeral=True,
-                        )
-                except Exception:
-                    pass
-                return _block("maintenance mode")
+        def _fail(reason: str, exc: Exception | None = None) -> bool:
+            msg = f"Slash guardrail failed for /{command_name}: {reason}"
+            if exc:
+                msg += f" ({type(exc).__name__}: {exc})"
+            self.logger.warning(msg)
+            self._mark_guardrail(interaction.id, False)
+            return False
 
-        # Owners bypass the remaining checks.
-        if getattr(self, "owner_ids", None) and user.id in self.owner_ids:
+        try:
+            # Global maintenance mode (prefix debug mode) blocks everyone except
+            # the configured cool_guys team, matching the prefix invoke behavior.
+            if getattr(self, "debug_mode_active", False):
+                cool_guys = getattr(self, "cool_guys", None) or []
+                if user.id not in cool_guys:
+                    await self._safe_guardrail_response(
+                        interaction,
+                        "The bot is currently in maintenance mode. Please try again later.",
+                    )
+                    return _block("maintenance mode")
+
+            # Owners bypass the remaining checks.
+            if getattr(self, "owner_ids", None) and user.id in self.owner_ids:
+                self._mark_guardrail(interaction.id, True)
+                return True
+
+            try:
+                is_blacklisted = await self.database.is_user_blacklisted(user.id)
+            except Exception as e:
+                return _fail("blacklist lookup failed", e)
+            if is_blacklisted:
+                await self._safe_guardrail_response(
+                    interaction, "You are blacklisted from using this bot."
+                )
+                return _block("blacklisted")
+
+            if interaction.guild is None:
+                await self._safe_guardrail_response(
+                    interaction, "Commands can only be used in a server."
+                )
+                return _block("DM")
+
+            account_age_threshold = timedelta(days=30)
+            account_age = discord.utils.utcnow() - user.created_at
+            if account_age < account_age_threshold:
+                days_remaining = 30 - account_age.days
+                await self._safe_guardrail_response(
+                    interaction,
+                    f"Your account must be at least 30 days old to use commands. "
+                    f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
+                )
+                return _block("account age")
+
+            try:
+                channel_id = interaction.channel_id
+                enabled = await self.database.get_command_status(command_name, channel_id)
+                if enabled is False:
+                    await self._safe_guardrail_response(
+                        interaction,
+                        f"The `/{command_name}` command is disabled in this channel by staff.",
+                    )
+                    return _block("channel disabled")
+                enabled_global = await self.database.get_command_status(command_name)
+                if enabled_global is False:
+                    await self._safe_guardrail_response(
+                        interaction,
+                        f"The `/{command_name}` command is currently disabled for maintenance.",
+                    )
+                    return _block("globally disabled")
+            except Exception as e:
+                return _fail("command status lookup failed", e)
+
+            try:
+                if interaction.guild and getattr(interaction.user, "roles", None):
+                    command_names = [command_name]
+                    aliases = getattr(command, "aliases", None) or []
+                    command_names.extend(a.lower() for a in aliases)
+                    has_permission = True
+                    for cmd_name in command_names:
+                        if not await self.database.check_command_role_restriction(
+                            interaction.guild.id, cmd_name, interaction.user.roles
+                        ):
+                            has_permission = False
+                            break
+                    if not has_permission:
+                        await self._safe_guardrail_response(
+                            interaction,
+                            f"You don't have the required role to use `/{command_name}`.",
+                        )
+                        return _block("role restriction")
+            except Exception as e:
+                return _fail("role restriction lookup failed", e)
+
             self._mark_guardrail(interaction.id, True)
             return True
-
-        try:
-            if not interaction.response.is_done():
-                if await self.database.is_user_blacklisted(user.id):
-                    await interaction.response.send_message(
-                        "You are blacklisted from using this bot.", ephemeral=True
-                    )
-                    return _block("blacklisted")
-        except Exception:
-            pass
-
-        if interaction.guild is None:
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "Commands can only be used in a server.", ephemeral=True
-                    )
-            except Exception:
-                pass
-            return _block("DM")
-
-        account_age_threshold = timedelta(days=30)
-        account_age = discord.utils.utcnow() - user.created_at
-        if account_age < account_age_threshold:
-            days_remaining = 30 - account_age.days
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"Your account must be at least 30 days old to use commands. "
-                        f"Please wait {days_remaining} more day{'s' if days_remaining != 1 else ''}.",
-                        ephemeral=True,
-                    )
-            except Exception:
-                pass
-            return _block("account age")
-
-        try:
-            channel_id = interaction.channel_id
-            enabled = await self.database.get_command_status(command_name, channel_id)
-            if enabled is False:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"The `/{command_name}` command is disabled in this channel by staff.",
-                        ephemeral=True,
-                    )
-                return _block("channel disabled")
-            enabled_global = await self.database.get_command_status(command_name)
-            if enabled_global is False:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"The `/{command_name}` command is currently disabled for maintenance.",
-                        ephemeral=True,
-                    )
-                return _block("globally disabled")
-        except Exception:
-            pass
-
-        try:
-            if interaction.guild and getattr(interaction.user, "roles", None):
-                command_names = [command_name]
-                aliases = getattr(command, "aliases", None) or []
-                command_names.extend(a.lower() for a in aliases)
-                has_permission = True
-                for cmd_name in command_names:
-                    if not await self.database.check_command_role_restriction(
-                        interaction.guild.id, cmd_name, interaction.user.roles
-                    ):
-                        has_permission = False
-                        break
-                if not has_permission:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            f"You don't have the required role to use `/{command_name}`.",
-                            ephemeral=True,
-                        )
-                    return _block("role restriction")
-        except Exception:
-            pass
-
-        self._mark_guardrail(interaction.id, True)
-        return True
+        except Exception as e:
+            return _fail("unexpected guardrail error", e)
 
     async def invoke(self, ctx: Context) -> None:
         try:
@@ -931,8 +952,9 @@ class DiscordBot(commands.Bot):
         # If our global guardrail check blocked this command we already sent an
         # ephemeral explanation. Don't record it as an error or show a generic one.
         if isinstance(root_error, app_commands.CheckFailure):
-            status = self._guardrail_status.pop(interaction.id, None)
+            status = self._guardrail_status.get(interaction.id)
             if status is not None and not status[1]:
+                self._guardrail_status.pop(interaction.id, None)
                 return
 
         retry_after = self._get_cooldown_retry_after(error)
