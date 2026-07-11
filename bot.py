@@ -224,6 +224,10 @@ class DiscordBot(commands.Bot):
         # interaction_check don't duplicate DB work or send double responses.
         self._guardrail_status: dict[int, tuple[float, bool]] = {}
         self._guardrail_status_ttl = 300.0
+        # Recent block log deduplication: suppress repeated log lines when
+        # Discord retries the same blocked slash interaction for the same user.
+        self._guardrail_log_dedup: dict[tuple[int, str, str], float] = {}
+        self._guardrail_log_dedup_ttl = 5.0
         # Discord privileged intents we require and why:
         # - message_content: spam-channel enforcement, automated moderation
         #   (PII/card/token detection), message delete/edit logging, attachment
@@ -488,9 +492,14 @@ class DiscordBot(commands.Bot):
         )
 
         def _block(reason: str) -> bool:
-            self.logger.info(
-                f"Slash guardrail blocked /{command_name} for {user} ({user.id}): {reason}"
-            )
+            now = time.perf_counter()
+            dedup_key = (user.id, command_name, reason)
+            last_logged = self._guardrail_log_dedup.get(dedup_key, 0)
+            if now - last_logged > self._guardrail_log_dedup_ttl:
+                self.logger.info(
+                    f"Slash guardrail blocked /{command_name} for {user} ({user.id}): {reason}"
+                )
+                self._guardrail_log_dedup[dedup_key] = now
             self._mark_guardrail(interaction.id, False)
             return False
 
