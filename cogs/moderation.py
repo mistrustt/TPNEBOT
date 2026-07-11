@@ -2320,6 +2320,7 @@ class Moderation(commands.Cog, name="Moderation"):
         description="Enable the Anti-MP3 feature for the server",
     )
     @unified_cooldown(5)
+    @commands.has_permissions(administrator=True)
     async def enable_antimp3(self, ctx: Context):
         """Toggle the Anti-MP3 feature"""
         guild_id = ctx.guild.id
@@ -2350,6 +2351,7 @@ class Moderation(commands.Cog, name="Moderation"):
         description="Disable the Anti-MP3 feature for the server",
     )
     @unified_cooldown(5)
+    @commands.has_permissions(administrator=True)
     async def disable_antimp3(self, ctx: Context):
         """Toggle the Anti-MP3 feature"""
         guild_id = ctx.guild.id
