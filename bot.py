@@ -385,10 +385,10 @@ class DiscordBot(commands.Bot):
 
             installed = 0
             for cmd in self.tree.walk_commands():
-                if isinstance(cmd, (app_commands.Command, app_commands.Group)):
+                if isinstance(cmd, app_commands.Command):
                     cmd.checks.insert(0, _guardrail_check)
                     installed += 1
-            self.logger.info(f"Guardrail checks installed on {installed} application commands/groups.")
+            self.logger.info(f"Guardrail checks installed on {installed} application commands.")
             self.logger.info("-------------------")
             self.logger.info("Starting background tasks...")
             self.status_task.start()
