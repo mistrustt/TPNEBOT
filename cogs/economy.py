@@ -1053,7 +1053,7 @@ class TransactionPaginator(discord.ui.View):
         tx_ids = []
         for tx in page_transactions:
             tx_ids.extend([getattr(tx, "from_user_id", None), getattr(tx, "to_user_id", None)])
-        resolved_tx_ids = resolve_ids(self.cog.bot.database,tx_ids)
+        resolved_tx_ids = await resolve_ids(self.cog.bot.database, tx_ids)
 
         for tx in page_transactions:
             amount = Decimal(tx.amount) if tx.amount else Decimal("0")

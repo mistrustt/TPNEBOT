@@ -526,6 +526,39 @@ async def _owner_check(interaction: discord.Interaction) -> bool:
     return await interaction.client.is_owner(interaction.user)
 
 
+def _parse_bool(value: str) -> bool:
+    """Parse a loose boolean string."""
+    if value is None:
+        raise ValueError("boolean value is required")
+    return value.strip().lower() in {"true", "yes", "y", "1", "on"}
+
+
+def _parse_kv_args(args: tuple[str, ...]) -> dict[str, str]:
+    """Parse a sequence of `key=value` strings, supporting quoted values."""
+    import shlex
+
+    joined = " ".join(args)
+    if not joined.strip():
+        return {}
+
+    # First try shlex so quoted values stay together, then fall back to simple split.
+    try:
+        parts = shlex.split(joined)
+    except ValueError:
+        parts = joined.split()
+
+    parsed: dict[str, str] = {}
+    for part in parts:
+        if "=" not in part:
+            raise ValueError(f"Expected `key=value`, got `{part}`")
+        key, _, raw_value = part.partition("=")
+        key = key.strip().lower()
+        if not key:
+            raise ValueError(f"Missing key in `{part}`")
+        parsed[key] = raw_value.strip().strip("\"'")
+    return parsed
+
+
 class Owner(commands.Cog, name="Owner"):
     def __init__(self, bot) -> None:
         self.bot = bot
@@ -534,10 +567,6 @@ class Owner(commands.Cog, name="Owner"):
         self.process = psutil.Process(os.getpid())
         self._last_result: Optional[Any] = None
         self.start_time = discord.utils.utcnow()
-
-    shopadmin = app_commands.Group(
-        name="shopadmin", description="Owner-only shop lifecycle commands"
-    )
 
     def _parse_shop_enum(self, enum_cls, value: str, default):
         """Safely parse a user-provided enum value."""
@@ -552,9 +581,28 @@ class Owner(commands.Cog, name="Owner"):
             except ValueError:
                 return default
 
-    @shopadmin.command(name="seed", description="Seed the default shop catalog")
-    @app_commands.check(_owner_check)
-    async def shopadmin_seed(self, interaction: discord.Interaction):
+    @commands.group(
+        name="shopadmin",
+        aliases=["sa"],
+        invoke_without_command=True,
+        hidden=True,
+        help="Owner-only shop lifecycle commands.",
+    )
+    @commands.is_owner()
+    async def shopadmin(self, ctx: Context):
+        """Owner-only prefix command group for managing the item shop."""
+        if ctx.invoked_subcommand is None:
+            prefix = await self.bot.get_prefix(ctx.message)
+            if isinstance(prefix, list):
+                prefix = prefix[0]
+            await ctx.send(
+                f"Use `{prefix}shopadmin seed|create|edit|remove|list`. "
+                "Create/edit accept `key=value` options after the required arguments."
+            )
+
+    @shopadmin.command(name="seed", hidden=True)
+    @commands.is_owner()
+    async def shopadmin_seed(self, ctx: Context):
         """Create any missing default shop items."""
 
         result = await self.bot.database.seed_default_shop_items()
@@ -566,103 +614,66 @@ class Owner(commands.Cog, name="Owner"):
             ),
             color=discord.Color.green(),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
-    @shopadmin.command(name="create", description="Create a new shop item")
-    @app_commands.check(_owner_check)
-    @app_commands.describe(
-        name="Item name",
-        description="Item description",
-        price="Price in coins",
-        quantity="Stock quantity, or 'unlimited'",
-        item_type="collectible / redeemable / consumable / defensive / offensive",
-        category="consumable / defensive / offensive / utility / cosmetic / redeemable / collectible",
-        rarity="common / uncommon / rare / epic / legendary",
-        effect="Effect type (optional)",
-        effect_value="Effect value (optional)",
-        effect_duration="Effect duration in seconds (optional)",
-        cooldown_seconds="Cooldown between uses in seconds (optional)",
-        targetable="Whether the item targets another user",
-        daily_limit="Per-user daily purchase limit (optional)",
-        global_daily_limit="Server-wide daily stock limit (optional)",
-        tradable="Whether the item can be traded",
-        unlimited="Whether stock is unlimited",
-    )
-    @app_commands.choices(
-        item_type=[
-            app_commands.Choice(name=t.value, value=t.value)
-            for t in ItemType
-        ],
-        category=[
-            app_commands.Choice(name=t.value, value=t.value)
-            for t in ItemCategory
-        ],
-        rarity=[
-            app_commands.Choice(name=t.value, value=t.value)
-            for t in ItemRarity
-        ],
-        effect=[
-            app_commands.Choice(name=e.value, value=e.value)
-            for e in EffectType
-        ],
-    )
+    @shopadmin.command(name="create", hidden=True)
+    @commands.is_owner()
     async def shopadmin_create(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        price: int,
-        description: str = "",
-        quantity: str = "1",
-        item_type: app_commands.Choice[str] = None,
-        category: app_commands.Choice[str] = None,
-        rarity: app_commands.Choice[str] = None,
-        effect: str = "",
-        effect_value: int = None,
-        effect_duration: int = None,
-        cooldown_seconds: int = None,
-        targetable: bool = False,
-        daily_limit: int = None,
-        global_daily_limit: int = None,
-        tradable: bool = True,
-        unlimited: bool = False,
+        self, ctx: Context, name: str, price: int, *options: str
     ):
-        """Create a fully-configured shop item."""
+        """Create a shop item.
 
-        quantity_str = quantity.strip().lower()
-        is_unlimited = quantity_str == "unlimited"
+        Usage: shopadmin create <name> <price> [key=value ...]
+        Options: description, quantity, unlimited, item_type, category, rarity,
+                 effect, effect_value, effect_duration, cooldown_seconds,
+                 targetable, daily_limit, global_daily_limit, tradable
+        """
+
+        try:
+            opts = _parse_kv_args(options)
+        except ValueError as e:
+            await Embeds.error(ctx, str(e), delete_after=10)
+            return
+
+        quantity_str = opts.get("quantity", "1").strip().lower()
+        is_unlimited = quantity_str == "unlimited" or _parse_bool(
+            opts.get("unlimited", "false")
+        )
         stock_quantity = 1 if is_unlimited else int(quantity_str)
 
         item_type_enum = self._parse_shop_enum(
-            ItemType, item_type.value if item_type else None, ItemType.COLLECTIBLE
+            ItemType, opts.get("item_type"), ItemType.COLLECTIBLE
         )
         category_enum = self._parse_shop_enum(
-            ItemCategory,
-            category.value if category else None,
-            ItemCategory.COLLECTIBLE,
+            ItemCategory, opts.get("category"), ItemCategory.COLLECTIBLE
         )
         rarity_enum = self._parse_shop_enum(
-            ItemRarity, rarity.value if rarity else None, ItemRarity.COMMON
+            ItemRarity, opts.get("rarity"), ItemRarity.COMMON
         )
 
-        effect_clean = effect.strip().lower() or None
+        effect_clean = opts.get("effect", "").strip().lower() or None
+
+        def _int_or_none(key: str) -> int | None:
+            raw = opts.get(key)
+            return int(raw) if raw is not None and raw.strip() else None
 
         item = await self.bot.database.add_shop_item(
             name=name.strip(),
-            description=description.strip() or None,
+            description=opts.get("description", "").strip() or None,
             price=price,
             quantity=stock_quantity,
             item_type=item_type_enum,
             category=category_enum,
             rarity=rarity_enum,
-            unlimited=is_unlimited or unlimited,
+            unlimited=is_unlimited,
             effect=effect_clean,
-            effect_value=effect_value,
-            effect_duration=effect_duration,
-            cooldown_seconds=cooldown_seconds,
-            targetable=targetable,
-            daily_limit=daily_limit,
-            global_daily_limit=global_daily_limit,
-            tradable=tradable,
+            effect_value=_int_or_none("effect_value"),
+            effect_duration=_int_or_none("effect_duration"),
+            cooldown_seconds=_int_or_none("cooldown_seconds"),
+            targetable=_parse_bool(opts.get("targetable", "false")),
+            daily_limit=_int_or_none("daily_limit"),
+            global_daily_limit=_int_or_none("global_daily_limit"),
+            tradable=_parse_bool(opts.get("tradable", "true")),
         )
 
         embed = discord.Embed(
@@ -670,117 +681,87 @@ class Owner(commands.Cog, name="Owner"):
             description=f"Added **{item.name}** (ID: `{item.id}`) for {item.price} coins.",
             color=discord.Color.green(),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
-    @shopadmin.command(name="edit", description="Edit an existing shop item")
-    @app_commands.check(_owner_check)
-    @app_commands.describe(
-        item_id="The shop item ID to edit",
-        name="New name",
-        description="New description",
-        price="New price",
-        quantity="New stock quantity or 'unlimited'",
-        unlimited="Set unlimited stock",
-        item_type="New item type",
-        category="New category",
-        rarity="New rarity",
-        effect="New effect type",
-        effect_value="New effect value",
-        effect_duration="New effect duration",
-        cooldown_seconds="New cooldown",
-        targetable="Targetable setting",
-        daily_limit="Per-user daily purchase limit",
-        global_daily_limit="Server-wide daily stock limit",
-        tradable="Tradable setting",
-    )
-    @app_commands.choices(
-        item_type=[
-            app_commands.Choice(name=t.value, value=t.value)
-            for t in ItemType
-        ],
-        category=[
-            app_commands.Choice(name=t.value, value=t.value)
-            for t in ItemCategory
-        ],
-        rarity=[
-            app_commands.Choice(name=t.value, value=t.value)
-            for t in ItemRarity
-        ],
-    )
-    async def shopadmin_edit(
-        self,
-        interaction: discord.Interaction,
-        item_id: int,
-        name: str = None,
-        description: str = None,
-        price: int = None,
-        quantity: str = None,
-        unlimited: bool = None,
-        item_type: app_commands.Choice[str] = None,
-        category: app_commands.Choice[str] = None,
-        rarity: app_commands.Choice[str] = None,
-        effect: str = None,
-        effect_value: int = None,
-        effect_duration: int = None,
-        cooldown_seconds: int = None,
-        targetable: bool = None,
-        daily_limit: int = None,
-        global_daily_limit: int = None,
-        tradable: bool = None,
-    ):
-        """Edit metadata for an existing shop item."""
+    @shopadmin.command(name="edit", hidden=True)
+    @commands.is_owner()
+    async def shopadmin_edit(self, ctx: Context, item_id: int, *options: str):
+        """Edit an existing shop item.
+
+        Usage: shopadmin edit <item_id> [key=value ...]
+        Options: name, description, price, quantity, unlimited, item_type,
+                 category, rarity, effect, effect_value, effect_duration,
+                 cooldown_seconds, targetable, daily_limit, global_daily_limit,
+                 tradable
+        """
+
+        try:
+            opts = _parse_kv_args(options)
+        except ValueError as e:
+            await Embeds.error(ctx, str(e), delete_after=10)
+            return
 
         shop_item = await self.bot.database.get_shop_item_by_id(item_id)
         if not shop_item:
             await Embeds.error(
-                interaction,
+                ctx,
                 f"No shop item found with ID `{item_id}`.",
                 title="Shop Admin",
-                ephemeral=True,
             )
             return
 
-        updates = {}
-        if name is not None:
-            updates["name"] = name.strip()
-        if description is not None:
-            updates["description"] = description.strip() or None
-        if price is not None:
-            updates["price"] = price
-        if quantity is not None:
-            quantity_str = quantity.strip().lower()
+        updates: dict[str, Any] = {}
+
+        if "name" in opts:
+            updates["name"] = opts["name"].strip()
+        if "description" in opts:
+            updates["description"] = opts["description"].strip() or None
+        if "price" in opts:
+            updates["price"] = int(opts["price"])
+        if "quantity" in opts:
+            quantity_str = opts["quantity"].strip().lower()
             updates["unlimited"] = quantity_str == "unlimited"
             updates["quantity"] = 1 if updates["unlimited"] else int(quantity_str)
-        if unlimited is not None:
-            updates["unlimited"] = unlimited
-        if item_type is not None:
+        if "unlimited" in opts:
+            updates["unlimited"] = _parse_bool(opts["unlimited"])
+        if "item_type" in opts:
             updates["item_type"] = self._parse_shop_enum(
-                ItemType, item_type.value, shop_item.item_type
+                ItemType, opts["item_type"], shop_item.item_type
             )
-        if category is not None:
+        if "category" in opts:
             updates["category"] = self._parse_shop_enum(
-                ItemCategory, category.value, shop_item.category
+                ItemCategory, opts["category"], shop_item.category
             )
-        if rarity is not None:
+        if "rarity" in opts:
             updates["rarity"] = self._parse_shop_enum(
-                ItemRarity, rarity.value, shop_item.rarity
+                ItemRarity, opts["rarity"], shop_item.rarity
             )
-        if effect is not None:
-            updates["effect"] = effect.strip().lower() or None
-        if effect_value is not None:
-            updates["effect_value"] = effect_value
-        if effect_duration is not None:
-            updates["effect_duration"] = effect_duration
-        if cooldown_seconds is not None:
-            updates["cooldown_seconds"] = cooldown_seconds
-        if targetable is not None:
-            updates["targetable"] = targetable
-        if daily_limit is not None:
-            updates["daily_limit"] = daily_limit
-        if global_daily_limit is not None:
-            updates["global_daily_limit"] = global_daily_limit
-        if tradable is not None:
-            updates["tradable"] = tradable
+        if "effect" in opts:
+            updates["effect"] = opts["effect"].strip().lower() or None
+        if "effect_value" in opts:
+            updates["effect_value"] = int(opts["effect_value"])
+        if "effect_duration" in opts:
+            updates["effect_duration"] = int(opts["effect_duration"])
+        if "cooldown_seconds" in opts:
+            updates["cooldown_seconds"] = int(opts["cooldown_seconds"])
+        if "targetable" in opts:
+            updates["targetable"] = _parse_bool(opts["targetable"])
+        if "daily_limit" in opts:
+            raw = opts["daily_limit"].strip()
+            updates["daily_limit"] = int(raw) if raw else None
+        if "global_daily_limit" in opts:
+            raw = opts["global_daily_limit"].strip()
+            updates["global_daily_limit"] = int(raw) if raw else None
+        if "tradable" in opts:
+            updates["tradable"] = _parse_bool(opts["tradable"])
+
+        if not updates:
+            await Embeds.warning(
+                ctx,
+                "No changes provided. Pass at least one `key=value` option.",
+                title="Shop Admin",
+            )
+            return
 
         updated = await self.bot.database.update_shop_item(item_id, **updates)
         embed = discord.Embed(
@@ -788,14 +769,11 @@ class Owner(commands.Cog, name="Owner"):
             description=f"Updated **{updated.name}** (ID: `{updated.id}`).",
             color=discord.Color.green(),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
-    @shopadmin.command(name="remove", description="Remove a shop item")
-    @app_commands.check(_owner_check)
-    @app_commands.describe(item_id="The shop item ID to remove")
-    async def shopadmin_remove(
-        self, interaction: discord.Interaction, item_id: int
-    ):
+    @shopadmin.command(name="remove", hidden=True)
+    @commands.is_owner()
+    async def shopadmin_remove(self, ctx: Context, item_id: int):
         """Delete a shop item from the catalog."""
 
         removed = await self.bot.database.remove_shop_item(item_id)
@@ -811,20 +789,19 @@ class Owner(commands.Cog, name="Owner"):
                 description=f"No shop item found with ID `{item_id}`.",
                 color=discord.Color.red(),
             )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
-    @shopadmin.command(name="list", description="List all shop items")
-    @app_commands.check(_owner_check)
-    async def shopadmin_list(self, interaction: discord.Interaction):
+    @shopadmin.command(name="list", hidden=True)
+    @commands.is_owner()
+    async def shopadmin_list(self, ctx: Context):
         """List every item currently in the shop."""
 
         items = await self.bot.database.list_shop_items()
         if not items:
             await Embeds.warning(
-                interaction,
+                ctx,
                 "No items in the shop.",
                 title="Shop Admin",
-                ephemeral=True,
             )
             return
 
@@ -858,7 +835,7 @@ class Owner(commands.Cog, name="Owner"):
         )
         if len(chunks) > 1:
             embed.set_footer(text=f"Page 1 / {len(chunks)} (truncated)")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
     def is_whitelisted_clubhouse(self, user_id: int):
         """Check if the user ID is in the whitelist."""

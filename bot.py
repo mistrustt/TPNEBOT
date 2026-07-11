@@ -199,48 +199,6 @@ setup_logging()
 logger = logging.getLogger("discord.client")
 
 
-class GuardrailCommandTree(app_commands.CommandTree):
-    """Command tree that enforces prefix-equivalent guardrails on slash commands."""
-
-    async def _call(self, interaction: discord.Interaction) -> None:
-        # Non-application-command interactions (views, buttons, etc.) are not
-        # guarded here; their own interaction_check handles authorization.
-        if interaction.type != discord.InteractionType.application_command:
-            return await super()._call(interaction)
-
-        # Let the tree-level interaction_check run first (default returns True).
-        if not await self.interaction_check(interaction):
-            interaction.command_failed = True
-            return
-
-        data: dict = interaction.data  # type: ignore
-        type_ = data.get("type", 1)
-        if type_ != 1:
-            # Context menu commands are left to the default flow.
-            return await super()._call(interaction)
-
-        # Pre-resolve the target command and namespace so the guardrail check
-        # can use interaction.command. Cached slots prevent re-computation when
-        # super()._call runs.
-        command, options = self._get_app_command_options(data)
-        interaction._cs_command = command
-        namespace = app_commands.Namespace(
-            interaction, data.get("resolved", {}), options
-        )
-        interaction._cs_namespace = namespace
-
-        if interaction.type is discord.InteractionType.autocomplete:
-            return await super()._call(interaction)
-
-        # Enforce maintenance mode, blacklist, DM block, account age, command
-        # status, and role restrictions before the command body is invoked.
-        if not await self.client._check_slash_guardrails(interaction):
-            interaction.command_failed = True
-            return
-
-        return await super()._call(interaction)
-
-
 class DiscordBot(commands.Bot):
     def __init__(self) -> None:
         self.logger = logger
@@ -286,7 +244,6 @@ class DiscordBot(commands.Bot):
             help_command=None,
             case_insensitive=True,
             allowed_mentions=discord.AllowedMentions(everyone=False),
-            tree_cls=GuardrailCommandTree,
         )
 
     async def get_prefix(self, message: discord.Message) -> str:
@@ -415,10 +372,23 @@ class DiscordBot(commands.Bot):
             await self.load_cogs()
             self.logger.info("Cog loading stage completed successfully.")
             self.logger.info("-------------------")
-            await self.tree.sync()
-            self.logger.info(
-                "Commands have been synced successfully to the global command tree."
-            )
+            self.logger.info("Syncing application commands...")
+            try:
+                await self.tree.sync()
+                self.logger.info("Commands have been synced successfully to the global command tree.")
+            except Exception as e:
+                self.logger.error(f"Failed to sync application commands: {e}")
+
+            self.logger.info("Installing slash guardrail checks...")
+            async def _guardrail_check(interaction: discord.Interaction) -> bool:
+                return await self._check_slash_guardrails(interaction)
+
+            installed = 0
+            for cmd in self.tree.walk_commands():
+                if isinstance(cmd, (app_commands.Command, app_commands.Group)):
+                    cmd.checks.insert(0, _guardrail_check)
+                    installed += 1
+            self.logger.info(f"Guardrail checks installed on {installed} application commands/groups.")
             self.logger.info("-------------------")
             self.logger.info("Starting background tasks...")
             self.status_task.start()
@@ -485,6 +455,19 @@ class DiscordBot(commands.Bot):
             return False
 
         user = interaction.user
+        command = interaction.command
+        command_name = (
+            getattr(command, "qualified_name", None)
+            or getattr(command, "name", None)
+            or "unknown"
+        )
+
+        def _block(reason: str) -> bool:
+            self.logger.info(
+                f"Slash guardrail blocked /{command_name} for {user} ({user.id}): {reason}"
+            )
+            self._mark_guardrail(interaction.id, False)
+            return False
 
         # Global maintenance mode (prefix debug mode) blocks everyone except
         # the configured cool_guys team, matching the prefix invoke behavior.
@@ -499,8 +482,7 @@ class DiscordBot(commands.Bot):
                         )
                 except Exception:
                     pass
-                self._mark_guardrail(interaction.id, False)
-                return False
+                return _block("maintenance mode")
 
         # Owners bypass the remaining checks.
         if getattr(self, "owner_ids", None) and user.id in self.owner_ids:
@@ -513,8 +495,7 @@ class DiscordBot(commands.Bot):
                     await interaction.response.send_message(
                         "You are blacklisted from using this bot.", ephemeral=True
                     )
-                    self._mark_guardrail(interaction.id, False)
-                    return False
+                    return _block("blacklisted")
         except Exception:
             pass
 
@@ -526,8 +507,7 @@ class DiscordBot(commands.Bot):
                     )
             except Exception:
                 pass
-            self._mark_guardrail(interaction.id, False)
-            return False
+            return _block("DM")
 
         account_age_threshold = timedelta(days=30)
         account_age = discord.utils.utcnow() - user.created_at
@@ -542,15 +522,7 @@ class DiscordBot(commands.Bot):
                     )
             except Exception:
                 pass
-            self._mark_guardrail(interaction.id, False)
-            return False
-
-        command = interaction.command
-        command_name = (
-            getattr(command, "qualified_name", None)
-            or getattr(command, "name", None)
-            or "unknown"
-        )
+            return _block("account age")
 
         try:
             channel_id = interaction.channel_id
@@ -561,8 +533,7 @@ class DiscordBot(commands.Bot):
                         f"The `/{command_name}` command is disabled in this channel by staff.",
                         ephemeral=True,
                     )
-                self._mark_guardrail(interaction.id, False)
-                return False
+                return _block("channel disabled")
             enabled_global = await self.database.get_command_status(command_name)
             if enabled_global is False:
                 if not interaction.response.is_done():
@@ -570,8 +541,7 @@ class DiscordBot(commands.Bot):
                         f"The `/{command_name}` command is currently disabled for maintenance.",
                         ephemeral=True,
                     )
-                self._mark_guardrail(interaction.id, False)
-                return False
+                return _block("globally disabled")
         except Exception:
             pass
 
@@ -593,8 +563,7 @@ class DiscordBot(commands.Bot):
                             f"You don't have the required role to use `/{command_name}`.",
                             ephemeral=True,
                         )
-                    self._mark_guardrail(interaction.id, False)
-                    return False
+                    return _block("role restriction")
         except Exception:
             pass
 
