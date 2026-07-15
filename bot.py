@@ -253,17 +253,6 @@ class DiscordBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions(everyone=False),
         )
 
-        # Use a larger default executor for asyncio thread-pool work (asyncpg
-        # DNS resolution runs here). The default pool is small and can saturate
-        # during a Postgres outage, which starves the event loop and makes the
-        # bot stop responding. Must be set after super().__init__() creates self.loop.
-        self.loop.set_default_executor(
-            concurrent.futures.ThreadPoolExecutor(
-                max_workers=max(32, (os.cpu_count() or 1) * 4),
-                thread_name_prefix="asyncio-default-",
-            )
-        )
-
     async def get_prefix(self, message: discord.Message) -> str:
         if not message.guild:
             return "!"
@@ -1387,6 +1376,17 @@ class DiscordBot(commands.Bot):
 async def main() -> None:
     """Load non-sensitive config from .env and all secrets from Infisical."""
     load_dotenv()
+
+    # Configure a larger default executor before the bot starts so asyncpg DNS
+    # resolution (which runs in asyncio's thread pool) can't saturate the small
+    # default pool during a Postgres outage and freeze the event loop.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(32, (os.cpu_count() or 1) * 4),
+            thread_name_prefix="asyncio-default-",
+        )
+    )
 
     infisical = InfisicalSecretsManager.from_env()
     if not infisical.is_configured:
