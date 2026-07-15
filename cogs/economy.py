@@ -38,6 +38,7 @@ class DropView(discord.ui.View):
         self.cog = cog
         self.message = None
         self.lock = asyncio.Lock()
+        self.drop_posted_at = None
 
     @discord.ui.button(label="Claim", style=discord.ButtonStyle.primary)
     async def claim_button(
@@ -101,10 +102,15 @@ class DropView(discord.ui.View):
         if self.message is not None and self.message.embeds:
             await self.message.edit(embed=self.message.embeds[0], view=self)
 
+        reaction_seconds = ""
+        if self.drop_posted_at is not None:
+            elapsed = (discord.utils.utcnow() - self.drop_posted_at).total_seconds()
+            reaction_seconds = f" in **{elapsed:.2f}s** 🏃"
+
         await Embeds.success(
             interaction,
             f"**{interaction.user.display_name}** claimed the {self.currency_name} "
-            f"**{await self.cog.formatter(self.amount)}** dropped by **{self.drop_author.display_name}**! 🎉",
+            f"**{await self.cog.formatter(self.amount)}** dropped by **{self.drop_author.display_name}**{reaction_seconds}! 🎉",
         )
 
         if self.message and self.message.id in self.cog.active_drops:
@@ -3276,11 +3282,13 @@ class Economy(commands.Cog):
         )
         drop_message = await ctx.reply(embed=embed, view=view)
         view.message = drop_message
+        view.drop_posted_at = discord.utils.utcnow()
 
         self.active_drops[drop_message.id] = {
             "amount": amount,
             "claimed": False,
             "author": ctx.author,
+            "posted_at": view.drop_posted_at,
         }
 
     @commands.command(name="airdrop")
