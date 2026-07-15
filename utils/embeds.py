@@ -81,11 +81,15 @@ class Embeds:
         if isinstance(ctx_or_channel, commands.Context):
             ctx = ctx_or_channel
             if reply:
-                return await ctx.reply(
-                    embed=embed,
-                    delete_after=delete_after,
-                    mention_author=mention_author,
-                )
+                try:
+                    return await ctx.reply(
+                        embed=embed,
+                        delete_after=delete_after,
+                        mention_author=mention_author,
+                    )
+                except discord.HTTPException:
+                    # Original message likely deleted while we were busy.
+                    pass
             return await ctx.send(embed=embed, delete_after=delete_after)
 
         # Fallback: treat as a sendable channel

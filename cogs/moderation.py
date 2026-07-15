@@ -3601,9 +3601,18 @@ class Moderation(commands.Cog, name="Moderation"):
                 return
 
         except discord.HTTPException:
-            await ctx.send("I do not have permission to nuke this channel.")
+            try:
+                await ctx.send("I do not have permission to nuke this channel.")
+            except discord.HTTPException:
+                pass
         except discord.Forbidden:
-            await ctx.send("I do not have permission to nuke this channel.")
+            try:
+                await ctx.send("I do not have permission to nuke this channel.")
+            except discord.HTTPException:
+                pass
+        except discord.NotFound:
+            # Channel was deleted before or during the command; nothing to respond in.
+            logger.warning("Nuke command ran in a channel that no longer exists.")
 
     @commands.command(
         name="slowmode", description="Set the slowmode for the current channel"

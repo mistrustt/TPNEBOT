@@ -353,6 +353,27 @@ class CrashView(discord.ui.LayoutView):
             user_id, self.pf_data[user_id], house_edge
         )
 
+    async def _crash_players_at_current_multiplier(self):
+        """Mark any active players whose crash point has been reached as crashed."""
+        for uid, cp in list(self.crash_points.items()):
+            if uid not in self.players:
+                continue
+            if uid in self.cashed_out or uid in self.crashed_out:
+                continue
+            if self.current_multiplier >= cp:
+                self.crashed_out[uid] = cp
+                await self.casino._remove_refund(self.session_id, user_id=uid)
+                await self.casino.process_game_result(uid, "crash", self.players[uid])
+                pf = self.pf_data.get(uid, {})
+                await self.casino._record_game_outcome(
+                    uid, "crash", "loss", self.players[uid], pf,
+                )
+                await self.casino._log_game_event(
+                    self.session_id,
+                    "crash",
+                    {"user_id": uid, "multiplier": str(cp)},
+                )
+
     async def start_game(self, ctx: commands.Context):
         """Start lobby > run > finish."""
         self.is_running = True
@@ -415,6 +436,9 @@ class CrashView(discord.ui.LayoutView):
             running_start = discord.utils.utcnow()
             max_run_seconds = 180
 
+            # Crash points <= 1.0 bust immediately — players have no time to cash out.
+            await self._crash_players_at_current_multiplier()
+
             while len(self.cashed_out | self.crashed_out) < len(self.players):
                 if (discord.utils.utcnow() - running_start).total_seconds() >= max_run_seconds:
                     for uid in self.players:
@@ -437,23 +461,7 @@ class CrashView(discord.ui.LayoutView):
                     break
 
                 self.current_multiplier += self.calculate_increment()
-
-                for uid, cp in self.crash_points.items():
-                    if uid not in self.cashed_out and uid not in self.crashed_out:
-                        if self.current_multiplier >= cp:
-                            self.crashed_out[uid] = self.crash_points[uid]
-                            await self.casino._remove_refund(self.session_id, user_id=uid)
-                            # Process game result for rakeback
-                            await self.casino.process_game_result(uid, "crash", self.players[uid])
-                            pf = self.pf_data.get(uid, {})
-                            await self.casino._record_game_outcome(
-                                uid, "crash", "loss", self.players[uid], pf,
-                            )
-                            await self.casino._log_game_event(
-                                self.session_id,
-                                "crash",
-                                {"user_id": uid, "multiplier": str(cp)},
-                            )
+                await self._crash_players_at_current_multiplier()
                 await self.update_game_message()
                 await asyncio.sleep(1)
 
@@ -1777,6 +1785,22 @@ class RouletteView(discord.ui.LayoutView):
         num_bets = len(bets)
         total_wager = self.bet_amount * num_bets
 
+        # ── Pre-flight balance check (total wager, not per-bet) ──
+        balance = Decimal(str(await self.bot.database.get_wallet_balance(self.wallet_id)))
+        if balance < total_wager:
+            self.game_phase = "betting"
+            self._rebuild_container()
+            await interaction.followup.edit_message(interaction.message.id, view=self)
+            formatted_need = await self.cog.formatter(total_wager)
+            formatted_have = await self.cog.formatter(balance)
+            await interaction.followup.send(
+                f"🚫 Insufficient balance. You selected **{num_bets}** bets totaling "
+                f"{self.currency_name} **{formatted_need}**, but you have "
+                f"{self.currency_name} **{formatted_have}**. Reduce your bets or lower the bet amount.",
+                ephemeral=True,
+            )
+            return
+
         # ── Fairness & session ──
         PF = await self.cog.start_fairgate_proof(self.user_id)
 
@@ -1788,7 +1812,18 @@ class RouletteView(discord.ui.LayoutView):
             self.game_phase = "betting"
             self._rebuild_container()
             await interaction.followup.edit_message(interaction.message.id, view=self)
-            await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
+            err = str(e)
+            if "Race or insufficient funds" in err:
+                formatted_need = await self.cog.formatter(total_wager)
+                formatted_have = await self.cog.formatter(
+                    Decimal(str(await self.bot.database.get_wallet_balance(self.wallet_id)))
+                )
+                err = (
+                    f"Insufficient balance. You need {self.currency_name} **{formatted_need}** "
+                    f"but currently have {self.currency_name} **{formatted_have}**. "
+                    "Your balance may have changed while the table was open."
+                )
+            await interaction.followup.send(f"🚫 {err}", ephemeral=True)
             return
 
         session_state = {
@@ -3955,10 +3990,10 @@ class Casino(commands.Cog):
 
         Uses the standard inverse-transform crash distribution so that the
         expected return equals ``1 - house_edge``. A uniform roll ``r`` in
-        ``[0, 1)`` produces ``target_rtp / (1 - r)``, capped at a sane max.
+        ``[0, 1)`` produces ``target_rtp / (1 - r)`` with no artificial cap,
+        matching the memoryless distribution used by Stake/Roobet-style crash.
         """
         base_edge = 0.04
-        max_crash = 50.0
         precision = 1_000_000  # six decimal places of uniformity
 
         # 1) Uniform roll in [0, precision) (one nonce).
@@ -3973,11 +4008,14 @@ class Casino(commands.Cog):
         target_rtp = 1.0 - edge
 
         # 3) Inverse-transform crash point.
-        #    P(crash > m) = target_rtp / m, so the expected multiplier is
-        #    exactly target_rtp (house edge = 1 - target_rtp).
+        #    P(crash > m) = target_rtp / m, so the expected payout of any
+        #    non-anticipating cashout is target_rtp (house edge = 1 - target_rtp).
+        #    Values below 1.0 are *not* floored: a crash point <= 1.0 means the
+        #    round busts immediately, which is what creates the house edge.
+        #    No max cap: the distribution is memoryless and unbounded, exactly
+        #    like Stake/Roobet.
         denominator = max(1e-9, 1.0 - r)
         v = target_rtp / denominator
-        v = max(1.0, min(v, max_crash))
 
         return Decimal(str(round(v, 2)))
 
@@ -4597,6 +4635,9 @@ class Casino(commands.Cog):
         Usage:
           !casino leaderboard [game_name] [limit]
         """
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.defer()
+
         game_key = (game_name or "gamble").lower()
 
         if game_key not in self.games:
@@ -6014,7 +6055,11 @@ class Casino(commands.Cog):
             )
             view = discord.ui.LayoutView()
             view.add_item(container)
-            await ctx.reply(view=view, delete_after=5)
+            try:
+                await ctx.reply(view=view, delete_after=5)
+            except discord.HTTPException:
+                # Original command message may have been deleted while we timed out.
+                await ctx.send(view=view, delete_after=5)
             return
 
         # Calculate house edge for RTP tracking

@@ -2848,10 +2848,12 @@ class Music(commands.Cog, name="Music"):
             return
 
         if len(song_list) == 1:
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.defer()
             layout_view = await self.create_snippet_view(song_list[0])
             if layout_view is None:
                 return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
-            
+
             await ctx.reply(view=layout_view)
 
         elif len(song_list) > 1:
@@ -2931,8 +2933,12 @@ class Music(commands.Cog, name="Music"):
 
         message = await ctx.send(view=layout_view)
 
-        await message.add_reaction("👍")
-        await message.add_reaction("👎")
+        try:
+            await message.add_reaction("👍")
+            await message.add_reaction("👎")
+        except discord.Forbidden:
+            # Missing Add Reactions permission; the view still works.
+            pass
 
 
     def clear_user_cache(self, user_id: int, identifiers: list[str] = []):

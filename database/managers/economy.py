@@ -2461,7 +2461,7 @@ class EconomyMixin(BaseManager):
         #   treasury: 30% → 37.5%
         #   liquidity: 25% → 31.25%
         #   velocity: 25% → 31.25%
-        treasury_score = treasury_health * Decimal("37.5")
+        treasury_score = Decimal(str(treasury_health)) * Decimal("37.5")
 
         # Liquidity ratio (31.25% weight) - ideal is around 0.5-0.8
         if 0.3 <= liquidity_ratio <= 0.8:
