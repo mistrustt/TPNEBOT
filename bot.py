@@ -217,7 +217,9 @@ class DiscordBot(commands.Bot):
         self.cooldowns = UnifiedCooldownManager(self)
         self._context_start_times: dict[int, float] = {}
         self._interaction_start_times: dict[int, float] = {}
-        self.config = self.database.load_config()
+        # load_config() is async; it will be awaited in setup_hook before cogs load.
+        self._config_task: asyncio.Task | None = None
+        self.config = None
         self.debug_mode_active = False
         self.version = "2026.07.10"
         self.cool_guys = None
@@ -243,23 +245,23 @@ class DiscordBot(commands.Bot):
         intents.presences = True
         intents.message_content = True
 
-        # Use a larger default executor for asyncio thread-pool work (asyncpg
-        # DNS resolution runs here). The default pool is small and can saturate
-        # during a Postgres outage, which starves the event loop and makes the
-        # bot stop responding.
-        self.loop.set_default_executor(
-            concurrent.futures.ThreadPoolExecutor(
-                max_workers=max(32, (os.cpu_count() or 1) * 4),
-                thread_name_prefix="asyncio-default-",
-            )
-        )
-
         super().__init__(
             command_prefix=commands.when_mentioned_or(self.get_prefix),
             intents=intents,
             help_command=None,
             case_insensitive=True,
             allowed_mentions=discord.AllowedMentions(everyone=False),
+        )
+
+        # Use a larger default executor for asyncio thread-pool work (asyncpg
+        # DNS resolution runs here). The default pool is small and can saturate
+        # during a Postgres outage, which starves the event loop and makes the
+        # bot stop responding. Must be set after super().__init__() creates self.loop.
+        self.loop.set_default_executor(
+            concurrent.futures.ThreadPoolExecutor(
+                max_workers=max(32, (os.cpu_count() or 1) * 4),
+                thread_name_prefix="asyncio-default-",
+            )
         )
 
     async def get_prefix(self, message: discord.Message) -> str:
@@ -269,7 +271,11 @@ class DiscordBot(commands.Bot):
 
     async def load_cogs(self) -> None:
         cogs_path = Path(__file__).parent / "cogs"
-        config = await self.config
+        config = self.config
+        # config should have been awaited in setup_hook before load_cogs is called;
+        # defensively resolve if it was somehow still a coroutine.
+        if inspect.isawaitable(config):
+            config = await config
         loaded_cogs = config.loaded_cogs if config else []
         unloaded_cogs = config.unloaded_cogs if config else []
         # Jishaku development environment check
@@ -363,6 +369,16 @@ class DiscordBot(commands.Bot):
         return False
 
     async def setup_hook(self) -> None:
+        # Await the config load that was started as a coroutine in __init__.
+        if self.config is None and self._config_task is None:
+            self._config_task = asyncio.create_task(self.database.load_config())
+        try:
+            if self.config is None and self._config_task is not None:
+                self.config = await self._config_task
+        except Exception as e:
+            self.logger.error(f"Failed to load bot config: {e}")
+            self.config = None
+
         try:
             self.logger.info(f"Logged in as {self.user.name}")
             self.logger.info(f"discord.py API version: {discord.__version__}")
