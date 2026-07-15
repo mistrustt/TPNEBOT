@@ -3833,6 +3833,34 @@ class Owner(commands.Cog, name="Owner"):
                 f"The `{command_name}` command has been disabled globally.",
             )
 
+    @command_cog.command(
+        name="list", help="List all disabled commands and their statuses.", hidden=True
+    )
+    @commands.is_owner()
+    async def list_disabled_commands(self, ctx: Context):
+        """List all disabled commands and their statuses."""
+        disabled_commands = await self.bot.database.get_disabled_commands()
+
+        if not disabled_commands:
+            await Embeds.send_info_embed(
+                ctx.channel,
+                ctx.author,
+                "No disabled commands found."
+            )
+            return
+
+        description = "\n".join(
+            f"`{cmd['command_name']}` — {cmd['reason']}" for cmd in disabled_commands
+        )
+
+        embed = discord.Embed(
+            title="Disabled Commands",
+            description=description,
+            color=discord.Color.red()
+        )
+
+        await ctx.reply(embed=embed, mention_author=False)
+
     @commands.group(name="bank", invoke_without_command=True, hidden=True)
     @commands.is_owner()
     async def adminbank(self, ctx: Context):
