@@ -70,6 +70,33 @@ def retry_db(max_retries: int = None, base_delay: float = None):
     return decorator
 
 
+def db_safe(default=None):
+    """Decorator for manager coroutines that should return *default* on DB errors.
+
+    Unlike @retry_db, this fast-fails when the DB circuit breaker is open so a
+    Postgres outage can't starve the asyncio event loop with reconnect attempts.
+    Use this for hot-path event handlers and read-only checks where a safe
+    default is acceptable during a brief database blip.
+    """
+
+    def decorator(coro):
+        @functools.wraps(coro)
+        async def wrapper(self: "BaseManager", *args, **kwargs):
+            if not await self.db_ready():
+                return default
+            try:
+                return await coro(self, *args, **kwargs)
+            except Exception as exc:
+                if self._is_retryable_db_error(exc):
+                    await self._mark_db_unhealthy()
+                    return default
+                raise
+
+        return wrapper
+
+    return decorator
+
+
 class BaseManager:
     """Base manager with connection resilience and user ID hashing helpers."""
 
@@ -126,10 +153,14 @@ class BaseManager:
             pool_recycle=1800,
             pool_size=10,
             max_overflow=20,
-            pool_timeout=30,
+            # Fail quickly when the pool is exhausted so an outage doesn't queue
+            # hundreds of coroutines waiting for connections.
+            pool_timeout=10,
             connect_args={
-                "timeout": 10,
-                "command_timeout": 60,
+                # Keep connect attempts short; DNS/server blips should not hold a
+                # thread-pool worker for tens of seconds.
+                "timeout": 5,
+                "command_timeout": 30,
                 "server_settings": {"application_name": "tpnebot"},
             },
         )
@@ -140,6 +171,12 @@ class BaseManager:
         self._db_retry_count = 5
         self._db_retry_base_delay = 1.0
         self._db_retry_max_delay = 30.0
+        # Circuit breaker: after a retryable failure, treat the DB as down for a
+        # cooldown so event handlers and commands fail fast instead of piling
+        # up connection attempts that can freeze the asyncio event loop.
+        self._db_healthy = True
+        self._db_last_failure = 0.0
+        self._db_failure_cooldown = 30.0
 
     @staticmethod
     def _is_retryable_db_error(exc: Exception) -> bool:
@@ -163,6 +200,30 @@ class BaseManager:
         )
         return any(marker in msg for marker in markers)
 
+    async def db_ready(self) -> bool:
+        """Return True if the database is believed reachable right now.
+
+        After a retryable failure this returns False for a cooldown period.  A
+        cheap health check is attempted once per cooldown to re-close the breaker.
+        """
+        if self._db_healthy:
+            return True
+        elapsed = time.monotonic() - self._db_last_failure
+        if elapsed < self._db_failure_cooldown:
+            return False
+        self._db_healthy = await self.health_check()
+        if not self._db_healthy:
+            self._db_last_failure = time.monotonic()
+        return self._db_healthy
+
+    async def _mark_db_healthy(self) -> None:
+        self._db_healthy = True
+        self._db_last_failure = 0.0
+
+    async def _mark_db_unhealthy(self) -> None:
+        self._db_healthy = False
+        self._db_last_failure = time.monotonic()
+
     async def _db_retry(
         self,
         coro,
@@ -178,7 +239,10 @@ class BaseManager:
 
         for attempt in range(retries):
             try:
-                return await coro(*args, **kwargs)
+                result = await coro(*args, **kwargs)
+                if not self._db_healthy:
+                    await self._mark_db_healthy()
+                return result
             except Exception as exc:
                 last_exc = exc
                 if not self._is_retryable_db_error(exc):
@@ -193,6 +257,7 @@ class BaseManager:
                 await asyncio.sleep(delay)
 
         logger.error(f"Database operation failed after {retries} attempts: {last_exc}")
+        await self._mark_db_unhealthy()
         raise last_exc
 
     @asynccontextmanager

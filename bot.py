@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import traceback
 import urllib.parse
+import concurrent.futures
 from discord import app_commands
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
@@ -241,6 +242,17 @@ class DiscordBot(commands.Bot):
         intents.members = True
         intents.presences = True
         intents.message_content = True
+
+        # Use a larger default executor for asyncio thread-pool work (asyncpg
+        # DNS resolution runs here). The default pool is small and can saturate
+        # during a Postgres outage, which starves the event loop and makes the
+        # bot stop responding.
+        self.loop.set_default_executor(
+            concurrent.futures.ThreadPoolExecutor(
+                max_workers=max(32, (os.cpu_count() or 1) * 4),
+                thread_name_prefix="asyncio-default-",
+            )
+        )
 
         super().__init__(
             command_prefix=commands.when_mentioned_or(self.get_prefix),
@@ -512,6 +524,15 @@ class DiscordBot(commands.Bot):
             return False
 
         try:
+            # If the DB is known to be down, fail fast so the slash guardrail
+            # doesn't hang the interaction (and the event loop) on reconnects.
+            if not await self.database.db_ready():
+                await self._safe_guardrail_response(
+                    interaction,
+                    "The database is temporarily unavailable. Please try again in a moment.",
+                )
+                return _block("database unavailable")
+
             # Global maintenance mode (prefix debug mode) blocks everyone except
             # the configured cool_guys team, matching the prefix invoke behavior.
             if getattr(self, "debug_mode_active", False):
@@ -612,6 +633,16 @@ class DiscordBot(commands.Bot):
                     delete_after=5,
                     reply=True,
                 )
+
+            # Fast-fail during DB outages. Without this, every prefix command
+            # hangs on DB pre-checks and can saturate the asyncio thread pool.
+            if not await self.database.db_ready():
+                embed = discord.Embed(
+                    title="⚠️ Database Temporarily Unavailable",
+                    description="The database connection dropped. Your command was not processed. Please try again in a moment.",
+                    color=discord.Color.orange(),
+                )
+                return await ctx.reply(embed=embed, delete_after=10)
 
             is_blacklisted = await self.database.is_user_blacklisted(ctx.author.id)
             if is_blacklisted and ctx.author.id not in self.owner_ids:
@@ -785,10 +816,12 @@ class DiscordBot(commands.Bot):
                 )
                 return
             # Ensure the mapping table has this user so hashes can be resolved later.
-            try:
-                await self.database.ensure_user_identity(interaction.user.id)
-            except Exception:
-                pass
+            # Skip during DB outages so slash interactions don't hang on identity upserts.
+            if await self.database.db_ready():
+                try:
+                    await self.database.ensure_user_identity(interaction.user.id)
+                except Exception:
+                    pass
             self._interaction_start_times[id(interaction)] = time.perf_counter()
 
         base = super()
@@ -819,10 +852,13 @@ class DiscordBot(commands.Bot):
     async def process_commands(self, message: discord.Message) -> None:
         """Ensure the user identity is recorded before running prefix commands."""
         if not message.author.bot:
-            try:
-                await self.database.ensure_user_identity(message.author.id)
-            except Exception:
-                pass
+            # Don't hang on identity upserts when the DB is unreachable; stats will
+            # catch up once the connection recovers.
+            if await self.database.db_ready():
+                try:
+                    await self.database.ensure_user_identity(message.author.id)
+                except Exception:
+                    pass
         await super().process_commands(message)
 
     async def on_command_completion(self, ctx: Context) -> None:

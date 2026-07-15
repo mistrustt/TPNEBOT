@@ -1,4 +1,4 @@
-from .base import BaseManager
+from .base import BaseManager, db_safe
 
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
@@ -48,6 +48,7 @@ class GuildMixin(BaseManager):
                     session.add(setting)
                 await session.commit()
 
+    @db_safe(default=None)
     async def get_spam_channel(self, guild_id: int):
         async with self.async_sessionmaker() as session:
             result = await session.execute(
@@ -79,6 +80,7 @@ class GuildMixin(BaseManager):
                     session.add(settings)
                 await session.commit()
 
+    @db_safe(default=None)
     async def get_server_settings(self, guild_id: int) -> ServerSettings:
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)
@@ -181,6 +183,7 @@ class GuildMixin(BaseManager):
                     session.add(settings)
                 await session.commit()
 
+    @db_safe(default=False)
     async def get_antimp3_status(self, guild_id: int) -> bool:
         async with self.get_session() as session:
             settings = await session.get(ServerSettings, guild_id)
@@ -232,6 +235,7 @@ class GuildMixin(BaseManager):
                     )
                     session.add(new_status)
 
+    @db_safe(default=True)
     async def get_command_status(
         self, command_name: str, channel_id: int = None
     ) -> bool:
@@ -402,6 +406,7 @@ class GuildMixin(BaseManager):
                 )
                 return result.rowcount
 
+    @db_safe(default=False)
     async def check_command_role_restriction(
         self, guild_id: int, command_name: str, user_roles: list
     ) -> bool:

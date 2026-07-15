@@ -227,30 +227,26 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
     async def get_guild_settings(self, guild_id: int) -> Optional[dict]:
         """Get cached guild settings or fetch from database"""
-        if (
-            guild_id not in self.guild_settings_cache
-            or (
-                discord.utils.utcnow()
-                - self.guild_settings_cache.get(guild_id, {}).get(
-                    "last_updated", datetime.min
-                )
-            ).total_seconds()
-            > 300
-        ):
+        cache = self.guild_settings_cache.get(guild_id)
+        now = discord.utils.utcnow()
+        if cache and (now - cache.get("last_updated", datetime.min)).total_seconds() <= 300:
+            return cache
+
+        try:
             settings = await self.bot.database.get_server_settings(guild_id)
-            if settings:
-                self.guild_settings_cache[guild_id] = {
-                    "enabled": settings.watchdog_enabled,
-                    "channel_id": settings.watchdog_channel_id,
-                    "pii_filter": settings.watchdog_pii_filter,
-                    "card_filter": settings.watchdog_card_filter,
-                    "member_tracking": settings.watchdog_member_tracking,
-                    "message_tracking": settings.watchdog_message_tracking,
-                    "voice_tracking": settings.watchdog_voice_tracking,
-                    "last_updated": discord.utils.utcnow(),
-                }
-            else:
-                self.guild_settings_cache[guild_id] = {
+        except Exception as exc:
+            if self.bot.database._is_retryable_db_error(exc):
+                logger.debug(
+                    "Guild settings fetch skipped for guild %s due to DB outage: %s",
+                    guild_id,
+                    exc,
+                )
+                # Return stale cache if we have it, otherwise a safe default
+                # that disables logging so we don't pile up more DB work.
+                if cache:
+                    cache["last_updated"] = now
+                    return cache
+                return {
                     "enabled": False,
                     "channel_id": None,
                     "pii_filter": True,
@@ -258,8 +254,32 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     "member_tracking": True,
                     "message_tracking": True,
                     "voice_tracking": True,
-                    "last_updated": discord.utils.utcnow(),
+                    "last_updated": now,
                 }
+            raise
+
+        if settings:
+            self.guild_settings_cache[guild_id] = {
+                "enabled": settings.watchdog_enabled,
+                "channel_id": settings.watchdog_channel_id,
+                "pii_filter": settings.watchdog_pii_filter,
+                "card_filter": settings.watchdog_card_filter,
+                "member_tracking": settings.watchdog_member_tracking,
+                "message_tracking": settings.watchdog_message_tracking,
+                "voice_tracking": settings.watchdog_voice_tracking,
+                "last_updated": now,
+            }
+        else:
+            self.guild_settings_cache[guild_id] = {
+                "enabled": False,
+                "channel_id": None,
+                "pii_filter": True,
+                "card_filter": True,
+                "member_tracking": True,
+                "message_tracking": True,
+                "voice_tracking": True,
+                "last_updated": now,
+            }
 
         return self.guild_settings_cache.get(guild_id)
 

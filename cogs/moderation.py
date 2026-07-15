@@ -4349,32 +4349,37 @@ class Moderation(commands.Cog, name="Moderation"):
         await ctx.send(embed=embed, view=view)
 
     async def handle_antimp3_check(self, message: discord.Message):
-        enabled = await self.bot.database.get_antimp3_status(message.guild.id)
+        try:
+            enabled = await self.bot.database.get_antimp3_status(message.guild.id)
+        except Exception as exc:
+            if self.bot.database._is_retryable_db_error(exc):
+                logger.debug(
+                    "Anti-MP3 check skipped for guild %s due to DB outage: %s",
+                    message.guild.id,
+                    exc,
+                )
+                return
+            raise
 
         if not enabled:
             return
 
-        if enabled:
-            if message.reference and message.reference.type == discord.MessageReferenceType.forward:
-                msg = message.message_snapshots[0]
+        if message.reference and message.reference.type == discord.MessageReferenceType.forward:
+            msg = message.message_snapshots[0]
+        else:
+            msg = message
 
-            else:
-                msg = message
+        if msg.flags.voice:
+            return
 
-            if msg.flags.voice:
-                return
-
-            for attachment in msg.attachments:
-                # if attachment.filename.lower().endswith(
-                #     (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus")
-                # ):
-                if attachment.content_type and attachment.content_type.lower().startswith('audio/'): # W discord feature
-                    await message.delete()
-                    embed = discord.Embed(
-                        description=f"{message.author.mention}: Audio files are not allowed in this server.",
-                        color=discord.Color.red(),
-                    )
-                    await message.channel.send(embed=embed, delete_after=10)
+        for attachment in msg.attachments:
+            if attachment.content_type and attachment.content_type.lower().startswith('audio/'): # W discord feature
+                await message.delete()
+                embed = discord.Embed(
+                    description=f"{message.author.mention}: Audio files are not allowed in this server.",
+                    color=discord.Color.red(),
+                )
+                await message.channel.send(embed=embed, delete_after=10)
 
 
     @commands.Cog.listener()

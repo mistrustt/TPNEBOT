@@ -760,13 +760,22 @@ class CoreMixin(BaseManager):
 
     async def get_prefix(self, guild_id: int) -> str:
         """Retrieve the prefix for a specific guild from the database."""
-        async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(ServerSettings.prefix).where(ServerSettings.guild_id == guild_id)
-            )
-            prefix = result.scalar_one_or_none()
-
-        return prefix if prefix else "!"
+        # Fast-fail during known outages; discord.py calls this for every message,
+        # so a hanging lookup can saturate the asyncio thread pool and freeze the bot.
+        if not await self.db_ready():
+            return "!"
+        try:
+            async with self.async_sessionmaker() as session:
+                result = await session.execute(
+                    select(ServerSettings.prefix).where(ServerSettings.guild_id == guild_id)
+                )
+                prefix = result.scalar_one_or_none()
+            return prefix if prefix else "!"
+        except Exception as exc:
+            if self._is_retryable_db_error(exc):
+                await self._mark_db_unhealthy()
+                return "!"
+            raise
 
     async def fetch_command_data(
         self, user_id: int, command_name: str, channel_id: int = None

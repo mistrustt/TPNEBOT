@@ -29,7 +29,17 @@ class Community(commands.Cog, name="Community"):
         if message.guild is None:
             return
 
-        channel_id = await self.bot.database.get_spam_channel(message.guild.id)
+        try:
+            channel_id = await self.bot.database.get_spam_channel(message.guild.id)
+        except Exception as exc:
+            if self.bot.database._is_retryable_db_error(exc):
+                logger.debug(
+                    "Spam-channel check skipped for guild %s due to DB outage: %s",
+                    message.guild.id,
+                    exc,
+                )
+                return
+            raise
 
         if not channel_id:
             return
@@ -81,7 +91,17 @@ class Community(commands.Cog, name="Community"):
         if after.guild is None:
             return
 
-        spam_channel_id = await self.bot.database.get_spam_channel(after.guild.id)
+        try:
+            spam_channel_id = await self.bot.database.get_spam_channel(after.guild.id)
+        except Exception as exc:
+            if self.bot.database._is_retryable_db_error(exc):
+                logger.debug(
+                    "Spam-channel edit check skipped for guild %s due to DB outage: %s",
+                    after.guild.id,
+                    exc,
+                )
+                return
+            raise
         if not spam_channel_id:
             return
 
