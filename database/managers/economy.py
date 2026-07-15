@@ -1539,6 +1539,60 @@ class EconomyMixin(BaseManager):
         gini = max(0.0, min(1.0, gini))
         return Decimal(str(gini)).quantize(Decimal("0.0001"))
 
+    async def get_user_net_worth(self, user_id: int) -> Decimal:
+        """
+        Calculate a user's net worth for limit and tier calculations.
+
+        Net worth is defined as: wallet balance + bank balance + crypto holdings
+        valued at the latest known prices. Shop items, inventory, and other
+        virtual goods are explicitly excluded from this value.
+
+        Args:
+            user_id: The user's Discord ID (int)
+
+        Returns:
+            Decimal: Total net worth (always non-negative)
+        """
+        raw_user_id = user_id
+        user_id = self.hash_user_id(raw_user_id)
+
+        async with self.async_sessionmaker() as session:
+            # Wallet + bank balances
+            result = await session.execute(
+                select(Wallet.balance, Wallet.bank_balance).where(
+                    Wallet.user_id == user_id
+                )
+            )
+            row = result.one_or_none()
+            wallet_bal = row[0] if row else Decimal("0.00")
+            bank_bal = row[1] if row else Decimal("0.00")
+
+            net_worth = wallet_bal + bank_bal
+
+            # Crypto holdings at latest prices
+            latest_prices = (
+                select(CryptoPrice.symbol, CryptoPrice.price)
+                .distinct(CryptoPrice.symbol)
+                .order_by(CryptoPrice.symbol, CryptoPrice.timestamp.desc())
+            ).subquery()
+
+            crypto_value_result = await session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(CryptoAsset.amount * latest_prices.c.price),
+                        Decimal("0.00"),
+                    )
+                )
+                .select_from(CryptoAsset)
+                .outerjoin(
+                    latest_prices, latest_prices.c.symbol == CryptoAsset.symbol
+                )
+                .where(CryptoAsset.user_id == user_id)
+            )
+            crypto_value = crypto_value_result.scalar() or Decimal("0.00")
+
+            return AmountUtils.round_currency(net_worth + crypto_value)
+
     async def get_user_wealth_tier(self, user_id: int) -> int:
         """
         Calculate the user's wealth tier based on their percentage of total supply.
@@ -1548,57 +1602,29 @@ class EconomyMixin(BaseManager):
         Returns:
             int: Tier 0-4 (0 = no penalty, 1-4 = escalating penalties)
         """
-        user_id = self.hash_user_id(user_id)
-        async with self.async_sessionmaker() as session:
-            # Get user's wallet and bank
-            result = await session.execute(
-                select(Wallet).where(Wallet.user_id == user_id)
-            )
-            wallet = result.scalar_one_or_none()
-            if not wallet:
-                return 0
+        user_wealth = await self.get_user_net_worth(user_id)
 
-            user_wealth = wallet.balance + wallet.bank_balance
+        # Get total supply from economy snapshot
+        snapshot = await self.get_economy_snapshot()
+        total_supply = snapshot["total_supply"]
 
-            # Get user's crypto holdings at current prices
-            crypto_result = await session.execute(
-                select(CryptoAsset).where(CryptoAsset.user_id == user_id)
-            )
-            crypto_holdings = crypto_result.scalars().all()
+        if total_supply <= 0:
+            return 0
 
-            for holding in crypto_holdings:
-                # Get latest price for this symbol
-                price_result = await session.execute(
-                    select(CryptoPrice)
-                    .where(CryptoPrice.symbol == holding.symbol)
-                    .order_by(CryptoPrice.timestamp.desc())
-                    .limit(1)
-                )
-                price_entry = price_result.scalar_one_or_none()
-                if price_entry:
-                    user_wealth += holding.amount * price_entry.price
+        # Calculate user's percentage of total supply
+        user_ratio = user_wealth / total_supply
 
-            # Get total supply from economy snapshot
-            snapshot = await self.get_economy_snapshot()
-            total_supply = snapshot["total_supply"]
-
-            if total_supply <= 0:
-                return 0
-
-            # Calculate user's percentage of total supply
-            user_ratio = user_wealth / total_supply
-
-            # Determine tier (check from highest to lowest)
-            if user_ratio >= WEALTH_TIERS["tier_4"]["threshold"]:
-                return 4
-            elif user_ratio >= WEALTH_TIERS["tier_3"]["threshold"]:
-                return 3
-            elif user_ratio >= WEALTH_TIERS["tier_2"]["threshold"]:
-                return 2
-            elif user_ratio >= WEALTH_TIERS["tier_1"]["threshold"]:
-                return 1
-            else:
-                return 0
+        # Determine tier (check from highest to lowest)
+        if user_ratio >= WEALTH_TIERS["tier_4"]["threshold"]:
+            return 4
+        elif user_ratio >= WEALTH_TIERS["tier_3"]["threshold"]:
+            return 3
+        elif user_ratio >= WEALTH_TIERS["tier_2"]["threshold"]:
+            return 2
+        elif user_ratio >= WEALTH_TIERS["tier_1"]["threshold"]:
+            return 1
+        else:
+            return 0
 
     def get_wealth_penalty_multipliers(self, tier: int) -> dict:
         """
@@ -1623,77 +1649,46 @@ class EconomyMixin(BaseManager):
             dict: Contains tier, wealth, percentage, thresholds, and multipliers
         """
         raw_user_id = user_id
-        user_id = self.hash_user_id(raw_user_id)
-        async with self.async_sessionmaker() as session:
-            # Get user's wallet and bank
-            wallet = await session.get(Wallet, user_id)
-            if not wallet:
-                return {
-                    "tier": 0,
-                    "wealth": Decimal("0"),
-                    "percentage": Decimal("0"),
-                    "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
-                    "multipliers": TIER_PENALTIES[0],
-                }
+        user_wealth = await self.get_user_net_worth(raw_user_id)
 
-            user_wealth = wallet.balance + wallet.bank_balance
+        # Get total supply from economy snapshot
+        snapshot = await self.get_economy_snapshot()
+        total_supply = snapshot["total_supply"]
 
-            # Get user's crypto holdings at current prices
-            crypto_result = await session.execute(
-                select(CryptoAsset).where(CryptoAsset.user_id == user_id)
-            )
-            crypto_holdings = crypto_result.scalars().all()
-
-            for holding in crypto_holdings:
-                # Get latest price for this symbol
-                price_result = await session.execute(
-                    select(CryptoPrice)
-                    .where(CryptoPrice.symbol == holding.symbol)
-                    .order_by(CryptoPrice.timestamp.desc())
-                    .limit(1)
-                )
-                price_entry = price_result.scalar_one_or_none()
-                if price_entry:
-                    user_wealth += holding.amount * price_entry.price
-
-            # Get total supply from economy snapshot
-            snapshot = await self.get_economy_snapshot()
-            total_supply = snapshot["total_supply"]
-
-            if total_supply <= 0:
-                return {
-                    "tier": 0,
-                    "wealth": user_wealth,
-                    "percentage": Decimal("0"),
-                    "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
-                    "multipliers": TIER_PENALTIES[0],
-                }
-
-            # Calculate user's percentage of total supply
-            user_ratio = user_wealth / total_supply
-
-            # Determine tier
-            tier = await self.get_user_wealth_tier(raw_user_id)
-
-            # Determine next tier threshold
-            next_tier_threshold = None
-            if tier == 0:
-                next_tier_threshold = WEALTH_TIERS["tier_1"]["threshold"]
-            elif tier == 1:
-                next_tier_threshold = WEALTH_TIERS["tier_2"]["threshold"]
-            elif tier == 2:
-                next_tier_threshold = WEALTH_TIERS["tier_3"]["threshold"]
-            elif tier == 3:
-                next_tier_threshold = WEALTH_TIERS["tier_4"]["threshold"]
-            # tier 4 has no next tier
-
+        if total_supply <= 0:
             return {
-                "tier": tier,
+                "tier": 0,
                 "wealth": user_wealth,
-                "percentage": user_ratio,
-                "next_tier_threshold": next_tier_threshold,
-                "multipliers": self.get_wealth_penalty_multipliers(tier),
+                "percentage": Decimal("0"),
+                "next_tier_threshold": WEALTH_TIERS["tier_1"]["threshold"],
+                "multipliers": TIER_PENALTIES[0],
             }
+
+        # Calculate user's percentage of total supply
+        user_ratio = user_wealth / total_supply
+
+        # Determine tier
+        tier = await self.get_user_wealth_tier(raw_user_id)
+
+        # Determine next tier threshold
+        next_tier_threshold = None
+        if tier == 0:
+            next_tier_threshold = WEALTH_TIERS["tier_1"]["threshold"]
+        elif tier == 1:
+            next_tier_threshold = WEALTH_TIERS["tier_2"]["threshold"]
+        elif tier == 2:
+            next_tier_threshold = WEALTH_TIERS["tier_3"]["threshold"]
+        elif tier == 3:
+            next_tier_threshold = WEALTH_TIERS["tier_4"]["threshold"]
+        # tier 4 has no next tier
+
+        return {
+            "tier": tier,
+            "wealth": user_wealth,
+            "percentage": user_ratio,
+            "next_tier_threshold": next_tier_threshold,
+            "multipliers": self.get_wealth_penalty_multipliers(tier),
+        }
 
     async def calculate_wealth_adjusted_fee(
         self, user_id: int, base_fee: Decimal
@@ -1744,39 +1739,15 @@ class EconomyMixin(BaseManager):
             max_payout_multiplier: Maximum payout multiplier for the game (e.g., 50.0 for crash)
         """
         raw_user_id = user_id
-        user_id = self.hash_user_id(raw_user_id)
 
         # ---- constants -------------------------------------------------------
         MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2% of treasury
         MIN_ABSOLUTE_FLOOR = Decimal("100.00")  # Floor value for small players
 
         # ---- fetch user data -------------------------------------------------
-        wallet = await self.get_wallet_by_user_id(raw_user_id)
-        wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
-        bank_bal = await self.get_bank_balance(wallet.wallet_id)
-        crypto_assets = await self.get_crypto_assets(raw_user_id)
-
-        # Calculate crypto value from assets
-        crypto_bal = Decimal("0.00")
-        if crypto_assets:
-            # Get current prices for all symbols held
-            symbols = [asset.symbol for asset in crypto_assets]
-            async with self.async_sessionmaker() as session:
-                price_result = await session.execute(
-                    select(CryptoPrice.symbol, CryptoPrice.price).where(
-                        CryptoPrice.symbol.in_(symbols)
-                    )
-                )
-                prices = {
-                    sym: Decimal(str(price)) for sym, price in price_result.fetchall()
-                }
-
-            # Sum up each asset's value (amount * current_price)
-            for asset in crypto_assets:
-                price = prices.get(asset.symbol, Decimal("0.00"))
-                crypto_bal += Decimal(str(asset.amount)) * price
-
-        user_total = wallet_bal + bank_bal + crypto_bal
+        # Net worth = wallet + bank + crypto at current prices.
+        # Shop items and other inventory are intentionally excluded.
+        user_total = await self.get_user_net_worth(raw_user_id)
 
         # ---- economy snapshot -----------------------------------------------
         supply = await self.get_supply_record()
@@ -1861,11 +1832,9 @@ class EconomyMixin(BaseManager):
         Uses a similar risk model to gambling limits but with more leniency.
         """
         raw_user_id = user_id
-        user_id = self.hash_user_id(raw_user_id)
-        wallet = await self.get_wallet_by_user_id(raw_user_id)
-        wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
-        bank_bal = await self.get_bank_balance(wallet.wallet_id)
-        user_total = wallet_bal + bank_bal
+        # Net worth = wallet + bank + crypto at current prices.
+        # Shop items and other inventory are intentionally excluded.
+        user_total = await self.get_user_net_worth(raw_user_id)
 
         supply = await self.get_supply_record()
         treasury = supply.treasury
@@ -1907,31 +1876,9 @@ class EconomyMixin(BaseManager):
             Decimal: Maximum transfer amount
         """
         raw_user_id = user_id
-        user_id = self.hash_user_id(raw_user_id)
-        wallet = await self.get_wallet_by_user_id(raw_user_id)
-        wallet_bal = await self.get_wallet_balance(wallet.wallet_id)
-        bank_bal = await self.get_bank_balance(wallet.wallet_id)
-
-        # Get user's crypto holdings at current prices
-        crypto_assets = await self.get_crypto_assets(raw_user_id)
-        crypto_bal = Decimal("0.00")
-        if crypto_assets:
-            symbols = [asset.symbol for asset in crypto_assets]
-            async with self.async_sessionmaker() as session:
-                price_result = await session.execute(
-                    select(CryptoPrice.symbol, CryptoPrice.price).where(
-                        CryptoPrice.symbol.in_(symbols)
-                    )
-                )
-                prices = {
-                    sym: Decimal(str(price)) for sym, price in price_result.fetchall()
-                }
-
-            for asset in crypto_assets:
-                price = prices.get(asset.symbol, Decimal("0.00"))
-                crypto_bal += Decimal(str(asset.amount)) * price
-
-        user_total = wallet_bal + bank_bal + crypto_bal
+        # Net worth = wallet + bank + crypto at current prices.
+        # Shop items and other inventory are intentionally excluded.
+        user_total = await self.get_user_net_worth(raw_user_id)
 
         supply = await self.get_supply_record()
         treasury = supply.treasury
