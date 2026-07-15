@@ -105,7 +105,7 @@ class DropView(discord.ui.View):
         reaction_seconds = ""
         if self.drop_posted_at is not None:
             elapsed = (discord.utils.utcnow() - self.drop_posted_at).total_seconds()
-            reaction_seconds = f" in **{elapsed:.2f}s** 🏃"
+            reaction_seconds = f" in **{elapsed:.2f}s**"
 
         await Embeds.success(
             interaction,
@@ -208,7 +208,7 @@ class AirDropView(discord.ui.View):
             try:
                 embed = discord.Embed(
                     description=(
-                        f"Airdrop ended! **{len(self.joiners)} user(s)** joined: {winners_str}\n"
+                        f"🪂 Airdrop ended! **{len(self.joiners)} user(s)** joined: {winners_str}\n"
                         f"Each received {self.currency_name} **{await economy.formatter(share)}**."
                     ),
                     color=discord.Color.gold(),
@@ -245,7 +245,7 @@ class AirDropView(discord.ui.View):
         economy = self.bot.get_cog("Economy")
 
         embed = discord.Embed(
-            title="🎁 Airdrop In Progress",
+            title="🪂 Airdrop In Progress",
             description=(
                 f"**{self.initiator.display_name}** dropped **{economy.currency_name} "
                 f"{await economy.formatter(self.amount)}**!\n\n"
@@ -1848,11 +1848,12 @@ class Economy(commands.Cog):
             )
 
             # Color coding for health
-            if component_data['score'] / component_data['weight'] > 0.8:
+            ratio = float(component_data['score']) / float(component_data['weight'])
+            if ratio > 0.8:
                 field_color = "🟢"
-            elif component_data['score'] / component_data['weight'] > 0.6:
+            elif ratio > 0.6:
                 field_color = "🟡"
-            elif component_data['score'] / component_data['weight'] > 0.4:
+            elif ratio > 0.4:
                 field_color = "🟠"
             else:
                 field_color = "🔴"
