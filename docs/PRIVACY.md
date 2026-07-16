@@ -154,4 +154,4 @@ For privacy questions, data-deletion requests, or to report a concern:
 - Open an issue in the GitHub repository: [https://github.com/mistrustt/TPNEBOT](https://github.com/mistrustt/TPNEBOT)
 - Contact the bot maintainers through the designated support channel on the support Discord server.
 
-For sensitive matters (e.g., security incidents), please refer to [SECURITY.md](SECURITY.md) and contact maintainers privately rather than opening a public issue.
+For sensitive matters (e.g., security incidents), please refer to [SECURITY.md](https://share.mistrust.dev/u/security.md) and contact maintainers privately rather than opening a public issue.

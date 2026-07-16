@@ -18,64 +18,14 @@ The repository tracks a single active development branch (main). Version tags sh
 - Develop and test patch.
 - Coordinate release and publish advisory in CHANGELOG or separate SECURITY_NOTICE.md.
 
-## Secrets Management
-- Store `TOKEN`, `DB_PW`, API keys, encryption keys, and all other credentials in Infisical. `.env` must only contain non-sensitive configuration and the Infisical machine-identity credentials.
-- Rotate tokens after suspected compromise or at regular intervals.
-- Avoid printing sensitive values in logs.
-
-## Database Security
-- Use least privilege Postgres role (avoid superuser for runtime).
-- Enforce password complexity and restrict network exposure (localhost or VPN).
-- Consider TLS for remote connections.
-
-### User ID hashing
-Discord user IDs are stored as deterministic HMAC-SHA256 hex hashes (64 characters) in all operational tables. The single `user_identities` table maps each hash back to the raw Discord ID. This means a database dump no longer exposes raw user IDs everywhere, but the mapping table is a high-value target and should be protected with the same care as credential secrets.
-
-- Run `migrations/secure_user_ids.sql` once to convert an existing database.
-- Store `USER_ID_HASH_KEY` in Infisical and use the same key when running the migration.
-- Back up `USER_ID_HASH_KEY` securely. If it is lost, stored hashes cannot be resolved back to Discord IDs, which breaks leaderboard display, punishment lookups, and any other feature that needs to show or mention users from stored records.
-- The analytics tables `command_usage_daily` and `daily_user_exposure` continue to use their existing `user_hash` column; do not reuse their migration for operational tables unless the salt/key is identical.
-
-### Location data encryption
-User locations for weather/timezone commands are encrypted at rest with Fernet using `LOCATION_ENCRYPTION_KEY`. The encryption is performed before writing to the `user_locations` table and decrypted only when a weather request is made. Exact latitude/longitude coordinates are no longer stored; the bot stores only coarse coordinates (one decimal degree, ~11 km precision) or WeatherAPI lookup prefixes.
-
-- Run `migrations/encrypt_location_data.sql` once to convert an existing database. This migration clears existing plaintext locations; users must re-run `!setloc`.
-- Store `LOCATION_ENCRYPTION_KEY` in Infisical and load it via the bot's Infisical mapping.
-- Back up `LOCATION_ENCRYPTION_KEY` securely. If it is lost, stored locations cannot be decrypted and users must set them again.
-
 ## Fairness and Cryptography
 - HMAC based RNG should use unpredictable server seeds. Periodically rotate server seed, archiving previous seeds only for post game verification window.
 - Never share private keys created for wallet operations.
-
-## Dependencies
-- Pin versions (done in requirements.txt).
-- Run periodic vulnerability scanning (pip audit or third party service).
-- Update critical libraries (cryptography, requests, discord.py) promptly upon security advisories.
-
-## Logging
-- Rotating files prevent uncontrolled growth.
-- Do not log stack traces that contain secrets.
-
-## Recommended Hardening
-- Run bot under a dedicated non admin OS user.
-- Use process supervision (systemd, Docker) with resource limits.
-- Enable rate limits at Discord layer (Discord handles these automatically) and internal cooldowns.
-
-## Incident Response
-1. Identify scope (logs, database integrity, tokens).
-2. Revoke compromised credentials immediately.
-3. Patch vulnerability and deploy.
-4. Publish sanitized post mortem.
 
 ### Breach notification
 If we become aware of unauthorized access to API data, Discord user data, or bot credentials, we will:
 - Notify Discord through the appropriate developer support channels as required by the Discord Developer Terms of Service.
 - Notify affected server owners and users to the extent we can identify them and as required by applicable law.
 - Document the incident and remediation steps in a private incident log, and publish a sanitized public summary when appropriate.
-
-## Safe Contribution Guidelines
-- Validate input, especially user provided arguments in commands.
-- Avoid executing arbitrary code (disable eval like features unless restricted to owners).
-- Use prepared statements or ORM queries (SQLAlchemy already protects from injection if used correctly).
 
 End of security policy.

@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-07-09
 
-These Terms of Service ("Terms", "ToS") govern your use of TPNEBOT ("the bot", "we", "us", "our"), a Discord bot operated as a hobby/community project. By adding TPNEBOT to a Discord server, using any of its commands or features, or otherwise interacting with the bot, you agree to be bound by these Terms and by the [Privacy Policy](PRIVACY.md).
+These Terms of Service ("Terms", "ToS") govern your use of TPNEBOT ("the bot", "we", "us", "our"), a Discord bot operated as a hobby/community project. By adding TPNEBOT to a Discord server, using any of its commands or features, or otherwise interacting with the bot, you agree to be bound by these Terms and by the [Privacy Policy](https://share.mistrust.dev/view/privacy.md).
 
 If you do not agree to these Terms, do not use the bot or add it to any server.
 
@@ -55,7 +55,7 @@ You may interact with the bot using **only one Discord account**. Using alternat
 
 TPNEBOT includes casino, gambling-style, and economy features intended for entertainment only. By using these features, you acknowledge that:
 
-- Outcomes are determined by the provably fair randomness system described in [FAIRNESS.md](FAIRNESS.md).
+- Outcomes are determined by the provably fair randomness system described in the [Fairness Documentation](https://share.mistrust.dev/view/fairness.md).
 - All wagers are made with virtual currency that has no real-world value.
 - You must comply with the laws of your jurisdiction; if gambling or games of chance are prohibited for you, do not use these features.
 - We may set minimum/maximum wagers, cooldowns, or other limits to promote responsible use.
@@ -71,7 +71,7 @@ To keep communities safe, we maintain moderation and anti-abuse records. These m
 - Punishment histories, case notes, warnings, mutes, kicks, bans, and jail records.
 - Blacklist entries for users or servers that violate these Terms or Discord's terms.
 - Suspicious-activity logs, anti-cheat flags, and evidence of exploitation or alt usage.
-- Owner/administrator command audit logs (see [PRIVACY.md](PRIVACY.md#12-bot-owneradministrator-command-audit-log)).
+- Owner/administrator command audit logs (see [Privacy Policy, section 1.2](https://share.mistrust.dev/view/privacy.md#12-bot-owneradministrator-command-audit-log)).
 
 **Moderation, ban, blacklist, and anti-abuse data is retained even if you exercise your right to be forgotten.** This data is kept only as long as necessary for community safety, dispute resolution, and operator accountability.
 
@@ -81,9 +81,9 @@ Server administrators and bot staff may use this data to enforce rules. We are n
 
 ## 7. Right to Be Forgotten / Data Deletion
 
-You have the right to request deletion of most personal data the bot holds about you. In most cases you can do this automatically by running the `!forgetme` command. After confirmation, the bot will delete the categories listed in [PRIVACY.md, section 4.1](PRIVACY.md#41-automatic-deletion).
+You have the right to request deletion of most personal data the bot holds about you. In most cases you can do this automatically by running the `!forgetme` command. After confirmation, the bot will delete the categories listed in [Privacy Policy, section 4.1](https://share.mistrust.dev/view/privacy.md#41-automatic-deletion).
 
-As explained in [PRIVACY.md, section 4.2](PRIVACY.md#42-data-we-retain), some data is retained after `!forgetme` for community safety and accountability, including moderation records, blacklists, anti-abuse logs, and the audit log. The `user_identities` mapping row is also retained so that moderation records remain resolvable by authorized staff.
+As explained in [Privacy Policy, section 4.2](https://share.mistrust.dev/view/privacy.md#42-data-we-retain), some data is retained after `!forgetme` for community safety and accountability, including moderation records, blacklists, anti-abuse logs, and the audit log. The `user_identities` mapping row is also retained so that moderation records remain resolvable by authorized staff.
 
 If you have questions about what data is retained, or if you believe data should be reviewed or removed, contact us through the channels listed at the end of this document.
 
@@ -139,4 +139,4 @@ For questions, concerns, data-deletion requests, or reports of abuse related to 
 - Open an issue in the GitHub repository: [https://github.com/mistrustt/TPNEBOT](https://github.com/mistrustt/TPNEBOT)
 - Contact the bot maintainers through the designated support channel on the support Discord server.
 
-For security incidents, please refer to [SECURITY.md](SECURITY.md) and contact maintainers privately rather than opening a public issue.
+For security incidents, please refer to our [Security Policy](https://share.mistrust.dev/u/security.md) and contact maintainers privately rather than opening a public issue.

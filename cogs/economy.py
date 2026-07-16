@@ -1110,7 +1110,7 @@ class TransactionPaginator(discord.ui.View):
         self.current_page = max(0, self.current_page - 1)
 
         button.disabled = self.current_page == 0
-        next_button = [x for x in self.children if x.label == "Next"][0]
+        next_button = [x for x in self.children if x.label == "➡"][0]
         next_button.disabled = self.current_page >= (self.max_pages - 1)
 
         embed = await self.get_page_embed(self.current_page)
@@ -1129,7 +1129,7 @@ class TransactionPaginator(discord.ui.View):
         self.current_page = min(self.max_pages - 1, self.current_page + 1)
 
         button.disabled = self.current_page >= (self.max_pages - 1)
-        prev_button = [x for x in self.children if x.label == "Previous"][0]
+        prev_button = [x for x in self.children if x.label == "⬅"][0]
         prev_button.disabled = self.current_page == 0
 
         embed = await self.get_page_embed(self.current_page)
