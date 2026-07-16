@@ -744,10 +744,92 @@ class CasinoMixin(BaseManager):
             if rng.get("nonce") != nonce:
                 continue
             state = gs.state or {}
+            verify_params = state.get("fairgate_verify_params")
+            if isinstance(verify_params, dict):
+                params = verify_params.get("params")
+                if isinstance(params, dict):
+                    return dict(params)
             fg_bet = state.get("fairgate_bet")
             if not isinstance(fg_bet, dict):
                 continue
             return dict(fg_bet)
+        return None
+
+    async def fetch_fairgate_verify_params(
+        self,
+        user_id: int,
+        game_name: str,
+        nonce: int,
+        *,
+        lookback: int = 200,
+    ) -> dict[str, Any] | None:
+        """Return the exact FairGate verify params stored for a game session.
+
+        The ``GameSession.state`` JSON column stores ``fairgate_verify_params``
+        (a dict with ``game`` and ``params`` keys) at creation time. We match
+        sessions by ``rng.nonce`` so the verify path can replay the exact call
+        that was made to ``/play``.
+
+        Returns ``None`` when no matching session is found or when the session
+        predates this storage (caller should fall back to heuristics).
+        """
+        user_id = self.hash_user_id(user_id)
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(GameSession)
+                .where(
+                    GameSession.owner_id == user_id,
+                    GameSession.game_name == game_name,
+                )
+                .order_by(GameSession.created_at.desc())
+                .limit(lookback)
+            )
+            sessions = result.scalars().all()
+
+        for gs in sessions:
+            rng = gs.rng or {}
+            if rng.get("nonce") != nonce:
+                continue
+            state = gs.state or {}
+            verify_params = state.get("fairgate_verify_params")
+            if isinstance(verify_params, dict):
+                return dict(verify_params)
+        return None
+
+    async def fetch_ladder_final_step(
+        self, user_id: int, nonce: int, *, lookback: int = 200
+    ) -> int | None:
+        """Return the final ladder step recorded for a session matching ``nonce``.
+
+        The step is stored in ``final_state.step`` when the ladder session ends.
+        """
+        user_id = self.hash_user_id(user_id)
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(GameSession)
+                .where(
+                    GameSession.owner_id == user_id,
+                    GameSession.game_name == "ladder",
+                )
+                .order_by(GameSession.created_at.desc())
+                .limit(lookback)
+            )
+            sessions = result.scalars().all()
+
+        for gs in sessions:
+            rng = gs.rng or {}
+            if rng.get("nonce") != nonce:
+                continue
+            final_state = gs.state or {}
+            # final_state may be nested under a 'final_state' key or flattened
+            if "final_state" in final_state and isinstance(final_state["final_state"], dict):
+                final_state = final_state["final_state"]
+            step = final_state.get("step")
+            if step is not None:
+                try:
+                    return int(step)
+                except (TypeError, ValueError):
+                    continue
         return None
 
     async def get_wager_stats(

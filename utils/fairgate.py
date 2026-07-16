@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 import asyncio
 import aiohttp
 
@@ -333,3 +333,32 @@ class FairGateClient:
             query["params"] = json.dumps(params, separators=(",", ":"), sort_keys=True)
 
         return await self._request("GET", "/fairness/verify", params=query, auth=False)
+
+    def verify_url(
+        self,
+        *,
+        server_seed: str,
+        server_seed_hash: str,
+        client_seed: str,
+        nonce: int,
+        game: str,
+        params: dict[str, Any] | None = None,
+        algorithm: str | None = None,
+    ) -> str:
+        """Return the public verification URL for a set of inputs.
+
+        This matches the query parameter order and encoding used by
+        ``verify()``. It is useful for auditors who want to call the endpoint
+        outside the bot.
+        """
+        query: dict[str, Any] = {
+            "server_seed": server_seed,
+            "server_seed_hash": server_seed_hash,
+            "client_seed": client_seed,
+            "nonce": str(nonce),
+            "game": game,
+            "algorithm": algorithm or self.algorithm,
+        }
+        if params:
+            query["params"] = json.dumps(params, separators=(",", ":"), sort_keys=True)
+        return f"{self.base_url}/fairness/verify?{urlencode(query)}"

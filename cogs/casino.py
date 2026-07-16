@@ -69,6 +69,7 @@ class CrashView(discord.ui.LayoutView):
         self.cashed_out: dict[int, Decimal] = {}
         self.crashed_out: dict[int, Decimal] = {}
         self.pf_data: dict[int, dict] = {}  # Provable fairness data per player
+        self.player_house_edges: dict[int, float] = {}  # House edge at join time
 
         self.join_btn = discord.ui.Button(
             label="Join Crash", style=discord.ButtonStyle.green
@@ -271,6 +272,7 @@ class CrashView(discord.ui.LayoutView):
                 "join",
                 {"user_id": uid, "bet": str(bet)},
             )
+            await self._persist_crash_player_verify(uid)
 
             self.cashout_btn.disabled = False
             await sub_int.response.send_message(
@@ -344,14 +346,33 @@ class CrashView(discord.ui.LayoutView):
         await self.update_game_message()
 
     async def generate_crash_point(self, user_id: int) -> Decimal:
-        """Per-user provable fairness with house edge adjustment"""
+        """Per-user provable fairness with house edge adjustment."""
 
         # Get user's house edge (lower for higher VIP tiers)
         house_edge = await self.casino.calculate_house_edge(user_id)
+        self.player_house_edges[user_id] = float(house_edge)
 
         return await self.casino.fairgate_generate_crash_point(
             user_id, self.pf_data[user_id], house_edge
         )
+
+    async def _persist_crash_player_verify(self, user_id: int) -> None:
+        """Store this player's crash verify metadata in the shared session state."""
+        if not self.session_id or user_id not in self.pf_data:
+            return
+        try:
+            gs = await self.bot.database.get_game_session(self.session_id)
+            crash_players = dict((gs.state or {}).get("crash_players", {}))
+            crash_players[str(user_id)] = {
+                "nonce": self.pf_data[user_id]["nonce"],
+                "house_edge": self.player_house_edges.get(user_id),
+                "verify_params": self.casino._fairgate_verify_params("crash"),
+            }
+            await self.casino._update_game_session(
+                self.session_id, state={"crash_players": crash_players}
+            )
+        except Exception:
+            logger.exception("Failed to persist crash player verify metadata")
 
     async def _crash_players_at_current_multiplier(self):
         """Mark any active players whose crash point has been reached as crashed."""
@@ -1826,12 +1847,16 @@ class RouletteView(discord.ui.LayoutView):
             await interaction.followup.send(f"🚫 {err}", ephemeral=True)
             return
 
+        roulette_fg_params = _roulette_fairgate_params(bets, wheel="american")
         session_state = {
             "user_id": self.user_id,
             "bet": str(self.bet_amount),
             "wallet_id": str(self.wallet_id),
             "bets": bets,
-            "fairgate_bet": _roulette_fairgate_params(bets, wheel="american"),
+            "fairgate_bet": roulette_fg_params,
+            "fairgate_verify_params": self.cog._fairgate_verify_params(
+                "roulette", fairgate_bet=roulette_fg_params
+            ),
         }
         self.session_id = await self.cog._create_game_session(
             self.ctx, "roulette", owner_id=self.user_id, wager_total=total_wager,
@@ -3805,6 +3830,75 @@ class Casino(commands.Cog):
             "nonce": nonce,
         }
 
+    def _fairgate_verify_params(
+        self, game_key: str, *, bombs: int = 3, fairgate_bet: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Return the exact FairGate ``game``/``params`` pair for a TPNEBOT game.
+
+        This is the single source of truth used both when calling ``/play`` and
+        when storing the params in ``GameSession.state`` for later verification.
+        """
+        if game_key in ("gamble", "double"):
+            return {"game": "coinflip", "params": {"choice": "heads"}}
+        if game_key == "supergamble":
+            return {
+                "game": "dice",
+                "params": {"mode": "target", "target": 50.0, "over": True},
+            }
+        if game_key == "dice":
+            return {"game": "dice", "params": {"mode": "sum", "dice": 2, "sides": 6}}
+        if game_key == "roulette":
+            return {
+                "game": "roulette",
+                "params": fairgate_bet or {"wheel": "american", "bet_type": "red"},
+            }
+        if game_key in ("blackjack", "poker"):
+            return {
+                "game": "cards",
+                "params": {
+                    "deck_count": 1,
+                    "format": "full_deck",
+                    "deck_order": "python",
+                },
+            }
+        if game_key == "hilo":
+            return {
+                "game": "numbers",
+                "params": {"pool": 13, "pick": 13, "replacement": False},
+            }
+        if game_key == "ladder":
+            return {
+                "game": "numbers",
+                "params": {"pool": 10000, "pick": 1, "replacement": True},
+            }
+        if game_key == "keno":
+            return {
+                "game": "numbers",
+                "params": {"pool": 30, "pick": 8, "replacement": False},
+            }
+        if game_key == "mines":
+            return {
+                "game": "mines",
+                "params": {"rows": 5, "cols": 5, "mines": bombs},
+            }
+        if game_key == "crash":
+            return {
+                "game": "numbers",
+                "params": {"pool": 1_000_000, "pick": 1, "replacement": True},
+            }
+        if game_key == "slots":
+            first_weights = self.SLOTS_REEL_WEIGHTS[0]
+            return {
+                "game": "numbers",
+                "params": {
+                    "pool": sum(first_weights.values()),
+                    "pick": 4,
+                    "replacement": True,
+                },
+            }
+        # Unknown game: best-effort pass-through
+        return {"game": game_key, "params": {}}
+
     async def fairgate_play_mines(
         self,
         user_id: int,
@@ -4757,6 +4851,216 @@ class Casino(commands.Cog):
             ctx, record, member, game_key, nonce, extra_args
         )
 
+    async def _verify_game_params(
+        self,
+        game_key: str,
+        member: discord.Member | discord.User,
+        nonce: int,
+        extra_args: list[str],
+    ) -> tuple[str, dict[str, Any] | None, list[tuple[str, str]]]:
+        """Resolve the exact FairGate ``game``/``params`` pair for verification.
+
+        First tries to read ``fairgate_verify_params`` from the stored
+        ``GameSession`` for the recorded nonce. If the session predates this
+        storage, it falls back to the heuristic mapping used in Phase 1 and
+        adds a best-effort note.
+        """
+        notes: list[tuple[str, str]] = []
+
+        stored = await self.bot.database.fetch_fairgate_verify_params(
+            member.id, game_key, nonce
+        )
+        if stored:
+            verify_game = stored.get("game", game_key)
+            params = stored.get("params")
+        else:
+            # Legacy fallback for sessions created before Phase 2.
+            fallback = self._fairgate_verify_params(game_key)
+            verify_game = fallback["game"]
+            params = fallback["params"]
+            notes.append(
+                (
+                    "⚠️ Note",
+                    "Could not locate the exact params stored at play time; using best-effort defaults. "
+                    "If the outcome below doesn't match, the session row may predate exact param storage.",
+                )
+            )
+
+        if game_key == "roulette" and stored:
+            # Stored roulette params are already the proof bet; nothing else to do.
+            pass
+        elif game_key == "roulette" and not stored:
+            # Legacy path: fairgate_bet was stored separately.
+            params = await self.bot.database.fetch_roulette_fairgate_params(member.id, nonce)
+            if params is not None:
+                # Remove the generic legacy note; exact roulette params were found.
+                notes = [n for n in notes if "best-effort defaults" not in n[1]]
+            else:
+                params = {"wheel": "american", "bet_type": "red"}
+                notes[-1] = (
+                    "⚠️ Note",
+                    (
+                        "Could not locate the roulette proof bet used for this spin. "
+                        "Falling back to a default red bet. The pocket shown is still "
+                        "correct, but the server-side win/loss flag may not match "
+                        "your actual bet."
+                    ),
+                )
+        elif game_key == "mines" and not stored:
+            bombs = await self.bot.database.fetch_mines_bomb_count(member.id, nonce)
+            if bombs is not None:
+                # Remove the generic legacy note; exact bomb count was found.
+                notes = [n for n in notes if "best-effort defaults" not in n[1]]
+            else:
+                bombs = 3
+                notes[-1] = (
+                    "⚠️ Note",
+                    "Could not locate the session bomb count, falling back to 3. "
+                    "If the board below doesn't match, the session row may have been pruned.",
+                )
+            params = {"rows": 5, "cols": 5, "mines": bombs}
+        elif game_key == "ladder":
+            # The recorded nonce belongs to the final step; resolve the step.
+            step = None
+            if extra_args:
+                try:
+                    step = int(extra_args[0])
+                except ValueError:
+                    pass
+            if step is None:
+                step = await self.bot.database.fetch_ladder_final_step(member.id, nonce)
+            if step is None:
+                step = 0
+                notes.append(
+                    (
+                        "⚠️ Note",
+                        "Could not determine the ladder step for this nonce; defaulting to step 0.",
+                    )
+                )
+            # Ladder uses the same numbers params for every step; the step only
+            # affects how the result is displayed.
+            extra_args[:] = [str(step)]
+        elif game_key == "crash":
+            notes.append(
+                (
+                    "⚠️ Note",
+                    "Crash is per-player inside a shared session; the displayed roll is the raw "
+                    "uniform draw. Recompute the crash point as (1 - house_edge) / (1 - roll/1e6). "
+                    "House edge may have changed since the bet was placed.",
+                )
+            )
+        elif game_key == "slots":
+            notes.append(
+                (
+                    "⚠️ Note",
+                    "Slots uses one FairGate draw per reel; this verifies the first reel's parameters only.",
+                )
+            )
+
+        return verify_game, params, notes
+
+    def _format_verify_outcome(
+        self, game_key: str, proof: dict[str, Any], extra_args: list[str]
+    ) -> tuple[Any, str]:
+        """Return ``(raw_outcome, pretty_text)`` for a verified game."""
+        outcome = proof.get("result") if "result" in proof else proof.get("outcome")
+        if outcome is None:
+            return None, "No outcome returned."
+
+        # Normalise raw list responses from the FairGate ``numbers`` engine.
+        if isinstance(outcome, list):
+            if game_key in ("hilo", "ladder", "keno", "crash", "slots"):
+                outcome = {"numbers": outcome}
+            elif game_key in ("gamble", "double") and outcome:
+                outcome = {"side": outcome[0]}
+
+        if game_key == "mines" and isinstance(outcome, dict):
+            bomb_cells = sorted(outcome.get("bombs", outcome.get("bomb_cells", [])))
+            bomb_set = set(bomb_cells)
+            bomb_emoji = "<:bombs:1278849752301309994>"
+            gem_emoji = "<:gems:1278849818025918497>"
+            grid = "\n".join(
+                "".join(
+                    bomb_emoji if (row * 5 + col) in bomb_set else gem_emoji
+                    for col in range(5)
+                )
+                for row in range(5)
+            )
+            return outcome, (
+                f"Bombs: **{len(bomb_cells)}** • Safe cells: **{25 - len(bomb_cells)}**\n"
+                f"Positions: `{bomb_cells}`\n{grid}"
+            )
+
+        if game_key in ("gamble", "double") and isinstance(outcome, dict):
+            side = outcome.get("side", outcome.get("result", "?"))
+            return outcome, f"Winning side: **{side}**"
+
+        if game_key == "supergamble" and isinstance(outcome, dict):
+            roll = float(outcome.get("roll", 0))
+            kind, _mult, text = self._map_supergamble_roll(roll)
+            return outcome, f"Roll: `{roll:.2f}` → **{kind.replace('_', ' ').title()}**{text}"
+
+        if game_key == "dice" and isinstance(outcome, dict):
+            roll = outcome.get("roll", outcome.get("total", "?"))
+            return outcome, f"Roll: `{roll}`"
+
+        if game_key == "roulette" and isinstance(outcome, dict):
+            pocket = outcome.get("pocket", outcome.get("spin_result", "?"))
+            color = (outcome.get("color") or "Unknown").title()
+            return outcome, f"Pocket: **{pocket}** ({color})"
+
+        if game_key in ("blackjack", "poker") and isinstance(outcome, dict):
+            deck = outcome.get("deck", [])
+            player = outcome.get("player", deck[:2] if deck else [])
+            if game_key == "blackjack":
+                dealer = outcome.get("dealer", [deck[2]] if len(deck) > 2 else [])
+                return outcome, f"Player: `{player}` • Dealer: `{dealer}`"
+            bot_hand = outcome.get("bot", deck[2:4] if len(deck) > 4 else [])
+            community = outcome.get("community", deck[4:9] if len(deck) > 9 else [])
+            return outcome, f"Player: `{player}` • Bot: `{bot_hand}` • Community: `{community}`"
+
+        if game_key == "hilo" and isinstance(outcome, dict):
+            numbers = outcome.get("numbers", [])
+            cards = [HILO_CARDS[n] for n in numbers if 0 <= n < len(HILO_CARDS)]
+            return outcome, f"Shuffled deck: `{cards}`"
+
+        if game_key == "ladder" and isinstance(outcome, dict):
+            numbers = outcome.get("numbers", [])
+            roll = numbers[0] if numbers else outcome.get("roll", "?")
+            step = 0
+            if extra_args:
+                try:
+                    step = int(extra_args[0])
+                except ValueError:
+                    pass
+            threshold = LADDER_STEP_PROBS.get(step, 0) * 100
+            survived = roll < threshold if isinstance(roll, int) else None
+            mult = LADDER_STEP_MULTS.get(step, Decimal("0"))
+            status = "✅ Survived" if survived else "❌ Fell"
+            return outcome, (
+                f"Step: `{step}` • Roll: `{roll}` • Threshold: `{threshold}`\n"
+                f"Multiplier: `{mult}x` • {status}"
+            )
+
+        if game_key == "keno" and isinstance(outcome, dict):
+            numbers = sorted(outcome.get("numbers", []))
+            return outcome, f"Winning positions: `{numbers}`"
+
+        if game_key == "crash" and isinstance(outcome, dict):
+            numbers = outcome.get("numbers", [])
+            roll = numbers[0] if numbers else outcome.get("roll", "?")
+            return outcome, (
+                f"Uniform roll: `{roll}` / 1,000,000 — apply "
+                f"``(1 - house_edge) / (1 - roll/1e6)``"
+            )
+
+        if game_key == "slots" and isinstance(outcome, dict):
+            pretty = json.dumps(outcome, indent=2)
+            return outcome, f"```json\n{shorten(pretty, width=900, placeholder='…')}```"
+
+        pretty = json.dumps(outcome, indent=2) if not isinstance(outcome, str) else outcome
+        return outcome, f"```json\n{shorten(pretty, width=900, placeholder='…')}```"
+
     async def _verify_fairgate_game(
         self,
         ctx: commands.Context,
@@ -4766,7 +5070,13 @@ class Casino(commands.Cog):
         nonce: int,
         extra_args: list[str],
     ):
-        """Verify a FairGate-backed game outcome against the remote verify endpoint."""
+        """Verify a FairGate-backed game outcome against the public /fairness/verify endpoint."""
+        if not self.fairgate_client:
+            return await ctx.reply(
+                "FairGate is not configured; verification is unavailable.",
+                mention_author=False,
+            )
+
         server_seed = record.used_server_seed
         client_seed = record.client_seed
         server_seed_hash = record.hash
@@ -4790,91 +5100,9 @@ class Casino(commands.Cog):
             )
             return await ctx.reply(embed=embed, mention_author=False)
 
-        # Map TPNEBOT game names to the actual FairGate engine game and the
-        # params that were passed to ``/play`` for the recorded nonce.
-        params = None
-        verify_game = game_key
-        if game_key == "mines":
-            bombs = await self.bot.database.fetch_mines_bomb_count(member.id, nonce)
-            if bombs is None:
-                bombs = 3
-                embed.add_field(
-                    name="⚠️ Note",
-                    value=(
-                        "Could not locate the session bomb count, falling back to 3. "
-                        "If the board below doesn't match, the session row may have been pruned."
-                    ),
-                    inline=False,
-                )
-            params = {"rows": 5, "cols": 5, "mines": bombs}
-        elif game_key in ("gamble", "double"):
-            verify_game = "coinflip"
-            params = {"choice": "heads"}
-        elif game_key == "supergamble":
-            verify_game = "dice"
-            params = {"mode": "target", "target": 50.0, "over": True}
-        elif game_key == "dice":
-            verify_game = "dice"
-            params = {"mode": "sum", "dice": 2, "sides": 6}
-        elif game_key == "roulette":
-            verify_game = "roulette"
-            params = await self.bot.database.fetch_roulette_fairgate_params(member.id, nonce)
-            if params is None:
-                params = {"wheel": "american", "bet_type": "red"}
-                embed.add_field(
-                    name="⚠️ Note",
-                    value=(
-                        "Could not locate the roulette proof bet used for this spin. "
-                        "Falling back to a default red bet. The pocket shown is still "
-                        "correct, but the server-side win/loss flag may not match "
-                        "your actual bet."
-                    ),
-                    inline=False,
-                )
-        elif game_key in ("blackjack", "poker"):
-            verify_game = "cards"
-            params = {"deck_count": 1, "format": "full_deck", "deck_order": "python"}
-        elif game_key == "hilo":
-            verify_game = "numbers"
-            params = {"pool": 13, "pick": 13, "replacement": False}
-        elif game_key == "ladder":
-            verify_game = "numbers"
-            params = {"pool": 10000, "pick": 1, "replacement": True}
-        elif game_key == "keno":
-            verify_game = "numbers"
-            params = {"pool": 30, "pick": 8, "replacement": False}
-        elif game_key == "crash":
-            # Crash points are generated from one uniform ``numbers`` draw on a
-            # 1,000,000-space pool using the standard inverse-transform formula.
-            verify_game = "numbers"
-            params = {"pool": 1_000_000, "pick": 1, "replacement": True}
-            embed.add_field(
-                name="⚠️ Note",
-                value=(
-                    "Crash uses one FairGate numbers draw. Recompute the crash "
-                    "point as (1 - house_edge) / (1 - roll / 1_000_000)."
-                ),
-                inline=False,
-            )
-        elif game_key == "slots":
-            # Slots uses one ``numbers`` draw per reel; the recorded nonce is
-            # the final reel's draw. We don't store the reel index, so verify
-            # against the first reel's weight distribution as a best-effort.
-            verify_game = "numbers"
-            first_weights = self.SLOTS_REEL_WEIGHTS[0]
-            params = {
-                "pool": sum(first_weights.values()),
-                "pick": 4,
-                "replacement": True,
-            }
-            embed.add_field(
-                name="⚠️ Note",
-                value=(
-                    "Slots uses one FairGate draw per reel; this verifies "
-                    "the first reel's parameters only."
-                ),
-                inline=False,
-            )
+        verify_game, params, notes = await self._verify_game_params(
+            game_key, member, nonce, extra_args
+        )
 
         try:
             proof = await self.fairgate_client.verify(
@@ -4891,46 +5119,218 @@ class Casino(commands.Cog):
             embed.description = f"FairGate verification failed: `{e}`"
             return await ctx.reply(embed=embed, mention_author=False)
 
+        algorithm = proof.get("algorithm", "sha256_tag")
+        win = proof.get("win")
+        payout_multiplier = proof.get("payout_multiplier")
+        raw_float = proof.get("raw_float")
+
         embed.description = (
             f"User: {member.display_name}\n"
             f"Nonce: `{nonce}` • Client Seed: `{client_seed}`\n"
-            f"Server Seed Hash: `{server_seed_hash}`\n"
-            f"Algorithm: `{proof.get('algorithm', 'sha256_tag')}`"
+            f"Server Seed Hash: `{server_seed_hash}`"
         )
+        embed.add_field(name="Algorithm", value=f"`{algorithm}`", inline=True)
+        if win is not None:
+            embed.add_field(name="Win", value="✅ Yes" if win else "❌ No", inline=True)
+        if payout_multiplier is not None:
+            embed.add_field(name="Payout Multiplier", value=f"`{payout_multiplier}x`", inline=True)
+        if raw_float is not None:
+            embed.add_field(name="Raw Float", value=f"`{raw_float}`", inline=True)
 
-        outcome = proof.get("result") if "result" in proof else proof.get("outcome")
-        if game_key == "mines" and outcome is not None:
-            bomb_cells = sorted(outcome.get("bombs", []))
-            bomb_emoji = "<:bombs:1278849752301309994>"
-            gem_emoji = "<:gems:1278849818025918497>"
-            bomb_set = set(bomb_cells)
-            grid = ""
-            for row in range(5):
-                grid += "".join(
-                    bomb_emoji if (row * 5 + col) in bomb_set else gem_emoji
-                    for col in range(5)
-                ) + "\n"
-            embed.add_field(
-                name="💣 Mines — Revealed Board",
-                value=(
-                    f"Bombs: **{len(bomb_cells)}** • Safe cells: **{25 - len(bomb_cells)}**\n"
-                    f"Positions: `{bomb_cells}`\n"
-                    f"{grid}"
-                ),
-                inline=False,
-            )
-        else:
-            pretty = (
-                json.dumps(outcome, indent=2)
-                if not isinstance(outcome, str)
-                else outcome
-            )
-            embed.add_field(
-                name="🎲 Outcome",
-                value=f"```json\n{shorten(pretty, width=900, placeholder='…')}```",
-                inline=False,
+        for name, value in notes:
+            embed.add_field(name=name, value=value, inline=False)
+
+        outcome, outcome_text = self._format_verify_outcome(game_key, proof, extra_args)
+        embed.add_field(name="🎲 Outcome", value=outcome_text, inline=False)
+
+        verify_url = self.fairgate_client.verify_url(
+            server_seed=server_seed,
+            server_seed_hash=server_seed_hash,
+            client_seed=client_seed,
+            nonce=nonce,
+            game=verify_game,
+            params=params,
+        )
+        embed.set_footer(text=f"Reproduce: {verify_url}")
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    def _validate_manual_verify_inputs(
+        self,
+        server_seed: str,
+        server_seed_hash: str,
+        nonce: int,
+        params_json: str,
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Validate inputs for manual ``/fairness/verify`` commands."""
+        errors: list[str] = []
+        hex_re = re.compile(r"^[0-9a-fA-F]+$")
+        if not hex_re.match(server_seed):
+            errors.append("`server_seed` must be a hex string.")
+        if not hex_re.match(server_seed_hash):
+            errors.append("`server_seed_hash` must be a hex string.")
+        if nonce < 0:
+            errors.append("`nonce` must be a non-negative integer.")
+
+        params: dict[str, Any] = {}
+        raw = (params_json or "").strip()
+        if raw and raw not in ("{}", ""):
+            try:
+                params = json.loads(raw)
+                if not isinstance(params, dict):
+                    raise ValueError
+            except Exception:
+                errors.append("`params_json` must be a valid JSON object.")
+
+        return errors, params
+
+    @casino.command(
+        name="verifyraw",
+        aliases=["vr", "manualverify"],
+        description="Manually verify a FairGate outcome using the public /fairness/verify endpoint.",
+    )
+    @unified_cooldown(5)
+    async def casino_verifyraw(
+        self,
+        ctx: commands.Context,
+        server_seed: str,
+        server_seed_hash: str,
+        client_seed: str,
+        nonce: int,
+        game: str,
+        params_json: str = "{}",
+        algorithm: str = "sha256_tag",
+    ):
+        """
+        Usage:
+          !casino verifyraw <server_seed> <server_seed_hash> <client_seed> <nonce> <game> [params_json] [algorithm]
+
+        Example:
+          !casino verifyraw a1b2 c3d4 my-seed 7 mines '{"mines":3}'
+        """
+        if not self.fairgate_client:
+            return await ctx.reply("FairGate is not configured.", mention_author=False)
+
+        errors, params = self._validate_manual_verify_inputs(
+            server_seed, server_seed_hash, nonce, params_json
+        )
+        if errors:
+            return await Embeds.error(
+                ctx,
+                description="\n".join(errors),
+                title="🔎 Manual Verify — Invalid Input",
+                delete_after=10,
             )
 
+        game_key = game.lower()
+        try:
+            proof = await self.fairgate_client.verify(
+                server_seed=server_seed,
+                server_seed_hash=server_seed_hash,
+                client_seed=client_seed,
+                nonce=nonce,
+                game=game_key,
+                params=params,
+                algorithm=algorithm,
+            )
+        except Exception as e:
+            logger.exception("Manual FairGate verification failed")
+            return await Embeds.error(
+                ctx,
+                description=f"FairGate verification failed: `{e}`",
+                title="🔎 Manual Verify — Error",
+                delete_after=10,
+            )
+
+        algorithm = proof.get("algorithm", algorithm)
+        win = proof.get("win")
+        payout_multiplier = proof.get("payout_multiplier")
+        raw_float = proof.get("raw_float")
+
+        embed = discord.Embed(
+            title=f"🔒 FairGate Manual Verify — {game_key.title()}",
+            color=discord.Color.blurple(),
+        )
+        embed.description = (
+            f"Nonce: `{nonce}` • Client Seed: `{client_seed}`\n"
+            f"Server Seed Hash: `{server_seed_hash}`"
+        )
+        embed.add_field(name="Algorithm", value=f"`{algorithm}`", inline=True)
+        if win is not None:
+            embed.add_field(name="Win", value="✅ Yes" if win else "❌ No", inline=True)
+        if payout_multiplier is not None:
+            embed.add_field(
+                name="Payout Multiplier", value=f"`{payout_multiplier}x`", inline=True
+            )
+        if raw_float is not None:
+            embed.add_field(name="Raw Float", value=f"`{raw_float}`", inline=True)
+
+        outcome, outcome_text = self._format_verify_outcome(game_key, proof, [])
+        embed.add_field(name="🎲 Outcome", value=outcome_text, inline=False)
+
+        verify_url = self.fairgate_client.verify_url(
+            server_seed=server_seed,
+            server_seed_hash=server_seed_hash,
+            client_seed=client_seed,
+            nonce=nonce,
+            game=game_key,
+            params=params,
+            algorithm=algorithm,
+        )
+        embed.set_footer(text=f"Endpoint: {verify_url}")
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @casino.command(
+        name="verifyurl",
+        aliases=["vurl"],
+        description="Return the public /fairness/verify URL for a set of inputs without calling it.",
+    )
+    @unified_cooldown(5)
+    async def casino_verifyurl(
+        self,
+        ctx: commands.Context,
+        server_seed: str,
+        server_seed_hash: str,
+        client_seed: str,
+        nonce: int,
+        game: str,
+        params_json: str = "{}",
+        algorithm: str = "sha256_tag",
+    ):
+        """
+        Usage:
+          !casino verifyurl <server_seed> <server_seed_hash> <client_seed> <nonce> <game> [params_json] [algorithm]
+        """
+        if not self.fairgate_client:
+            return await ctx.reply("FairGate is not configured.", mention_author=False)
+
+        errors, params = self._validate_manual_verify_inputs(
+            server_seed, server_seed_hash, nonce, params_json
+        )
+        if errors:
+            return await Embeds.error(
+                ctx,
+                description="\n".join(errors),
+                title="🔎 Verify URL — Invalid Input",
+                delete_after=10,
+            )
+
+        game_key = game.lower()
+        verify_url = self.fairgate_client.verify_url(
+            server_seed=server_seed,
+            server_seed_hash=server_seed_hash,
+            client_seed=client_seed,
+            nonce=nonce,
+            game=game_key,
+            params=params,
+            algorithm=algorithm,
+        )
+        embed = discord.Embed(
+            title="🔒 FairGate Verify URL",
+            description=f"```\n{verify_url}\n```",
+            color=discord.Color.blurple(),
+        )
         await ctx.reply(embed=embed, mention_author=False)
 
     @casino.command(
@@ -5031,6 +5431,7 @@ class Casino(commands.Cog):
                     "user_id": user_id,
                     "bet": str(amount),
                     "wallet_id": str(wallet_id),
+                    "fairgate_verify_params": self._fairgate_verify_params("gamble"),
                 },
                 rng=PF,
             )
@@ -5172,6 +5573,7 @@ class Casino(commands.Cog):
                     "user_id": user_id,
                     "bet": str(amount),
                     "wallet_id": str(wallet_id),
+                    "fairgate_verify_params": self._fairgate_verify_params("supergamble"),
                 },
                 rng=PF,
             )
@@ -5539,6 +5941,7 @@ class Casino(commands.Cog):
                 "bet": str(stake),
                 "wallet_id": str(wallet_id),
                 "currency": currency,
+                "fairgate_verify_params": self._fairgate_verify_params("slots"),
             },
             rng=PF,
         )
@@ -5695,6 +6098,7 @@ class Casino(commands.Cog):
                 "bet": str(amount),
                 "wallet_id": str(wallet_id),
                 "guess": guess,
+                "fairgate_verify_params": self._fairgate_verify_params("dice"),
             },
             rng=PF,
         )
@@ -5925,6 +6329,7 @@ class Casino(commands.Cog):
                 "user_id": user_id,
                 "bet": str(amount),
                 "wallet_id": str(wallet_id),
+                "fairgate_verify_params": self._fairgate_verify_params("double"),
             },
             rng=PF,
         )
@@ -6033,6 +6438,7 @@ class Casino(commands.Cog):
                 "insurance_bet": "0",
                 "insurance_taken": False,
                 "insurance_offered": False,
+                "fairgate_verify_params": self._fairgate_verify_params("blackjack"),
             },
             rng=PF,
         )
@@ -6785,6 +7191,7 @@ class Casino(commands.Cog):
                 "user_id": user_id,
                 "bet": str(bet),
                 "wallet_id": str(wallet_id),
+                "fairgate_verify_params": self._fairgate_verify_params("poker"),
             },
             rng=PF,
         )
@@ -6886,7 +7293,12 @@ class Casino(commands.Cog):
 
             session_id = await self._create_game_session(
                 ctx, "hilo", owner_id=user_id, wager_total=bet_amount,
-                state={"user_id": user_id, "bet": str(bet_amount), "wallet_id": str(wallet_id)},
+                state={
+                    "user_id": user_id,
+                    "bet": str(bet_amount),
+                    "wallet_id": str(wallet_id),
+                    "fairgate_verify_params": self._fairgate_verify_params("hilo"),
+                },
                 rng=PF,
             )
             await self._add_refund(
@@ -6974,6 +7386,7 @@ class Casino(commands.Cog):
                 "user_id": user_id,
                 "bet": str(amount),
                 "wallet_id": str(wallet_id),
+                "fairgate_verify_params": self._fairgate_verify_params("ladder"),
             },
             rng=PF,
         )
@@ -7011,7 +7424,11 @@ class Casino(commands.Cog):
             ctx,
             "crash",
             owner_id=ctx.author.id,
-            state={"host_id": ctx.author.id},
+            state={
+                "host_id": ctx.author.id,
+                "fairgate_verify_params": self._fairgate_verify_params("crash"),
+                "crash_players": {},
+            },
         )
         view = CrashView(self.bot, ctx.author.id, cid, session_id=session_id)
         try:
@@ -7140,6 +7557,7 @@ class Casino(commands.Cog):
                     "join",
                     {"user_id": uid, "bet": str(amt)},
                 )
+                await current_game._persist_crash_player_verify(uid)
                 await current_game.update_game_message()
 
             modal.on_submit = on_submit
@@ -7660,6 +8078,7 @@ class Casino(commands.Cog):
                     "bet": str(bet_amount),
                     "wallet_id": str(wallet_id),
                     "bombs": num_bombs,
+                    "fairgate_verify_params": self._fairgate_verify_params("mines", bombs=num_bombs),
                 },
                 rng=PF,
             )
@@ -7791,6 +8210,7 @@ class Casino(commands.Cog):
                     "user_id": user_id,
                     "bet": str(amount),
                     "wallet_id": str(wallet_id),
+                    "fairgate_verify_params": self._fairgate_verify_params("keno"),
                 },
                 rng=PF,
             )
