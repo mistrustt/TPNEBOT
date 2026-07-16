@@ -1184,7 +1184,7 @@ class Economy(commands.Cog):
             "poker",
             "crash",
             "hilo",
-            "ridebus",
+            "cards",
         ]
         self.exchange_rate = Decimal("1000000000000")
         self.validate_economy_task.start()
@@ -1767,6 +1767,8 @@ class Economy(commands.Cog):
         if not hasattr(self.bot, 'database'):
             return await ctx.send("❌ Database not available.")
 
+        if days < 1:
+            return await ctx.send("❌ Trend period must be at least 1 day.")
         if days > 365:
             return await ctx.send("❌ Maximum trend period is 365 days.")
 
@@ -1778,43 +1780,71 @@ class Economy(commands.Cog):
 
             embed = discord.Embed(
                 title=f"📈 Economic Trends ({days} days)",
-                description=f"Data points: {trends['data_points']}",
+                description=f"Based on **{trends['data_points']}** daily snapshots",
                 color=discord.Color.green()
             )
 
+            # Metric display metadata: emoji, friendly label, and value format.
+            metric_display = {
+                "treasury_health":    {"emoji": "🏦", "label": "Treasury Health",    "fmt": "percent"},
+                "liquidity_ratio":    {"emoji": "💧", "label": "Liquidity Ratio",    "fmt": "percent"},
+                "velocity_of_money":  {"emoji": "⚡", "label": "Velocity of Money",  "fmt": "percent"},
+                "volatility_index":   {"emoji": "📊", "label": "Volatility Index",   "fmt": "percent"},
+                "transaction_volume": {"emoji": "💸", "label": "Transaction Volume", "fmt": "currency"},
+                "fee_rate":           {"emoji": "🧾", "label": "Fee Rate",           "fmt": "percent"},
+                "passive_income_rate":{"emoji": "💰", "label": "Passive Income Rate","fmt": "percent"},
+            }
+
+            def fmt_percent(value: float) -> str:
+                return f"{value * 100:.2f}%"
+
+            async def fmt_metric_value(value: float, fmt: str) -> str:
+                if fmt == "percent":
+                    return fmt_percent(value)
+                if fmt == "currency":
+                    return f"{self.currency_name} {await self.formatter(Decimal(str(value)))}"
+                return f"{value:.4f}"
+
             # Add metrics with their trends
             for metric_name, metric_data in trends['metrics'].items():
-                # Format metric name to be more readable
-                formatted_name = metric_name.replace('_', ' ').title()
+                # Skip active_users from the trends display
+                if metric_name == "active_users":
+                    continue
+                display = metric_display.get(
+                    metric_name,
+                    {"emoji": "📌", "label": metric_name.replace('_', ' ').title(), "fmt": "raw"}
+                )
 
-                # Determine trend indicator
-                if metric_data['trend_slope'] > 0:
-                    trend_indicator = "↗️"
-                elif metric_data['trend_slope'] < 0:
-                    trend_indicator = "↘️"
+                # Trend direction based on the latest change
+                change_pct = metric_data.get('change_percent', 0)
+                if change_pct > 0:
+                    trend_indicator = "▲"
+                    change_text = f"+{change_pct:.2f}%"
+                elif change_pct < 0:
+                    trend_indicator = "▼"
+                    change_text = f"{change_pct:.2f}%"
                 else:
-                    trend_indicator = "➡️"
+                    trend_indicator = "➖"
+                    change_text = "0.00%"
 
-                # Format the value appropriately
-                if metric_name in ['treasury_health', 'liquidity_ratio']:
-                    current_val = f"{metric_data['current']*100:.2f}%"
-                    avg_val = f"{metric_data['average']*100:.2f}%"
-                else:
-                    current_val = f"{metric_data['current']:.4f}"
-                    avg_val = f"{metric_data['average']:.4f}"
+                current_val = await fmt_metric_value(metric_data['current'], display['fmt'])
+                avg_val = await fmt_metric_value(metric_data['average'], display['fmt'])
+                min_val = await fmt_metric_value(metric_data['min'], display['fmt'])
+                max_val = await fmt_metric_value(metric_data['max'], display['fmt'])
 
                 value_text = (
-                    f"Current: {current_val} {trend_indicator}\n"
-                    f"Average: {avg_val}\n"
-                    f"Range: {metric_data['min']:.4f} - {metric_data['max']:.4f}"
+                    f"**Current:** {current_val} {trend_indicator} ({change_text})\n"
+                    f"**Average:** {avg_val}\n"
+                    f"**Range:** {min_val} – {max_val}"
                 )
 
                 embed.add_field(
-                    name=formatted_name,
+                    name=f"{display['emoji']} {display['label']}",
                     value=value_text,
                     inline=True
                 )
 
+            embed.set_footer(text="💡 Use !economy health for the current economic health score")
             await ctx.send(embed=embed)
 
         except Exception as e:
@@ -1873,7 +1903,7 @@ class Economy(commands.Cog):
                 rec_text += f"{emoji} {rec['message']}\n"
 
             embed.add_field(
-                name="💡 Recommendations",
+                name="💡 Info",
                 value=rec_text.strip(),
                 inline=False
             )

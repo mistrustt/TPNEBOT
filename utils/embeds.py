@@ -95,6 +95,37 @@ class Embeds:
         # Fallback: treat as a sendable channel
         return await ctx_or_channel.send(embed=embed, delete_after=delete_after)
 
+    @staticmethod
+    async def safe_reply(
+        ctx: commands.Context,
+        content=None,
+        *,
+        embed=None,
+        view=None,
+        delete_after=None,
+        mention_author=False,
+    ):
+        """Reply to a context message, falling back to a plain send on failure.
+
+        Use this for any `ctx.reply(...)` call that includes a view or other
+        payload not handled by the standard `_send` helper.
+        """
+        try:
+            return await ctx.reply(
+                content=content,
+                embed=embed,
+                view=view,
+                delete_after=delete_after,
+                mention_author=mention_author,
+            )
+        except discord.HTTPException:
+            return await ctx.send(
+                content=content,
+                embed=embed,
+                view=view,
+                delete_after=delete_after,
+            )
+
     # ------------------------------------------------------------------
     # New high-level helpers (context/interaction/channel agnostic)
     # ------------------------------------------------------------------

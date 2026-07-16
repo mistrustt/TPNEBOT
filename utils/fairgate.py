@@ -117,11 +117,13 @@ class FairGateClient:
         if not self.api_key:
             raise FairGateError("FairGate app API key is not configured")
 
-    def _headers(self, *, admin: bool = False) -> dict[str, str]:
+    def _headers(self, *, admin: bool = False, auth: bool = True) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if not auth:
+            return headers
         if admin:
             if not self.admin_api_key:
                 raise FairGateError("FairGate admin API key is not configured")
@@ -144,6 +146,7 @@ class FairGateClient:
         json_body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         admin: bool = False,
+        auth: bool = True,
     ) -> dict[str, Any]:
         session = self._session_or_create()
         url = urljoin(self.base_url + "/", path.lstrip("/"))
@@ -151,7 +154,7 @@ class FairGateClient:
         async with session.request(
             method,
             url,
-            headers=self._headers(admin=admin),
+            headers=self._headers(admin=admin, auth=auth),
             json=json_body,
             params=params,
         ) as resp:
@@ -171,7 +174,7 @@ class FairGateClient:
 
     async def health(self) -> dict[str, Any]:
         """Health check. No authentication required."""
-        return await self._request("GET", "/health")
+        return await self._request("GET", "/health", auth=False)
 
     async def get_seed(self, *, force: bool = False) -> dict[str, Any]:
         """Return the active app seed commitment, caching it until expiry.
@@ -260,8 +263,7 @@ class FairGateClient:
             payload["allowed_games"] = allowed_games
         if rotation_config is not None:
             payload["rotation_config"] = rotation_config
-        if algorithm is not None:
-            payload["algorithm"] = algorithm
+        payload["algorithm"] = algorithm if algorithm is not None else self.algorithm
 
         return await self._request("POST", "/apps", json_body=payload, admin=True)
 
@@ -275,13 +277,12 @@ class FairGateClient:
 
     async def list_games(self) -> dict[str, Any]:
         """List the games supported by this FairGate instance."""
-        return await self._request("GET", "/games")
+        return await self._request("GET", "/games", auth=False)
 
     async def patch_app(
         self,
         app_id: str,
         *,
-        name: str | None = None,
         allowed_games: list[str] | None = None,
         rotation_policy: str | None = None,
         rotation_config: dict[str, Any] | None = None,
@@ -290,11 +291,10 @@ class FairGateClient:
         """Update metadata for an existing FairGate app.
 
         Requires ``FAIRGATE_ADMIN_API_KEY`` to be configured. Only fields
-        that are passed are sent to the server.
+        that are passed are sent to the server. The app ``name`` cannot be
+        changed through this endpoint.
         """
         payload: dict[str, Any] = {}
-        if name is not None:
-            payload["name"] = name
         if allowed_games is not None:
             payload["allowed_games"] = allowed_games
         if rotation_policy is not None:
@@ -332,4 +332,4 @@ class FairGateClient:
         if params:
             query["params"] = json.dumps(params, separators=(",", ":"), sort_keys=True)
 
-        return await self._request("GET", "/fairness/verify", params=query)
+        return await self._request("GET", "/fairness/verify", params=query, auth=False)

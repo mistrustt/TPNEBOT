@@ -4059,14 +4059,20 @@ class Casino(commands.Cog):
         )
         return result["outcome"]["numbers"]
 
-    async def fairgate_play_ridebus(
+    async def fairgate_play_cards(
         self, user_id: int, PF: dict, *, deck_count: int = 1
     ) -> list[str]:
-        """Resolve a shuffled deck through FairGate (ridebus engine)."""
+        """Resolve a full shuffled deck through FairGate's generic ``cards`` engine.
+        
+        """
         result = await self.fairgate_client.play(
             user_id=user_id,
-            game="ridebus",
-            params={"deck_count": deck_count},
+            game="cards",
+            params={
+                "deck_count": deck_count,
+                "format": "full_deck",
+                "deck_order": "python",
+            },
             client_seed=PF["client_seed"],
             nonce=PF["nonce"],
             server_seed_hash=PF["server_seed_hash"],
@@ -4826,8 +4832,8 @@ class Casino(commands.Cog):
                     inline=False,
                 )
         elif game_key in ("blackjack", "poker"):
-            verify_game = "ridebus"
-            params = {"deck_count": 1}
+            verify_game = "cards"
+            params = {"deck_count": 1, "format": "full_deck", "deck_order": "python"}
         elif game_key == "hilo":
             verify_game = "numbers"
             params = {"pool": 13, "pick": 13, "replacement": False}
@@ -4892,7 +4898,7 @@ class Casino(commands.Cog):
             f"Algorithm: `{proof.get('algorithm', 'sha256_tag')}`"
         )
 
-        outcome = proof.get("outcome")
+        outcome = proof.get("result") if "result" in proof else proof.get("outcome")
         if game_key == "mines" and outcome is not None:
             bomb_cells = sorted(outcome.get("bombs", []))
             bomb_emoji = "<:bombs:1278849752301309994>"
@@ -6039,7 +6045,7 @@ class Casino(commands.Cog):
         )
 
         try:
-            deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+            deck = await self.fairgate_play_cards(user_id, PF, deck_count=1)
         except FairGateError as exc:
             logger.exception("Blackjack deck draw failed for user %s: %s", user_id, exc)
             await self._refund_game_session(
@@ -6791,7 +6797,7 @@ class Casino(commands.Cog):
         )
 
         try:
-            deck = await self.fairgate_play_ridebus(user_id, PF, deck_count=1)
+            deck = await self.fairgate_play_cards(user_id, PF, deck_count=1)
         except FairGateError as exc:
             logger.exception("Poker deck draw failed for user %s: %s", user_id, exc)
             await self._refund_game_session(

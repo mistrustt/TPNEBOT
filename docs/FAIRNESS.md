@@ -33,6 +33,7 @@ The verifier class `ProvenFairness` mirrors production logic. Key examples:
 - `verify_blackjack`: Fisher Yates style shuffle with per swap tagged draws then first cards distribution.
 - `verify_roulette`: Choice among 0 to 36 plus 00 returning color and parity flags.
 - `verify_poker`: Shuffle then deal player, bot, and community cards.
+- `verify_cards`: Generic full-deck shuffle used by blackjack, poker, and hi-lo (matches the FairGate `cards` engine with `deck_order: "python"`).
 - `verify_mines`: Partial Fisher Yates sampling of bomb positions.
 - `verify_crash`: One uniform draw mapped through a multiplier function.
 

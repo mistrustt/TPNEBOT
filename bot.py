@@ -202,6 +202,10 @@ logger = logging.getLogger("discord.client")
 
 class DiscordBot(commands.Bot):
     def __init__(self) -> None:
+        # Patch Context.reply so every command reply falls back to a plain send
+        # if the invoking message was deleted before we could respond.
+        self._patch_context_reply()
+
         self.logger = logger
         # Database connection. Defaults preserve the original `localhost` / `postgres` /
         # `postgres` behavior for bare-metal runs; Docker compose sets these to reach the

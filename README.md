@@ -6,7 +6,7 @@ TPNEBOT is a modular Discord bot featuring an economy, casino style games with p
 
 ## Key Features
 - Economy and virtual currency with wallets, transactions, items, shop, bounties
-- Casino and game suite (dice, gamble variants, slots, blackjack, mines, crash, ladder, roulette, poker, ridebus, etc.)
+- Casino and game suite (dice, gamble variants, slots, blackjack, mines, crash, ladder, roulette, poker, cards, etc.)
 - Provable fairness system (HMAC based deterministic RNG and verifiers)
 - Moderation (punishments, jail, mute variants, case notes, watchdog auditing)
 - Community utilities (timezone, location, reactions, reputation, streaks, LastFM integration)

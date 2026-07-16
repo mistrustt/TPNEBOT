@@ -589,11 +589,21 @@ class ProvenFairness:
         }
 
     @staticmethod
+    def verify_cards(
+        server_seed: str, client_seed: str, start_nonce: int
+    ) -> Dict[str, List[str]]:
+        """Verify a full-deck shuffle from the FairGate ``cards`` engine.
+        
+        """
+        deck, next_nonce = outcome_shuffle_deck(server_seed, client_seed, start_nonce)
+        return {"shuffled_deck": deck, "next_nonce": next_nonce}
+
+    @staticmethod
     def verify_ridebus(
         server_seed: str, client_seed: str, start_nonce: int
     ) -> Dict[str, List[str]]:
-        deck, next_nonce = outcome_shuffle_deck(server_seed, client_seed, start_nonce)
-        return {"shuffled_deck": deck, "next_nonce": next_nonce}
+        """Legacy alias for ``verify_cards``."""
+        return ProvenFairness.verify_cards(server_seed, client_seed, start_nonce)
 
     @staticmethod
     def verify_double(server_seed: str, client_seed: str, nonce: int) -> bool:
