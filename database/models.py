@@ -397,11 +397,22 @@ class Item(Base):
     serial_number = Column(String, unique=True, nullable=False)
     description = Column(String, nullable=True)
     quantity = Column(Integer, default=1, nullable=False)
-    item_type = Column(Enum(ItemType), nullable=False, default=ItemType.COLLECTIBLE)
-    category = Column(
-        Enum(ItemCategory), nullable=True, default=ItemCategory.COLLECTIBLE
+    # native_enum=False stores enum values as VARCHAR instead of PostgreSQL
+    # native enums. The deployed DB has these columns as TEXT/VARCHAR, so
+    # SQLAlchemy must bind values as strings to avoid "text = itemtype" errors.
+    item_type = Column(
+        Enum(ItemType, native_enum=False), nullable=False, default=ItemType.COLLECTIBLE
     )
-    rarity = Column(Enum(ItemRarity), nullable=True, default=ItemRarity.COMMON)
+    category = Column(
+        Enum(ItemCategory, native_enum=False),
+        nullable=True,
+        default=ItemCategory.COLLECTIBLE,
+    )
+    rarity = Column(
+        Enum(ItemRarity, native_enum=False),
+        nullable=True,
+        default=ItemRarity.COMMON,
+    )
     effect = Column(String, nullable=True)
     effect_value = Column(Integer, nullable=True)
     effect_duration = Column(Integer, nullable=True)
@@ -426,11 +437,22 @@ class ShopItem(Base):
     price = Column(Integer, nullable=False)
     quantity = Column(Integer, default=1, nullable=False)
     unlimited = Column(Boolean, default=False)
-    item_type = Column(Enum(ItemType), nullable=False, default=ItemType.COLLECTIBLE)
-    category = Column(
-        Enum(ItemCategory), nullable=True, default=ItemCategory.COLLECTIBLE
+    # native_enum=False stores enum values as VARCHAR instead of PostgreSQL
+    # native enums. The deployed DB has these columns as TEXT/VARCHAR, so
+    # SQLAlchemy must bind values as strings to avoid "text = itemtype" errors.
+    item_type = Column(
+        Enum(ItemType, native_enum=False), nullable=False, default=ItemType.COLLECTIBLE
     )
-    rarity = Column(Enum(ItemRarity), nullable=True, default=ItemRarity.COMMON)
+    category = Column(
+        Enum(ItemCategory, native_enum=False),
+        nullable=True,
+        default=ItemCategory.COLLECTIBLE,
+    )
+    rarity = Column(
+        Enum(ItemRarity, native_enum=False),
+        nullable=True,
+        default=ItemRarity.COMMON,
+    )
     effect = Column(String, nullable=True)
     effect_value = Column(Integer, nullable=True)
     effect_duration = Column(Integer, nullable=True)
