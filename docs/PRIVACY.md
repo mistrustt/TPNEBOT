@@ -119,16 +119,6 @@ Aggregated statistics that cannot reasonably identify you may be retained for bo
 
 ---
 
-## 5. Data Security
-
-- Discord user IDs are hashed before storage in operational tables.
-- Location data is encrypted at rest.
-- Secrets (bot token, database password, API keys, encryption keys) are stored in [Infisical](https://infisical.com/) and fetched at runtime; they are not committed to the repository.
-- The bot does not expose any host network ports.
-- We use commercially reasonable efforts to protect data, including access controls and encrypted storage.
-
----
-
 ## 6. Children's Privacy
 
 TPNEBOT is not directed at users under the age of digital consent. Discord requires users to be at least 13 years old (or the minimum age in their country). We do not knowingly collect data from users under 13.
