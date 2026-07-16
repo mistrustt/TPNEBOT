@@ -449,6 +449,22 @@ class General(commands.Cog, name="General"):
                 await message.channel.send(embed=embed)
 
     @commands.hybrid_command(
+        name="terms", description="View the terms of service."
+    )
+    async def terms_of_service(self, ctx: commands.Context) -> None:
+        url = "https://share.mistrust.dev/view/terms.md"  # Replace with actual terms URL
+        markdown = f"[Click here to view the terms]({url})"
+        await ctx.reply(markdown, mention_author=False)
+
+    @commands.hybrid_command(
+        name="privacy", description="View the privacy policy."
+    )
+    async def privacy_policy(self, ctx: commands.Context) -> None:
+        url = "https://share.mistrust.dev/view/privacy.md"  # Replace with actual privacy policy URL
+        markdown = f"[Click here to view the privacy policy]({url})"
+        await ctx.reply(markdown, mention_author=False)
+
+    @commands.hybrid_command(
         name="help", description="Displays a list of available commands."
     )
     @unified_cooldown(5)

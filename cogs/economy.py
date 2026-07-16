@@ -3449,6 +3449,57 @@ class Economy(commands.Cog):
                 reply=True,
             )
             return
+
+    @commands.command(name="halloween")
+    async def halloween(self, ctx: commands.Context):
+        """Open your Halloween gift!"""
+        # 1. Date Check: Only allow on October 31st
+        now = datetime.now(timezone.utc)
+        if now.month != 10 or now.day != 31:
+            return await Embeds.warning(ctx, "🎃 **It's not Halloween yet!** This command only works on October 31st.", delete_after=10, reply=True)
+
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        gift_amount = Decimal(str(user_id)) * Decimal("2")
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=gift_amount,
+                description="Halloween Gift",
+            )
+        except ValueError as e:
+            await Embeds.error(
+                ctx,
+                f"🚫 Transaction failed: {e}",
+                delete_after=5,
+                reply=True,
+            )
+            return
+
+    @commands.command(name='independence', aliases=['fourth', '4th'])
+    async def fourth(self, ctx: commands.Context):
+        """Open your Independence Day gift!"""
+        # 1. Date Check: Only allow on July 4th
+        now = datetime.now(timezone.utc)
+        if now.month != 7 or now.day != 4:
+            return await Embeds.warning(ctx, "🎆 **It's not Independence Day yet!** This command only works on July 4th.", delete_after=10, reply=True)
+
+        user_id = ctx.author.id
+        wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
+        gift_amount = Decimal(str(user_id)) * Decimal("2")
+        try:
+            await self.bot.database.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=gift_amount,
+                description="Independence Day Gift",
+            )
+        except ValueError as e:
+            await Embeds.error(
+                ctx,
+                f"🚫 Transaction failed: {e}",
+                delete_after=5,
+                reply=True,
+            )
             return
 
     @commands.group(name="crypto", aliases=["coin","coins"], invoke_without_command=True)
