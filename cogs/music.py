@@ -2338,7 +2338,7 @@ class Music(commands.Cog, name="Music"):
                 song = songs[0]
 
                 if song['groupbuy_info']['price'] == '':
-                    return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **groupbuy** information')
+                    return await Embeds.send_warning_embed(ctx, ctx.author, f'**{song['name']}** has no **groupbuy** information')
 
                 layout_view = discord.ui.LayoutView()
                 layout_view.add_item(GroupbuyContainer(self, song))
@@ -2852,7 +2852,7 @@ class Music(commands.Cog, name="Music"):
                 await ctx.defer()
             layout_view = await self.create_snippet_view(song_list[0])
             if layout_view is None:
-                return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
+                return await Embeds.send_warning_embed(ctx, ctx.author, f'**{song_list[0]['name']}** has no **snippets** available')
 
             await ctx.reply(view=layout_view)
 
@@ -2889,7 +2889,7 @@ class Music(commands.Cog, name="Music"):
                     layout_view = await self.cog.create_snippet_view(song)
 
                     if layout_view is None:
-                        return await Embeds.send_warning_embed(ctx.channel, ctx.author, f'**{song['name']}** has no **snippets** available')
+                        return await Embeds.send_warning_embed(ctx, ctx.author, f'**{song['name']}** has no **snippets** available')
 
                     if self.author != itn.user:
                         return await itn.response.send_message(
@@ -3295,8 +3295,8 @@ class Music(commands.Cog, name="Music"):
         old_names_length = len(self.valid_names)
         old_prods_length = len(self.producer_counts)
         await self.sync_blacktea()
-        await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
-        await Embeds.send_info_embed(ctx.channel, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
+        await Embeds.send_info_embed(ctx, ctx.author, f"Synced valid track names. Total songs: **{len(songs)}**. Total valid names: **{old_names_length}** -> **{len(self.valid_names)}**")
+        await Embeds.send_info_embed(ctx, ctx.author, f"Synced producer counts. Total producers: **{old_prods_length}** -> **{len(self.producer_counts)}**")
 
         if ctx.message is not None:
             await ctx.message.add_reaction('✅')
@@ -3307,7 +3307,7 @@ class Music(commands.Cog, name="Music"):
     @unified_cooldown(60)
     async def blacktea(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_blacktea:
-            await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Blacktea!")
+            await Embeds.send_error_embed(ctx, ctx.author, "You already have an ongoing game of Blacktea!")
             return
 
         if not self.is_blacktea_synced:
@@ -3365,7 +3365,7 @@ class Music(commands.Cog, name="Music"):
 
         if len(players) <= 1:
             self.ongoing_blacktea.remove(ctx.author.id)
-            await Embeds.send_warning_embed(ctx.channel, ctx.author, "Not enough players joined the game. At least 2 players are required.")
+            await Embeds.send_warning_embed(ctx, ctx.author, "Not enough players joined the game. At least 2 players are required.")
             return
 
         await self.bot.database.set_cooldown(
@@ -3392,7 +3392,7 @@ class Music(commands.Cog, name="Music"):
                         break
 
                 if song is None:
-                    await Embeds.send_error_embed(ctx.channel, ctx.author, "Ran out of unique songs for the game. Ending early.")
+                    await Embeds.send_error_embed(ctx, ctx.author, "Ran out of unique songs for the game. Ending early.")
                     self.ongoing_blacktea.remove(ctx.author.id)
                     alive_players = []
                     break
@@ -3913,21 +3913,21 @@ class Music(commands.Cog, name="Music"):
     @commands.command(name="higherlower", description="Play a game of Higher or Lower with Juice WRLD song streams.")
     async def higherlower(self, ctx: commands.Context):
         if ctx.author.id in self.ongoing_higherlower:
-            await Embeds.send_error_embed(ctx.channel, ctx.author, "You already have an ongoing game of Higher or Lower!")
+            await Embeds.send_error_embed(ctx, ctx.author, "You already have an ongoing game of Higher or Lower!")
             return
 
         response1_data = await self.fetch_random_playable_song()
         if response1_data is None:
-            await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+            await Embeds.send_error_embed(ctx, ctx.author, "Failed to fetch song data. Please try again later.")
             return
 
         song1_genius_data = await self.get_genius_data(response1_data.get("song", {}).get("name", ""))
         if not song1_genius_data:
-            await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+            await Embeds.send_error_embed(ctx, ctx.author, "Failed to fetch song data. Please try again later.")
             return
         song1_id = song1_genius_data.get("id", None)
         if not song1_id:
-            await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract song ID. Please try again later.")
+            await Embeds.send_error_embed(ctx, ctx.author, "Failed to extract song ID. Please try again later.")
             return
 
         song2_id = song1_id
@@ -3935,19 +3935,19 @@ class Music(commands.Cog, name="Music"):
         while song2_id == song1_id:
             response2_data = await self.fetch_random_playable_song()
             if response2_data is None:
-                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
+                await Embeds.send_error_embed(ctx, ctx.author, "Failed to fetch second song data. Please try again later.")
                 return
 
             song2_genius_data = await self.get_genius_data(response2_data.get("song", {}).get("name", ""))
             if not song2_genius_data:
-                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to extract second song ID. Please try again later.")
+                await Embeds.send_error_embed(ctx, ctx.author, "Failed to extract second song ID. Please try again later.")
                 return
             song2_id = song2_genius_data.get("id", None)
             if not song2_id:
-                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch second song data. Please try again later.")
+                await Embeds.send_error_embed(ctx, ctx.author, "Failed to fetch second song data. Please try again later.")
                 return
             if not song2_id and retry > 5:
-                await Embeds.send_error_embed(ctx.channel, ctx.author, "Failed to fetch song data. Please try again later.")
+                await Embeds.send_error_embed(ctx, ctx.author, "Failed to fetch song data. Please try again later.")
                 return
             retry += 1
 
@@ -3975,11 +3975,11 @@ class Music(commands.Cog, name="Music"):
 
             reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=30)
             if (reaction.emoji == "⬆️" and song1_pageviews > song2_pageviews) or (reaction.emoji == "⬇️" and song1_pageviews < song2_pageviews):
-                await Embeds.send_success_embed(ctx.channel, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
+                await Embeds.send_success_embed(ctx, ctx.author, f"Correct! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
             else:
-                await Embeds.send_error_embed(ctx.channel, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
+                await Embeds.send_error_embed(ctx, ctx.author, f"Wrong! **{song1_title}** has {song1_pageviews:,} views while **{song2_title}** has {song2_pageviews:,} views.")
         except asyncio.TimeoutError:
-            await Embeds.send_warning_embed(ctx.channel, ctx.author, "You took too long to react! Please try again.")
+            await Embeds.send_warning_embed(ctx, ctx.author, "You took too long to react! Please try again.")
             self.ongoing_higherlower.remove(ctx.author.id)
             return
 

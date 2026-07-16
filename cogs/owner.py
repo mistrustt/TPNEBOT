@@ -3775,7 +3775,7 @@ class Owner(commands.Cog, name="Owner"):
 
         if not command_exists:
             await Embeds.send_error_embed(
-                ctx.channel, ctx.author, f"The command `{command_name}` does not exist."
+                ctx, ctx.author, f"The command `{command_name}` does not exist."
             )
             return
 
@@ -3794,7 +3794,7 @@ class Owner(commands.Cog, name="Owner"):
                 command_name, enabled=True, channel_id=None
             )
             await Embeds.send_success_embed(
-                ctx.channel,
+                ctx,
                 ctx.author,
                 f"The `{command_name}` command has been enabled globally.",
             )
@@ -3809,7 +3809,7 @@ class Owner(commands.Cog, name="Owner"):
 
         if not command_exists:
             await Embeds.send_error_embed(
-                ctx.channel, ctx.author, f"The command `{command_name}` does not exist."
+                ctx, ctx.author, f"The command `{command_name}` does not exist."
             )
             return
 
@@ -3828,7 +3828,7 @@ class Owner(commands.Cog, name="Owner"):
                 command_name, enabled=False, channel_id=None
             )
             await Embeds.send_success_embed(
-                ctx.channel,
+                ctx,
                 ctx.author,
                 f"The `{command_name}` command has been disabled globally.",
             )
@@ -3843,7 +3843,7 @@ class Owner(commands.Cog, name="Owner"):
 
         if not disabled_commands:
             await Embeds.send_info_embed(
-                ctx.channel,
+                ctx,
                 ctx.author,
                 "No disabled commands found."
             )

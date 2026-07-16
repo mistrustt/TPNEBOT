@@ -59,7 +59,12 @@ class Embeds:
         mention_author=False,
         **embed_kwargs,
     ):
-        """Send an embed through a Context, Interaction, or TextChannel."""
+        """Send an embed through a Context, Interaction, or TextChannel.
+
+        If embed sending fails because the bot is missing ``Embed Links`` or
+        ``Send Messages``, fall back to a simple text message so the user gets
+        feedback instead of a raw 403 in the logs.
+        """
         embed = Embeds.embed(
             description=description,
             title=title,
@@ -73,9 +78,15 @@ class Embeds:
             kwargs = {}
             if ephemeral:
                 kwargs["ephemeral"] = True
-            if interaction.response.is_done():
-                return await interaction.followup.send(embed=embed, **kwargs)
-            return await interaction.response.send_message(embed=embed, **kwargs)
+            try:
+                if interaction.response.is_done():
+                    return await interaction.followup.send(embed=embed, **kwargs)
+                return await interaction.response.send_message(embed=embed, **kwargs)
+            except discord.Forbidden:
+                text = f"I don't have permission to send messages or embeds here. Please check my role/channel permissions (needs **Send Messages** and **Embed Links**)."
+                if interaction.response.is_done():
+                    return await interaction.followup.send(text, **kwargs)
+                return await interaction.response.send_message(text, **kwargs)
 
         # Context (commands.Context / hybrid context)
         if isinstance(ctx_or_channel, commands.Context):
@@ -87,13 +98,37 @@ class Embeds:
                         delete_after=delete_after,
                         mention_author=mention_author,
                     )
+                except discord.Forbidden:
+                    return await Embeds._send_permission_fallback(ctx, description)
                 except discord.HTTPException:
                     # Original message likely deleted while we were busy.
                     pass
-            return await ctx.send(embed=embed, delete_after=delete_after)
+            try:
+                return await ctx.send(embed=embed, delete_after=delete_after)
+            except discord.Forbidden:
+                return await Embeds._send_permission_fallback(ctx, description)
 
         # Fallback: treat as a sendable channel
-        return await ctx_or_channel.send(embed=embed, delete_after=delete_after)
+        try:
+            return await ctx_or_channel.send(embed=embed, delete_after=delete_after)
+        except discord.Forbidden:
+            return await Embeds._send_permission_fallback(ctx_or_channel, description)
+
+    @staticmethod
+    async def _send_permission_fallback(ctx_or_channel, description: str):
+        """Send a simple text error when embeds are blocked by permissions."""
+        # Strip markdown and mentions down to a clean sentence.
+        text = (
+            "⚠️ I don't have permission to send embeds in this channel. "
+            "Please check my role/channel permissions: I need **Send Messages** and **Embed Links**."
+        )
+        try:
+            if isinstance(ctx_or_channel, commands.Context):
+                return await ctx_or_channel.send(text, delete_after=10)
+            return await ctx_or_channel.send(text, delete_after=10)
+        except discord.Forbidden:
+            # We cannot send anything at all in this channel; give up silently.
+            return None
 
     @staticmethod
     async def safe_reply(
@@ -352,21 +387,36 @@ class Embeds:
     # ------------------------------------------------------------------
     @staticmethod
     async def send_embed(
-        channel: discord.TextChannel,
+        ctx_or_channel,
         description,
         title=None,
         delete_after=7,
         color=discord.Color.blue(),
     ):
+        if isinstance(ctx_or_channel, (commands.Context, discord.Interaction)):
+            return await Embeds._send(
+                ctx_or_channel,
+                description,
+                title=title,
+                delete_after=delete_after,
+                color=color,
+            )
         embed = discord.Embed(title=title, description=description, color=color)
-        return await channel.send(embed=embed, delete_after=delete_after)
+        return await ctx_or_channel.send(embed=embed, delete_after=delete_after)
 
     @staticmethod
     async def send_warning_embed(
-        channel: discord.TextChannel, user: discord.Member, description, delete_after=7
+        ctx_or_channel, user: discord.Member, description, delete_after=7
     ):
+        if isinstance(ctx_or_channel, (commands.Context, discord.Interaction)):
+            return await Embeds.warning(
+                ctx_or_channel,
+                f"⚠️ {user.mention}: {description}",
+                delete_after=delete_after,
+                reply=True,
+            )
         return await Embeds.send_embed(
-            channel,
+            ctx_or_channel,
             f"⚠️ {user.mention}: {description}",
             title=None,
             delete_after=delete_after,
@@ -375,10 +425,17 @@ class Embeds:
 
     @staticmethod
     async def send_error_embed(
-        channel: discord.TextChannel, user: discord.Member, description, delete_after=7
+        ctx_or_channel, user: discord.Member, description, delete_after=7
     ):
+        if isinstance(ctx_or_channel, (commands.Context, discord.Interaction)):
+            return await Embeds.error(
+                ctx_or_channel,
+                f"❌ {user.mention}: {description}",
+                delete_after=delete_after,
+                reply=True,
+            )
         return await Embeds.send_embed(
-            channel,
+            ctx_or_channel,
             f"❌ {user.mention}: {description}",
             title=None,
             delete_after=delete_after,
@@ -387,10 +444,17 @@ class Embeds:
 
     @staticmethod
     async def send_success_embed(
-        channel: discord.TextChannel, user: discord.Member, description, delete_after=7
+        ctx_or_channel, user: discord.Member, description, delete_after=7
     ):
+        if isinstance(ctx_or_channel, (commands.Context, discord.Interaction)):
+            return await Embeds.success(
+                ctx_or_channel,
+                f"✅ {user.mention}: {description}",
+                delete_after=delete_after,
+                reply=True,
+            )
         return await Embeds.send_embed(
-            channel,
+            ctx_or_channel,
             f"✅ {user.mention}: {description}",
             title=None,
             delete_after=delete_after,
@@ -399,14 +463,23 @@ class Embeds:
 
     @staticmethod
     async def send_info_embed(
-        channel: discord.TextChannel,
+        ctx_or_channel,
         user: discord.Member,
         description,
         delete_after=7,
         title=None,
     ):
+        if isinstance(ctx_or_channel, (commands.Context, discord.Interaction)):
+            return await Embeds._send(
+                ctx_or_channel,
+                f"ℹ️ {user.mention}: {description}",
+                title=title,
+                delete_after=delete_after,
+                color=discord.Color.blue(),
+                reply=True,
+            )
         return await Embeds.send_embed(
-            channel,
+            ctx_or_channel,
             f"ℹ️ {user.mention}: {description}",
             title=title,
             delete_after=delete_after,

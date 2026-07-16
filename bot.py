@@ -210,10 +210,25 @@ class DiscordBot(commands.Bot):
         self.db_name = os.getenv("DB_NAME", "postgres")
         self.db_host = os.getenv("DB_HOST", "localhost")
         self.db_port = os.getenv("DB_PORT", "5432")
+        # Docker Compose uses the service name 'db'. If .env still has the bare-metal
+        # default 'localhost' but the compose network can resolve 'db', prefer 'db' so
+        # production deployments don't crash with a stale .env default.
+        if self.db_host == "localhost":
+            try:
+                import socket
+
+                socket.getaddrinfo("db", int(self.db_port))
+                self.logger.info(
+                    "DB_HOST was 'localhost' but 'db' resolves on this network; using 'db'"
+                )
+                self.db_host = "db"
+            except (socket.gaierror, ValueError):
+                pass
         self.db_pw = urllib.parse.quote_plus(os.getenv("DB_PW", ""))
-        self.database = DatabaseManager(
-            f"postgresql+asyncpg://{self.db_user}:{self.db_pw}@{self.db_host}:{self.db_port}/{self.db_name}"
-        )
+        db_url = f"postgresql+asyncpg://{self.db_user}:{self.db_pw}@{self.db_host}:{self.db_port}/{self.db_name}"
+        masked_url = db_url.replace(self.db_pw, "***" if self.db_pw else "")
+        self.logger.info(f"Connecting to database at host={self.db_host} ({masked_url})")
+        self.database = DatabaseManager(db_url)
         self.cooldowns = UnifiedCooldownManager(self)
         self._context_start_times: dict[int, float] = {}
         self._interaction_start_times: dict[int, float] = {}
@@ -388,6 +403,11 @@ class DiscordBot(commands.Bot):
                 self.config = await self._config_task
         except Exception as e:
             self.logger.error(f"Failed to load bot config: {e}")
+            if isinstance(e, OSError) and e.errno == -2:
+                self.logger.error(
+                    f"Database host '{self.db_host}' could not be resolved. "
+                    "If running in Docker Compose, set DB_HOST=db (or remove DB_HOST from .env)."
+                )
             self.config = None
 
         try:
@@ -458,6 +478,11 @@ class DiscordBot(commands.Bot):
 
         except Exception as e:
             self.logger.error(f"An error occurred during setup: {e}")
+            if isinstance(e, OSError) and e.errno == -2:
+                self.logger.error(
+                    f"Database host '{self.db_host}' could not be resolved. "
+                    "If running in Docker Compose, set DB_HOST=db (or remove DB_HOST from .env)."
+                )
             raise
 
     def _guardrail_status_done(self, interaction_id: int) -> bool | None:
