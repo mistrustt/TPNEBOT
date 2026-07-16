@@ -397,8 +397,8 @@ class Music(commands.Cog, name="Music"):
             title="Last.fm — Available Commands",
             description=description,
             color=discord.Color.blurple(),
-            footer=f"Use {prefix}lastfm <subcommand> for details.",
         )
+        embed.set_footer(text=f"Use {prefix}lastfm <subcommand> for details.")
         await ctx.reply(embed=embed, mention_author=False)
 
     @lastfm.command(name="set", description="Set your Last.fm username.")
@@ -632,8 +632,8 @@ class Music(commands.Cog, name="Music"):
             title=f"{lastfm_username}'s Top 10 Tracks",
             description=description,
             color=embed_color,
-            footer="Data from Last.fm",
         )
+        embed.set_footer(text="Data from Last.fm")
         await ctx.reply(embed=embed)
 
     @lastfm.command(name="topartists", aliases=["tar"], description="Display your top artists on Last.fm.")
@@ -693,8 +693,8 @@ class Music(commands.Cog, name="Music"):
                         title=f"{lastfm_username}'s Top 10 Artists",
                         description=description,
                         color=embed_color,
-                        footer="Data from Last.fm",
                     )
+                    embed.set_footer(text="Data from Last.fm")
                     await ctx.reply(embed=embed)
                     
             except (aiohttp.ClientError, KeyError, TypeError, ValueError) as e:
