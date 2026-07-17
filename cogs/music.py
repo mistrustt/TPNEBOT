@@ -4281,7 +4281,7 @@ class CoverSearch(commands.Cog, name="Cover", description="Search for song cover
         await asyncio.gather(*[warm(u) for u in urls], return_exceptions=True)
 
     @commands.command(name="cover", description="Search for available covers of a song")
-    async def cover(self, ctx: commands.Context, song_name: Optional[str] = None):
+    async def cover(self, ctx: commands.Context, *, song_name: Optional[str] = None):
         """Search for song covers in the Juice WRLD API database, grouped by artist."""
         if not song_name:
             await Embeds.error(

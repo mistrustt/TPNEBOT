@@ -268,6 +268,9 @@ class AirDropView(discord.ui.View):
         await self.message.edit(embed=embed, view=self)
 
 
+BETA_FOOTER = "🧪 Inventory/Shop features are in beta. Please report any issues."
+
+
 class ShopView(View):
     def __init__(self, bot, shop_items, user_id, currency_name):
         """
@@ -314,7 +317,7 @@ class ShopView(View):
             )
             embed.add_field(name="Quantity", value=qty_text, inline=True)
             embed.set_footer(
-                text=f"Item {self.current_index + 1} of {len(self.shop_items)} • Use the navigation buttons below."
+                text=f"Item {self.current_index + 1} of {len(self.shop_items)} • {BETA_FOOTER}"
             )
         if interaction.response.is_done():
             await interaction.followup.edit_message(
@@ -392,6 +395,7 @@ class ShopView(View):
             ),
             color=discord.Color.gold(),
         )
+        confirm_embed.set_footer(text=BETA_FOOTER)
         confirm_view = ConfirmPurchaseView(
             self.bot, self.user_id, item, self.currency_name, self
         )
@@ -481,7 +485,7 @@ class ConfirmPurchaseView(View):
                 self.parent_view.current_index = 0
 
         await interaction.response.send_message(
-            f"✅ You successfully purchased **{self.item.name}** for {self.currency_name} **{await economy.formatter(item_price)}**!",
+            f"✅ You successfully purchased **{self.item.name}** for {self.currency_name} **{await economy.formatter(item_price)}**!\n\n{BETA_FOOTER}",
             ephemeral=True,
         )
 
@@ -578,7 +582,7 @@ class ItemPaginator(View):
                     inline=False,
                 )
 
-        embed.set_footer(text=f"Page {self.current_page + 1} of {self.max_page + 1}")
+        embed.set_footer(text=f"Page {self.current_page + 1} of {self.max_page + 1} • {BETA_FOOTER}")
         return embed
 
     async def send_page(self, interaction=None):
@@ -689,7 +693,7 @@ class UseItemPaginator(View):
                 name=f"{name} (x{quantity})", value=description, inline=False
             )
 
-        embed.set_footer(text=f"Page {self.current_page+1} of {self.max_page+1}")
+        embed.set_footer(text=f"Page {self.current_page+1} of {self.max_page+1} • {BETA_FOOTER}")
         return embed
 
     async def send_page(self, interaction=None):
@@ -825,18 +829,20 @@ class TradeRequestView(discord.ui.View):
                 color=discord.Color.green(),
             )
             embed.add_field(name="Item", value=f"{self.item_name} x{self.quantity}", inline=True)
+            embed.set_footer(text=BETA_FOOTER)
 
             await interaction.response.edit_message(embed=embed, view=None)
 
             # Try to DM the sender
             if from_user:
                 try:
-                    dm_embed =await Embeds.custom(
+                    dm_embed = await Embeds.custom(
                         from_user,
                         f"{to_name} accepted your trade request for {self.item_name} x{self.quantity}",
                         title="Trade Accepted",
                         color=discord.Color.green(),
                         delete_after=None,
+                        footer=BETA_FOOTER,
                     )
                     await from_user.send(embed=dm_embed)
                 except discord.Forbidden:
@@ -875,6 +881,7 @@ class TradeRequestView(discord.ui.View):
                 description=f"{to_name} declined the trade request.",
                 color=discord.Color.red(),
             )
+            embed.set_footer(text=BETA_FOOTER)
             await interaction.response.edit_message(embed=embed, view=None)
 
             # Try to DM the sender
@@ -886,6 +893,7 @@ class TradeRequestView(discord.ui.View):
                         title="Trade Declined",
                         color=discord.Color.red(),
                         delete_after=None,
+                        footer=BETA_FOOTER,
                     )
                     await from_user.send(embed=dm_embed)
                 except discord.Forbidden:
@@ -3094,16 +3102,14 @@ class Economy(commands.Cog):
         )
 
         if outcome_roll < success_threshold:
-            drain_amount = (target_balance * robbery_debuff).quantize(
-                Decimal("1"), rounding=ROUND_HALF_UP
-            )
             try:
-                await self.bot.database.process_p2p_transaction(
-                    sender_wallet_id=target_wallet,
-                    receiver_wallet_id=robber_wallet,
-                    amount=drain_amount,
+                _, drain_amount = await self.bot.database.drain_wallet(
+                    target_wallet_id=target_wallet,
+                    robber_wallet_id=robber_wallet,
+                    target_user_id=target.id,
+                    robber_user_id=ctx.author.id,
                     description=f"Drained by {ctx.author.name}",
-                    guild_id=ctx.guild.id if ctx.guild else None,
+                    robbery_debuff=robbery_debuff,
                     fee_from_amount=True,
                 )
 
@@ -4201,6 +4207,7 @@ class Economy(commands.Cog):
                 interaction,
                 "There are no items in the shop currently. Check back later!",
                 ephemeral=True,
+                footer=BETA_FOOTER,
             )
         else:
             view = ShopView(
@@ -4225,7 +4232,7 @@ class Economy(commands.Cog):
                 else f"**{item.quantity}** left in stock."
             )
             embed.add_field(name="Quantity", value=qty_text, inline=True)
-            embed.set_footer(text=f"Item 1 of {len(shop_items)}")
+            embed.set_footer(text=f"Item 1 of {len(shop_items)} • {BETA_FOOTER}")
 
             await interaction.response.send_message(
                 "Welcome to the shop!", embed=embed, view=view, ephemeral=True
@@ -4244,6 +4251,7 @@ class Economy(commands.Cog):
                 "Your inventory is empty.",
                 title="Inventory",
                 ephemeral=True,
+                footer=BETA_FOOTER,
             )
             return
 
@@ -4303,6 +4311,7 @@ class Economy(commands.Cog):
                     description=result["message"],
                     color=discord.Color.red(),
                 )
+                embed.set_footer(text=BETA_FOOTER)
                 await interaction.response.send_message(embed=embed, ephemeral=True)
             except Exception as e:
                 await Embeds.error(
@@ -4342,6 +4351,7 @@ class Economy(commands.Cog):
                 description=message,
                 color=discord.Color.green(),
             )
+            embed.set_footer(text=BETA_FOOTER)
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except Exception as e:
             await Embeds.error(
@@ -4419,7 +4429,7 @@ class Economy(commands.Cog):
                 color=discord.Color.blue(),
             )
             embed.add_field(name="Trade ID", value=str(trade.id), inline=True)
-            embed.set_footer(text="Waiting for recipient to respond...")
+            embed.set_footer(text=f"Waiting for recipient to respond... • {BETA_FOOTER}")
 
             # Create trade request view for the recipient
             view = TradeRequestView(
@@ -4440,7 +4450,7 @@ class Economy(commands.Cog):
             recipient_embed.add_field(name="Item", value=f"{item.name} x{quantity}", inline=True)
             if item.description:
                 recipient_embed.add_field(name="Description", value=item.description, inline=False)
-            recipient_embed.set_footer(text="You have 2 minutes to respond")
+            recipient_embed.set_footer(text=f"You have 2 minutes to respond • {BETA_FOOTER}")
 
             try:
                 await member.send(embed=recipient_embed, view=view)
@@ -4467,6 +4477,7 @@ class Economy(commands.Cog):
                 "You have no active effects.",
                 title="Active Effects",
                 ephemeral=True,
+                footer=BETA_FOOTER,
             )
             return
 
@@ -4503,6 +4514,7 @@ class Economy(commands.Cog):
                 inline=False,
             )
 
+        embed.set_footer(text=BETA_FOOTER)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="trades", description="View your pending trade requests")
@@ -4517,6 +4529,7 @@ class Economy(commands.Cog):
                 "You have no pending trade requests.",
                 title="Pending Trades",
                 ephemeral=True,
+                footer=BETA_FOOTER,
             )
             return
 
@@ -4551,6 +4564,7 @@ class Economy(commands.Cog):
                 outgoing_str += f"\n... and {len(outgoing) - 5} more"
             embed.add_field(name="📤 Outgoing", value=outgoing_str, inline=False)
 
+        embed.set_footer(text=BETA_FOOTER)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ==================== VIP Commands ====================

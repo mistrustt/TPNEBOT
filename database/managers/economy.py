@@ -560,6 +560,125 @@ class EconomyMixin(BaseManager):
 
         return txid_main
 
+    async def drain_wallet(
+        self,
+        target_wallet_id: str,
+        robber_wallet_id: str,
+        target_user_id: int,
+        robber_user_id: int,
+        description: str,
+        robbery_debuff: Decimal,
+        fee_from_amount: bool = True,
+    ) -> tuple[str, Decimal]:
+        """
+        Atomically drain the target's wallet into the robber's wallet.
+
+        The target's balance is re-read inside the transaction so the drain
+        succeeds even if the balance changed between the command's initial read
+        and the actual transfer. Returns (txid, actual_drained_amount).
+        """
+
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
+        base_fee_rate = await self.get_enhanced_fee_rate("standard")
+        adjusted_fee: Decimal | None = None
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                target = await session.get(Wallet, target_wallet_id)
+                robber = await session.get(Wallet, robber_wallet_id)
+                if not target or not robber:
+                    raise ValueError("Invalid target or robber wallet.")
+                if target.wallet_frozen:
+                    raise ValueError("Target's wallet is frozen.")
+                if robber.wallet_frozen:
+                    raise ValueError("Robber's wallet is frozen.")
+
+                # Re-read balance inside the transaction to avoid race conditions.
+                fresh_target_balance = AmountUtils.round_currency(
+                    Decimal(str(target.balance))
+                )
+                if fresh_target_balance <= 0:
+                    raise ValueError("Target has no funds to drain.")
+
+                # Calculate fee based on the actual current balance.
+                raw_target_id = await self.resolve_user_hash(target.user_id)
+                drain_amount = AmountUtils.round_currency(
+                    fresh_target_balance * robbery_debuff
+                )
+                base_fee = AmountUtils.round_currency(drain_amount * base_fee_rate)
+                adjusted_fee = await self.calculate_wealth_adjusted_fee(
+                    raw_target_id, base_fee
+                )
+
+                if fee_from_amount:
+                    receiver_gets = drain_amount - adjusted_fee
+                    if receiver_gets <= 0:
+                        raise ValueError("Drain amount too small to cover fees.")
+                    total_deduction = drain_amount
+                else:
+                    receiver_gets = drain_amount
+                    total_deduction = drain_amount + adjusted_fee
+
+                if fresh_target_balance < total_deduction:
+                    raise ValueError("Target balance is insufficient to cover drain.")
+
+                # Atomic balance changes
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    target_wallet_id,
+                    -total_deduction,
+                    frozen_field="wallet_frozen",
+                )
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    robber_wallet_id,
+                    +receiver_gets,
+                )
+                await self._atomic_balance_change(
+                    session,
+                    "supply",
+                    "id",
+                    1,
+                    +adjusted_fee,
+                    balance_col="treasury",
+                )
+
+                txid_main = str(uuid.uuid4())
+                txid_fee = str(uuid.uuid4())
+                session.add_all(
+                    [
+                        Transaction(
+                            id=txid_main,
+                            from_user_id=target.user_id,
+                            to_user_id=robber.user_id,
+                            amount=receiver_gets,
+                            description=description,
+                            timestamp=discord.utils.utcnow(),
+                        ),
+                        Transaction(
+                            id=txid_fee,
+                            from_user_id=target.user_id,
+                            to_user_id=_treasury_hash(),
+                            amount=adjusted_fee,
+                            description=f"Drain fee (base: {base_fee_rate:.2%}, wealth-adjusted)",
+                            timestamp=discord.utils.utcnow(),
+                        ),
+                    ]
+                )
+
+            await self.update_supply()
+
+        return txid_main, drain_amount
+
     async def process_treasury_transaction(
         self,
         wallet_id: str,
