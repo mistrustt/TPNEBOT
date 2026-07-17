@@ -1130,6 +1130,12 @@ class InventoryMixin(BaseManager):
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    async def has_active_effect(self, user_id: int, effect_type: str) -> bool:
+        """Return True if the user already has an active non-expired effect of this type."""
+
+        effects = await self.get_active_effects_by_type(user_id, effect_type)
+        return bool(effects)
+
     async def cleanup_expired_effects(self) -> int:
         """Remove all expired effects. Returns count of removed effects."""
         async with self.async_sessionmaker() as session:
@@ -1407,6 +1413,13 @@ class InventoryMixin(BaseManager):
                     "anti_rob",
                     "anti_bank_rob",
                 ):
+                    # Prevent stacking the same effect type on yourself
+                    if await self.has_active_effect(raw_user_id, effect):
+                        raise ValueError(
+                            f"You already have an active `{effect}` effect. "
+                            "Wait for it to expire before using this item again."
+                        )
+
                     # Create timed effect
                     if effect_duration:
                         await self.create_active_effect(
@@ -1831,6 +1844,13 @@ class InventoryMixin(BaseManager):
                 }
                 if effect not in supported_target_effects:
                     raise ValueError(f"**{item.name}** cannot be used on another user.")
+
+                # Prevent stacking the same debuff on the target
+                if await self.has_active_effect(raw_target_id, effect):
+                    raise ValueError(
+                        f"<@{raw_target_id}> already has an active `{effect}` effect. "
+                        "Wait for it to expire before using this item on them again."
+                    )
 
                 # Apply effect to target
                 await self.create_active_effect(
