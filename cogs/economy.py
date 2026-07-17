@@ -3384,7 +3384,7 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         
-        gift_amount = Decimal(str(user_id)) * Decimal("2") 
+        gift_amount = Decimal(str(user_id)) / Decimal("4")
 
         try:
             await self.bot.database.process_treasury_transaction(
@@ -3434,7 +3434,7 @@ class Economy(commands.Cog):
 
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        gift_amount = Decimal(str(user_id)) * Decimal("3")
+        gift_amount = Decimal(str(user_id)) / Decimal("3")
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id,
@@ -3460,7 +3460,7 @@ class Economy(commands.Cog):
 
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        gift_amount = Decimal(str(user_id)) * Decimal("2")
+        gift_amount = Decimal(str(user_id)) / Decimal("4")
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id,
@@ -3486,7 +3486,7 @@ class Economy(commands.Cog):
 
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        gift_amount = Decimal(str(user_id)) * Decimal("2")
+        gift_amount = Decimal(str(user_id)) / Decimal("4")
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id,

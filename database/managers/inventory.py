@@ -957,47 +957,44 @@ class InventoryMixin(BaseManager):
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(Item).where(Item.user_id == user_id, Item.id == item_id)
-            )
-            item = result.scalar_one_or_none()
-            if not item:
-                raise ValueError("Item not found in inventory.")
+            async with session.begin():
+                result = await session.execute(
+                    select(Item).where(Item.user_id == user_id, Item.id == item_id)
+                )
+                item = result.scalar_one_or_none()
+                if not item:
+                    raise ValueError("Item not found in inventory.")
 
-            if item.item_type == ItemType.CONSUMABLE:
-                message = f"You have consumed one {item.name}."
-                if item.effect == "currency" and item.effect_value:
-                    wallet_id = await self.get_wallet_id_for_user(raw_user_id)
-                    await self.process_treasury_transaction(
-                        wallet_id,
-                        Decimal(item.effect_value),
-                        f"Used {item.name}",
-                        "standard",
-                    )
-                async with session.begin():
+                if item.item_type == ItemType.CONSUMABLE:
+                    message = f"You have consumed one {item.name}."
+                    if item.effect == "currency" and item.effect_value:
+                        wallet_id = await self.get_wallet_id_for_user(raw_user_id)
+                        await self.process_treasury_transaction(
+                            wallet_id,
+                            Decimal(item.effect_value),
+                            f"Used {item.name}",
+                            "standard",
+                        )
                     item.quantity -= 1
                     if item.quantity <= 0:
                         await session.delete(item)
-                await session.commit()
-                return message
-            elif item.item_type == ItemType.REDEEMABLE:
-                message = f"You have redeemed {item.name} and received its benefits."
-                if item.effect == "currency" and item.effect_value:
-                    wallet_id = await self.get_wallet_id_for_user(raw_user_id)
-                    await self.process_treasury_transaction(
-                        wallet_id,
-                        Decimal(item.effect_value),
-                        f"Redeemed {item.name}",
-                        "standard",
-                    )
-                async with session.begin():
+                    return message
+                elif item.item_type == ItemType.REDEEMABLE:
+                    message = f"You have redeemed {item.name} and received its benefits."
+                    if item.effect == "currency" and item.effect_value:
+                        wallet_id = await self.get_wallet_id_for_user(raw_user_id)
+                        await self.process_treasury_transaction(
+                            wallet_id,
+                            Decimal(item.effect_value),
+                            f"Redeemed {item.name}",
+                            "standard",
+                        )
                     await session.delete(item)
-                await session.commit()
-                return message
-            elif item.item_type == ItemType.COLLECTIBLE:
-                return f"You are now showcasing your collectible {item.name}."
-            else:
-                raise ValueError("Unknown item type.")
+                    return message
+                elif item.item_type == ItemType.COLLECTIBLE:
+                    return f"You are now showcasing your collectible {item.name}."
+                else:
+                    raise ValueError("Unknown item type.")
 
     async def set_item_cooldown(
         self, user_id: int, item_name: str, cooldown_seconds: int
@@ -1367,112 +1364,109 @@ class InventoryMixin(BaseManager):
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(Item).where(Item.user_id == user_id, Item.id == item_id)
-            )
-            item = result.scalar_one_or_none()
-            if not item:
-                raise ValueError("Item not found in inventory.")
-
-            # Check cooldown
-            if item.cooldown_seconds:
-                remaining = await self.get_item_cooldown(raw_user_id, item.name)
-                if remaining > 0:
-                    raise ValueError(
-                        f"This item is on cooldown. {remaining} seconds remaining."
-                    )
-
-            response = {"message": "", "effect_applied": False}
-
-            # Apply effect based on type
-            effect = item.effect
-            effect_value = item.effect_value
-            effect_duration = item.effect_duration
-
-            if effect == "currency" and effect_value:
-                # Direct currency grant
-                wallet_id = await self.get_wallet_id_for_user(raw_user_id)
-                await self.process_treasury_transaction(
-                    wallet_id, Decimal(effect_value), f"Used {item.name}", "standard"
+            async with session.begin():
+                result = await session.execute(
+                    select(Item).where(Item.user_id == user_id, Item.id == item_id)
                 )
-                response[
-                    "message"
-                ] = f"You received {effect_value} coins from {item.name}!"
-                response["effect_applied"] = True
+                item = result.scalar_one_or_none()
+                if not item:
+                    raise ValueError("Item not found in inventory.")
 
-            elif effect in (
-                "gambling_multiplier",
-                "luck_boost",
-                "earning_boost",
-                "cooldown_reduction",
-                "rtp_boost",
-                "anti_rob",
-                "anti_bank_rob",
-            ):
-                # Create timed effect
-                if effect_duration:
-                    await self.create_active_effect(
-                        user_id=raw_user_id,
-                        effect_type=effect,
-                        effect_value=Decimal(str(effect_value)),
-                        duration_seconds=effect_duration,
-                        source_item_name=item.name,
-                    )
-                    duration_mins = effect_duration // 60
-                    duration_secs = effect_duration % 60
-                    duration_str = (
-                        f"{duration_mins}m {duration_secs}s"
-                        if duration_mins
-                        else f"{duration_secs}s"
-                    )
+                # Check cooldown
+                if item.cooldown_seconds:
+                    remaining = await self.get_item_cooldown(raw_user_id, item.name)
+                    if remaining > 0:
+                        raise ValueError(
+                            f"This item is on cooldown. {remaining} seconds remaining."
+                        )
 
-                    effect_names = {
-                        "gambling_multiplier": f"{effect_value}x gambling multiplier",
-                        "luck_boost": f"{effect_value}x luck boost",
-                        "earning_boost": f"{effect_value}x earning boost",
-                        "cooldown_reduction": f"{effect_value}% cooldown reduction",
-                        "rtp_boost": f"{effect_value}% RTP boost",
-                        "anti_rob": "Anti-Rob aura",
-                        "anti_bank_rob": "Anti-Bank-Rob aura",
-                    }
+                response = {"message": "", "effect_applied": False}
+
+                # Apply effect based on type
+                effect = item.effect
+                effect_value = item.effect_value
+                effect_duration = item.effect_duration
+
+                if effect == "currency" and effect_value:
+                    # Direct currency grant
+                    wallet_id = await self.get_wallet_id_for_user(raw_user_id)
+                    await self.process_treasury_transaction(
+                        wallet_id, Decimal(effect_value), f"Used {item.name}", "standard"
+                    )
                     response[
                         "message"
-                    ] = f"Activated {effect_names.get(effect, effect)} for {duration_str}!"
+                    ] = f"You received {effect_value} coins from {item.name}!"
                     response["effect_applied"] = True
-                else:
+
+                elif effect in (
+                    "gambling_multiplier",
+                    "luck_boost",
+                    "earning_boost",
+                    "cooldown_reduction",
+                    "rtp_boost",
+                    "anti_rob",
+                    "anti_bank_rob",
+                ):
+                    # Create timed effect
+                    if effect_duration:
+                        await self.create_active_effect(
+                            user_id=raw_user_id,
+                            effect_type=effect,
+                            effect_value=Decimal(str(effect_value)),
+                            duration_seconds=effect_duration,
+                            source_item_name=item.name,
+                        )
+                        duration_mins = effect_duration // 60
+                        duration_secs = effect_duration % 60
+                        duration_str = (
+                            f"{duration_mins}m {duration_secs}s"
+                            if duration_mins
+                            else f"{duration_secs}s"
+                        )
+
+                        effect_names = {
+                            "gambling_multiplier": f"{effect_value}x gambling multiplier",
+                            "luck_boost": f"{effect_value}x luck boost",
+                            "earning_boost": f"{effect_value}x earning boost",
+                            "cooldown_reduction": f"{effect_value}% cooldown reduction",
+                            "rtp_boost": f"{effect_value}% RTP boost",
+                            "anti_rob": "Anti-Rob aura",
+                            "anti_bank_rob": "Anti-Bank-Rob aura",
+                        }
+                        response[
+                            "message"
+                        ] = f"Activated {effect_names.get(effect, effect)} for {duration_str}!"
+                        response["effect_applied"] = True
+                    else:
+                        response[
+                            "message"
+                        ] = f"Used {item.name} but no duration was specified."
+
+                elif item.item_type == ItemType.COLLECTIBLE:
                     response[
                         "message"
-                    ] = f"Used {item.name} but no duration was specified."
+                    ] = f"You are showcasing your collectible {item.name}."
+                else:
+                    response["message"] = f"You used {item.name}."
 
-            elif item.item_type == ItemType.COLLECTIBLE:
-                response[
-                    "message"
-                ] = f"You are showcasing your collectible {item.name}."
-            else:
-                response["message"] = f"You used {item.name}."
+                # Set cooldown if applicable
+                if item.cooldown_seconds and item.item_type != ItemType.COLLECTIBLE:
+                    await self.set_item_cooldown(
+                        raw_user_id, item.name, item.cooldown_seconds
+                    )
+                    response["cooldown_seconds"] = item.cooldown_seconds
 
-            # Set cooldown if applicable
-            if item.cooldown_seconds and item.item_type != ItemType.COLLECTIBLE:
-                await self.set_item_cooldown(
-                    raw_user_id, item.name, item.cooldown_seconds
-                )
-                response["cooldown_seconds"] = item.cooldown_seconds
-
-            # Handle quantity/durability/uses reduction
-            if item.item_type in (
-                ItemType.CONSUMABLE,
-                ItemType.DEFENSIVE,
-                ItemType.OFFENSIVE,
-            ):
-                async with session.begin():
+                # Handle quantity/durability/uses reduction
+                if item.item_type in (
+                    ItemType.CONSUMABLE,
+                    ItemType.DEFENSIVE,
+                    ItemType.OFFENSIVE,
+                ):
                     await self._consume_item_use(session, item)
-                await session.commit()
-            elif item.item_type == ItemType.REDEEMABLE:
-                async with session.begin():
+                elif item.item_type == ItemType.REDEEMABLE:
                     await session.delete(item)
-                await session.commit()
 
-            return response
+                return response
 
     async def place_bounty(
         self, issuer_id: int, target_id: int, reward: Decimal
@@ -1806,66 +1800,65 @@ class InventoryMixin(BaseManager):
         user_id_h = self.hash_user_id(user_id)
 
         async with self.async_sessionmaker() as session:
-            result = await session.execute(
-                select(Item).where(Item.user_id == user_id_h, Item.id == item_id)
-            )
-            item = result.scalar_one_or_none()
-            if not item:
-                raise ValueError("Item not found in your inventory.")
-            if not item.targetable:
-                raise ValueError(f"**{item.name}** is not targetable.")
-            if item.cooldown_seconds:
-                remaining = await self.get_item_cooldown(raw_user_id, item.name)
-                if remaining > 0:
-                    raise ValueError(
-                        f"This item is on cooldown. {remaining} seconds remaining."
-                    )
+            async with session.begin():
+                result = await session.execute(
+                    select(Item).where(Item.user_id == user_id_h, Item.id == item_id)
+                )
+                item = result.scalar_one_or_none()
+                if not item:
+                    raise ValueError("Item not found in your inventory.")
+                if not item.targetable:
+                    raise ValueError(f"**{item.name}** is not targetable.")
+                if item.cooldown_seconds:
+                    remaining = await self.get_item_cooldown(raw_user_id, item.name)
+                    if remaining > 0:
+                        raise ValueError(
+                            f"This item is on cooldown. {remaining} seconds remaining."
+                        )
 
-            effect = item.effect
-            effect_value = item.effect_value
-            effect_duration = item.effect_duration
-            if not effect or not effect_duration:
-                raise ValueError("That item has no usable targeted effect.")
+                effect = item.effect
+                effect_value = item.effect_value
+                effect_duration = item.effect_duration
+                if not effect or not effect_duration:
+                    raise ValueError("That item has no usable targeted effect.")
 
-            supported_target_effects = {
-                "robbery_debuff",
-                "fee_increase",
-                "cooldown_increase",
-                "earning_debuff",
-                "luck_shield",
-            }
-            if effect not in supported_target_effects:
-                raise ValueError(f"**{item.name}** cannot be used on another user.")
+                supported_target_effects = {
+                    "robbery_debuff",
+                    "fee_increase",
+                    "cooldown_increase",
+                    "earning_debuff",
+                    "luck_shield",
+                }
+                if effect not in supported_target_effects:
+                    raise ValueError(f"**{item.name}** cannot be used on another user.")
 
-            # Apply effect to target
-            await self.create_active_effect(
-                raw_target_id,
-                effect,
-                Decimal(str(effect_value)) if effect_value else Decimal("1.0"),
-                effect_duration,
-                item.name,
-            )
-
-            if item.cooldown_seconds:
-                await self.set_item_cooldown(
-                    raw_user_id, item.name, item.cooldown_seconds
+                # Apply effect to target
+                await self.create_active_effect(
+                    raw_target_id,
+                    effect,
+                    Decimal(str(effect_value)) if effect_value else Decimal("1.0"),
+                    effect_duration,
+                    item.name,
                 )
 
-            async with session.begin():
-                await self._consume_item_use(session, item)
-            await session.commit()
+                if item.cooldown_seconds:
+                    await self.set_item_cooldown(
+                        raw_user_id, item.name, item.cooldown_seconds
+                    )
 
-            duration_minutes = effect_duration // 60
-            return {
-                "message": (
-                    f"You used **{item.name}** on <@{raw_target_id}>. "
-                    f"They now suffer `{effect}` for {duration_minutes}m."
-                ),
-                "target_id": raw_target_id,
-                "effect": effect,
-                "effect_value": effect_value,
-                "duration_seconds": effect_duration,
-            }
+                await self._consume_item_use(session, item)
+
+                duration_minutes = effect_duration // 60
+                return {
+                    "message": (
+                        f"You used **{item.name}** on <@{raw_target_id}>. "
+                        f"They now suffer `{effect}` for {duration_minutes}m."
+                    ),
+                    "target_id": raw_target_id,
+                    "effect": effect,
+                    "effect_value": effect_value,
+                    "duration_seconds": effect_duration,
+                }
 
     async def _consume_item_use(self, session, item: Item) -> None:
         """
