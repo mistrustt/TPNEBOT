@@ -630,10 +630,6 @@ class Moderation(commands.Cog, name="Moderation"):
     @app_commands.default_permissions(manage_messages=True)
     @unified_cooldown(5)
     async def purge(self, ctx: Context, arg1: str, arg2: str = None):
-        """
-        Deletes messages from a channel. Can specify amount and/or user.
-        Usage: purge <amount> [member] OR purge <member> <amount>
-        """
         try:
             member = None
             amount = None
@@ -1135,11 +1131,6 @@ class Moderation(commands.Cog, name="Moderation"):
         *,
         reason: str = "No reason provided",
     ) -> None:
-        """
-        Usage:
-          !tempban @user 1h spamming    > bans for 1 hour
-          !tempban @user 2d harassment  > bans for 2 days
-        """
 
         member = None
         if re.match(r"^\d+$", identifier):
@@ -1999,14 +1990,6 @@ class Moderation(commands.Cog, name="Moderation"):
         *,
         reason: str = "No reason provided",
     ):
-        """
-        Jail a user by assigning them the jail role.
-
-        Usage:
-          !jail @user               > indefinite jail
-          !jail @user 2h spamming   > 2-hour jail, reason "spamming"
-          !jail @user griefing      > indefinite jail, reason "griefing"
-        """
 
         member = None
         if re.match(r"^\d+$", identifier):
@@ -2172,14 +2155,6 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(manage_messages=True)
     @commands.bot_has_permissions(manage_roles=True)
     async def unjail(self, ctx: Context, identifier: str):
-        """
-        Release a user from jail by removing the jail role and restoring previous roles.
-
-        Usage:
-          !unjail @user
-          !unjail 123456789012345678
-          !unjail username
-        """
         guild_id = ctx.guild.id
 
         jail_settings = await self.bot.database.get_jail_settings(guild_id)
@@ -2534,12 +2509,6 @@ class Moderation(commands.Cog, name="Moderation"):
         *,
         reason: Optional[str] = None,
     ):
-        """
-        Usage:
-          !mute @user               > indefinite mute (reason defaults)
-          !mute @user 30m spamming  > 30-minute mute for "spamming"
-          !mute @user spamming      > indefinite mute for "spamming"
-        """
         member = await self._lookup_member(ctx, identifier)
         if not member:
             return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)
@@ -2733,12 +2702,6 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     async def react_mute_user(self, ctx: Context, identifier: str, *args):
-        """
-        Usage:
-          !rmute @user               > indefinite react-mute
-          !rmute @user 30m spamming  > 30-minute react-mute for "spamming"
-          !rmute @user spamming      > indefinite react-mute for "spamming"
-        """
         member = await self._lookup_member(ctx, identifier)
         if not member:
             return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)
@@ -2942,12 +2905,6 @@ class Moderation(commands.Cog, name="Moderation"):
         *,
         reason: Optional[str] = None,
     ):
-        """
-        Usage:
-          !imute @user               > indefinite image-mute
-          !imute @user 2h spoilers   > 2-hour image-mute for "spoilers"
-          !imute @user spoilers      > indefinite image-mute for "spoilers"
-        """
         member = await self._lookup_member(ctx, identifier)
         if not member:
             return await Embeds.error(ctx, f"No user found with identifier `{identifier}`.", reply=False)

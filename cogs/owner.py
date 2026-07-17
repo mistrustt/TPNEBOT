@@ -623,7 +623,6 @@ class Owner(commands.Cog, name="Owner"):
     ):
         """Create a shop item.
 
-        Usage: shopadmin create <name> <price> [key=value ...]
         Options: description, quantity, unlimited, item_type, category, rarity,
                  effect, effect_value, effect_duration, cooldown_seconds,
                  targetable, daily_limit, global_daily_limit, tradable
@@ -683,17 +682,9 @@ class Owner(commands.Cog, name="Owner"):
         )
         await ctx.send(embed=embed)
 
-    @shopadmin.command(name="edit", hidden=True)
+    @shopadmin.command(name="edit", description="Edit an existing shop item.", hidden=True)
     @commands.is_owner()
     async def shopadmin_edit(self, ctx: Context, item_id: int, *options: str):
-        """Edit an existing shop item.
-
-        Usage: shopadmin edit <item_id> [key=value ...]
-        Options: name, description, price, quantity, unlimited, item_type,
-                 category, rarity, effect, effect_value, effect_duration,
-                 cooldown_seconds, targetable, daily_limit, global_daily_limit,
-                 tradable
-        """
 
         try:
             opts = _parse_kv_args(options)
@@ -875,11 +866,6 @@ class Owner(commands.Cog, name="Owner"):
     )
     @commands.is_owner()
     async def metrics(self, ctx: Context, days: int = 7):
-        """Display a metrics dashboard overview.
-
-        Args:
-            days: Number of days to look back (1-365, default 7)
-        """
         if days < 1 or days > 365:
             return await ctx.send("❌ Days must be between 1 and 365.")
 
@@ -1017,7 +1003,7 @@ class Owner(commands.Cog, name="Owner"):
         )
         await ctx.reply(embed=embed, view=view, mention_author=False)
 
-    @metrics.command(name="usage", hidden=True)
+    @metrics.command(name="usage", description="Display command usage metrics.", hidden=True)
     @commands.is_owner()
     async def metrics_usage(
         self,
@@ -4196,7 +4182,7 @@ class Owner(commands.Cog, name="Owner"):
 
     # ==================== VIP Admin Commands ====================
 
-    @adminbank.command(name="setviptier", hidden=True)
+    @adminbank.command(name="setviptier", description="Manually set a user's VIP tier.", hidden=True)
     @commands.is_owner()
     async def set_vip_tier(
         self,
@@ -4204,11 +4190,6 @@ class Owner(commands.Cog, name="Owner"):
         user: discord.User,
         tier_name: str,
     ):
-        """Manually set a user's VIP tier.
-
-        Usage: !setviptier <user> <tier_name>
-        Tier names: Bronze, Silver, Gold, Platinum, Diamond
-        """
         try:
             # Get tier by name
             tier_name = tier_name.capitalize()
@@ -4242,13 +4223,9 @@ class Owner(commands.Cog, name="Owner"):
             logger.error(f"Error in set_vip_tier: {e}")
             await ctx.send(f"Error: {e}")
 
-    @adminbank.command(name="resetvip", hidden=True)
+    @adminbank.command(name="resetvip", description="Reset a user's VIP progress to default.", hidden=True)
     @commands.is_owner()
     async def reset_vip(self, ctx: Context, user: discord.User):
-        """Reset a user's VIP progress to default.
-
-        Usage: !resetvip <user>
-        """
         try:
             success = await self.bot.database.reset_user_vip(user.id)
 
@@ -4266,13 +4243,9 @@ class Owner(commands.Cog, name="Owner"):
             logger.error(f"Error in reset_vip: {e}")
             await ctx.send(f"Error: {e}")
 
-    @adminbank.command(name="vipconfig", hidden=True)
+    @adminbank.command(name="vipconfig", description="Display VIP tier configuration.", hidden=True)
     @commands.is_owner()
     async def vip_config(self, ctx: Context):
-        """Display VIP tier configuration.
-
-        Usage: !vipconfig
-        """
         try:
             tiers = await self.bot.database.get_all_vip_tiers()
 

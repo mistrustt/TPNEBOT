@@ -470,7 +470,7 @@ class RoleTools(commands.Cog, name="Roles"):
             return await ctx.reply(embed=embed)
 
     @role.command(
-        name="color", description="Change a role color. Usage: role color <role> <#hex>"
+        name="color", description="Change a role color."
     )
     @commands.has_permissions(manage_roles=True)
     @commands.bot_has_permissions(manage_roles=True)

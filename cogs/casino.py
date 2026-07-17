@@ -4663,10 +4663,6 @@ class Casino(commands.Cog):
         ctx: commands.Context,
         game_name: str = "gamble",
     ):
-        """
-        Usage:
-          !casino stats [game_name] [@member]
-        """
         member = ctx.author
         game_key = (game_name or "gamble").lower()
 
@@ -4731,10 +4727,6 @@ class Casino(commands.Cog):
     async def casino_leaderboard(
         self, ctx: commands.Context, game_name: str = "gamble", limit: int = 10
     ):
-        """
-        Usage:
-          !casino leaderboard [game_name] [limit]
-        """
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.defer()
 
@@ -4783,12 +4775,6 @@ class Casino(commands.Cog):
         name="history", aliases=["games", "ghistory"], description="View your game history."
     )
     async def casino_history(self, ctx: commands.Context, limit: int = 100):
-        """
-        Usage:
-          !casino history [@member] [limit]
-          !casino games
-          !casino ghistory
-        """
         member = ctx.author
         limit = max(1, min(int(limit), 1000))
 
@@ -5201,13 +5187,6 @@ class Casino(commands.Cog):
         params_json: str = "{}",
         algorithm: str = "sha256_tag",
     ):
-        """
-        Usage:
-          !casino verifyraw <server_seed> <server_seed_hash> <client_seed> <nonce> <game> [params_json] [algorithm]
-
-        Example:
-          !casino verifyraw a1b2 c3d4 my-seed 7 mines '{"mines":3}'
-        """
         if not self.fairgate_client:
             return await ctx.reply("FairGate is not configured.", mention_author=False)
 
@@ -5298,10 +5277,6 @@ class Casino(commands.Cog):
         params_json: str = "{}",
         algorithm: str = "sha256_tag",
     ):
-        """
-        Usage:
-          !casino verifyurl <server_seed> <server_seed_hash> <client_seed> <nonce> <game> [params_json] [algorithm]
-        """
         if not self.fairgate_client:
             return await ctx.reply("FairGate is not configured.", mention_author=False)
 
@@ -5338,10 +5313,6 @@ class Casino(commands.Cog):
     )
     @unified_cooldown(5)
     async def casino_seed(self, ctx: commands.Context):
-        """
-        Usage:
-          !casino seed
-        """
         client_seed, nonce = await self.bot.database.get_client_seed(ctx.author.id)
 
         if self.fairgate_client:
@@ -5375,11 +5346,6 @@ class Casino(commands.Cog):
     async def casino_setseed(
         self, ctx: commands.Context, *, seed: Optional[str] = None
     ):
-        """
-        Usage:
-          !casino setseed [seed]
-          (if no seed is supplied, a random one is generated)
-        """
         if not seed:
             seed = secrets.token_hex(16)
 

@@ -500,19 +500,6 @@ class Watchdog(commands.Cog, name="Watchdog"):
     @discord.app_commands.default_permissions(administrator=True)
     @unified_cooldown(10)
     async def toggle_listener(self, ctx: Context, feature: str = None):
-        """Enable or disable logging for this server or a specific feature.
-        
-        Features:
-        - pii_filter: PII (Personal Identifiable Information) detection
-        - card_filter: Credit card detection
-        - member_tracking: Member join/leave, role changes, nickname changes
-        - message_tracking: Message deletions
-        - voice_tracking: Voice state changes
-        
-        Usage:
-        !watchdog toggle - Toggle entire watchdog on/off
-        !watchdog toggle pii_filter - Toggle PII filter only
-        """
         guild_id = ctx.guild.id
         settings = await self.bot.database.get_server_settings(guild_id)
 
