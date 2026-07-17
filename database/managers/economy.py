@@ -355,6 +355,105 @@ class EconomyMixin(BaseManager):
             wallet = await session.get(Wallet, wallet_id)
             return wallet.bank_balance if wallet else Decimal("0.00")
 
+    async def spend_from_wallet(
+        self,
+        wallet_id: str,
+        amount: Decimal,
+        description: str,
+        *,
+        transaction_type: str = "standard",
+    ) -> tuple[str, Decimal]:
+        """
+        Atomically spend an exact amount from a wallet into the treasury.
+
+        Re-reads the wallet balance when the atomic deduction fails so the caller
+        can present a clean "insufficient funds" message based on current funds,
+        not a stale value. Returns (txid, amount_spent).
+        """
+        amount = AmountUtils.round_currency(amount)
+        if amount <= 0:
+            raise ValueError("Amount must be greater than zero.")
+
+        try:
+            txid = await self.process_treasury_transaction(
+                wallet_id=wallet_id,
+                amount=-amount,
+                description=description,
+                transaction_type=transaction_type,
+            )
+        except ValueError as e:
+            if "Race or insufficient funds" in str(e):
+                current_balance = await self.get_wallet_balance(wallet_id)
+                raise ValueError(
+                    f"Insufficient funds. You have {current_balance}, "
+                    f"but this action requires {amount}."
+                ) from e
+            raise
+
+        return txid, amount
+
+    async def fine_wallet(
+        self,
+        wallet_id: str,
+        percentage: Decimal,
+        description: str,
+    ) -> Decimal:
+        """
+        Atomically fine a wallet by a percentage of its current balance.
+
+        Re-reads the balance inside the transaction so the fine reflects the
+        actual available funds and avoids stale-balance race failures.
+        Returns the actual amount fined.
+        """
+        if percentage <= 0 or percentage > 1:
+            raise ValueError("Percentage must be between 0 and 1.")
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                wallet = await session.get(Wallet, wallet_id)
+                if not wallet:
+                    raise ValueError("Wallet not found.")
+                if wallet.wallet_frozen:
+                    raise ValueError("Wallet is frozen.")
+
+                fresh_balance = AmountUtils.round_currency(Decimal(str(wallet.balance)))
+                fine_amount = AmountUtils.round_currency(fresh_balance * percentage)
+                if fine_amount <= 0:
+                    raise ValueError("Fine amount is too small.")
+
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    wallet_id,
+                    -fine_amount,
+                    frozen_field="wallet_frozen",
+                )
+                await self._atomic_balance_change(
+                    session,
+                    "supply",
+                    "id",
+                    1,
+                    +fine_amount,
+                    balance_col="treasury",
+                )
+
+                txid = str(uuid.uuid4())
+                session.add(
+                    Transaction(
+                        id=txid,
+                        from_user_id=wallet.user_id,
+                        to_user_id=_treasury_hash(),
+                        amount=fine_amount,
+                        description=description,
+                        timestamp=discord.utils.utcnow(),
+                    )
+                )
+
+            await self.update_supply()
+
+        return fine_amount
+
     async def deposit_to_bank(self, wallet_id: str, amount: Decimal, description: str):
         """Transfer funds from wallet to bank without affecting treasury."""
         async with self.async_sessionmaker() as session:
@@ -678,6 +777,133 @@ class EconomyMixin(BaseManager):
             await self.update_supply()
 
         return txid_main, drain_amount
+
+    async def rob_wallet(
+        self,
+        target_wallet_id: str,
+        robber_wallet_id: str,
+        description: str,
+        percentage: Decimal,
+        robbery_debuff: Decimal,
+        *,
+        counter_loss_percentage: Decimal = Decimal("0"),
+        fee_from_amount: bool = True,
+    ) -> tuple[str, Decimal, Decimal]:
+        """
+        Atomically rob a percentage of the target's wallet into the robber's wallet.
+
+        The target's balance is re-read inside the transaction so the robbery
+        succeeds even if the balance changed between the command's initial read
+        and the actual transfer. Returns (txid, amount_stolen, counter_loss).
+        """
+
+        # Check economic circuit breaker before processing
+        circuit_breaker = await self.check_economic_circuit_breaker()
+        if circuit_breaker["triggered"]:
+            reasons = ", ".join(circuit_breaker["reasons"])
+            raise ValueError(f"Economic circuit breaker triggered: {reasons}")
+
+        base_fee_rate = await self.get_enhanced_fee_rate("standard")
+        adjusted_fee: Decimal | None = None
+
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                target = await session.get(Wallet, target_wallet_id)
+                robber = await session.get(Wallet, robber_wallet_id)
+                if not target or not robber:
+                    raise ValueError("Invalid target or robber wallet.")
+                if target.wallet_frozen:
+                    raise ValueError("Target's wallet is frozen.")
+                if robber.wallet_frozen:
+                    raise ValueError("Robber's wallet is frozen.")
+
+                # Re-read balance inside the transaction to avoid race conditions.
+                fresh_target_balance = AmountUtils.round_currency(
+                    Decimal(str(target.balance))
+                )
+                if fresh_target_balance <= 0:
+                    raise ValueError("Target has no funds to rob.")
+
+                amount_stolen = AmountUtils.round_currency(
+                    fresh_target_balance * percentage * robbery_debuff
+                )
+                counter_loss = AmountUtils.round_currency(
+                    fresh_target_balance * counter_loss_percentage * robbery_debuff
+                )
+                total_theft = amount_stolen + counter_loss
+
+                if total_theft <= 0:
+                    raise ValueError("Robbery amount is too small.")
+
+                raw_target_id = await self.resolve_user_hash(target.user_id)
+                base_fee = AmountUtils.round_currency(total_theft * base_fee_rate)
+                adjusted_fee = await self.calculate_wealth_adjusted_fee(
+                    raw_target_id, base_fee
+                )
+
+                if fee_from_amount:
+                    receiver_gets = total_theft - adjusted_fee
+                    if receiver_gets <= 0:
+                        raise ValueError("Robbery amount too small to cover fees.")
+                    total_deduction = total_theft
+                else:
+                    receiver_gets = total_theft
+                    total_deduction = total_theft + adjusted_fee
+
+                if fresh_target_balance < total_deduction:
+                    raise ValueError("Target balance is insufficient to cover robbery.")
+
+                # Atomic balance changes
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    target_wallet_id,
+                    -total_deduction,
+                    frozen_field="wallet_frozen",
+                )
+                await self._atomic_balance_change(
+                    session,
+                    "wallets",
+                    "wallet_id",
+                    robber_wallet_id,
+                    +receiver_gets,
+                )
+                await self._atomic_balance_change(
+                    session,
+                    "supply",
+                    "id",
+                    1,
+                    +adjusted_fee,
+                    balance_col="treasury",
+                )
+
+                txid_main = str(uuid.uuid4())
+                txid_fee = str(uuid.uuid4())
+                session.add_all(
+                    [
+                        Transaction(
+                            id=txid_main,
+                            from_user_id=target.user_id,
+                            to_user_id=robber.user_id,
+                            amount=receiver_gets,
+                            description=description,
+                            timestamp=discord.utils.utcnow(),
+                        ),
+                        Transaction(
+                            id=txid_fee,
+                            from_user_id=target.user_id,
+                            to_user_id=_treasury_hash(),
+                            amount=adjusted_fee,
+                            description=f"Robbery fee (base: {base_fee_rate:.2%}, wealth-adjusted)",
+                            timestamp=discord.utils.utcnow(),
+                        ),
+                    ]
+                )
+
+            await self.update_supply()
+
+        return txid_main, amount_stolen, counter_loss
 
     async def process_treasury_transaction(
         self,

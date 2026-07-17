@@ -2713,24 +2713,24 @@ class Economy(commands.Cog):
 
             if amount_decimal <= 0:
                 raise ValueError("Repayment amount must be greater than zero.")
-            if amount_decimal > Decimal(balance):
-                raise ValueError("You do not have enough funds to make this repayment.")
-            
+
             # Calculate remaining balance and cap payment at remaining balance
             remaining_balance = loan.total_repay - loan.amount_paid
             if amount_decimal > remaining_balance:
                 amount_decimal = remaining_balance
-            
+
             # Process the payment using the new payment system
             payment_result = await self.bot.database.make_loan_payment(
                 user_id=user_id,
                 payment_amount=amount_decimal,
                 notes=f"Payment via loan repay command"
             )
-            
-            # Deduct from wallet
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=-amount_decimal, description="Loan Repayment"
+
+            # Deduct from wallet atomically; re-reads balance inside the tx.
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id,
+                amount=amount_decimal,
+                description="Loan Repayment",
             )
             
             color = (
@@ -2876,13 +2876,7 @@ class Economy(commands.Cog):
         try:
             if result == "critical_success":
                 percentage = Decimal(secrets.randbelow(21) + 40) / Decimal("100")
-                amount_stolen = (target_balance * percentage * robbery_debuff).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                counter_loss = (target_balance * Decimal("0.10") * robbery_debuff).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                total_theft = amount_stolen + counter_loss
+                counter_loss_percentage = Decimal("0.10")
 
                 target_has_bounty = await self.bot.database.user_has_bounty(target.id)
                 bounty_msg = ""
@@ -2892,14 +2886,16 @@ class Economy(commands.Cog):
                         f"\nYou also claimed the bounty on {target.display_name}."
                     )
 
-                await self.bot.database.process_p2p_transaction(
-                    sender_wallet_id=target_wallet_id,
-                    receiver_wallet_id=user_wallet_id,
-                    amount=total_theft,
+                _, amount_stolen, counter_loss = await self.bot.database.rob_wallet(
+                    target_wallet_id=target_wallet_id,
+                    robber_wallet_id=user_wallet_id,
                     description=f"Critical Robbery by {ctx.author.name}",
-                    guild_id=ctx.guild.id if ctx.guild else None,
+                    percentage=percentage,
+                    robbery_debuff=robbery_debuff,
+                    counter_loss_percentage=counter_loss_percentage,
                     fee_from_amount=True,
                 )
+                total_theft = amount_stolen + counter_loss
                 result_message = (
                     f"🔥 **YOU STOLE BASICALLY EVERYTHING LMFAOOOOOOOOOOOO**.\n"
                     f"{target.mention} woke up missing {self.currency_name} **{await self.formatter(total_theft)}**"
@@ -2907,9 +2903,6 @@ class Economy(commands.Cog):
                 )
             elif result == "success":
                 percentage = Decimal(secrets.randbelow(16) + 20) / Decimal("100")
-                amount_stolen = (target_balance * percentage * robbery_debuff).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
 
                 target_has_bounty = await self.bot.database.user_has_bounty(target.id)
                 bounty_msg = ""
@@ -2919,12 +2912,12 @@ class Economy(commands.Cog):
                         f"\nYou also claimed the bounty on {target.display_name}."
                     )
 
-                await self.bot.database.process_p2p_transaction(
-                    sender_wallet_id=target_wallet_id,
-                    receiver_wallet_id=user_wallet_id,
-                    amount=amount_stolen,
+                _, amount_stolen, _ = await self.bot.database.rob_wallet(
+                    target_wallet_id=target_wallet_id,
+                    robber_wallet_id=user_wallet_id,
                     description=f"Robbery by {ctx.author.name}",
-                    guild_id=ctx.guild.id if ctx.guild else None,
+                    percentage=percentage,
+                    robbery_debuff=robbery_debuff,
                     fee_from_amount=True,
                 )
 
@@ -2935,34 +2928,29 @@ class Economy(commands.Cog):
                 )
             elif result == "partial_failure":
                 percentage = Decimal(secrets.randbelow(6) + 10) / Decimal("100")
-                stolen = (target_balance * percentage * robbery_debuff).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                recoup = (stolen * Decimal("0.50")).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-                net_gain = stolen - recoup
-                await self.bot.database.process_p2p_transaction(
-                    sender_wallet_id=target_wallet_id,
-                    receiver_wallet_id=user_wallet_id,
-                    amount=net_gain,
+                recoup_percentage = Decimal("0.50")
+
+                _, stolen, _ = await self.bot.database.rob_wallet(
+                    target_wallet_id=target_wallet_id,
+                    robber_wallet_id=user_wallet_id,
                     description=f"Partial Robbery by {ctx.author.name}",
-                    guild_id=ctx.guild.id if ctx.guild else None,
+                    percentage=percentage,
+                    robbery_debuff=robbery_debuff,
                     fee_from_amount=True,
                 )
+                recoup = AmountUtils.round_currency(stolen * recoup_percentage)
+                net_gain = stolen - recoup
+
                 result_message = (
                     f"🤏 You **robbed** {target.mention} but they fought back, you managed to steal "
                     f"{self.currency_name} **{await self.formatter(net_gain)}** after they recovered some of it."
                 )
             elif result == "failure":
                 percentage = Decimal(secrets.randbelow(5) + 1) / Decimal("100")
-                amount_fined = (robber_balance * percentage).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
                 try:
-                    await self.bot.database.process_treasury_transaction(
+                    amount_fined = await self.bot.database.fine_wallet(
                         wallet_id=user_wallet_id,
-                        amount=-amount_fined,
+                        percentage=percentage,
                         description="Fine for failed robbery",
                     )
                 except ValueError as e:
@@ -3139,13 +3127,10 @@ class Economy(commands.Cog):
                 return
         else:
             fine_percentage = Decimal("0.05")
-            amount_fined = (robber_balance * fine_percentage).quantize(
-                Decimal("1"), rounding=ROUND_HALF_UP
-            )
             try:
-                await self.bot.database.process_treasury_transaction(
+                amount_fined = await self.bot.database.fine_wallet(
                     wallet_id=robber_wallet,
-                    amount=-amount_fined,
+                    percentage=fine_percentage,
                     description="Fine for failed drain attempt",
                 )
             except ValueError as e:
@@ -3155,7 +3140,6 @@ class Economy(commands.Cog):
                     delete_after=5,
                     reply=True,
                 )
-                return
                 return
             await Embeds.error(
                 ctx,
@@ -3260,9 +3244,17 @@ class Economy(commands.Cog):
                     f"ID: `{txid}`"
                 ), color=None)
         except ValueError as e:
+            error_msg = str(e)
+            if "Race or insufficient funds" in error_msg:
+                current_balance = await self.bot.database.get_wallet_balance(sender_wallet_id)
+                error_msg = (
+                    f"Insufficient funds for this transfer.\n"
+                    f"**Current balance:** {self.currency_name} **{await self.formatter(current_balance)}**\n"
+                    f"**Attempted:** {self.currency_name} **{await self.formatter(amount)}**"
+                )
             await Embeds.error(
                 ctx,
-                str(e),
+                error_msg,
                 delete_after=5,
                 reply=True,
                 author={"name": "Transfer Error", "icon_url": self.utils.get_avatar_url(ctx.author)},
@@ -3285,8 +3277,10 @@ class Economy(commands.Cog):
             return
 
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=drop_wallet, amount=-amount, description="Money Drop"
+            await self.bot.database.spend_from_wallet(
+                wallet_id=drop_wallet,
+                amount=amount,
+                description="Money Drop",
             )
         except ValueError as e:
             await Embeds.error(
@@ -3295,7 +3289,6 @@ class Economy(commands.Cog):
                 delete_after=5,
                 reply=True,
             )
-            return
             return
 
         symbols = ["💰", "💸", "💳", "💵", "💶", "🪙", "💷", "💴"]
@@ -3346,8 +3339,10 @@ class Economy(commands.Cog):
             return
 
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=-amount_converted, description="Airdrop"
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id,
+                amount=amount_converted,
+                description="Airdrop",
             )
         except ValueError as e:
             await Embeds.error(
@@ -3356,7 +3351,6 @@ class Economy(commands.Cog):
                 delete_after=5,
                 reply=True,
             )
-            return
             return
 
         embed = discord.Embed(
@@ -3586,9 +3580,18 @@ class Economy(commands.Cog):
             return await ctx.reply(
                 f"Invalid price calculation result for {symbol}.", delete_after=5
             )
-        await self.bot.database.process_treasury_transaction(
-            wallet_id, -spend, f"Buy {symbol}"
-        ) 
+        try:
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id,
+                amount=spend,
+                description=f"Buy {symbol}",
+            )
+        except ValueError as e:
+            return await ctx.reply(
+                f"🚫 Purchase failed: {e}",
+                delete_after=5,
+            )
+
         await self.bot.database.add_crypto_asset(user_id, symbol, coins, price)
 
         embed = discord.Embed(

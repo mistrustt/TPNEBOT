@@ -2898,10 +2898,10 @@ class General(commands.Cog, name="General"):
                     str(await self.bot.database.get_wallet_balance(member_wallet_id))
                 )
                 if wallet_balance > 0:
-                    await self.bot.database.process_treasury_transaction(
-                        member_wallet_id,
-                        -wallet_balance,
-                        "Data deletion - wallet balance returned to treasury",
+                    await self.bot.database.spend_from_wallet(
+                        wallet_id=member_wallet_id,
+                        amount=wallet_balance,
+                        description="Data deletion - wallet balance returned to treasury",
                     )
             except Exception as e:
                 logger.warning(f"forgetme wallet reset failed for {user_id}: {e}")

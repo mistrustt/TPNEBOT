@@ -4018,10 +4018,10 @@ class Owner(commands.Cog, name="Owner"):
                     amount,
                     f"Admin Audit - Seizure by {ctx.author.name}",
                 )
-                await self.bot.database.process_treasury_transaction(
-                    member_wallet_id,
-                    -amount,
-                    f"Admin Audit - Seizure by {ctx.author.name}",
+                await self.bot.database.spend_from_wallet(
+                    wallet_id=member_wallet_id,
+                    amount=amount,
+                    description=f"Admin Audit - Seizure by {ctx.author.name}",
                 )
             except ValueError as e:
                 await Embeds.error(
@@ -4100,11 +4100,16 @@ class Owner(commands.Cog, name="Owner"):
             )
 
             if total_wallet_balance != 0:
-                await self.bot.database.process_treasury_transaction(
-                    member_wallet_id,
-                    -total_wallet_balance,
-                    f"Admin Audit - Reset (Full Wipe) by {ctx.author.name}",
-                )
+                try:
+                    await self.bot.database.spend_from_wallet(
+                        wallet_id=member_wallet_id,
+                        amount=total_wallet_balance,
+                        description=f"Admin Audit - Reset (Full Wipe) by {ctx.author.name}",
+                    )
+                except ValueError as e:
+                    logger.warning(
+                        "admin_bank_reset wallet wipe failed for %s: %s", member.id, e
+                    )
 
             await self.bot.database.validate_economy()
 

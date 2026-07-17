@@ -231,9 +231,16 @@ class CrashView(discord.ui.LayoutView):
                 )
                 return
 
-            await self.bot.database.process_treasury_transaction(
-                wallet, -bet, "Crash Game Bet"
-            )
+            try:
+                await self.bot.database.spend_from_wallet(
+                    wallet_id=wallet,
+                    amount=bet,
+                    description="Crash Game Bet",
+                )
+            except ValueError as e:
+                return await sub_int.response.send_message(
+                    f"🚫 {e}", ephemeral=True
+                )
 
             await self.casino._add_refund(
                 self.session_id,
@@ -3327,11 +3334,19 @@ class SlotsView(discord.ui.LayoutView):
                     self._update_button_states()
                     return
 
-                await self.bot.database.process_treasury_transaction(
-                    wallet_id=wallet_id,
-                    amount=-self.bet,
-                    description="Slots Bet"
-                )
+                try:
+                    await self.bot.database.spend_from_wallet(
+                        wallet_id=wallet_id,
+                        amount=self.bet,
+                        description="Slots Bet",
+                    )
+                except ValueError as e:
+                    await interaction.response.send_message(
+                        f"🚫 {e}", ephemeral=True
+                    )
+                    self.is_spinning = False
+                    self._update_button_states()
+                    return
 
             # Run animation
             await self._run_animation(interaction)
@@ -5379,13 +5394,13 @@ class Casino(commands.Cog):
                 await Embeds.warning(ctx, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
                         f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
             try:
-                await self.bot.database.process_treasury_transaction(
+                await self.bot.database.spend_from_wallet(
                     wallet_id=wallet_id,
-                    amount=-Decimal(amount),
+                    amount=Decimal(amount),
                     description="Gamble Bet",
                 )
             except ValueError as e:
-                await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
+                await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
                 return
 
             session_id = await self._create_game_session(
@@ -6047,11 +6062,11 @@ class Casino(commands.Cog):
             return
 
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=-Decimal(amount), description="Dice Bet"
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id, amount=Decimal(amount), description="Dice Bet"
             )
         except ValueError as e:
-            await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
+            await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
             return
 
         session_id = await self._create_game_session(
@@ -6271,14 +6286,14 @@ class Casino(commands.Cog):
             await ctx.reply(view=view, delete_after=5)
 
         try:
-            await self.bot.database.process_treasury_transaction(
+            await self.bot.database.spend_from_wallet(
                 wallet_id=wallet_id,
-                amount=-amount,
+                amount=amount,
                 description="Double or Nothing Initial Bet",
             )
         except ValueError as e:
             container = discord.ui.Container(
-                discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
+                discord.ui.TextDisplay(f"🚫 {e}"),
                 accent_color=0xED4245
             )
             view = discord.ui.LayoutView()
@@ -6379,12 +6394,12 @@ class Casino(commands.Cog):
             return
 
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=-amount, description="Blackjack Bet"
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id, amount=amount, description="Blackjack Bet"
             )
         except ValueError as e:
             container = discord.ui.Container(
-                discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
+                discord.ui.TextDisplay(f"🚫 {e}"),
                 accent_color=0xED4245
             )
             view = discord.ui.LayoutView()
@@ -6929,14 +6944,14 @@ class Casino(commands.Cog):
 
             # Deduct additional bet
             try:
-                await self.bot.database.process_treasury_transaction(
+                await self.bot.database.spend_from_wallet(
                     wallet_id=wallet_id,
-                    amount=-bet_to_double,
+                    amount=bet_to_double,
                     description="Blackjack Double Down",
                 )
             except ValueError as e:
                 await interaction.followup.send(
-                    f"🚫 Transaction failed: {e}", ephemeral=True
+                    f"🚫 {e}", ephemeral=True
                 )
                 return
 
@@ -6985,14 +7000,14 @@ class Casino(commands.Cog):
 
             # Deduct additional bet for second hand
             try:
-                await self.bot.database.process_treasury_transaction(
+                await self.bot.database.spend_from_wallet(
                     wallet_id=wallet_id,
-                    amount=-current_bet,
+                    amount=current_bet,
                     description="Blackjack Split",
                 )
             except ValueError as e:
                 await interaction.followup.send(
-                    f"🚫 Transaction failed: {e}", ephemeral=True
+                    f"🚫 {e}", ephemeral=True
                 )
                 return
 
@@ -7049,14 +7064,14 @@ class Casino(commands.Cog):
 
             # Deduct insurance bet from wallet
             try:
-                await self.bot.database.process_treasury_transaction(
+                await self.bot.database.spend_from_wallet(
                     wallet_id=wallet_id,
-                    amount=-insurance_amount,
+                    amount=insurance_amount,
                     description="Blackjack Insurance",
                 )
             except ValueError as e:
                 await interaction.followup.send(
-                    f"🚫 Transaction failed: {e}", ephemeral=True
+                    f"🚫 {e}", ephemeral=True
                 )
                 return
 
@@ -7142,8 +7157,8 @@ class Casino(commands.Cog):
                     ), color=discord.Color.orange(), delete_after=5)
 
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=-bet, description="Poker Bet"
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id, amount=bet, description="Poker Bet"
             )
         except ValueError as e:
             return await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
@@ -7249,11 +7264,11 @@ class Casino(commands.Cog):
                         ), color=discord.Color.orange(), delete_after=5)
 
             try:
-                await self.bot.database.process_treasury_transaction(
-                    wallet_id=wallet_id, amount=-bet_amount, description="HiLo Bet"
+                await self.bot.database.spend_from_wallet(
+                    wallet_id=wallet_id, amount=bet_amount, description="HiLo Bet"
                 )
             except ValueError as e:
-                await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
+                await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
                 self.active_players.discard(user_id)
                 return
 
@@ -7337,11 +7352,11 @@ class Casino(commands.Cog):
                     f"**{await self.formatter(amount)} {self.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
         try:
-            await self.bot.database.process_treasury_transaction(
-                wallet_id=wallet_id, amount=-amount, description="Lucky Ladder bet"
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id, amount=amount, description="Lucky Ladder bet"
             )
         except ValueError as e:
-            return await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
+            return await Embeds.error(ctx, description=f"🚫 {e}", delete_after=5)
 
         session_id = await self._create_game_session(
             ctx,
@@ -8019,9 +8034,9 @@ class Casino(commands.Cog):
                 await ctx.reply(view=view, delete_after=5)
 
             try:
-                await self.bot.database.process_treasury_transaction(
+                await self.bot.database.spend_from_wallet(
                     wallet_id=wallet_id,
-                    amount=-bet_amount,
+                    amount=bet_amount,
                     description="Mines game bet",
                 )
             except ValueError as e:
@@ -8470,13 +8485,13 @@ class BetButton(discord.ui.Button):
                 return await Embeds.error(itn, description=f"🚫 {itn.user.mention}: Insufficient Funds", ephemeral=True, reply=False)
 
             try:
-                await self.bot.database.process_treasury_transaction(
+                await self.bot.database.spend_from_wallet(
                     wallet_id=wallet_id,
-                    amount=-Decimal(player_bet),
+                    amount=Decimal(player_bet),
                     description="Keno Bet",
                 )
             except ValueError as e:
-                return await Embeds.error(itn, description=f"🚫 Transaction failed: {e}", delete_after=5, reply=False)
+                return await Embeds.error(itn, description=f"🚫 {e}", delete_after=5, reply=False)
 
             session_id = getattr(game_ui_container, "session_id", None) or getattr(
                 table_ui_view, "session_id", None
