@@ -141,6 +141,12 @@ class Misc(commands.Cog, name="Misc"):
         author_id = int(reaction.message.author.id)
 
         if reaction.emoji in ["😭", "💀", "🔥", "❤️", "🤡"]:
+            if await self.bot.database.is_user_blacklisted(user_id):
+                logging.debug(
+                    f"Ignoring reaction from blacklisted user: {user_id}"
+                )
+                return
+
             if reaction.emoji == "😭":
                 logging.debug(
                     f"Processing sob reaction for user: {user_id}, author: {author_id}"
