@@ -472,11 +472,14 @@ class General(commands.Cog, name="General"):
         self, ctx: commands.Context, query: Optional[str] = None
     ):
         prefix = ctx.prefix or "/"
-        color = (
-            ctx.author.top_role.color
-            if hasattr(ctx.author, "top_role")
-            else discord.Color.blurple()
-        )
+        try:
+            color = (
+                ctx.author.top_role.color
+                if hasattr(ctx.author, "top_role")
+                else discord.Color.blurple()
+            )
+        except TypeError:
+            color = discord.Color.blurple()
 
         def create_embed(title: str, description: str = None) -> discord.Embed:
             emb = discord.Embed(
@@ -956,6 +959,18 @@ class General(commands.Cog, name="General"):
         except Exception:
             await ctx.send("An error occurred", delete_after=5)
 
+    @commands.command(name="setprefix")
+    @commands.has_permissions(administrator=True)
+    async def set_prefix(self, ctx: Context, prefix: str):
+        try:
+            await self.bot.database.set_prefix(ctx.guild.id, prefix)
+            await Embeds.success(ctx, f"Prefix set to: `{prefix}`", reply=False)
+        except Exception as e:
+            await ctx.send(
+                f"An error occurred while setting the prefix. Please try again later."
+            )
+            logger.error(f"Error setting prefix: {e}")
+
     @commands.command(
         name="listbots", description="List all bots in the server."
     )
@@ -1027,18 +1042,6 @@ class General(commands.Cog, name="General"):
 
         await ctx.reply(embed=embed)
         logger.debug("Botinfo message sent")
-
-    @commands.command(name="setprefix")
-    @commands.has_permissions(administrator=True)
-    async def set_prefix(self, ctx: Context, prefix: str):
-        try:
-            await self.bot.database.set_prefix(ctx.guild.id, prefix)
-            await Embeds.success(ctx, f"Prefix set to: `{prefix}`", reply=False)
-        except Exception as e:
-            await ctx.send(
-                f"An error occurred while setting the prefix. Please try again later."
-            )
-            logger.error(f"Error setting prefix: {e}")
 
     @commands.hybrid_command(
         name="userinfo",
@@ -1387,6 +1390,17 @@ class General(commands.Cog, name="General"):
             await ctx.reply(embed=embed)
         else:
             await Embeds.error(ctx, f"{member.display_name} does not have a server-specific avatar. Here's their global avatar: {member.display_avatar.url}", reply=True)
+
+    @commands.hybrid_command(
+        name="servericon",
+        description="View the icon of the current server."
+    )
+    async def servericon(self, ctx: commands.Context) -> None:
+        embed = discord.Embed(
+            title=f"**{ctx.guild.name}** Icon", color=ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+        )
+        embed.set_image(url=str(ctx.guild.icon.url))
+        await ctx.reply(embed=embed)
 
     @commands.command(
         name="invite",

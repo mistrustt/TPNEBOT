@@ -4632,11 +4632,10 @@ class Casino(commands.Cog):
 
         return payout, False, ""
 
-    @commands.hybrid_group(
-        name="casino",
-        invoke_without_command=True,
-        description="Casino command group. Use /casino for subcommands.",
-    )
+    ### TEMPORARILY REMOVED FROM COMMAND GROUP
+    ### DISCORD DISALLOWS THE WORD "CASINO" FROM COMMAND NAMES
+    ### THIS WILL REMAIN DISABLED UNTIL A SOLUTION IS FOUND
+
     async def casino(self, ctx: commands.Context):
         """Root for casino commands. Lists available subcommands."""
         prefix = ctx.prefix or "/"
@@ -4670,9 +4669,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @casino.command(
-        name="stats", description="Check your win/loss statistics for a specific game."
-    )
     async def casino_stats(
         self,
         ctx: commands.Context,
@@ -4734,11 +4730,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @casino.command(
-        name="leaderboard",
-        aliases=["lb"],
-        description="View the top winners and losers for a specific game.",
-    )
     async def casino_leaderboard(
         self, ctx: commands.Context, game_name: str = "gamble", limit: int = 10
     ):
@@ -4786,9 +4777,6 @@ class Casino(commands.Cog):
             embed.add_field(name="Top 10 Users", value="No data available", inline=True)
         await ctx.send(embed=embed)
 
-    @casino.command(
-        name="history", aliases=["games", "ghistory"], description="View your game history."
-    )
     async def casino_history(self, ctx: commands.Context, limit: int = 100):
         member = ctx.author
         limit = max(1, min(int(limit), 1000))
@@ -4803,13 +4791,6 @@ class Casino(commands.Cog):
         embed = await view.get_page_embed()
         await ctx.reply(embed=embed, view=view, mention_author=False)
 
-    @casino.command(
-        name="verify",
-        aliases=["v", "verif", "check"],
-        description="Verify a provably-fair game outcome.",
-        hidden=True,
-    )
-    @unified_cooldown(5)
     async def casino_verify(
         self,
         ctx: commands.Context,
@@ -5185,12 +5166,6 @@ class Casino(commands.Cog):
 
         return errors, params
 
-    @casino.command(
-        name="verifyraw",
-        aliases=["vr", "manualverify"],
-        description="Manually verify a FairGate outcome using the public /fairness/verify endpoint.",
-    )
-    @unified_cooldown(5)
     async def casino_verifyraw(
         self,
         ctx: commands.Context,
@@ -5275,12 +5250,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @casino.command(
-        name="verifyurl",
-        aliases=["vurl"],
-        description="Return the public /fairness/verify URL for a set of inputs without calling it.",
-    )
-    @unified_cooldown(5)
     async def casino_verifyurl(
         self,
         ctx: commands.Context,
@@ -5323,10 +5292,6 @@ class Casino(commands.Cog):
         )
         await ctx.reply(embed=embed, mention_author=False)
 
-    @casino.command(
-        name="seed", description="View your current client seed and the active FairGate server seed hash."
-    )
-    @unified_cooldown(5)
     async def casino_seed(self, ctx: commands.Context):
         client_seed, nonce = await self.bot.database.get_client_seed(ctx.author.id)
 
@@ -5352,12 +5317,6 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @casino.command(
-        name="setseed",
-        aliases=["newseed"],
-        description="Update your client seed for provable fairness.",
-    )
-    @unified_cooldown(5)
     async def casino_setseed(
         self, ctx: commands.Context, *, seed: Optional[str] = None
     ):
