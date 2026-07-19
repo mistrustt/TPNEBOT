@@ -4568,21 +4568,11 @@ class Owner(commands.Cog, name="Owner"):
                 delete_after=None,
             )
 
-    @app_commands.command(
-        name="shopmodal",
-        description="Open a modal to create a new shop item with effect configuration.",
-    )
-    @app_commands.check(_owner_check)
     async def shop_item_modal(self, interaction: discord.Interaction):
         """Open a modal to create a new shop item with effect configuration."""
         modal = ShopItemModal(self.bot)
         await interaction.response.send_modal(modal)
 
-    @app_commands.command(
-        name="editshopitem", description="Edit an existing shop item using a modal."
-    )
-    @app_commands.check(_owner_check)
-    @app_commands.describe(item_id="The ID of the shop item to edit")
     async def edit_shop_item(self, interaction: discord.Interaction, item_id: int):
         """Edit an existing shop item using a modal."""
         item = await self.bot.database.get_shop_item_by_id(item_id)
