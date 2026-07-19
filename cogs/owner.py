@@ -3884,7 +3884,7 @@ class Owner(commands.Cog, name="Owner"):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @adminbank.command(name="give", aliases=["grant", "award", "wire"], hidden=True)
+    @adminbank.command(name="give", aliases=["award", "wire"], hidden=True)
     @commands.is_owner()
     async def admin_bank_give(self, ctx: Context, member: discord.Member, amount: str):
         """Give a specified amount to a user's bank balance."""
@@ -4195,6 +4195,7 @@ class Owner(commands.Cog, name="Owner"):
         user: discord.User,
         tier_name: str,
     ):
+        """Manually set a user's VIP tier."""
         try:
             # Get tier by name
             tier_name = tier_name.capitalize()
@@ -4231,6 +4232,7 @@ class Owner(commands.Cog, name="Owner"):
     @adminbank.command(name="resetvip", description="Reset a user's VIP progress to default.", hidden=True)
     @commands.is_owner()
     async def reset_vip(self, ctx: Context, user: discord.User):
+        """Reset a user's VIP progress to default (Bronze)."""
         try:
             success = await self.bot.database.reset_user_vip(user.id)
 
@@ -4251,6 +4253,7 @@ class Owner(commands.Cog, name="Owner"):
     @adminbank.command(name="vipconfig", description="Display VIP tier configuration.", hidden=True)
     @commands.is_owner()
     async def vip_config(self, ctx: Context):
+        """Display VIP tier configuration."""
         try:
             tiers = await self.bot.database.get_all_vip_tiers()
 
@@ -4285,7 +4288,7 @@ class Owner(commands.Cog, name="Owner"):
             logger.error(f"Error in vip_config: {e}")
             await ctx.send(f"Error: {e}")
 
-    @adminbank.command(name="getvipwagered", hidden=True)
+    @adminbank.command(name="getvipwagered", description="Get a user's total wagered amount.", hidden=True)
     @commands.is_owner()
     async def get_vip_wagered(
         self,
@@ -4318,7 +4321,7 @@ class Owner(commands.Cog, name="Owner"):
             logger.error(f"Error in get_vip_wagered: {e}")
             await ctx.send(f"Error: {e}")
 
-    @adminbank.command(name="addrakeback", hidden=True)
+    @adminbank.command(name="addrakeback", description="Add rakeback to a user's balance.", hidden=True)
     @commands.is_owner()
     async def add_rakeback(
         self,
@@ -4363,7 +4366,7 @@ class Owner(commands.Cog, name="Owner"):
             logger.error(f"Error in add_rakeback: {e}")
             await ctx.send(f"Error: {e}")
 
-    @adminbank.command(name="initviptiers", hidden=True)
+    @adminbank.command(name="initviptiers", description="Initialize default VIP tiers.", hidden=True)
     @commands.is_owner()
     async def init_vip_tiers(self, ctx: Context):
         """Initialize default VIP tiers."""
@@ -4390,7 +4393,7 @@ class Owner(commands.Cog, name="Owner"):
             logger.error(f"Error in init_vip_tiers: {e}")
             await ctx.send(f"Error: {e}")
 
-    @adminbank.command(name="rebalance", aliases=["rebal"], hidden=True)
+    @adminbank.command(name="rebalance", aliases=["rebal"], description="Force an economic rebalance cycle and display the result.", hidden=True)
     @commands.is_owner()
     async def admin_bank_rebalance(self, ctx: Context):
         """Force an economic rebalance cycle and display the result."""
@@ -4440,7 +4443,7 @@ class Owner(commands.Cog, name="Owner"):
         except Exception as e:
             await Embeds.error(ctx, f"Error: {e}", delete_after=None)
 
-    @commands.command(name="shopitem", hidden=True)
+    @commands.command(name="shopitem", description="Add a new item to the shop.", hidden=True)
     @commands.is_owner()
     async def add_item(self, ctx: commands.Context):
         """Allows an admin to add a new item to the shop with step‐by‐step prompts."""
@@ -4528,7 +4531,7 @@ class Owner(commands.Cog, name="Owner"):
             delete_after=None,
         )
 
-    @commands.command(name="restock", hidden=True)
+    @commands.command(name="restock", description="Restock an existing item in the shop.", hidden=True)
     @commands.is_owner()
     async def restock_item(
         self, ctx: commands.Context, item_identifier: str, quantity: int
@@ -4589,7 +4592,7 @@ class Owner(commands.Cog, name="Owner"):
         modal = ShopItemModal(self.bot, edit_item=item)
         await interaction.response.send_modal(modal)
 
-    @commands.command(name="listitems", hidden=True)
+    @commands.command(name="listitems", description="List all shop items with their details.", hidden=True)
     @commands.is_owner()
     async def list_shop_items(self, ctx: commands.Context, page: int = 1):
         """List all shop items with their details."""
@@ -4652,7 +4655,7 @@ class Owner(commands.Cog, name="Owner"):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name="giveitem", hidden=True)
+    @commands.command(name="giveitem", description="Give an item directly to a user.", hidden=True)
     @commands.is_owner()
     async def give_item(
         self,
@@ -4709,7 +4712,7 @@ class Owner(commands.Cog, name="Owner"):
             )
         await ctx.send(embed=embed)
 
-    @commands.command(name="vieweffects", hidden=True)
+    @commands.command(name="vieweffects", description="View a user's active effects.", hidden=True)
     @commands.is_owner()
     async def view_effects(self, ctx: commands.Context, member: discord.Member):
         """View a user's active effects."""
@@ -4747,7 +4750,7 @@ class Owner(commands.Cog, name="Owner"):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name="clearcooldown", hidden=True)
+    @commands.command(name="clearcooldown", description="Clear a user's item cooldown (debug tool).", hidden=True)
     @commands.is_owner()
     async def clear_cooldown(
         self, ctx: commands.Context, member: discord.Member, item_name: str
