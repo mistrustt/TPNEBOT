@@ -2579,20 +2579,21 @@ class Economy(commands.Cog):
             await Embeds.error(ctx, str(e), delete_after=5, reply=True)
 
     @commands.group(name="loan", aliases=["loans"], invoke_without_command=True)
-    async def loan(self, ctx: commands.Context):
-        """Group command for managing loans."""
+    async def loan(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+        """Group command for managing loans. Defaults to your own loan."""
         if ctx.invoked_subcommand is None:
-            user_id = ctx.author.id
-            active_loan = await self.bot.database.get_active_loans_for_user(user_id)
+            target = member or ctx.author
+            active_loan = await self.bot.database.get_active_loans_for_user(target.id)
             if not active_loan:
-                return await Embeds.error(ctx, "You have no active loans.", delete_after=5, reply=True)
+                msg = f"{target.display_name} has no active loans." if member else "You have no active loans."
+                return await Embeds.error(ctx, msg, delete_after=5, reply=True)
 
             await self.bot.database.date_check_loans()
 
             loan = active_loan[0]
             remaining_balance = loan.total_repay - loan.amount_paid
             payment_percentage = (loan.amount_paid / loan.total_repay * 100) if loan.total_repay > 0 else 0
-            
+
             color = (
                 discord.Color.blurple()
                 if isinstance(ctx.channel, discord.DMChannel)
@@ -2605,6 +2606,7 @@ class Economy(commands.Cog):
             embed = discord.Embed(
                 title="Loan Status",
                 description=(
+                    f"User: {target.mention}\n"
                     f"Principal: {self.currency_name} **{await self.formatter(loan.principal)}**\n"
                     f"Total to Repay: {self.currency_name} **{await self.formatter(loan.total_repay)}**\n"
                     f"Amount Paid: {self.currency_name} **{await self.formatter(loan.amount_paid)}**\n"
@@ -2615,7 +2617,7 @@ class Economy(commands.Cog):
                 ),
                 color=color,
             )
-            embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(ctx.author))
+            embed.set_author(name="Loan Status", icon_url=self.utils.get_avatar_url(target))
             embed.set_footer(text=f"Interest Rate: {loan.interest_rate * 100:.1f}%")
             await ctx.reply(embed=embed)
 
