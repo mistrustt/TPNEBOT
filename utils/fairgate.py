@@ -210,7 +210,8 @@ class FairGateClient:
         """Resolve a single FairGate game/play draw.
 
         If ``server_seed_hash`` is omitted the cached active hash is used.
-        On ``410 Gone`` the client refreshes the seed once and retries.
+        On seed rotation the client refreshes the seed and retries a few
+        times to tolerate rapidly rotating seeds.
         """
         payload = {
             "user_id": str(user_id),
@@ -221,28 +222,65 @@ class FairGateClient:
             "params": params or {},
         }
 
-        try:
-            return await self._request("POST", "/play", json_body=payload)
-        except SeedGoneError:
-            logger.warning("FairGate seed rotated (410 Gone); refreshing and retrying")
-            await self.get_seed(force=True)
-            payload["server_seed_hash"] = self._active_hash(None)
-            return await self._request("POST", "/play", json_body=payload)
-        except FairGateError as exc:
-            # Some FairGate instances return the mismatch as a non-410 error.
-            msg = str(exc).lower()
-            if "server seed hash" in msg or "active session" in msg:
-                logger.warning("FairGate seed mismatch; refreshing and retrying")
-                await self.get_seed(force=True)
-                payload["server_seed_hash"] = self._active_hash(None)
+        for attempt in range(3):
+            try:
                 return await self._request("POST", "/play", json_body=payload)
-            raise
-        except (TimeoutError, asyncio.TimeoutError):
-            # Re-raise as FairGateError so callers can uniformly catch failures.
-            raise FairGateError("FairGate request timed out", status=None)
-        except OSError as exc:
-            # aiohttp network/connection errors subclass OSError.
-            raise FairGateError(f"FairGate connection error: {exc}", status=None)
+            except SeedGoneError as exc:
+                current_hash = exc.current_hash or (
+                    exc.response.get("current_hash")
+                    if isinstance(exc.response, dict)
+                    else None
+                )
+                if current_hash:
+                    payload["server_seed_hash"] = current_hash
+                    self._seed = {
+                        "server_seed_hash": current_hash,
+                        "algorithm": self.algorithm,
+                    }
+                else:
+                    await self.get_seed(force=True)
+                    payload["server_seed_hash"] = self._active_hash(None)
+
+                if attempt == 2:
+                    raise
+                logger.warning(
+                    "FairGate seed rotated (410 Gone); retrying (%s/3)", attempt + 1
+                )
+            except FairGateError as exc:
+                # Some FairGate instances return the mismatch as a non-410 error.
+                msg = str(exc).lower()
+                if "server seed hash" in msg or "active session" in msg:
+                    current_hash = (
+                        exc.response.get("current_hash")
+                        if isinstance(exc.response, dict)
+                        else None
+                    )
+                    if current_hash:
+                        payload["server_seed_hash"] = current_hash
+                        self._seed = {
+                            "server_seed_hash": current_hash,
+                            "algorithm": self.algorithm,
+                        }
+                    else:
+                        await self.get_seed(force=True)
+                        payload["server_seed_hash"] = self._active_hash(None)
+
+                    if attempt == 2:
+                        raise
+                    logger.warning(
+                        "FairGate seed mismatch; retrying (%s/3)", attempt + 1
+                    )
+                else:
+                    raise
+            except (TimeoutError, asyncio.TimeoutError):
+                # Re-raise as FairGateError so callers can uniformly catch failures.
+                raise FairGateError("FairGate request timed out", status=None)
+            except OSError as exc:
+                # aiohttp network/connection errors subclass OSError.
+                raise FairGateError(f"FairGate connection error: {exc}", status=None)
+
+        # Unreachable, but keeps type checkers happy.
+        raise FairGateError("FairGate play retries exhausted", status=None)
 
     async def create_app(
         self,

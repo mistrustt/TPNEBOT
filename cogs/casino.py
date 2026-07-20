@@ -859,13 +859,13 @@ class MinesGridLayout(discord.ui.LayoutView):
         return (1.0 - house_edge) / prob
 
     async def _calculate_multiplier(self, house_edge: float | None = None) -> float:
-        """Calculate the current multiplier from the mines probability formula.
+        """Calculate the current mines multiplier purely from probability.
 
         The multiplier is authoritative: ``(1 / P(x)) * RTP``, where
         ``P(x) = C(25-M, x) / C(25, x)`` and ``RTP = 1 - house_edge``.
-        Database values are ignored unless they match the math exactly
-        (within floating-point tolerance); this prevents stored misconfigurations
-        from being exploited.
+        Database ``mines_settings`` values are no longer consulted; payouts
+        are computed from the math directly to avoid misconfigured DB rows
+        affecting results.
 
         Args:
             house_edge: House edge fraction to use. Defaults to the user's
@@ -883,23 +883,7 @@ class MinesGridLayout(discord.ui.LayoutView):
 
         bomb_count = len(self.bomb_positions)
         gem_count = self.gems_clicked
-        expected = self._compute_mines_multiplier(bomb_count, gem_count, house_edge)
-
-        # Optional DB cache: only accepted if it matches the formula.
-        try:
-            db_value = await self.bot.database.get_mines_multiplier(bomb_count, gem_count)
-            if db_value is not None:
-                value = float(db_value)
-                if value > 0 and abs(value - expected) / expected <= 1e-6:
-                    return value
-                logger.warning(
-                    "Mines DB multiplier ignored: bomb=%s gem=%s db=%s math=%s",
-                    bomb_count, gem_count, value, expected,
-                )
-        except Exception as e:
-            logger.error(f"Error reading mines multiplier from DB: {str(e)}")
-
-        return expected
+        return self._compute_mines_multiplier(bomb_count, gem_count, house_edge)
 
     def _reveal_grid_buttons(self) -> None:
         """Reveal the final grid state on the existing buttons.

@@ -4205,6 +4205,10 @@ class CoverArtistView(discord.ui.LayoutView):
                 await self.message.edit(view=self)
         except discord.NotFound:
             pass
+        except discord.HTTPException:
+            # Message edit failed due to a Discord API issue (e.g. 503).
+            # The view has still timed out; leave the message as-is.
+            pass
 
 class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
     THUMB_SIZE = 1024
@@ -4441,6 +4445,8 @@ class LatestSurfacesView(discord.ui.LayoutView):
         try:
             await self.message.edit(view=self)
         except discord.NotFound:
+            pass
+        except discord.HTTPException:
             pass
 
 class GroupbuySongSelect(discord.ui.Select):

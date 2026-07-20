@@ -2293,6 +2293,7 @@ class Economy(commands.Cog):
                 )
         except ValueError as e:
             await Embeds.error(ctx, str(e), delete_after=5, reply=True)
+            return
 
         await ctx.reply(embed=embed)
 
