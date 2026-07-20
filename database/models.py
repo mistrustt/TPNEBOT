@@ -898,6 +898,8 @@ class GameHistory(Base):
     game_name = Column(String, nullable=False)
     outcome = Column(String, nullable=False)  # 'win', 'loss', 'tie', etc.
     wagered = Column(Numeric(precision=38, scale=2), nullable=False)
+    payout_multiplier = Column(Numeric(precision=38, scale=10), nullable=True)
+    payout_amount = Column(Numeric(precision=38, scale=2), nullable=True)
     client_seed = Column(String(64), nullable=False)  # widened
     used_server_seed = Column(
         String(64), nullable=True

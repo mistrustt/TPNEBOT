@@ -414,6 +414,9 @@ class CasinoMixin(BaseManager):
         seed_used: str,
         nonce: int,
         hash_hex: str,
+        *,
+        payout_multiplier=None,
+        payout_amount=None,
     ) -> tuple[str, str]:
         """Insert a game history entry with the given outcome and rotate the seed.
 
@@ -428,6 +431,9 @@ class CasinoMixin(BaseManager):
         Writing it at insert time means the most-recent game is verifiable
         immediately, without waiting for the next game's rotation to
         back-fill via ``_reveal_and_rotate_in_tx``.
+
+        ``payout_multiplier`` and ``payout_amount`` are optional. When supplied,
+        they describe the actual payout returned to the player for this round.
         """
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
@@ -439,6 +445,8 @@ class CasinoMixin(BaseManager):
                         game_name=game_name,
                         outcome=outcome,
                         wagered=bet,
+                        payout_multiplier=payout_multiplier,
+                        payout_amount=payout_amount,
                         client_seed=client_seed,
                         used_server_seed=seed_used,
                         nonce=nonce,
@@ -469,12 +477,18 @@ class CasinoMixin(BaseManager):
         client_seed: str,
         nonce: int,
         hash_hex: str,
+        *,
+        payout_multiplier=None,
+        payout_amount=None,
     ) -> None:
         """Insert a FairGate-resolved game history entry.
 
         The raw server seed is not known until FairGate rotates/reveals it, so
         ``used_server_seed`` is left NULL and must be back-filled later via
         ``backfill_fairgate_seed``.
+
+        ``payout_multiplier`` and ``payout_amount`` are optional. When supplied,
+        they describe the actual payout returned to the player for this round.
         """
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
@@ -486,6 +500,8 @@ class CasinoMixin(BaseManager):
                         game_name=game_name,
                         outcome=outcome,
                         wagered=bet,
+                        payout_multiplier=payout_multiplier,
+                        payout_amount=payout_amount,
                         client_seed=client_seed,
                         used_server_seed=None,
                         nonce=nonce,
@@ -525,6 +541,9 @@ class CasinoMixin(BaseManager):
         seed_used: str,
         nonce: int,
         hash_hex: str,
+        *,
+        payout_multiplier=None,
+        payout_amount=None,
     ) -> tuple[str, str]:
         """Insert a win entry into game history."""
         raw_user_id = user_id
@@ -539,6 +558,8 @@ class CasinoMixin(BaseManager):
             seed_used=seed_used,
             nonce=nonce,
             hash_hex=hash_hex,
+            payout_multiplier=payout_multiplier,
+            payout_amount=payout_amount,
         )
         # Award a small player-earned karma point for winning (capped by daily karma system).
         try:
@@ -556,6 +577,9 @@ class CasinoMixin(BaseManager):
         seed_used: str,
         nonce: int,
         hash_hex: str,
+        *,
+        payout_multiplier=None,
+        payout_amount=None,
     ) -> tuple[str, str]:
         """Insert a loss entry into game history."""
         raw_user_id = user_id
@@ -570,6 +594,8 @@ class CasinoMixin(BaseManager):
             seed_used=seed_used,
             nonce=nonce,
             hash_hex=hash_hex,
+            payout_multiplier=payout_multiplier,
+            payout_amount=payout_amount,
         )
 
     async def get_total_wins(self, user_id: int) -> int:

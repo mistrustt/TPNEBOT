@@ -341,8 +341,14 @@ class CrashView(discord.ui.LayoutView):
         # Process game result for rakeback
         await self.casino.process_game_result(uid, "crash", bet)
         pf = self.pf_data.get(uid, {})
+        payout_multiplier = (
+            (win / bet).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+            if bet else Decimal("0")
+        )
         await self.casino._record_game_outcome(
-            uid, "crash", "win", bet, pf
+            uid, "crash", "win", bet, pf,
+            payout_multiplier=payout_multiplier,
+            payout_amount=win,
         )
 
         self.cashed_out[uid] = self.current_multiplier
@@ -395,6 +401,8 @@ class CrashView(discord.ui.LayoutView):
                 pf = self.pf_data.get(uid, {})
                 await self.casino._record_game_outcome(
                     uid, "crash", "loss", self.players[uid], pf,
+                    payout_multiplier=Decimal("0"),
+                    payout_amount=Decimal("0"),
                 )
                 await self.casino._log_game_event(
                     self.session_id,
@@ -480,6 +488,8 @@ class CrashView(discord.ui.LayoutView):
                             pf = self.pf_data.get(uid, {})
                             await self.casino._record_game_outcome(
                                 uid, "crash", "loss", self.players[uid], pf,
+                                payout_multiplier=Decimal("0"),
+                                payout_amount=Decimal("0"),
                             )
                             await self.casino._log_game_event(
                                 self.session_id,
@@ -604,11 +614,19 @@ class MinesGridLayout(discord.ui.LayoutView):
                 pos = row_idx * 5 + col_idx
                 self.grid_buttons.append(button)
 
-    async def _record_mines_outcome(self, outcome: str):
+    async def _record_mines_outcome(
+        self, outcome: str, *, payout_multiplier=None, payout_amount=None
+    ):
         """Persist the game result through FairGate."""
         try:
             await self.casino._record_game_outcome(
-                self.user_id, "mines", outcome, self.bet_amount, self.PF
+                self.user_id,
+                "mines",
+                outcome,
+                self.bet_amount,
+                self.PF,
+                payout_multiplier=payout_multiplier,
+                payout_amount=payout_amount,
             )
         except Exception as e:
             logger.error(f"Failed to record mines {outcome}: {e}")
@@ -689,7 +707,17 @@ class MinesGridLayout(discord.ui.LayoutView):
                 amount=potential,
                 description="Mines game luck save",
             )
-            await self._record_mines_outcome("win")
+            payout_multiplier = (
+                (potential / self.bet_amount).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if self.bet_amount else Decimal("0")
+            )
+            await self._record_mines_outcome(
+                "win",
+                payout_multiplier=payout_multiplier,
+                payout_amount=potential,
+            )
             await casino.process_game_result(self.user_id, "mines", self.bet_amount)
             formatted_save = await casino.formatter(potential)
             self.container.game_text.content = (
@@ -713,7 +741,11 @@ class MinesGridLayout(discord.ui.LayoutView):
             return
 
         # Record loss
-        await self._record_mines_outcome("loss")
+        await self._record_mines_outcome(
+            "loss",
+            payout_multiplier=Decimal("0"),
+            payout_amount=Decimal("0"),
+        )
 
         # Process game result for rakeback
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
@@ -784,7 +816,17 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
 
         # Record win
-        await self._record_mines_outcome("win")
+        payout_multiplier = (
+            (winnings / self.bet_amount).quantize(
+                Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+            )
+            if self.bet_amount else Decimal("0")
+        )
+        await self._record_mines_outcome(
+            "win",
+            payout_multiplier=payout_multiplier,
+            payout_amount=winnings,
+        )
 
         # Process game result for rakeback
         await casino.process_game_result(self.user_id, "mines", self.bet_amount)
@@ -982,7 +1024,17 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
 
         # Record win
-        await self._record_mines_outcome("win")
+        payout_multiplier = (
+            (winnings / self.bet_amount).quantize(
+                Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+            )
+            if self.bet_amount else Decimal("0")
+        )
+        await self._record_mines_outcome(
+            "win",
+            payout_multiplier=payout_multiplier,
+            payout_amount=winnings,
+        )
 
         # Process game result for rakeback only if user actually played
         if self.gems_clicked > 0:
@@ -1254,12 +1306,20 @@ class DoubleOrNothingView(discord.ui.LayoutView):
         success = side == "heads"
         if success:
             self.winnings = Decimal(self.winnings) * 2
+            payout_multiplier = (
+                (self.winnings / self.initial_amount).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if self.initial_amount else Decimal("0")
+            )
             await self.casino._record_game_outcome(
                 self.user_id,
                 "double",
                 "win",
                 self.initial_amount,
                 self.PF,
+                payout_multiplier=payout_multiplier,
+                payout_amount=self.winnings,
             )
             self.rounds += 1
 
@@ -1285,6 +1345,8 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 "loss",
                 self.initial_amount,
                 self.PF,
+                payout_multiplier=Decimal("0"),
+                payout_amount=Decimal("0"),
             )
 
             # Build loss container (no buttons)
@@ -1332,6 +1394,23 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             show_buttons=False
         )
         await interaction.response.edit_message(view=self)
+
+        # Record the final cashout outcome.
+        payout_multiplier = (
+            (self.winnings / self.initial_amount).quantize(
+                Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+            )
+            if self.initial_amount else Decimal("0")
+        )
+        await self.casino._record_game_outcome(
+            self.user_id,
+            "double",
+            "win",
+            self.initial_amount,
+            self.PF,
+            payout_multiplier=payout_multiplier,
+            payout_amount=self.winnings,
+        )
 
         wallet_id = await self.bot.database.get_wallet_id_for_user(self.initial_user.id)
         await self.bot.database.process_treasury_transaction(
@@ -1913,8 +1992,25 @@ class RouletteView(discord.ui.LayoutView):
 
         # ── Record outcome ──
         net_won = total_winnings > 0
+        if net_won:
+            payout_multiplier = (
+                (total_winnings / total_wager).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if total_wager else Decimal("0")
+            )
+            payout_amount = total_winnings
+        else:
+            payout_multiplier = Decimal("0")
+            payout_amount = Decimal("0")
         await self.cog._record_game_outcome(
-            self.user_id, "roulette", "win" if net_won else "loss", total_wager, PF
+            self.user_id,
+            "roulette",
+            "win" if net_won else "loss",
+            total_wager,
+            PF,
+            payout_multiplier=payout_multiplier,
+            payout_amount=payout_amount,
         )
         if net_won:
             try:
@@ -2201,7 +2297,7 @@ class HiLoView(discord.ui.LayoutView):
                 return None
         return self.deck.pop(0)
 
-    async def _end_game(self, win: bool):
+    async def _end_game(self, win: bool, payout: Decimal | None = None):
         self.game_active = False
 
         if self.user_id in self.cog.active_players:
@@ -2210,18 +2306,35 @@ class HiLoView(discord.ui.LayoutView):
         await self.cog.process_game_result(self.user_id, "hilo", self.bet_amount)
 
         outcome = "win" if win else "loss"
+        if win and payout is not None:
+            payout_amount = payout
+            payout_multiplier = (
+                (payout_amount / self.bet_amount).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if self.bet_amount else Decimal("0")
+            )
+        else:
+            payout_amount = Decimal("0")
+            payout_multiplier = Decimal("0")
         await self.cog._record_game_outcome(
-            self.user_id, "hilo", outcome, self.bet_amount, self.PF
+            self.user_id,
+            "hilo",
+            outcome,
+            self.bet_amount,
+            self.PF,
+            payout_multiplier=payout_multiplier,
+            payout_amount=payout_amount,
         )
         await self.cog._remove_refund(self.session_id, user_id=self.user_id)
         await self.cog._end_game_session(
             self.session_id, outcome=outcome,
             final_state={
-                "winnings": str(self.bet_amount * self.multiplier) if win else None,
+                "winnings": str(payout_amount) if win else None,
                 "loss": str(self.bet_amount) if not win else None,
             },
         )
-        return self.bet_amount * self.multiplier if win else None
+        return payout_amount if win else None
 
     async def _show_result(self, interaction: discord.Interaction, win: bool, *, auto_cashout_card: str | None = None, boost_text: str = "", payout: Decimal | None = None):
         if win:
@@ -2296,7 +2409,7 @@ class HiLoView(discord.ui.LayoutView):
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
-                    await self._end_game(True)
+                    await self._end_game(True, payout=winnings)
                     await self._show_result(interaction, True, auto_cashout_card=next_card, boost_text=boost_text, payout=winnings)
                     return
             else:
@@ -2315,7 +2428,7 @@ class HiLoView(discord.ui.LayoutView):
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
-                    await self._end_game(True)
+                    await self._end_game(True, payout=potential)
                     await self._show_result(interaction, True, boost_text=boost_text, payout=potential)
                     return
                 await self._end_game(False)
@@ -2368,7 +2481,7 @@ class HiLoView(discord.ui.LayoutView):
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
-                    await self._end_game(True)
+                    await self._end_game(True, payout=winnings)
                     await self._show_result(interaction, True, auto_cashout_card=next_card, boost_text=boost_text, payout=winnings)
                     return
             else:
@@ -2387,7 +2500,7 @@ class HiLoView(discord.ui.LayoutView):
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
-                    await self._end_game(True)
+                    await self._end_game(True, payout=potential)
                     await self._show_result(interaction, True, boost_text=boost_text, payout=potential)
                     return
                 await self._end_game(False)
@@ -2455,7 +2568,7 @@ class HiLoView(discord.ui.LayoutView):
                 await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
                 return
 
-            await self._end_game(True)
+            await self._end_game(True, payout=winnings)
             await self._show_result(interaction, True, boost_text=boost_text, payout=winnings)
 
     # ── Force end / timeout ──
@@ -2622,8 +2735,16 @@ class PokerView(View):
             payout, _, boost_text = await self.cog._apply_item_multipliers(
                 self.user_id, payout, True
             )
+            payout_multiplier = (
+                (payout / self.bet).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if self.bet else Decimal("0")
+            )
             await self.cog._record_game_outcome(
-                self.user_id, "poker", "win", self.bet, self.PF
+                self.user_id, "poker", "win", self.bet, self.PF,
+                payout_multiplier=payout_multiplier,
+                payout_amount=payout,
             )
             await self.bot.database.process_treasury_transaction(
                 wallet_id=self.wallet_id, amount=payout, description="Poker Win"
@@ -2636,7 +2757,9 @@ class PokerView(View):
             # Tied hand → push. Record the round as a push (counts toward
             # total wagered but not toward wins or losses) and refund the bet.
             await self.cog._record_game_outcome(
-                self.user_id, "poker", "push", self.bet, self.PF
+                self.user_id, "poker", "push", self.bet, self.PF,
+                payout_multiplier=Decimal("1"),
+                payout_amount=self.bet,
             )
             await self.bot.database.process_treasury_transaction(
                 wallet_id=self.wallet_id, amount=self.bet, description="Poker Push"
@@ -2651,8 +2774,16 @@ class PokerView(View):
                 self.user_id, potential, False
             )
             if saved:
+                payout_multiplier = (
+                    (potential / self.bet).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if self.bet else Decimal("0")
+                )
                 await self.cog._record_game_outcome(
-                    self.user_id, "poker", "win", self.bet, self.PF
+                    self.user_id, "poker", "win", self.bet, self.PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=potential,
                 )
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id, amount=potential, description="Poker Win"
@@ -2664,7 +2795,9 @@ class PokerView(View):
                 player_wins = True
             else:
                 await self.cog._record_game_outcome(
-                    self.user_id, "poker", "loss", self.bet, self.PF
+                    self.user_id, "poker", "loss", self.bet, self.PF,
+                    payout_multiplier=Decimal("0"),
+                    payout_amount=Decimal("0"),
                 )
                 formatted = await self.cog.formatter(self.bet)
                 result = f"You lose! You lost **{formatted}**.{boost_text}"
@@ -2699,7 +2832,9 @@ class PokerView(View):
             )
 
         await self.cog._record_game_outcome(
-            self.user_id, "poker", "loss", self.bet, self.PF
+            self.user_id, "poker", "loss", self.bet, self.PF,
+            payout_multiplier=Decimal("0"),
+            payout_amount=Decimal("0"),
         )
         formatted = await self.cog.formatter(self.bet)
         result = f"You folded. You lost **{formatted}**."
@@ -2887,8 +3022,16 @@ class LadderView(discord.ui.LayoutView):
             if self.step >= self.MAX_STEP:
                 # Reached the top — auto cash-out
                 await self.cog.process_game_result(self.user_id, "ladder", self.bet)
+                payout_multiplier = (
+                    (current_winnings / self.bet).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if self.bet else Decimal("0")
+                )
                 await self.cog._record_game_outcome(
                     self.user_id, "ladder", "win", self.bet, self.PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=current_winnings,
                 )
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id,
@@ -2939,8 +3082,16 @@ class LadderView(discord.ui.LayoutView):
             if saved:
                 potential = AmountUtils.round_currency(potential)
                 await self.cog.process_game_result(self.user_id, "ladder", self.bet)
+                payout_multiplier = (
+                    (potential / self.bet).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if self.bet else Decimal("0")
+                )
                 await self.cog._record_game_outcome(
                     self.user_id, "ladder", "win", self.bet, self.PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=potential,
                 )
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id,
@@ -2968,6 +3119,8 @@ class LadderView(discord.ui.LayoutView):
             await self.cog.process_game_result(self.user_id, "ladder", self.bet)
             await self.cog._record_game_outcome(
                 self.user_id, "ladder", "loss", self.bet, self.PF,
+                payout_multiplier=Decimal("0"),
+                payout_amount=Decimal("0"),
             )
             formatted_bet = await self.cog.formatter(self.bet)
             content = (
@@ -3002,8 +3155,16 @@ class LadderView(discord.ui.LayoutView):
         )
         final_reward = AmountUtils.round_currency(final_reward)
         await self.cog.process_game_result(self.user_id, "ladder", self.bet)
+        payout_multiplier = (
+            (final_reward / self.bet).quantize(
+                Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+            )
+            if self.bet else Decimal("0")
+        )
         await self.cog._record_game_outcome(
             self.user_id, "ladder", "win", self.bet, self.PF,
+            payout_multiplier=payout_multiplier,
+            payout_amount=final_reward,
         )
         await self.bot.database.process_treasury_transaction(
             wallet_id=self.wallet_id,
@@ -3400,10 +3561,23 @@ class SlotsView(discord.ui.LayoutView):
             # Record this spin in game_history (spin-again was previously
             # missing the increment call, so all but the first spin in a
             # session were absent from history and from wager metrics).
+            if final_winner:
+                payout_amount = final_winnings
+                payout_multiplier = (
+                    (final_winnings / self.bet).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if self.bet else Decimal("0")
+                )
+            else:
+                payout_amount = Decimal("0")
+                payout_multiplier = Decimal("0")
             await self.cog._record_game_outcome(
                 user_id, "slots",
                 "win" if final_winner else "loss",
                 self.bet, final_PF,
+                payout_multiplier=payout_multiplier,
+                payout_amount=payout_amount,
             )
 
             # Check for free spins trigger (max 1 retrigger)
@@ -3674,6 +3848,30 @@ class GameHistoryPaginator(discord.ui.View):
                 wager_text = f"{self.cog.currency_name} **{await self.cog.formatter(Decimal(wagered))}**"
             except Exception:
                 wager_text = f"{self.cog.currency_name} **{wagered}**"
+
+            payout_multiplier = getattr(row, "payout_multiplier", None)
+            payout_amount = getattr(row, "payout_amount", None)
+            payout_lines = []
+            if payout_multiplier is not None:
+                try:
+                    mult_val = Decimal(payout_multiplier)
+                    payout_lines.append(f"**Multiplier:** ×{mult_val:.3f}")
+                except Exception:
+                    pass
+            if payout_amount is not None:
+                try:
+                    payout_text = f"{self.cog.currency_name} **{await self.cog.formatter(Decimal(payout_amount))}**"
+                    payout_lines.append(f"**Payout:** {payout_text}")
+                    try:
+                        net = Decimal(payout_amount) - Decimal(wagered)
+                        net_text = f"{self.cog.currency_name} **{await self.cog.formatter(net)}**"
+                        sign = "+" if net > 0 else ""
+                        payout_lines.append(f"**Net:** {sign}{net_text}")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
             created_at = getattr(row, "created_at", None)
             timestamp = (
                 created_at.strftime("%Y-%m-%d %H:%M") if created_at else "Unknown time"
@@ -3685,8 +3883,10 @@ class GameHistoryPaginator(discord.ui.View):
             field_value = (
                 f"**Result:** {outcome.capitalize()}\n"
                 f"**Wager:** {wager_text}\n"
-                f"**Seed:** `{client_seed}` • **Nonce:** {nonce}"
             )
+            if payout_lines:
+                field_value += "\n".join(payout_lines) + "\n"
+            field_value += f"**Seed:** `{client_seed}` • **Nonce:** {nonce}"
             embed.add_field(name=field_name, value=field_value, inline=False)
 
         total_pages = max(1, (len(self.history) + self.per_page - 1) // self.per_page)
@@ -3927,10 +4127,18 @@ class Casino(commands.Cog):
         outcome: str,
         bet_amount,
         PF: dict,
+        *,
+        payout_multiplier=None,
+        payout_amount=None,
     ) -> None:
         """Persist a win/loss through FairGate.
 
-        ``outcome`` must be ``"win"`` or ``"loss"``.
+        ``outcome`` must be ``"win"`` or ``"loss"`` (``"push"`` is also accepted
+        by the DB layer).
+
+        ``payout_multiplier`` and ``payout_amount`` describe the actual payout
+        returned to the player. For a loss, pass ``0`` for both. For a push,
+        pass ``1`` and the wager amount.
         """
         await self.bot.database.record_fairgate_game(
             user_id,
@@ -3940,6 +4148,8 @@ class Casino(commands.Cog):
             client_seed=PF["client_seed"],
             nonce=PF["nonce"],
             hash_hex=PF["server_seed_hash"],
+            payout_multiplier=payout_multiplier,
+            payout_amount=payout_amount,
         )
 
     async def fairgate_play_coinflip(
@@ -4761,13 +4971,25 @@ class Casino(commands.Cog):
             embed.add_field(name="Top 10 Users", value="No data available", inline=True)
         await ctx.send(embed=embed)
 
-    async def casino_history(self, ctx: commands.Context, limit: int = 100):
-        member = ctx.author
+    @commands.command(name="history")
+    async def casino_history(
+        self,
+        ctx: commands.Context,
+        member: Optional[discord.Member] = None,
+        limit: int = 100,
+    ):
+        if member is None:
+            member = ctx.author
         limit = max(1, min(int(limit), 1000))
 
         history = await self.bot.database.get_user_game_history(member.id, limit)
         if not history:
-            return await Embeds.error(ctx, description="No game history found.", title="Game History", delete_after=5)
+            return await Embeds.error(
+                ctx,
+                description=f"No game history found for {member.display_name}.",
+                title="Game History",
+                delete_after=5,
+            )
 
         view = GameHistoryPaginator(
             cog=self, history=history, member=member, requester=ctx.author
@@ -5392,8 +5614,16 @@ class Casino(commands.Cog):
             )
 
             if final_winner:
+                payout_multiplier = (
+                    (winnings / amount).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if amount else Decimal("0")
+                )
                 await self._record_game_outcome(
-                    user_id, "gamble", "win", amount, PF
+                    user_id, "gamble", "win", amount, PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=winnings,
                 )
                 try:
                     await self.bot.database.process_treasury_transaction(
@@ -5429,7 +5659,9 @@ class Casino(commands.Cog):
                 )
             else:
                 await self._record_game_outcome(
-                    user_id, "gamble", "loss", amount, PF
+                    user_id, "gamble", "loss", amount, PF,
+                    payout_multiplier=Decimal("0"),
+                    payout_amount=Decimal("0"),
                 )
                 embed = discord.Embed(
                     description=f"You lost {self.currency_name} **{await self.formatter(amount)}**",
@@ -5588,8 +5820,16 @@ class Casino(commands.Cog):
                     )
                     await ctx.reply(embed=embed, delete_after=5)
                     return
+                payout_multiplier = (
+                    (winnings / amount).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if amount else Decimal("0")
+                )
                 await self._record_game_outcome(
-                    user_id, "supergamble", "win", amount, PF
+                    user_id, "supergamble", "win", amount, PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=winnings,
                 )
                 embed = discord.Embed(
                     description=f"🎉 You hit the jackpot and won **{await self.formatter(winnings)} {self.currency_name}**! {bonus_text}{boost_text}",
@@ -5618,18 +5858,28 @@ class Casino(commands.Cog):
                     )
                     await ctx.reply(embed=embed, delete_after=5)
                     return
+                payout_multiplier = (
+                    (winnings / amount).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if amount else Decimal("0")
+                )
                 embed = discord.Embed(
                     description=f"You lost, but recovered **{await self.formatter(winnings)} {self.currency_name}**!",
                     color=discord.Color.blurple(),
                 )
                 await self._record_game_outcome(
-                    user_id, "supergamble", "loss", amount, PF
+                    user_id, "supergamble", "loss", amount, PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=winnings,
                 )
                 outcome = "loss"
                 outcome_amount = winnings
             else:
                 await self._record_game_outcome(
-                    user_id, "supergamble", "loss", amount, PF
+                    user_id, "supergamble", "loss", amount, PF,
+                    payout_multiplier=Decimal("0"),
+                    payout_amount=Decimal("0"),
                 )
                 embed = discord.Embed(
                     description=f"You lost **{await self.formatter(amount)} {self.currency_name}**.{boost_text}",
@@ -5918,10 +6168,22 @@ class Casino(commands.Cog):
             await self.bot.database.process_treasury_transaction(
                 wallet_id, winnings, "Slots Win"
             )
+            payout_amount = winnings
+            payout_multiplier = (
+                (winnings / stake).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if stake else Decimal("0")
+            )
+        else:
+            payout_amount = Decimal("0")
+            payout_multiplier = Decimal("0")
         await self._record_game_outcome(
             user_id, "slots",
             "win" if final_winner else "loss",
             stake, final_PF,
+            payout_multiplier=payout_multiplier,
+            payout_amount=payout_amount,
         )
 
         # Check for free spins trigger
@@ -6113,15 +6375,25 @@ class Casino(commands.Cog):
             except ValueError as e:
                 await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
                 return
+            payout_multiplier = (
+                (winnings / amount).quantize(
+                    Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                )
+                if amount else Decimal("0")
+            )
             await self._record_game_outcome(
-                user_id, "dice", "win", amount, PF
+                user_id, "dice", "win", amount, PF,
+                payout_multiplier=payout_multiplier,
+                payout_amount=winnings,
             )
             if boost_text:
                 result += boost_text
         else:
             winnings = Decimal("0")
             await self._record_game_outcome(
-                user_id, "dice", "loss", amount, PF
+                user_id, "dice", "loss", amount, PF,
+                payout_multiplier=Decimal("0"),
+                payout_amount=Decimal("0"),
             )
 
         embed.description = result
@@ -6463,8 +6735,16 @@ class Casino(commands.Cog):
                 if final_winner:
                     winnings = potential_payout
                     outcome = "win"
+                    payout_multiplier = (
+                        (winnings / Decimal(hand_bet)).quantize(
+                            Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                        )
+                        if hand_bet else Decimal("0")
+                    )
                     await self._record_game_outcome(
-                        user_id, "blackjack", "win", hand_bet, PF
+                        user_id, "blackjack", "win", hand_bet, PF,
+                        payout_multiplier=payout_multiplier,
+                        payout_amount=winnings,
                     )
                     result = f"Bust, but luck saved you! You win {self.currency_name} **{await self.formatter(winnings)}**!{boost_text}"
                     try:
@@ -6486,7 +6766,9 @@ class Casino(commands.Cog):
                     outcome = "loss"
                     result = f"Bust! You lost {self.currency_name} **{await self.formatter(hand_bet)}**.{boost_text}"
                     await self._record_game_outcome(
-                        user_id, "blackjack", "loss", hand_bet, PF
+                        user_id, "blackjack", "loss", hand_bet, PF,
+                        payout_multiplier=Decimal("0"),
+                        payout_amount=Decimal("0"),
                     )
             elif dealer_score > 21 or player_score > dealer_score:
                 is_winner = True
@@ -6510,8 +6792,16 @@ class Casino(commands.Cog):
                     result += boost_text
 
                 outcome = "win"
+                payout_multiplier = (
+                    (winnings / Decimal(hand_bet)).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if hand_bet else Decimal("0")
+                )
                 await self._record_game_outcome(
-                    user_id, "blackjack", "win", hand_bet, PF
+                    user_id, "blackjack", "win", hand_bet, PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=winnings,
                 )
                 try:
                     await self.bot.database.process_treasury_transaction(
@@ -6533,7 +6823,9 @@ class Casino(commands.Cog):
                 winnings = Decimal(hand_bet)
                 try:
                     await self._record_game_outcome(
-                        user_id, "blackjack", "push", hand_bet, PF
+                        user_id, "blackjack", "push", hand_bet, PF,
+                        payout_multiplier=Decimal("1"),
+                        payout_amount=winnings,
                     )
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id,
@@ -6562,8 +6854,16 @@ class Casino(commands.Cog):
                 if final_winner:
                     winnings = potential_payout
                     outcome = "win"
+                    payout_multiplier = (
+                        (winnings / Decimal(hand_bet)).quantize(
+                            Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                        )
+                        if hand_bet else Decimal("0")
+                    )
                     await self._record_game_outcome(
-                        user_id, "blackjack", "win", hand_bet, PF
+                        user_id, "blackjack", "win", hand_bet, PF,
+                        payout_multiplier=payout_multiplier,
+                        payout_amount=winnings,
                     )
                     result = f"Dealer wins, but luck saved you! You win {self.currency_name} **{await self.formatter(winnings)}**!{boost_text}"
                     try:
@@ -6584,7 +6884,9 @@ class Casino(commands.Cog):
                 else:
                     outcome = "loss"
                     await self._record_game_outcome(
-                        user_id, "blackjack", "loss", hand_bet, PF
+                        user_id, "blackjack", "loss", hand_bet, PF,
+                        payout_multiplier=Decimal("0"),
+                        payout_amount=Decimal("0"),
                     )
                     result = f"Dealer wins! You lost {self.currency_name} **{await self.formatter(hand_bet)}**.{boost_text}"
 
@@ -8473,12 +8775,24 @@ class BetButton(discord.ui.Button):
                         amount=Decimal(total_win),
                         description=f"Keno Win",
                     )
+                    payout_amount = Decimal(total_win)
+                    payout_multiplier = (
+                        (payout_amount / player_bet).quantize(
+                            Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                        )
+                        if player_bet else Decimal("0")
+                    )
+                else:
+                    payout_amount = Decimal("0")
+                    payout_multiplier = Decimal("0")
                 await self.cog._record_game_outcome(
                     table_ui_view.player.id,
                     "keno",
                     "win" if is_winner else "loss",
                     player_bet,
                     self.PF,
+                    payout_multiplier=payout_multiplier,
+                    payout_amount=payout_amount,
                 )
 
             except ValueError as e:

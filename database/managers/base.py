@@ -290,6 +290,7 @@ class BaseManager:
             await self._repair_daily_user_hash_columns()
             await self._repair_command_cooldowns_constraint()
             await self._repair_item_shop_columns()
+            await self._repair_game_history_columns()
 
         try:
             await self._db_retry(_init, retries=self._db_retry_count, base_delay=2.0)
@@ -497,6 +498,27 @@ class BaseManager:
                     )
 
             logger.info("Repaired item/shop item expansion columns")
+
+    async def _repair_game_history_columns(self):
+        """
+        Add payout columns to game_history if they are missing on an older schema.
+        New deployments get these from Base.metadata.create_all().
+        """
+        async with self.engine.begin() as conn:
+            history_columns = [
+                ("payout_multiplier", "NUMERIC(38, 10)"),
+                ("payout_amount", "NUMERIC(38, 2)"),
+            ]
+            for column, col_type in history_columns:
+                try:
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE game_history ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                        )
+                    )
+                except SQLAlchemyError as e:
+                    logger.warning(f"Schema repair for game_history.{column} failed: {e}")
+            logger.info("Repaired game_history payout columns")
 
     def get_session(self):
         """Provide a transactional scope around a series of operations."""
