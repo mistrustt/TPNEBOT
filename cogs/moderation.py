@@ -1333,7 +1333,7 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
 
     @commands.hybrid_command(
-        name="history",
+        name="phistory",
         aliases=["ph", "punishments"],
         description="View a user's punishment history.",
     )
@@ -1341,7 +1341,7 @@ class Moderation(commands.Cog, name="Moderation"):
     @commands.has_permissions(manage_messages=True)
     @app_commands.default_permissions(manage_messages=True)
     @unified_cooldown(10)
-    async def history(self, ctx: Context, user: discord.Member):
+    async def phistory(self, ctx: Context, user: discord.Member):
         """View a specific user's punishment history"""
         guild_id = ctx.guild.id
 
