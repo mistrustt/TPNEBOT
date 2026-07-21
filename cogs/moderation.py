@@ -1333,7 +1333,7 @@ class Moderation(commands.Cog, name="Moderation"):
             await ctx.send(embed=embed)
 
     @commands.hybrid_command(
-        name="phistory",
+        name="punishhistory",
         aliases=["ph", "punishments"],
         description="View a user's punishment history.",
     )

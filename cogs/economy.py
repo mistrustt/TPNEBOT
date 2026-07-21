@@ -20,7 +20,7 @@ from utils.security import resolve_id, resolve_ids
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Sequence, List, Any
+from typing import Sequence, List, Any, Optional
 
 logger = logging.getLogger("discord.client")
 

@@ -4971,7 +4971,7 @@ class Casino(commands.Cog):
             embed.add_field(name="Top 10 Users", value="No data available", inline=True)
         await ctx.send(embed=embed)
 
-    @commands.command(name="history")
+    @commands.command(name="gamehistory", aliases=["gh"])
     async def casino_history(
         self,
         ctx: commands.Context,
@@ -4997,6 +4997,7 @@ class Casino(commands.Cog):
         embed = await view.get_page_embed()
         await ctx.reply(embed=embed, view=view, mention_author=False)
 
+    @commands.command(name="verify")
     async def casino_verify(
         self,
         ctx: commands.Context,
@@ -5006,11 +5007,6 @@ class Casino(commands.Cog):
         step: Optional[int] = None,
     ):
         """
-        Usage examples:
-          !casino verify gamble 42
-          !casino verify gamble 42 @user
-          !casino verify ladder 3 2
-
         The user is optional and defaults to the command author.
         For ladder, supply the step number as the last argument.
         """
@@ -5498,6 +5494,7 @@ class Casino(commands.Cog):
         )
         await ctx.reply(embed=embed, mention_author=False)
 
+    @commands.command(name="seed")
     async def casino_seed(self, ctx: commands.Context):
         client_seed, nonce = await self.bot.database.get_client_seed(ctx.author.id)
 
@@ -5523,6 +5520,7 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
+    @commands.command(name="setseed")
     async def casino_setseed(
         self, ctx: commands.Context, *, seed: Optional[str] = None
     ):
