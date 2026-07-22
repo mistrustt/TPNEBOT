@@ -274,14 +274,13 @@ class TodoPaginator(discord.ui.View):
 
 
 class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
-    """Modal for creating/editing shop items with effect configuration."""
+    """Modal for creating/editing shop items with full configuration."""
 
     def __init__(self, bot, edit_item=None):
         super().__init__()
         self.bot = bot
         self.edit_item = edit_item
 
-        # Name input
         self.name_input = discord.ui.TextInput(
             label="Item Name",
             placeholder="Enter the item name",
@@ -290,7 +289,6 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
         )
         self.add_item(self.name_input)
 
-        # Description input
         self.description_input = discord.ui.TextInput(
             label="Description",
             placeholder="Enter item description",
@@ -301,7 +299,6 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
         )
         self.add_item(self.description_input)
 
-        # Price input
         self.price_input = discord.ui.TextInput(
             label="Price (coins)",
             placeholder="Enter the price",
@@ -310,7 +307,6 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
         )
         self.add_item(self.price_input)
 
-        # Quantity and unlimited
         self.quantity_input = discord.ui.TextInput(
             label="Quantity (or 'unlimited')",
             placeholder="Enter quantity or 'unlimited'",
@@ -321,46 +317,68 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
         )
         self.add_item(self.quantity_input)
 
-        # Item type input
         item_type_default = (
             edit_item.item_type.value
             if (edit_item and edit_item.item_type)
             else "collectible"
         )
         self.item_type_input = discord.ui.TextInput(
-            label="Item Type (collectible/redeemable/consumable)",
-            placeholder="collectible, redeemable, or consumable",
+            label="Item Type",
+            placeholder="collectible, redeemable, consumable, defensive, or offensive",
             max_length=20,
             default=item_type_default,
         )
         self.add_item(self.item_type_input)
 
-        # Effect configuration
+        category_default = (
+            edit_item.category.value
+            if (edit_item and edit_item.category)
+            else item_type_default
+        )
+        self.category_input = discord.ui.TextInput(
+            label="Category",
+            placeholder="collectible, redeemable, consumable, defensive, offensive, utility, or cosmetic",
+            max_length=20,
+            default=category_default,
+        )
+        self.add_item(self.category_input)
+
+        rarity_default = (
+            edit_item.rarity.value
+            if (edit_item and edit_item.rarity)
+            else "common"
+        )
+        self.rarity_input = discord.ui.TextInput(
+            label="Rarity",
+            placeholder="common, uncommon, rare, epic, or legendary",
+            max_length=20,
+            default=rarity_default,
+        )
+        self.add_item(self.rarity_input)
+
         self.effect_input = discord.ui.TextInput(
-            label="Effect Type (currency/gambling_multiplier/luck_boost/earning_boost/cooldown_reduction)",
-            placeholder="Leave empty for no effect",
+            label="Effect Type",
+            placeholder="currency/gambling_multiplier/luck_boost/earning_boost/cooldown_reduction (empty for none)",
             max_length=50,
             required=False,
             default=edit_item.effect if (edit_item and edit_item.effect) else None,
         )
         self.add_item(self.effect_input)
 
-        # Effect value
         self.effect_value_input = discord.ui.TextInput(
             label="Effect Value",
-            placeholder="e.g., 100 for currency, 1.5 for 1.5x multiplier",
+            placeholder="e.g. 100 for currency, 1.5 for a multiplier",
             max_length=20,
             required=False,
             default=str(edit_item.effect_value)
-            if (edit_item and edit_item.effect_value)
+            if (edit_item and edit_item.effect_value is not None)
             else None,
         )
         self.add_item(self.effect_value_input)
 
-        # Effect duration
         self.effect_duration_input = discord.ui.TextInput(
             label="Effect Duration (seconds)",
-            placeholder="e.g., 3600 for 1 hour. Leave empty for instant effects",
+            placeholder="e.g. 3600 for 1 hour. Leave empty for instant effects",
             max_length=10,
             required=False,
             default=str(edit_item.effect_duration)
@@ -369,7 +387,39 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
         )
         self.add_item(self.effect_duration_input)
 
-        # Cooldown
+        self.targetable_input = discord.ui.TextInput(
+            label="Targetable (true/false)",
+            placeholder="true or false",
+            max_length=5,
+            required=False,
+            default="true"
+            if (edit_item and edit_item.targetable)
+            else "false",
+        )
+        self.add_item(self.targetable_input)
+
+        self.daily_limit_input = discord.ui.TextInput(
+            label="Daily Limit (per user)",
+            placeholder="Leave empty for no limit",
+            max_length=10,
+            required=False,
+            default=str(edit_item.daily_limit)
+            if (edit_item and edit_item.daily_limit is not None)
+            else None,
+        )
+        self.add_item(self.daily_limit_input)
+
+        self.global_daily_limit_input = discord.ui.TextInput(
+            label="Global Daily Limit",
+            placeholder="Leave empty for no limit",
+            max_length=10,
+            required=False,
+            default=str(edit_item.global_daily_limit)
+            if (edit_item and edit_item.global_daily_limit is not None)
+            else None,
+        )
+        self.add_item(self.global_daily_limit_input)
+
         self.cooldown_input = discord.ui.TextInput(
             label="Cooldown (seconds)",
             placeholder="Time between uses. Leave empty for no cooldown",
@@ -381,98 +431,149 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
         )
         self.add_item(self.cooldown_input)
 
+    @staticmethod
+    def _parse_enum(enum_cls, value: str, default):
+        if not value:
+            return default
+        try:
+            return enum_cls[value.upper()]
+        except KeyError:
+            try:
+                return enum_cls(value.lower())
+            except ValueError:
+                return default
+
+    @staticmethod
+    def _parse_bool(value: str) -> bool:
+        if value is None:
+            return False
+        return value.strip().lower() in {"true", "yes", "y", "1", "on"}
+
+    @staticmethod
+    def _int_or_none(value: str):
+        if value is None:
+            return None
+        stripped = value.strip()
+        return int(stripped) if stripped else None
+
+    @staticmethod
+    def _decimal_or_none(value: str):
+        if value is None:
+            return None
+        stripped = value.strip()
+        return Decimal(stripped) if stripped else None
+
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            if not await interaction.client.is_owner(interaction.user):
+                await interaction.response.send_message(
+                    "You are not authorized to create or edit shop items.",
+                    ephemeral=True,
+                )
+                return
+
             name = self.name_input.value.strip()
             description = self.description_input.value.strip() or None
             price = int(self.price_input.value.strip())
 
-            # Handle quantity/unlimited
             quantity_str = self.quantity_input.value.strip().lower()
             unlimited = quantity_str == "unlimited"
             quantity = 1 if unlimited else int(quantity_str)
 
-            # Handle item type
-            item_type_str = self.item_type_input.value.strip().upper()
-            try:
-                item_type = ItemType[item_type_str]
-            except KeyError:
-                item_type = ItemType.COLLECTIBLE  # Default fallback
+            item_type = self._parse_enum(
+                ItemType, self.item_type_input.value, ItemType.COLLECTIBLE
+            )
+            category = self._parse_enum(
+                ItemCategory, self.category_input.value, item_type
+            )
+            rarity = self._parse_enum(
+                ItemRarity, self.rarity_input.value, ItemRarity.COMMON
+            )
 
-            # Handle effect configuration
             effect = self.effect_input.value.strip().lower() or None
-            effect_value = None
-            effect_duration = None
-            cooldown_seconds = None
-
-            if effect:
-                if self.effect_value_input.value.strip():
-                    effect_value = int(float(self.effect_value_input.value.strip()))
-                if self.effect_duration_input.value.strip():
-                    effect_duration = int(self.effect_duration_input.value.strip())
-
-            if self.cooldown_input.value.strip():
-                cooldown_seconds = int(self.cooldown_input.value.strip())
+            effect_value = self._decimal_or_none(self.effect_value_input.value)
+            effect_duration = self._int_or_none(self.effect_duration_input.value)
+            cooldown_seconds = self._int_or_none(self.cooldown_input.value)
+            targetable = self._parse_bool(self.targetable_input.value)
+            daily_limit = self._int_or_none(self.daily_limit_input.value)
+            global_daily_limit = self._int_or_none(self.global_daily_limit_input.value)
 
             if self.edit_item:
-                # Update existing item
-                async with self.bot.database.async_sessionmaker() as session:
-                    from sqlalchemy import update
-
-                    stmt = (
-                        update(type(self.edit_item))
-                        .where(type(self.edit_item).id == self.edit_item.id)
-                        .values(
-                            name=name,
-                            description=description,
-                            price=price,
-                            quantity=quantity,
-                            unlimited=unlimited,
-                            item_type=item_type,
-                            effect=effect,
-                            effect_value=effect_value,
-                            effect_duration=effect_duration,
-                            cooldown_seconds=cooldown_seconds,
-                        )
+                updated = await self.bot.database.update_shop_item(
+                    self.edit_item.id,
+                    name=name,
+                    description=description,
+                    price=price,
+                    quantity=quantity,
+                    unlimited=unlimited,
+                    item_type=item_type,
+                    category=category,
+                    rarity=rarity,
+                    effect=effect,
+                    effect_value=effect_value,
+                    effect_duration=effect_duration,
+                    cooldown_seconds=cooldown_seconds,
+                    targetable=targetable,
+                    daily_limit=daily_limit,
+                    global_daily_limit=global_daily_limit,
+                )
+                if not updated:
+                    await interaction.response.send_message(
+                        "Shop item no longer exists.", ephemeral=True
                     )
-                    await session.execute(stmt)
-                    await session.commit()
+                    return
 
                 embed = discord.Embed(
                     title="Shop Item Updated",
-                    description=f"Updated **{name}** in the shop.",
+                    description=f"Updated **{updated.name}** (ID: `{updated.id}`).",
                     color=discord.Color.green(),
                 )
             else:
-                # Create new item
-                await self.bot.database.add_shop_item(
+                item = await self.bot.database.add_shop_item(
                     name=name,
                     description=description,
                     price=price,
                     quantity=quantity,
                     item_type=item_type,
+                    category=category,
+                    rarity=rarity,
                     unlimited=unlimited,
                     effect=effect,
                     effect_value=effect_value,
                     effect_duration=effect_duration,
                     cooldown_seconds=cooldown_seconds,
+                    targetable=targetable,
+                    daily_limit=daily_limit,
+                    global_daily_limit=global_daily_limit,
                 )
 
                 embed = discord.Embed(
                     title="Shop Item Created",
-                    description=f"Added **{name}** to the shop for {price} coins.",
+                    description=f"Added **{item.name}** (ID: `{item.id}`) for {item.price} coins.",
                     color=discord.Color.green(),
                 )
 
+            stock = "∞" if unlimited else str(quantity)
+            embed.add_field(name="Stock", value=stock, inline=True)
+            embed.add_field(name="Type", value=item_type.value, inline=True)
+            embed.add_field(name="Rarity", value=rarity.value, inline=True)
             if effect:
                 embed.add_field(
                     name="Effect",
                     value=f"{effect}: {effect_value or 'N/A'}",
                     inline=True,
                 )
-            if effect_duration:
+                if effect_duration:
+                    embed.add_field(
+                        name="Duration", value=f"{effect_duration}s", inline=True
+                    )
+            if targetable:
+                embed.add_field(name="Targetable", value="Yes", inline=True)
+            if daily_limit is not None:
+                embed.add_field(name="Daily Limit", value=str(daily_limit), inline=True)
+            if global_daily_limit is not None:
                 embed.add_field(
-                    name="Duration", value=f"{effect_duration}s", inline=True
+                    name="Global Daily Limit", value=str(global_daily_limit), inline=True
                 )
             if cooldown_seconds:
                 embed.add_field(
@@ -487,11 +588,11 @@ class ShopItemModal(discord.ui.Modal, title="Create Shop Item"):
                 ephemeral=True,
             )
         except Exception as e:
+            logger.exception("ShopItemModal submit failed")
             await interaction.response.send_message(
-                f"Error creating item: {str(e)}",
+                f"Error saving shop item: {str(e)}",
                 ephemeral=True,
             )
-
 
 def _parse_cog_list(arg: str) -> List[str]:
     """Split comma/space separated cogs safely; always return a list."""
@@ -656,6 +757,10 @@ class Owner(commands.Cog, name="Owner"):
             raw = opts.get(key)
             return int(raw) if raw is not None and raw.strip() else None
 
+        def _decimal_or_none(key: str):
+            raw = opts.get(key)
+            return Decimal(raw.strip()) if raw is not None and raw.strip() else None
+
         item = await self.bot.database.add_shop_item(
             name=name.strip(),
             description=opts.get("description", "").strip() or None,
@@ -666,7 +771,7 @@ class Owner(commands.Cog, name="Owner"):
             rarity=rarity_enum,
             unlimited=is_unlimited,
             effect=effect_clean,
-            effect_value=_int_or_none("effect_value"),
+            effect_value=_decimal_or_none("effect_value"),
             effect_duration=_int_or_none("effect_duration"),
             cooldown_seconds=_int_or_none("cooldown_seconds"),
             targetable=_parse_bool(opts.get("targetable", "false")),
@@ -730,7 +835,7 @@ class Owner(commands.Cog, name="Owner"):
         if "effect" in opts:
             updates["effect"] = opts["effect"].strip().lower() or None
         if "effect_value" in opts:
-            updates["effect_value"] = int(opts["effect_value"])
+            updates["effect_value"] = Decimal(opts["effect_value"].strip())
         if "effect_duration" in opts:
             updates["effect_duration"] = int(opts["effect_duration"])
         if "cooldown_seconds" in opts:
@@ -4571,11 +4676,15 @@ class Owner(commands.Cog, name="Owner"):
                 delete_after=None,
             )
 
+    @discord.app_commands.command(name="shopitemmodal", description="Open a modal to create a new shop item with effect configuration.", hidden=True)
+    @discord.app_commands.checks.is_owner()
     async def shop_item_modal(self, interaction: discord.Interaction):
         """Open a modal to create a new shop item with effect configuration."""
         modal = ShopItemModal(self.bot)
         await interaction.response.send_modal(modal)
 
+    @discord.app_commands.command(name="editshopitem", description="Edit an existing shop item using a modal.", hidden=True)
+    @discord.app_commands.checks.is_owner()
     async def edit_shop_item(self, interaction: discord.Interaction, item_id: int):
         """Edit an existing shop item using a modal."""
         item = await self.bot.database.get_shop_item_by_id(item_id)

@@ -1,4 +1,5 @@
-deploy.sh
+*.sh
+*.bat
 .claude/
 
 # Byte-compiled / optimized / DLL files
