@@ -33,18 +33,10 @@ class Moderation(commands.Cog, name="Moderation"):
         self.lockdown_channels = []
         self.new_members = []
         self.sync_counts.start()
-        self.allowed_mp3_bypass_ids = [  # every big name in com that we want to upload files
-            1202351653559488552,  # tragic
+        self.allowed_mp3_bypass_ids = [
             1333280676119838821,  # daniel
             493432686694629376,  # jowy
-            518362287233302531,  # destroyer (he been leaking shit recently so might as well add him)
-            1164298738819411969,  # kinnon
-            919718348894388256,  # sillycat
-            897473098658484285,  # goongod
-            1166140569861496853,  # googly
-            1288160215241326674,  # yo hello (daniel alt)
-            1085252140102062210,  # dnd8
-            1333280676119838821,  # wrld
+            1288160215241326674,  # yo hello
             1099696209637167145,  # toxic
         ]
 
@@ -2258,96 +2250,96 @@ class Moderation(commands.Cog, name="Moderation"):
         except discord.Forbidden:
             pass
 
-    @commands.group(name="antimp3", aliases=["nomp3"], invoke_without_command=True, description="Manage the Anti-MP3 feature.")
+    @commands.group(name="antiaudio", aliases=["antimp3", "antiwav",], invoke_without_command=True, description="Manage the Anti-Audio feature.")
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
-    async def anti_mp3(self, ctx: Context):
-        """Check the status of the Anti-MP3 feature"""
+    async def anti_audio(self, ctx: Context):
+        """Check the status of the Anti-Audio feature"""
         if ctx.invoked_subcommand is None:
             guild_id = ctx.guild.id
-            anti_mp3_settings = await self.bot.database.get_antimp3_status(guild_id)
-            if not anti_mp3_settings:
+            anti_audio_settings = await self.bot.database.get_antiaudio_status(guild_id)
+            if not anti_audio_settings:
                 embed = discord.Embed(
-                    description=f"The Anti-MP3 feature is currently **disabled** in {ctx.guild.name}.",
+                    description=f"The Anti-Audio feature is currently **disabled** in {ctx.guild.name}.",
                     color=discord.Color.greyple(),
                 )
-                embed.set_footer(text="Use `!antimp3 enable` to enable the feature.")
+                embed.set_footer(text="Use `!antiaudio enable` to enable the feature.")
                 embed.set_author(
-                    name="Anti-MP3 Status",
+                    name="Anti-Audio Status",
                     icon_url=self.utils.get_avatar_url(ctx.author),
                 )
                 await ctx.send(embed=embed)
             else:
                 embed = discord.Embed(
-                    description=f"The Anti-MP3 feature is currently **enabled** in {ctx.guild.name}.",
+                    description=f"The Anti-Audio feature is currently **enabled** in {ctx.guild.name}.",
                     color=discord.Color.blurple(),
                 )
-                embed.set_footer(text="Use `!antimp3 disable` to disable the feature.")
+                embed.set_footer(text="Use `!antiaudio disable` to disable the feature.")
                 embed.set_author(
-                    name="Anti-MP3 Status",
+                    name="Anti-Audio Status",
                     icon_url=self.utils.get_avatar_url(ctx.author),
                 )
                 await ctx.send(embed=embed)
 
-    @anti_mp3.command(
+    @anti_audio.command(
         name="enable",
         aliases=["on"],
-        description="Enable the Anti-MP3 feature for the server",
+        description="Enable the Anti-Audio feature for the server",
     )
     @unified_cooldown(5)
     @commands.has_permissions(administrator=True)
-    async def enable_antimp3(self, ctx: Context):
-        """Toggle the Anti-MP3 feature"""
+    async def enable_antiaudio(self, ctx: Context):
+        """Toggle the Anti-Audio feature"""
         guild_id = ctx.guild.id
-        anti_mp3 = await self.bot.database.get_antimp3_status(guild_id)
+        anti_audio = await self.bot.database.get_antiaudio_status(guild_id)
 
-        if not anti_mp3:
-            await self.bot.database.toggle_antimp3(guild_id, True)
+        if not anti_audio:
+            await self.bot.database.toggle_antiaudio(guild_id, True)
             embed = discord.Embed(
-                description="Anti-MP3 has been enabled.", color=discord.Color.blurple()
+                description="Anti-Audio has been enabled.", color=discord.Color.blurple()
             )
             embed.set_author(
-                name="Anti-MP3", icon_url=self.utils.get_avatar_url(ctx.author)
+                name="Anti-Audio", icon_url=self.utils.get_avatar_url(ctx.author)
             )
             await ctx.send(embed=embed, delete_after=5)
         else:
             embed = discord.Embed(
-                description="The Anti-MP3 feature is already enabled.",
+                description="The Anti-Audio feature is already enabled.",
                 color=discord.Color.greyple(),
             )
             embed.set_author(
-                name="Anti-MP3", icon_url=self.utils.get_avatar_url(ctx.author)
+                name="Anti-Audio", icon_url=self.utils.get_avatar_url(ctx.author)
             )
             await ctx.send(embed=embed, delete_after=5)
 
-    @anti_mp3.command(
+    @anti_audio.command(
         name="disable",
         aliases=["off"],
-        description="Disable the Anti-MP3 feature for the server",
+        description="Disable the Anti-Audio feature for the server",
     )
     @unified_cooldown(5)
     @commands.has_permissions(administrator=True)
-    async def disable_antimp3(self, ctx: Context):
-        """Toggle the Anti-MP3 feature"""
+    async def disable_antiaudio(self, ctx: Context):
+        """Toggle the Anti-Audio feature"""
         guild_id = ctx.guild.id
-        anti_mp3 = await self.bot.database.get_antimp3_status(guild_id)
+        anti_audio = await self.bot.database.get_antiaudio_status(guild_id)
 
-        if anti_mp3:
-            await self.bot.database.toggle_antimp3(guild_id, False)
+        if anti_audio:
+            await self.bot.database.toggle_antiaudio(guild_id, False)
             embed = discord.Embed(
-                description="Anti-MP3 has been disabled.", color=discord.Color.greyple()
+                description="Anti-Audio has been disabled.", color=discord.Color.greyple()
             )
             embed.set_author(
-                name="Anti-MP3", icon_url=self.utils.get_avatar_url(ctx.author)
+                name="Anti-Audio", icon_url=self.utils.get_avatar_url(ctx.author)
             )
             await ctx.send(embed=embed, delete_after=5)
         else:
             embed = discord.Embed(
-                description="The Anti-MP3 feature is already disabled.",
+                description="The Anti-Audio feature is already disabled.",
                 color=discord.Color.greyple(),
             )
             embed.set_author(
-                name="Anti-MP3", icon_url=self.utils.get_avatar_url(ctx.author)
+                name="Anti-Audio", icon_url=self.utils.get_avatar_url(ctx.author)
             )
             await ctx.send(embed=embed, delete_after=5)
 
@@ -2459,9 +2451,16 @@ class Moderation(commands.Cog, name="Moderation"):
             imute_role_id=imuted_role.id,
             rmute_role_id=rmuted_role.id,
         )
+        embed_msg = f"""
+        Mute roles have been set up successfully:
+        - Text Mute Role: {muted_role.name}
+        - Image Mute Role: {imuted_role.name}
+        - React Mute Role: {rmuted_role.name}
+        """
+        
         embed.add_field(
             name="Setup Complete",
-            value=f"Mute roles have been set. Text: {muted_role.name}, Image: {imuted_role.name}, React: {rmuted_role.name}.",
+            value=embed_msg,
             inline=False,
         )
         embed.color = discord.Color.green()

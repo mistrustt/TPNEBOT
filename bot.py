@@ -1308,20 +1308,27 @@ class DiscordBot(commands.Bot):
                     value=f"`{error_type}`",
                     inline=True,
                 )
+                user = discord.utils.get(self.get_all_members(), id=ctx.author.id)
                 base_embed.add_field(
                     name="👤 User",
-                    value=f"{ctx.author.mention}\n`{ctx.author.id}`",
+                    value=f"{user.mention}\n`{ctx.author.id}`"
+                    if user
+                    else f"Unknown User\n`{ctx.author.id}`",
                     inline=True,
                 )
+                channel = discord.utils.get(self.get_all_channels(), id=ctx.channel.id),
                 base_embed.add_field(
                     name="📍 Channel",
-                    value=f"{ctx.channel.mention}\n`{ctx.channel.id}`",
+                    value=f"{channel.mention}\n`{ctx.channel.id}`"
+                    if channel
+                    else f"Unknown Channel\n`{ctx.channel.id}`",
                     inline=True,
                 )
+                guild = await discord.utils.find(lambda g: g.id == ctx.guild.id, self.guilds) if ctx.guild else None
                 base_embed.add_field(
                     name="🏠 Guild",
-                    value=f"{ctx.guild.name}\n`{ctx.guild.id}`"
-                    if ctx.guild
+                    value=f"{guild.name}\n`{guild.id}`"
+                    if guild
                     else "Direct Message",
                     inline=True,
                 )

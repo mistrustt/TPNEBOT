@@ -1399,7 +1399,14 @@ class General(commands.Cog, name="General"):
         embed = discord.Embed(
             title=f"**{ctx.guild.name}** Icon", color=ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
         )
-        embed.set_image(url=str(ctx.guild.icon.url))
+
+        server_icon_url = ctx.guild.icon.url if ctx.guild.icon else None
+
+        if server_icon_url:
+            embed.set_image(url=server_icon_url)
+        else:
+            embed.description = "This server does not have an icon."
+
         await ctx.reply(embed=embed)
 
     @commands.command(
@@ -1435,7 +1442,7 @@ class General(commands.Cog, name="General"):
         name="emojisteal", help="Steal a custom server emoji"
     )
     async def steal(self, ctx: commands.Context, emoji: str):
-        """Steal a custom emoji without writing to disk."""
+        """Steal a custom emoji server emoji"""
         try:
             partial_emoji = discord.PartialEmoji.from_str(emoji)
             if not partial_emoji.is_custom_emoji():

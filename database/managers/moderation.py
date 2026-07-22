@@ -78,7 +78,7 @@ class ModerationMixin(BaseManager):
             )
             return []
 
-    async def get_punishment(self, case_id: int, guild_id: int) -> Optional[Punishment]:
+    async def get_case(self, case_id: int, guild_id: int) -> Optional[Punishment]:
         """Retrieve a specific punishment by case ID in a guild."""
         try:
             async with self.async_sessionmaker() as session:
@@ -92,18 +92,6 @@ class ModerationMixin(BaseManager):
             logging.error(
                 f"Error retrieving punishment case {case_id} in guild {guild_id}: {e}"
             )
-            return None
-
-    async def get_punishment_by_id(self, punishment_id: int) -> Optional[Punishment]:
-        """Retrieve a punishment by its database ID (not case_id)."""
-        try:
-            async with self.async_sessionmaker() as session:
-                result = await session.execute(
-                    select(Punishment).where(Punishment.id == punishment_id)
-                )
-                return result.scalar_one_or_none()
-        except SQLAlchemyError as e:
-            logging.error(f"Error retrieving punishment by id {punishment_id}: {e}")
             return None
 
     async def get_next_case_id(self, guild_id: int) -> int:
@@ -289,16 +277,16 @@ class ModerationMixin(BaseManager):
                             Punishment.guild_id == guild_id,
                         )
                     )
-                    punishment = result.scalar_one_or_none()
+                    case = result.scalar_one_or_none()
 
-                    if not punishment:
+                    if not case:
                         logging.warning(
                             f"Punishment case {case_id} not found in guild {guild_id}"
                         )
                         return False
 
                     case_note = CaseNote(
-                        punishment_id=punishment.id,
+                        case_id=case.id,
                         moderator_id=moderator_id,
                         note=note,
                         created_at=discord.utils.utcnow(),

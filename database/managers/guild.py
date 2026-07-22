@@ -820,5 +820,5 @@ class GuildMixin(BaseManager):
             return (
                 nuke_msg
                 if nuke_msg is not None
-                else "TOXIC HUMANS IS NEVER COMING!!! - DENKOV"
+                else "Channel nuked successfully!"
             )

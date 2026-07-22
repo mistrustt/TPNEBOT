@@ -2218,7 +2218,7 @@ class Economy(commands.Cog):
             f"**{name}** just shrugs and says, 'Maybe next time,' as they keep walking.",
             f"'I can't help you,' **{name}** says bluntly before disappearing into the crowd.",
             f"**{name}** gives you a cold stare and continues on their way without a word.",
-            f"**{name}** looks you dead in the eye and screams, 'TOXIC HUMANS IS NEVER COMING'",
+            f"**{name}** looks you dead in the eye and screams, 'No!'",
             f"**{name}** pulls out their earbuds just to say 'No' before putting them back in.",
             f"'I'm broke too,' **{name}** claims while clearly holding a designer bag.",
             f"**{name}** laughs mockingly and says, 'Nice try, but I'm not falling for that.'",
