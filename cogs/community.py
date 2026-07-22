@@ -272,13 +272,28 @@ class Community(commands.Cog, name="Community"):
             await ctx.send("You have no grails yet.")
             return
 
-        grails = "\n".join([f"{song.song_title.title()}" for song in favorite_songs])
+        lines = [f"{song.song_title.title()}" for song in favorite_songs]
 
-        embed = discord.Embed(description=grails, color=discord.Color.blurple())
+        pages = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) + 1 > 4000:
+                pages.append(current)
+                current = line
+            else:
+                current = current + "\n" + line if current else line
+        if current:
+            pages.append(current)
+
+        embed = discord.Embed(
+            description=pages[0], color=discord.Color.blurple()
+        )
         embed.set_author(
             name=f"{member.display_name}'s Grail List",
             icon_url=self.utils.get_avatar_url(member),
         )
+        if len(pages) > 1:
+            embed.set_footer(text=f"Page 1 / {len(pages)}")
 
         await ctx.send(embed=embed)
 
