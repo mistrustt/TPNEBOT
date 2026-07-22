@@ -1316,7 +1316,7 @@ class DiscordBot(commands.Bot):
                     else f"Unknown User\n`{ctx.author.id}`",
                     inline=True,
                 )
-                channel = discord.utils.get(self.get_all_channels(), id=ctx.channel.id),
+                channel = discord.utils.get(self.get_all_channels(), id=ctx.channel.id)
                 base_embed.add_field(
                     name="📍 Channel",
                     value=f"{channel.mention}\n`{ctx.channel.id}`"
@@ -1324,7 +1324,7 @@ class DiscordBot(commands.Bot):
                     else f"Unknown Channel\n`{ctx.channel.id}`",
                     inline=True,
                 )
-                guild = await discord.utils.find(lambda g: g.id == ctx.guild.id, self.guilds) if ctx.guild else None
+                guild = discord.utils.find(lambda g: g.id == ctx.guild.id, self.guilds) if ctx.guild else None
                 base_embed.add_field(
                     name="🏠 Guild",
                     value=f"{guild.name}\n`{guild.id}`"

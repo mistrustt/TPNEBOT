@@ -233,33 +233,38 @@ class CoreMixin(BaseManager):
                 used_at = used_at.replace(tzinfo=timezone.utc)
             bucket_date = used_at.date()
             async with self.async_sessionmaker() as session:
-                stmt = select(CommandErrorDaily).where(
-                    CommandErrorDaily.bucket_date == bucket_date,
-                    CommandErrorDaily.command_name == command_name,
-                    CommandErrorDaily.guild_id == guild_id,
-                    CommandErrorDaily.user_hash == user_hash,
-                    CommandErrorDaily.is_slash == is_slash,
-                    CommandErrorDaily.error_type == error_type,
-                )
-                result = await session.execute(stmt)
-                row = result.scalar_one_or_none()
-                if row:
-                    row.count += 1
-                    row.last_seen_at = used_at
-                else:
-                    session.add(
-                        CommandErrorDaily(
-                            bucket_date=bucket_date,
-                            command_name=command_name,
-                            guild_id=guild_id,
-                            user_hash=user_hash,
-                            is_slash=is_slash,
-                            error_type=error_type,
-                            count=1,
-                            last_seen_at=used_at,
-                        )
+                stmt = (
+                    pg_insert(CommandErrorDaily)
+                    .values(
+                        bucket_date=bucket_date,
+                        command_name=command_name,
+                        guild_id=guild_id,
+                        user_hash=user_hash,
+                        is_slash=is_slash,
+                        error_type=error_type,
+                        count=1,
+                        last_seen_at=used_at,
                     )
+                    .on_conflict_do_update(
+                        index_elements=[
+                            "bucket_date",
+                            "command_name",
+                            "guild_id",
+                            "user_hash",
+                            "is_slash",
+                            "error_type",
+                        ],
+                        set_={
+                            "count": CommandErrorDaily.count + 1,
+                            "last_seen_at": used_at,
+                        },
+                    )
+                )
+                await session.execute(stmt)
                 await session.commit()
+        except IntegrityError:
+            # Another concurrent upsert won the race; the row is now correct.
+            pass
         except SQLAlchemyError as e:
             logging.error(f"Error recording command error: {str(e)}")
 
