@@ -4830,8 +4830,9 @@ class Casino(commands.Cog):
     ### DISCORD DISALLOWS THE WORD "CASINO" FROM COMMAND NAMES
     ### THIS WILL REMAIN DISABLED UNTIL A SOLUTION IS FOUND
 
-    async def casino(self, ctx: commands.Context):
-        """Root for casino commands. Lists available subcommands."""
+    @commands.group(name="game", invoke_without_command=True, case_insensitive=True)
+    async def game(self, ctx: commands.Context):
+        """Root for game commands. Lists available subcommands."""
         prefix = ctx.prefix or "/"
 
         subcmds = getattr(ctx.command, "commands", []) or []
@@ -4845,9 +4846,9 @@ class Casino(commands.Cog):
             )
             desc = (cmd.help or cmd.description or "").strip()
             if desc:
-                lines.append(f"`{prefix}casino {name}`{aliases} — {desc}")
+                lines.append(f"`{prefix}game {name}`{aliases} — {desc}")
             else:
-                lines.append(f"`{prefix}casino {name}`{aliases}")
+                lines.append(f"`{prefix}game {name}`{aliases}")
 
         if not lines:
             description = "No subcommands available."
@@ -4855,15 +4856,16 @@ class Casino(commands.Cog):
             description = "\n".join(lines)
 
         embed = discord.Embed(
-            title="Casino — Available Commands",
+            title="Game — Available Commands",
             description=description,
             color=discord.Color.blurple(),
         )
-        embed.set_footer(text=f"Use {prefix}casino <subcommand> for details.")
+        embed.set_footer(text=f"Use {prefix}game <subcommand> for details.")
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    async def casino_stats(
+    @game.command(name="stats", aliases=["statistics"])
+    async def game_stats(
         self,
         ctx: commands.Context,
         game_name: str = "gamble",
@@ -4924,7 +4926,8 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    async def casino_leaderboard(
+    @game.command(name="leaderboard", aliases=["lb"])
+    async def game_leaderboard(
         self, ctx: commands.Context, game_name: str = "gamble", limit: int = 10
     ):
         if ctx.interaction and not ctx.interaction.response.is_done():
@@ -4944,7 +4947,7 @@ class Casino(commands.Cog):
             else discord.Color.blurple()
         )
         embed.set_author(
-            name=f"Casino Leaderboard - {game_name.title()}",
+            name=f"Game Leaderboard - {game_name.title()}",
             icon_url=self.utils.get_avatar_url(ctx.author),
         )
         if top_winners:
@@ -4971,8 +4974,8 @@ class Casino(commands.Cog):
             embed.add_field(name="Top 10 Users", value="No data available", inline=True)
         await ctx.send(embed=embed)
 
-    @commands.command(name="gamehistory", aliases=["gh"])
-    async def casino_history(
+    @game.command(name="history", aliases=["hist"])
+    async def game_history(
         self,
         ctx: commands.Context,
         member: Optional[discord.Member] = None,
@@ -4997,8 +5000,8 @@ class Casino(commands.Cog):
         embed = await view.get_page_embed()
         await ctx.reply(embed=embed, view=view, mention_author=False)
 
-    @commands.command(name="verify")
-    async def casino_verify(
+    @game.command(name="verify")
+    async def game_verify(
         self,
         ctx: commands.Context,
         game: str,
@@ -5494,7 +5497,7 @@ class Casino(commands.Cog):
         )
         await ctx.reply(embed=embed, mention_author=False)
 
-    @commands.command(name="seed")
+    @game.command(name="seed")
     async def casino_seed(self, ctx: commands.Context):
         client_seed, nonce = await self.bot.database.get_client_seed(ctx.author.id)
 
@@ -5520,7 +5523,7 @@ class Casino(commands.Cog):
 
         await ctx.reply(embed=embed, mention_author=False)
 
-    @commands.command(name="setseed")
+    @game.command(name="setseed")
     async def casino_setseed(
         self, ctx: commands.Context, *, seed: Optional[str] = None
     ):
