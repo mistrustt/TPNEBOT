@@ -414,7 +414,7 @@ class Item(Base):
         default=ItemRarity.COMMON,
     )
     effect = Column(String, nullable=True)
-    effect_value = Column(Integer, nullable=True)
+    effect_value = Column(Numeric(10, 4), nullable=True)
     effect_duration = Column(Integer, nullable=True)
     cooldown_seconds = Column(Integer, nullable=True)
     targetable = Column(Boolean, default=False, nullable=False)
@@ -454,7 +454,7 @@ class ShopItem(Base):
         default=ItemRarity.COMMON,
     )
     effect = Column(String, nullable=True)
-    effect_value = Column(Integer, nullable=True)
+    effect_value = Column(Numeric(10, 4), nullable=True)
     effect_duration = Column(Integer, nullable=True)
     cooldown_seconds = Column(Integer, nullable=True)
     targetable = Column(Boolean, default=False, nullable=False)
