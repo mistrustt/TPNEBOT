@@ -703,6 +703,7 @@ class General(commands.Cog, name="General"):
     async def afk(
         self,
         ctx: commands.Context,
+        *,
         reason: Optional[str] = "No reason provided",
     ) -> None:
         """
