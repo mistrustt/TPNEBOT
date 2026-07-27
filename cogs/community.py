@@ -190,10 +190,13 @@ class Community(commands.Cog, name="Community"):
         await ctx.send(embed=embed, view=view)
 
     @grail.command(name="add")
+    @unified_cooldown(10)
     async def grail_add(self, ctx: Context, *, song_title: str):
         """Add a favorite song."""
+        await ctx.defer(ephemeral=True)
+
         if len(song_title) > 64:
-            await ctx.reply("Song title cannot be longer than 64 characters.")
+            await ctx.send("Song title cannot be longer than 64 characters.")
             return
 
         await self.bot.database.add_favorite_song(ctx.author.id, song_title)
@@ -210,13 +213,15 @@ class Community(commands.Cog, name="Community"):
             ctx,
             f"Added **{song_title}** to your grail list.",
             color=color,
-            reply=True,
             delete_after=None,
         )
 
     @grail.command(name="remove")
+    @unified_cooldown(10)
     async def grail_remove(self, ctx: Context, *, song_title: str):
         """Remove a favorite song by title."""
+        await ctx.defer(ephemeral=True)
+
         favorite_songs = await self.bot.database.get_favorite_songs(ctx.author.id)
         song_title_lower = song_title.lower()
         song_to_remove = next(
@@ -244,20 +249,21 @@ class Community(commands.Cog, name="Community"):
                 ctx,
                 f"Removed **{song_title}** from your grail list.",
                 color=color,
-                reply=True,
                 delete_after=None,
             )
         else:
             await Embeds.error(
                 ctx,
                 f"Could not find **{song_title}** in your grail list.",
-                reply=True,
                 delete_after=None,
             )
 
     @grail.command(name="list")
+    @unified_cooldown(10)
     async def grail_list(self, ctx: commands.Context, member: discord.Member = None):
         """View your favorite songs."""
+        await ctx.defer(ephemeral=True)
+
         member = member or ctx.author
 
         favorite_songs = await self.bot.database.get_favorite_songs(member.id)
@@ -266,13 +272,28 @@ class Community(commands.Cog, name="Community"):
             await ctx.send("You have no grails yet.")
             return
 
-        grails = "\n".join([f"{song.song_title.title()}" for song in favorite_songs])
+        lines = [f"{song.song_title.title()}" for song in favorite_songs]
 
-        embed = discord.Embed(description=grails, color=discord.Color.blurple())
+        pages = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) + 1 > 4000:
+                pages.append(current)
+                current = line
+            else:
+                current = current + "\n" + line if current else line
+        if current:
+            pages.append(current)
+
+        embed = discord.Embed(
+            description=pages[0], color=discord.Color.blurple()
+        )
         embed.set_author(
             name=f"{member.display_name}'s Grail List",
             icon_url=self.utils.get_avatar_url(member),
         )
+        if len(pages) > 1:
+            embed.set_footer(text=f"Page 1 / {len(pages)}")
 
         await ctx.send(embed=embed)
 
@@ -280,6 +301,8 @@ class Community(commands.Cog, name="Community"):
     @unified_cooldown(10)
     async def clear_favorite(self, ctx: Context):
         """Clear your favourite songs."""
+        await ctx.defer(ephemeral=True)
+
         await self.bot.database.clear_favorite_songs(ctx.author.id)
         color = discord.Color.blurple()
         if isinstance(ctx.channel, discord.DMChannel):
@@ -294,7 +317,6 @@ class Community(commands.Cog, name="Community"):
             ctx,
             f"Removed **all songs** from your grail list.",
             color=color,
-            reply=True,
             delete_after=None,
         )
 

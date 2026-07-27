@@ -755,6 +755,7 @@ class General(commands.Cog, name="General"):
     @unified_cooldown(3)
     async def snipe(self, ctx: Context, index: int = 1) -> None:
         """Retrieve deleted messages from the channel."""
+        await ctx.defer(ephemeral=False)
         try:
             index = max(1, min(index, 50))
             guild_id = ctx.guild.id
@@ -843,6 +844,7 @@ class General(commands.Cog, name="General"):
     @unified_cooldown(3)
     async def edit_snipe(self, ctx: Context) -> None:
         """Retrieve the last edited message in the channel."""
+        await ctx.defer(ephemeral=False)
         try:
             guild_id = ctx.guild.id
             channel_id = ctx.channel.id
@@ -878,6 +880,7 @@ class General(commands.Cog, name="General"):
     @unified_cooldown(5)
     async def clear_snipe(self, ctx: Context) -> None:
         """Clear snipe history for the current channel."""
+        await ctx.defer(ephemeral=True)
         guild_id = ctx.guild.id
         channel_id = ctx.channel.id
         cleared = False

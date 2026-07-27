@@ -17,6 +17,7 @@ from utils.cooldown import unified_cooldown
 from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
 from itertools import product
+from difflib import SequenceMatcher
 from moviepy import *
 import re
 import random
@@ -48,6 +49,11 @@ class Music(commands.Cog, name="Music"):
         self.latest_surfaces = []
         self.cache_songs.start()
         self.is_blacktea_synced = False
+
+        self.cover_thumb_cache: dict[str, bytes] = {}
+        self._cover_inflight: dict[str, asyncio.Task] = {}
+        self._cover_bg_tasks: set[asyncio.Task] = set()
+        self.COVER_THUMB_SIZE = 1024
 
         self.valid_names = set()
         self.producer_counts = {}
@@ -182,11 +188,202 @@ class Music(commands.Cog, name="Music"):
 
     async def cog_unload(self):
         self._auto_cache_clean.cancel()
+        for task in self._cover_bg_tasks:
+            task.cancel()
+        self._cover_bg_tasks.clear()
         await self.session.close()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Delegate slash guardrails to the bot's centralized check."""
         return await check_slash_guardrails(self, interaction)
+
+    # ------------------------------------------------------------------
+    # Cover art helpers
+    # ------------------------------------------------------------------
+
+    def _cover_spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self._cover_bg_tasks.add(task)
+        task.add_done_callback(self._cover_bg_tasks.discard)
+
+    @staticmethod
+    def _cover_resize(raw: bytes, size: int) -> bytes:
+        with Image.open(BytesIO(raw)) as im:
+            im.draft("RGB", (size, size))
+            im = im.convert("RGB")
+            im.thumbnail((size, size))
+            out = BytesIO()
+            im.save(out, format="JPEG", quality=85)
+            return out.getvalue()
+
+    async def fetch_cover_thumb(self, url: str):
+        """GET a cover, downscale it, and cache the bytes, returns None on failure."""
+        cached = self.cover_thumb_cache.get(url)
+        if cached is not None:
+            return cached
+        if url not in self._cover_inflight:
+            self._cover_inflight[url] = asyncio.ensure_future(self._download_cover_thumb(url))
+        try:
+            return await self._cover_inflight[url]
+        except Exception:
+            return None
+
+    async def _download_cover_thumb(self, url: str):
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    return None
+                raw = await resp.read()
+            data = await asyncio.to_thread(self._cover_resize, raw, self.COVER_THUMB_SIZE)
+            self.cover_thumb_cache[url] = data
+            return data
+        except Exception:
+            return None
+        finally:
+            self._cover_inflight.pop(url, None)
+
+    async def prefetch_cover_thumbs(self, urls):
+        sem = asyncio.Semaphore(6)
+
+        async def warm(u):
+            async with sem:
+                await self.fetch_cover_thumb(u)
+
+        await asyncio.gather(*[warm(u) for u in urls], return_exceptions=True)
+
+    async def _search_cover_files(self, song_name: str) -> list[tuple[str, str, str]] | None:
+        """Search the cover-art file tree with query variants and fuzzy scoring.
+
+        The browse endpoint is exact-substring-ish; retry with stripped quotes,
+        leading small words moved, and no-parentheses forms, then score file
+        names against the query to keep the best matches.
+        Returns None when the API request itself fails.
+        """
+
+        def normalize(text: str) -> str:
+            return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
+
+        def score(name: str, query_norm: str) -> float:
+            return SequenceMatcher(None, query_norm, normalize(name)).ratio()
+
+        queries = [song_name]
+        stripped = song_name.strip("'")
+        if stripped != song_name:
+            queries.append(stripped)
+        parts = song_name.split()
+        if len(parts) > 1 and len(parts[0]) <= 2 and parts[0] != "go":
+            queries.append(" ".join(parts[1:]))
+            queries.append(" ".join(parts[1:]) + " " + parts[0])
+        no_parens = re.sub(r"\s*\([^)]*\)", "", song_name).strip()
+        if no_parens and no_parens != song_name:
+            queries.append(no_parens)
+
+        seen_paths = set()
+        all_files: list[tuple[str, str, str]] = []
+        for q in queries:
+            async with self.session.get(
+                f"{JUICEWRLD_API}/juicewrld/files/browse/",
+                params={"search": q},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+
+            for item in data.get("items", []):
+                if item.get("type") != "file":
+                    continue
+                if not (item.get("mime_type") or "").startswith("image/"):
+                    continue
+                path = item.get("path", "")
+                parts = path.split("/")
+                if len(parts) < 3 or parts[0] != "Cover Arts":
+                    continue
+                if path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                artist = parts[1]
+                name = item.get("name", parts[-1])
+                all_files.append((artist, path, name))
+
+        query_norm = normalize(song_name)
+        scored = sorted(
+            ((score(name, query_norm), artist, path, name) for artist, path, name in all_files),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+
+        if scored and scored[0][0] >= 0.4:
+            return [(a, p, n) for _, a, p, n in scored if _ >= 0.25]
+        return all_files
+
+    @commands.hybrid_command(
+        name="cover",
+        aliases=["covers"],
+        description="Search for available covers of a song",
+    )
+    @unified_cooldown(10)
+    async def cover(self, ctx: commands.Context, *, song_name: Optional[str] = None):
+        """Search for song covers in the Juice WRLD API database, grouped by artist."""
+        await ctx.defer(ephemeral=False)
+
+        if not song_name:
+            await Embeds.error(
+                ctx,
+                "🚫 Please provide a song name to search for covers.",
+                delete_after=None,
+            )
+            return
+
+        song_name = song_name.strip().replace('’', "'")
+
+        if len(song_name) < 3:
+            await Embeds.error(
+                ctx,
+                "🚫 Please enter at least 3 characters to search for covers.",
+                delete_after=None,
+            )
+            return
+
+        progress_msg = await Embeds.custom(
+            ctx,
+            f"🔍 Searching for covers of **{song_name}**...",
+            color=discord.Color.blurple(),
+            delete_after=None,
+        )
+
+        cover_files = await self._search_cover_files(song_name)
+
+        if cover_files is None:
+            await progress_msg.edit(embed=discord.Embed(
+                description="❌ Couldn't reach the cover database. Please try again later.",
+                color=discord.Color.red(),
+            ))
+            await asyncio.sleep(10)
+            await progress_msg.delete()
+            return
+
+        if not cover_files:
+            await progress_msg.edit(embed=discord.Embed(
+                description=f"❌ No covers found for **{song_name}**.",
+                color=discord.Color.red(),
+            ))
+            await asyncio.sleep(10)
+            await progress_msg.delete()
+            return
+
+        covers_by_artist: dict[str, list[tuple[str, str]]] = {}
+        for artist, path, name in cover_files:
+            url = f"{JUICEWRLD_API}/juicewrld/files/download/?path=" + quote(path, safe="/")
+            covers_by_artist.setdefault(artist, []).append((url, name))
+
+        for covers in covers_by_artist.values():
+            covers.sort(key=lambda cover: cover[1].lower())
+
+        await progress_msg.delete()
+
+        view = CoverArtistView(self, song_name, covers_by_artist, ctx.author.id)
+        view.message = await ctx.send(view=view)
 
     def can_test(ctx: commands.Context, cog=None):
         if cog is None:
@@ -1840,29 +2037,100 @@ class Music(commands.Cog, name="Music"):
 
     async def fetch_song(self, ctx: commands.Context, query: str, allow_unsurfaced: bool = True):
         query = query.replace('’', "'")
-        async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
-        ) as response:
-            if response.status != 200:
-                await Embeds.error(
-                    ctx,
-                    "Request failed. Please try again later.",
-                    delete_after=5,
-                    reply=True,
-                )
-                return None
-
-            data = await response.json()
-
-        song_list = [
-            song
-            for song in data.get("results", [])
-            if song.get("leak_type")
-            and "session" not in song["leak_type"].lower()
-            and (allow_unsurfaced or not self._is_unsurfaced(song))
-        ]
-
+        song_list = await self._search_songs(query, allow_unsurfaced=allow_unsurfaced)
+        if song_list is None:
+            await Embeds.error(
+                ctx,
+                "Request failed. Please try again later.",
+                delete_after=5,
+                reply=True,
+            )
+            return None
         return song_list
+
+    async def _search_songs(
+        self,
+        query: str,
+        *,
+        allow_unsurfaced: bool = True,
+        session_only: bool = False,
+    ) -> list[dict] | None:
+        """Search the Juice WRLD API, falling back to broader strategies.
+
+        The API's search parameter can be picky about punctuation,
+        leading words, and word order. Try the query directly, then retry
+        with cleaned-up variants, and finally score results client-side.
+        Returns None only when the API request itself fails.
+        """
+
+        def normalize(text: str) -> str:
+            return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
+
+        def score(song: dict, query_norm: str) -> float:
+            candidates = [
+                normalize(song.get("name", "")),
+                normalize(" ".join(song.get("track_titles", []) or [])),
+            ]
+            return max(
+                SequenceMatcher(None, query_norm, cand).ratio()
+                for cand in candidates
+            )
+
+        def keep(song: dict) -> bool:
+            leak_type = (song.get("leak_type") or "").lower()
+            if not leak_type:
+                return False
+            is_session = "session" in leak_type
+            if session_only:
+                return is_session
+            return not is_session
+
+        queries = [query]
+        stripped = query.strip("'")
+        if stripped != query:
+            queries.append(stripped)
+        # Drop a leading single letter word like "k" and retry
+        parts = query.split()
+        if len(parts) > 1 and len(parts[0]) <= 2 and parts[0] != "go":
+            queries.append(" ".join(parts[1:]))
+            queries.append(" ".join(parts[1:]) + " " + parts[0])
+        # Try without parentheses content
+        no_parens = re.sub(r"\s*\([^)]*\)", "", query).strip()
+        if no_parens and no_parens != query:
+            queries.append(no_parens)
+
+        seen_ids = set()
+        all_results: list[dict] = []
+        for q in queries:
+            async with self.session.get(
+                JUICEWRLD_API + "/juicewrld/songs/", params={"search": q}
+            ) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+
+            for song in data.get("results", []):
+                if keep(song):
+                    if song.get("id") not in seen_ids:
+                        seen_ids.add(song.get("id"))
+                        all_results.append(song)
+
+        if not allow_unsurfaced:
+            all_results = [s for s in all_results if not self._is_unsurfaced(s)]
+
+        query_norm = normalize(query)
+        scored = sorted(
+            ((score(s, query_norm), s) for s in all_results),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+
+        # If the direct query returned nothing useful, return the best fuzzy
+        # matches so the user still gets a selection. Require a modest threshold
+        # so completely unrelated songs don't appear.
+        if scored and scored[0][0] >= 0.4:
+            return [s for score_val, s in scored if score_val >= 0.25]
+        return all_results
 
     async def fetch_random_playable_song(self, max_retries: int = 8) -> dict | None:
         """Hit /juicewrld/radio/random/ until we get a song with audio.
@@ -1889,27 +2157,17 @@ class Music(commands.Cog, name="Music"):
 
     async def fetch_session(self, ctx: commands.Context, query: str, allow_unsurfaced: bool = True):
         query = query.replace('’', "'")
-        async with self.session.get(
-            JUICEWRLD_API + "/juicewrld/songs/", params={"search": query}
-        ) as response:
-            if response.status != 200:
-                await Embeds.error(
-                    ctx,
-                    "Request failed. Please try again later.",
-                    delete_after=5,
-                    reply=True,
-                )
-                return None
-
-            data = await response.json()
-
-        song_list = [
-            song
-            for song in data.get("results", [])
-            if "session" in (song.get("leak_type") or "").lower()
-            and (allow_unsurfaced or not self._is_unsurfaced(song))
-        ]
-
+        song_list = await self._search_songs(
+            query, allow_unsurfaced=allow_unsurfaced, session_only=True
+        )
+        if song_list is None:
+            await Embeds.error(
+                ctx,
+                "Request failed. Please try again later.",
+                delete_after=5,
+                reply=True,
+            )
+            return None
         return song_list
 
     async def fetch_session_files(self, song: dict) -> tuple[list[str], list[str]]:
@@ -3655,25 +3913,12 @@ class Music(commands.Cog, name="Music"):
         try:
             async with ctx.typing():
                 normalized_query = query.replace("’", "'")
-                async with self.session.get(
-                    JUICEWRLD_API + "/juicewrld/songs/", params={"search": normalized_query}
-                ) as response:
-                    content_type = response.headers.get("Content-Type", "")
-                    if response.status != 200 or "application/json" not in content_type:
-                        await handle_request_failed(
-                            ctx, response.status if response.status != 200 else 500
-                        )
-                        return
-
-                    data = await response.json()
-
-                matches = [
-                    song
-                    for song in data.get("results", [])
-                    if (song.get("leak_type") or "")
-                    and "session" not in song.get("leak_type", "").lower()
-                    and song.get("category", "").lower() != "unsurfaced"
-                ]
+                matches = await self._search_songs(
+                    normalized_query, allow_unsurfaced=False
+                )
+                if matches is None:
+                    await handle_request_failed(ctx, 500)
+                    return
 
                 safe_items: dict[str, dict] = {}
                 for song in matches:
@@ -3990,7 +4235,7 @@ class CoverArtistView(discord.ui.LayoutView):
     PREV_ARTISTS = "__artists_prev__"
     NEXT_ARTISTS = "__artists_next__"
 
-    def __init__(self, cog: "CoverSearch", song_name: str, covers_by_artist: dict, author_id: int):
+    def __init__(self, cog: "Music", song_name: str, covers_by_artist: dict, author_id: int):
         super().__init__(timeout=180)
         self.cog = cog
         self.song_name = song_name
@@ -4125,7 +4370,7 @@ class CoverArtistView(discord.ui.LayoutView):
         start = self.page * self.PER_PAGE
         page_covers = covers[start:start + self.PER_PAGE]
 
-        results = await asyncio.gather(*[self.cog.fetch_thumb(url) for url, _name in page_covers])
+        results = await asyncio.gather(*[self.cog.fetch_cover_thumb(url) for url, _name in page_covers])
 
         files = []
         media_names = []
@@ -4144,9 +4389,9 @@ class CoverArtistView(discord.ui.LayoutView):
             for pidx in {(self.page - 1) % total, (self.page + 1) % total}:
                 s = pidx * self.PER_PAGE
                 neighbours.extend(url for url, _name in covers[s:s + self.PER_PAGE])
-        neighbours = [u for u in neighbours if u not in self.cog.thumb_cache]
+        neighbours = [u for u in neighbours if u not in self.cog.cover_thumb_cache]
         if neighbours:
-            self.cog._spawn(self.cog.prefetch(neighbours))
+            self.cog._cover_spawn(self.cog.prefetch_cover_thumbs(neighbours))
 
         return files
 
@@ -4210,172 +4455,8 @@ class CoverArtistView(discord.ui.LayoutView):
             # The view has still timed out; leave the message as-is.
             pass
 
-class CoverSearch(commands.Cog, name="Cover", description="Search for song covers from Juice WRLD API"):
-    THUMB_SIZE = 1024
-
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self.session = None
-        self.thumb_cache = {}
-        self._inflight = {}
-        self._bg_tasks = set()
-
-    def _spawn(self, coro):
-        task = asyncio.create_task(coro)
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
-
-    async def cog_unload(self):
-        if self.session is not None and not self.session.closed:
-            await self.session.close()
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        return self.session
-
-    @staticmethod
-    def _resize(raw: bytes, size: int) -> bytes:
-        with Image.open(BytesIO(raw)) as im:
-            im.draft("RGB", (size, size))
-            im = im.convert("RGB")
-            im.thumbnail((size, size))
-            out = BytesIO()
-            im.save(out, format="JPEG", quality=85)
-            return out.getvalue()
-
-    async def fetch_thumb(self, url: str):
-        """GET a cover, downscale it, and cache the bytes, returns None on failure
-
-        if a page render and a background prefetch happen to want the same cover
-        at the same time, they wait on the one download instead of grabbing it twice
-        """
-        cached = self.thumb_cache.get(url)
-        if cached is not None:
-            return cached
-        if url not in self._inflight:
-            self._inflight[url] = asyncio.ensure_future(self._download_resize(url))
-        try:
-            return await self._inflight[url]
-        except Exception:
-            return None
-
-    async def _download_resize(self, url: str):
-        try:
-            session = await self._get_session()
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                if resp.status != 200:
-                    return None
-                raw = await resp.read()
-            data = await asyncio.to_thread(self._resize, raw, self.THUMB_SIZE)
-            self.thumb_cache[url] = data
-            return data
-        except Exception:
-            return None
-        finally:
-            self._inflight.pop(url, None)
-
-    async def prefetch(self, urls):
-        sem = asyncio.Semaphore(6)
-
-        async def warm(u):
-            async with sem:
-                await self.fetch_thumb(u)
-
-        await asyncio.gather(*[warm(u) for u in urls], return_exceptions=True)
-
-    @commands.command(name="cover", description="Search for available covers of a song")
-    async def cover(self, ctx: commands.Context, *, song_name: Optional[str] = None):
-        """Search for song covers in the Juice WRLD API database, grouped by artist."""
-        if not song_name:
-            await Embeds.error(
-                ctx,
-                "🚫 Please provide a song name to search for covers.",
-                delete_after=None,
-            )
-            return
-
-        song_name = song_name.strip()
-
-        if len(song_name) < 3:
-            await Embeds.error(
-                ctx,
-                "🚫 Please enter at least 3 characters to search for covers.",
-                delete_after=None,
-            )
-            return
-
-        progress_msg = await Embeds.custom(
-            ctx,
-            f"🔍 Searching for covers of **{song_name}**...",
-            color=discord.Color.blurple(),
-            delete_after=None,
-        )
-
-        try:
-            session = await self._get_session()
-            async with session.get(
-                f"{JUICEWRLD_API}/juicewrld/files/browse/",
-                params={"search": song_name},
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as response:
-                data = await response.json() if response.status == 200 else None
-        except Exception:
-            data = None
-
-        if data is None:
-            await progress_msg.edit(embed=discord.Embed(
-                description="❌ Couldn't reach the cover database. Please try again later.",
-                color=discord.Color.red(),
-            ))
-            await asyncio.sleep(10)
-            await progress_msg.delete()
-            return
-
-        cover_files = []
-        for item in data.get("items", []):
-            if item.get("type") != "file":
-                continue
-            if not (item.get("mime_type") or "").startswith("image/"):
-                continue
-            path = item.get("path", "")
-            parts = path.split("/")
-            if len(parts) < 3 or parts[0] != "Cover Arts":
-                continue
-            cover_files.append((parts[1], path, item.get("name", parts[-1])))
-
-        query = song_name.lower()
-        relevant = [
-            cf for cf in cover_files
-            if cf[2].rsplit(".", 1)[0].strip().lower().startswith(query)
-        ]
-        chosen = relevant or cover_files
-
-        covers_by_artist: dict[str, list[tuple[str, str]]] = {}
-        for artist, path, name in chosen:
-            url = f"{JUICEWRLD_API}/juicewrld/files/download/?path=" + quote(path, safe="/")
-            covers_by_artist.setdefault(artist, []).append((url, name))
-
-        if not covers_by_artist:
-            await progress_msg.edit(embed=discord.Embed(
-                description=f"❌ No covers found for **{song_name}**.",
-                color=discord.Color.red(),
-            ))
-            await asyncio.sleep(10)
-            await progress_msg.delete()
-            return
-
-        for covers in covers_by_artist.values():
-            covers.sort(key=lambda cover: cover[1].lower())
-
-        await progress_msg.delete()
-
-        view = CoverArtistView(self, song_name, covers_by_artist, ctx.author.id)
-        view.message = await ctx.send(view=view)
-
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Music(bot))
-    await bot.add_cog(CoverSearch(bot))
     logger.debug("Music cog initialized successfully")
 
 class LatestSurfacesView(discord.ui.LayoutView):
