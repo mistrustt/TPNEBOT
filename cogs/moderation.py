@@ -2257,7 +2257,7 @@ class Moderation(commands.Cog, name="Moderation"):
         """Check the status of the Anti-Audio feature"""
         if ctx.invoked_subcommand is None:
             guild_id = ctx.guild.id
-            anti_audio_settings = await self.bot.database.get_antiaudio_status(guild_id)
+            anti_audio_settings = await self.bot.database.get_antimp3_status(guild_id)
             if not anti_audio_settings:
                 embed = discord.Embed(
                     description=f"The Anti-Audio feature is currently **disabled** in {ctx.guild.name}.",
@@ -2291,10 +2291,10 @@ class Moderation(commands.Cog, name="Moderation"):
     async def enable_antiaudio(self, ctx: Context):
         """Toggle the Anti-Audio feature"""
         guild_id = ctx.guild.id
-        anti_audio = await self.bot.database.get_antiaudio_status(guild_id)
+        anti_audio = await self.bot.database.get_antimp3_status(guild_id)
 
         if not anti_audio:
-            await self.bot.database.toggle_antiaudio(guild_id, True)
+            await self.bot.database.toggle_antimp3(guild_id, True)
             embed = discord.Embed(
                 description="Anti-Audio has been enabled.", color=discord.Color.blurple()
             )
@@ -2322,10 +2322,10 @@ class Moderation(commands.Cog, name="Moderation"):
     async def disable_antiaudio(self, ctx: Context):
         """Toggle the Anti-Audio feature"""
         guild_id = ctx.guild.id
-        anti_audio = await self.bot.database.get_antiaudio_status(guild_id)
+        anti_audio = await self.bot.database.get_antimp3_status(guild_id)
 
         if anti_audio:
-            await self.bot.database.toggle_antiaudio(guild_id, False)
+            await self.bot.database.toggle_antimp3(guild_id, False)
             embed = discord.Embed(
                 description="Anti-Audio has been disabled.", color=discord.Color.greyple()
             )
