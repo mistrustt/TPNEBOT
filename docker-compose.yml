@@ -1,6 +1,8 @@
 # Docker Compose for TPNEBOT
-# - `app` runs the Discord bot
-# - `db`  runs PostgreSQL 17 with a named volume for persistence
+# - `app`        runs the Discord bot
+# - `db`         runs PostgreSQL 17 with a named volume for persistence
+# - `db-backup`  runs `pg_dump` on a schedule (default: every 14 days) into
+#                the `dbbackups` volume, keeping the newest few dumps
 #
 # All secrets (TOKEN, DB_PW, API keys, encryption keys) are fetched from
 # Infisical at runtime. .env must only contain non-sensitive configuration
@@ -11,6 +13,12 @@
 #   2. docker compose build
 #   3. docker compose up -d
 #   4. docker compose logs -f app
+#   5. docker compose logs -f db-backup   # confirm backups are running
+#
+# Restore a backup:
+#   docker compose run --rm --entrypoint sh db-backup -c 'ls /backups'
+#   docker compose run --rm --entrypoint sh db-backup \
+#     -c 'pg_restore --clean --if-exists -d "$PGDATABASE" /backups/<file>.dump'
 
 services:
   db:
@@ -29,6 +37,29 @@ services:
       retries: 10
       start_period: 20s
     # Postgres only listens inside the compose network by default; no host port published.
+
+  db-backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # pg_dump/pg_restore read these connection vars automatically.
+      PGHOST: db
+      PGPORT: ${DB_PORT:-5432}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_INTERVAL_DAYS: ${BACKUP_INTERVAL_DAYS:-14}
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-6}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - dbbackups:/backups
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    # Stays on the image's default (root) user, same as `db` above - it
+    # only talks to Postgres and its own `dbbackups` volume, and needs to
+    # own that volume's contents the first time it's created.
 
   app:
     image: git.silverside-grouse.ts.net/dirtymonkeysquad/tpnebot:latest
@@ -62,3 +93,5 @@ volumes:
     name: tpnebot_pgdata
   appdata:
     name: tpnebot_appdata
+  dbbackups:
+    name: tpnebot_dbbackups

@@ -184,7 +184,7 @@ class GuildMixin(BaseManager):
                 await session.commit()
 
     @db_safe(default=False)
-    async def get_antimp3_status(self, guild_id: int) -> bool:
+    async def get_antiaudio_status(self, guild_id: int) -> bool:
         async with self.get_session() as session:
             settings = await session.get(ServerSettings, guild_id)
             return settings.antimp3_enabled if settings else False

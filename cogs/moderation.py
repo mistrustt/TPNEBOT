@@ -4306,7 +4306,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     async def handle_antimp3_check(self, message: discord.Message):
         try:
-            enabled = await self.bot.database.get_antimp3_status(message.guild.id)
+            enabled = await self.bot.database.get_antiaudio_status(message.guild.id)
         except Exception as exc:
             if self.bot.database._is_retryable_db_error(exc):
                 logger.debug(

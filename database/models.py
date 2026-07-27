@@ -13,7 +13,6 @@ from sqlalchemy import (
     JSON,
     func,
     CheckConstraint,
-    LargeBinary,
     UniqueConstraint,
     DateTime,
     Date,
@@ -36,7 +35,6 @@ class UserIdentity(Base):
 
     user_hash = Column(String(64), primary_key=True)
     user_id = Column(BigInteger, nullable=False, unique=True)
-
 
 class PunishmentType(enum.Enum):
     BAN = "ban"
