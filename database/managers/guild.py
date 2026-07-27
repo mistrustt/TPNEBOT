@@ -170,7 +170,7 @@ class GuildMixin(BaseManager):
         async with self.async_sessionmaker() as session:
             return await session.get(ServerSettings, guild_id)
 
-    async def toggle_antimp3(self, guild_id: int, enabled: bool):
+    async def toggle_antiaudio(self, guild_id: int, enabled: bool):
         async with self.get_session() as session:
             async with session.begin():
                 settings = await session.get(ServerSettings, guild_id)

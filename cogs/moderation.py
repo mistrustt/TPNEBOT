@@ -37,7 +37,7 @@ class Moderation(commands.Cog, name="Moderation"):
             1333280676119838821,  # daniel
             493432686694629376,  # jowy
             1288160215241326674,  # yo hello
-            1099696209637167145,  # toxic
+            #stop adding yourselves.
         ]
 
     def cog_unload(self):
@@ -2257,7 +2257,7 @@ class Moderation(commands.Cog, name="Moderation"):
         """Check the status of the Anti-Audio feature"""
         if ctx.invoked_subcommand is None:
             guild_id = ctx.guild.id
-            anti_audio_settings = await self.bot.database.get_antimp3_status(guild_id)
+            anti_audio_settings = await self.bot.database.get_antiaudio_status(guild_id)
             if not anti_audio_settings:
                 embed = discord.Embed(
                     description=f"The Anti-Audio feature is currently **disabled** in {ctx.guild.name}.",
@@ -2294,7 +2294,7 @@ class Moderation(commands.Cog, name="Moderation"):
         anti_audio = await self.bot.database.get_antimp3_status(guild_id)
 
         if not anti_audio:
-            await self.bot.database.toggle_antimp3(guild_id, True)
+            await self.bot.database.toggle_antiaudio(guild_id, True)
             embed = discord.Embed(
                 description="Anti-Audio has been enabled.", color=discord.Color.blurple()
             )
@@ -2322,10 +2322,10 @@ class Moderation(commands.Cog, name="Moderation"):
     async def disable_antiaudio(self, ctx: Context):
         """Toggle the Anti-Audio feature"""
         guild_id = ctx.guild.id
-        anti_audio = await self.bot.database.get_antimp3_status(guild_id)
+        anti_audio = await self.bot.database.get_antiaudio_status(guild_id)
 
         if anti_audio:
-            await self.bot.database.toggle_antimp3(guild_id, False)
+            await self.bot.database.toggle_antiaudio(guild_id, False)
             embed = discord.Embed(
                 description="Anti-Audio has been disabled.", color=discord.Color.greyple()
             )
@@ -4304,7 +4304,7 @@ class Moderation(commands.Cog, name="Moderation"):
         embed = view.create_embed()
         await ctx.send(embed=embed, view=view)
 
-    async def handle_antimp3_check(self, message: discord.Message):
+    async def handle_antiaudio_check(self, message: discord.Message):
         try:
             enabled = await self.bot.database.get_antiaudio_status(message.guild.id)
         except Exception as exc:
@@ -4346,7 +4346,7 @@ class Moderation(commands.Cog, name="Moderation"):
             return
 
         if message.author.id not in self.allowed_mp3_bypass_ids:
-            await self.handle_antimp3_check(message)
+            await self.handle_antiaudio_check(message)
 
 
 
