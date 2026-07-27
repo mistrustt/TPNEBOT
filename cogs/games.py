@@ -71,7 +71,7 @@ class Games(commands.Cog, name="Games"):
     @unified_cooldown(5)
     async def connect4(self, ctx: Context[commands.Bot], member: discord.User):
         await ctx.defer()
-        game = button_games.BetaConnect4(player1=ctx.author, player2=member)
+        game = button_games.BetaConnectFour(player1=ctx.author, player2=member)
         await game.start(ctx)
 
     @commands.hybrid_command(
@@ -80,7 +80,7 @@ class Games(commands.Cog, name="Games"):
     @unified_cooldown(5)
     async def battleship(self, ctx: Context[commands.Bot], member: discord.User):
         await ctx.defer()
-        game = button_games.BetaBattleship(player1=ctx.author, player2=member)
+        game = button_games.BetaBattleShip(player1=ctx.author, player2=member)
         await game.start(ctx)
 
     @commands.hybrid_command(
