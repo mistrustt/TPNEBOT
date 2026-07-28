@@ -1281,7 +1281,8 @@ class General(commands.Cog, name="General"):
         embed = discord.Embed(
             title=f"**{guild.name}**", colour=color, timestamp=discord.utils.utcnow()
         )
-        embed.set_thumbnail(url=str(guild.icon.url))
+        if guild.icon:
+            embed.set_thumbnail(url=str(guild.icon.url))
 
         embed.add_field(
             name="Members",
