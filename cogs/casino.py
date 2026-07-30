@@ -4006,7 +4006,7 @@ class Casino(commands.Cog):
         """
         client_seed, _nonce = await self.bot.database.get_client_seed(user_id)
         nonce = await self.bot.database.bump_fairgate_nonce(user_id)
-        seed = await self.fairgate_client.get_seed()
+        seed = await self.fairgate_client.get_seed(force=True)
         return {
             "server_seed_hash": seed["server_seed_hash"],
             "server_seed": None,
