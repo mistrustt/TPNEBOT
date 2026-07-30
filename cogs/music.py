@@ -1592,7 +1592,6 @@ class Music(commands.Cog, name="Music"):
             title="JuiceWRLD API — Available Commands",
             description=description,
             color=discord.Color.blurple(),
-            footer=f"Use {prefix}jwapi <subcommand> for details.",
         )
         await ctx.reply(embed=embed, mention_author=False)
 

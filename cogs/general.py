@@ -488,7 +488,9 @@ class General(commands.Cog, name="General"):
                 color=color,
                 timestamp=discord.utils.utcnow(),
             )
-            emb.set_thumbnail(url=self.bot.user.display_avatar.url)
+            avatar = self.bot.user.display_avatar.url
+            if avatar:
+                emb.set_thumbnail(url=avatar)
             return emb
 
         # If a specific command was requested, try to find and display detailed help.
