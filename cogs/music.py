@@ -2954,6 +2954,7 @@ class Music(commands.Cog, name="Music"):
                 f"The lyrics command crashed: `{type(e).__name__}: {e}`",
             )
             raise
+
     @tasks.loop(hours=1)
     async def cache_songs(self):
         songs = Cache.get_songs()
@@ -3393,10 +3394,10 @@ class Music(commands.Cog, name="Music"):
 
             era = song.get("era", {})
             era_name = era.get("name", "N/A")
-            if era_name == "POST":
-                continue
-            if len(producers) > 5:
-                continue
+            #if era_name == "POST": # ignore posthumous releases
+            #    continue
+            #if len(producers) > 5: # ignore groups with more than 5 producers
+            #    continue
 
             for producer in producers:
                 self.producer_counts[producer] = self.producer_counts.get(producer, 0) + 1

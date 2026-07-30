@@ -4493,7 +4493,7 @@ class Economy(commands.Cog):
         )
 
         for effect in effects:
-            expires_in = effect.expires_at - datetime.utcnow()
+            expires_in = effect.expires_at - datetime.now(timezone.utc)
             mins, secs = divmod(int(expires_in.total_seconds()), 60)
             hours, mins = divmod(mins, 60)
 

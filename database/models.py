@@ -367,6 +367,7 @@ class ItemRarity(enum.Enum):
     RARE = "rare"
     EPIC = "epic"
     LEGENDARY = "legendary"
+    MYTHICAL = "mythical"
 
 
 class EffectType(enum.Enum):
