@@ -3618,9 +3618,6 @@ class Music(commands.Cog, name="Music"):
                 "lives": 2,
             })
 
-            if len(players) >= 2:
-                break
-
         if len(players) <= 1:
             self.ongoing_blacktea.remove(ctx.author.id)
             await Embeds.send_warning_embed(ctx, ctx.author, "Not enough players joined the game. At least 2 players are required.")
