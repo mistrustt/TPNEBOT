@@ -3446,14 +3446,23 @@ class Owner(commands.Cog, name="Owner"):
             await ctx.send(f"🚫 Failed to send DM: {e}")
 
     @commands.command(
-        name="servers", help="List all servers the bot is currently in.", hidden=True
+        name="servers",
+        aliases=["list_servers"],
+        help="List all servers or show a specific server by ID.",
+        hidden=True,
     )
     @commands.is_owner()
-    async def list_servers(self, ctx: Context):
-        """List all servers the bot is currently in with detailed information."""
-        servers = self.bot.guilds
-        if not servers:
-            return await ctx.send("The bot is not in any servers.")
+    async def list_servers(self, ctx: Context, server_id: Optional[int] = None):
+        """List all servers the bot is in, or show details for a specific server by ID."""
+        if server_id is not None:
+            guild = self.bot.get_guild(server_id)
+            if not guild:
+                return await ctx.send(f"🚫 The bot is not in a server with ID `{server_id}`.")
+            servers = [guild]
+        else:
+            servers = self.bot.guilds
+            if not servers:
+                return await ctx.send("The bot is not in any servers.")
 
         # Prepare detailed info for each server
         server_details = []
