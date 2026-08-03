@@ -2576,7 +2576,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.hybrid_command(name='groupbuy', aliases=['gb', 'gbinfo', 'groupbuyinfo'], description='Find a songs groupbuy information')
     @unified_cooldown(10)
-    async def groupbuy(self, ctx: commands.Context, query: Optional[str] = None):
+    async def groupbuy(self, ctx: commands.Context, *, query: str = None):
         if not query:
             await Embeds.custom(
                 ctx,
@@ -2627,7 +2627,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.hybrid_command("leak", description="Search for a Juice WRLD leak by name")
     @unified_cooldown(10)
-    async def leak(self, ctx: commands.Context, query: str):
+    async def leak(self, ctx: commands.Context, *, query: str = None):
         if not query:
             await Embeds.custom(
                 ctx,
@@ -2702,7 +2702,7 @@ class Music(commands.Cog, name="Music"):
 
     @commands.hybrid_command("session", description="Search for a Juice WRLD session by name")
     @unified_cooldown(10)
-    async def session(self, ctx: commands.Context, query: str):
+    async def session(self, ctx: commands.Context, *, query: str = None):
         if not query:
             await Embeds.custom(
                 ctx,
