@@ -1288,10 +1288,10 @@ class CasinoMixin(BaseManager):
                     balance.total_claimed or Decimal("0")
                 ) + claim_amount
 
-                # Credit to wallet
+                # Credit to wallet (rakeback claims are fee-exempt)
                 wallet_id = await self.get_wallet_id_for_user(raw_user_id)
                 await self.process_treasury_transaction(
-                    wallet_id, claim_amount, "Rakeback Claim", "standard"
+                    wallet_id, claim_amount, "Rakeback Claim", "rakeback"
                 )
 
             await session.commit()

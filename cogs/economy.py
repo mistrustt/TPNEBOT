@@ -93,6 +93,7 @@ class DropView(discord.ui.View):
                 wallet_id=claim_wallet,
                 amount=Decimal(self.amount),
                 description="Drop Claim",
+                transaction_type="reward",
             )
             self.claimed = True
 
@@ -126,6 +127,7 @@ class DropView(discord.ui.View):
                 wallet_id=refund_wallet,
                 amount=Decimal(self.amount),
                 description="Drop Refund",
+                transaction_type="reward",
             )
 
             for child in self.children:
@@ -178,6 +180,7 @@ class AirDropView(discord.ui.View):
                         wallet_id=self.initiator_wallet,
                         amount=self.amount,
                         description="AirDrop Refund",
+                        transaction_type="reward",
                     )
             try:
                 await Embeds.error(
@@ -200,6 +203,7 @@ class AirDropView(discord.ui.View):
                             wallet_id=recipient_wallet,
                             amount=share,
                             description=f"Airdrop from {self.initiator.display_name}",
+                            transaction_type="reward",
                         )
 
             winners = [f"<@{uid}>" for uid in self.joiners]
@@ -1938,6 +1942,7 @@ class Economy(commands.Cog):
                     wallet_id=wallet_id,
                     amount=Decimal(daily_amount),
                     description="Daily Reward",
+                    transaction_type="reward",
                 )
             except ValueError as e:
                 await Embeds.error(
@@ -2012,6 +2017,7 @@ class Economy(commands.Cog):
                     wallet_id=wallet_id,
                     amount=Decimal(weekly_amount),
                     description="Weekly Reward",
+                    transaction_type="reward",
                 )
             except ValueError as e:
                 await Embeds.error(
@@ -2083,6 +2089,7 @@ class Economy(commands.Cog):
                     wallet_id=wallet_id,
                     amount=Decimal(monthly_amount),
                     description="Monthly Reward",
+                    transaction_type="reward",
                 )
             except ValueError as e:
                 await Embeds.error(
@@ -2249,7 +2256,7 @@ class Economy(commands.Cog):
 
                 try:
                     await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id, amount=amount, description="Beg"
+                        wallet_id=wallet_id, amount=amount, description="Beg", transaction_type="reward"
                     )
                 except ValueError as e:
                     await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
@@ -2443,6 +2450,7 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id,
                 amount=salary,
                 description=f"Job Salary: {job.title}",
+                transaction_type="reward",
             )
 
             color = (
@@ -2974,6 +2982,7 @@ class Economy(commands.Cog):
                         wallet_id=target_wallet_id,
                         amount=bonus,
                         description="Bonus for foiling robbery",
+                        transaction_type="reward",
                     )
                 except ValueError as e:
                     await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
@@ -3394,6 +3403,7 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id,
                 amount=gift_amount,
                 description="Christmas Gift",
+                transaction_type="reward",
             )
         except ValueError as e:
             await Embeds.error(
@@ -3443,6 +3453,7 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id,
                 amount=gift_amount,
                 description="New Year's Gift",
+                transaction_type="reward",
             )
         except ValueError as e:
             await Embeds.error(
@@ -3469,6 +3480,7 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id,
                 amount=gift_amount,
                 description="Halloween Gift",
+                transaction_type="reward",
             )
         except ValueError as e:
             await Embeds.error(
@@ -3495,6 +3507,7 @@ class Economy(commands.Cog):
                 wallet_id=wallet_id,
                 amount=gift_amount,
                 description="Independence Day Gift",
+                transaction_type="reward",
             )
         except ValueError as e:
             await Embeds.error(

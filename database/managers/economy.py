@@ -92,6 +92,11 @@ TIER_PENALTIES = {
     },
 }
 
+# Transaction types that should not incur dynamic/wealth fees. These represent
+# legitimate treasury-to-wallet credits (game wins, refunds, rewards, rakeback)
+# where the displayed/gross amount must equal the amount received.
+_FEE_EXEMPT_TYPES = {"game_payout", "rakeback", "reward"}
+
 
 class EconomyMixin(BaseManager):
     async def initialize_supply_record(self):
@@ -927,10 +932,15 @@ class EconomyMixin(BaseManager):
             user_id = wallet.user_id
             raw_user_id = await self.resolve_user_hash(user_id)
 
-        # Calculate base fee rate and apply wealth adjustment
-        base_fee_rate = await self.get_enhanced_fee_rate(transaction_type)
-        base_fee = AmountUtils.round_currency(abs(amount) * base_fee_rate)
-        adjusted_fee = await self.calculate_wealth_adjusted_fee(raw_user_id, base_fee)
+        # Calculate base fee rate and apply wealth adjustment, unless this is a
+        # fee-exempt payout type (game wins, rakeback claims, rewards).
+        if transaction_type in _FEE_EXEMPT_TYPES:
+            base_fee_rate = Decimal("0")
+            adjusted_fee = Decimal("0")
+        else:
+            base_fee_rate = await self.get_enhanced_fee_rate(transaction_type)
+            base_fee = AmountUtils.round_currency(abs(amount) * base_fee_rate)
+            adjusted_fee = await self.calculate_wealth_adjusted_fee(raw_user_id, base_fee)
 
         amount = AmountUtils.round_currency(amount)
         if amount == 0:
@@ -1006,17 +1016,19 @@ class EconomyMixin(BaseManager):
 
                 # DB tx rows
                 tid_main = str(uuid.uuid4())
-                tid_fee = str(uuid.uuid4())
-                session.add_all(
-                    [
-                        Transaction(
-                            id=tid_main,
-                            from_user_id=from_uid,
-                            to_user_id=to_uid,
-                            amount=net,
-                            description=description,
-                            timestamp=discord.utils.utcnow(),
-                        ),
+                tx_rows = [
+                    Transaction(
+                        id=tid_main,
+                        from_user_id=from_uid,
+                        to_user_id=to_uid,
+                        amount=net,
+                        description=description,
+                        timestamp=discord.utils.utcnow(),
+                    )
+                ]
+                if fee > 0:
+                    tid_fee = str(uuid.uuid4())
+                    tx_rows.append(
                         Transaction(
                             id=tid_fee,
                             from_user_id=from_uid,
@@ -1024,9 +1036,9 @@ class EconomyMixin(BaseManager):
                             amount=fee,
                             description=f"{description} (fee @ {fee_rate:.2%})",
                             timestamp=discord.utils.utcnow(),
-                        ),
-                    ]
-                )
+                        )
+                    )
+                session.add_all(tx_rows)
 
             await self.update_supply()
 

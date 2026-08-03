@@ -264,7 +264,7 @@ class CrashView(discord.ui.LayoutView):
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet, bet, "Crash Refund — FairGate unreachable"
-                    )
+                    , transaction_type="game_payout")
                 except Exception:
                     logger.exception("Crash refund failed for user %s", uid)
                 self.players.pop(uid, None)
@@ -329,7 +329,7 @@ class CrashView(discord.ui.LayoutView):
         wallet = await self.bot.database.get_wallet_id_for_user(uid)
         await self.bot.database.process_treasury_transaction(
             wallet, win, "Crash Game Payout"
-        )
+        , transaction_type="game_payout")
 
         await self.casino._remove_refund(self.session_id, user_id=uid)
         await self.casino._log_game_event(
@@ -706,7 +706,7 @@ class MinesGridLayout(discord.ui.LayoutView):
                 wallet_id=wallet_id,
                 amount=potential,
                 description="Mines game luck save",
-            )
+            transaction_type="game_payout")
             payout_multiplier = (
                 (potential / self.bet_amount).quantize(
                     Decimal("0.0000000001"), rounding=ROUND_HALF_UP
@@ -813,7 +813,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             wallet_id=wallet_id,
             amount=winnings,
             description="Mines game win - all gems cleared",
-        )
+        transaction_type="game_payout")
 
         # Record win
         payout_multiplier = (
@@ -956,7 +956,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             wallet_id=wallet_id,
             amount=self.bet_amount,
             description="Mines game refund due to error",
-        )
+        transaction_type="game_payout")
 
         # Disable all grid buttons; don't reveal bombs since the game errored.
         for button in self.grid_buttons:
@@ -1021,7 +1021,7 @@ class MinesGridLayout(discord.ui.LayoutView):
             wallet_id=wallet_id,
             amount=winnings,
             description="Mines game cashout",
-        )
+        transaction_type="game_payout")
 
         # Record win
         payout_multiplier = (
@@ -1077,7 +1077,7 @@ class MinesGridLayout(discord.ui.LayoutView):
                 wallet_id=wallet_id,
                 amount=self.bet_amount,
                 description="Mines Refund",
-            )
+            transaction_type="game_payout")
 
         self.container.cashout_row.children[0].disabled = True
 
@@ -1417,7 +1417,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
             wallet_id=wallet_id,
             amount=self.winnings,
             description="Double or Nothing Winnings",
-        )
+        transaction_type="game_payout")
         await self.casino._remove_refund(self.session_id, user_id=self.user_id)
         await self.casino._end_game_session(
             self.session_id,
@@ -1450,7 +1450,7 @@ class DoubleOrNothingView(discord.ui.LayoutView):
                 wallet_id=wallet_id,
                 amount=self.initial_amount,
                 description="Double or Nothing Refund",
-            )
+            transaction_type="game_payout")
         await self.casino._remove_refund(self.session_id, user_id=self.user_id)
         await self.casino._end_game_session(
             self.session_id,
@@ -2016,7 +2016,7 @@ class RouletteView(discord.ui.LayoutView):
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id, amount=total_winnings, description="Roulette Win"
-                )
+                , transaction_type="game_payout")
             except ValueError:
                 pass
 
@@ -2405,7 +2405,7 @@ class HiLoView(discord.ui.LayoutView):
                     try:
                         await self.bot.database.process_treasury_transaction(
                             wallet_id=self.wallet_id, amount=winnings, description="HiLo Win"
-                        )
+                        , transaction_type="game_payout")
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
@@ -2424,7 +2424,7 @@ class HiLoView(discord.ui.LayoutView):
                     try:
                         await self.bot.database.process_treasury_transaction(
                             wallet_id=self.wallet_id, amount=potential, description="HiLo Win"
-                        )
+                        , transaction_type="game_payout")
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
@@ -2477,7 +2477,7 @@ class HiLoView(discord.ui.LayoutView):
                     try:
                         await self.bot.database.process_treasury_transaction(
                             wallet_id=self.wallet_id, amount=winnings, description="HiLo Win"
-                        )
+                        , transaction_type="game_payout")
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
@@ -2496,7 +2496,7 @@ class HiLoView(discord.ui.LayoutView):
                     try:
                         await self.bot.database.process_treasury_transaction(
                             wallet_id=self.wallet_id, amount=potential, description="HiLo Win"
-                        )
+                        , transaction_type="game_payout")
                     except ValueError as e:
                         await interaction.followup.send(f"\U0001f6ab Transaction failed: {e}", ephemeral=True)
                         return
@@ -2563,7 +2563,7 @@ class HiLoView(discord.ui.LayoutView):
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id, amount=winnings, description="HiLo Win"
-                )
+                , transaction_type="game_payout")
             except ValueError as e:
                 await interaction.followup.send(f"🚫 Transaction failed: {e}", ephemeral=True)
                 return
@@ -2582,7 +2582,7 @@ class HiLoView(discord.ui.LayoutView):
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id, amount=self.bet_amount, description="HiLo Refund"
-                )
+                , transaction_type="game_payout")
             except Exception:
                 pass
 
@@ -2748,7 +2748,7 @@ class PokerView(View):
             )
             await self.bot.database.process_treasury_transaction(
                 wallet_id=self.wallet_id, amount=payout, description="Poker Win"
-            )
+            , transaction_type="game_payout")
             formatted = await self.cog.formatter(payout)
             result = f"You win! You won **{formatted}**.{boost_text}"
             color = discord.Color.green()
@@ -2763,7 +2763,7 @@ class PokerView(View):
             )
             await self.bot.database.process_treasury_transaction(
                 wallet_id=self.wallet_id, amount=self.bet, description="Poker Push"
-            )
+            , transaction_type="game_payout")
             formatted = await self.cog.formatter(self.bet)
             result = f"It's a tie! Your bet of **{formatted}** has been refunded."
             color = discord.Color.greyple()
@@ -2787,7 +2787,7 @@ class PokerView(View):
                 )
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=self.wallet_id, amount=potential, description="Poker Win"
-                )
+                , transaction_type="game_payout")
                 formatted = await self.cog.formatter(potential)
                 result = f"You lose, but luck saved you! You won **{formatted}**.{boost_text}"
                 color = discord.Color.green()
@@ -2869,7 +2869,7 @@ class PokerView(View):
                 wallet_id=self.wallet_id,
                 amount=self.bet,
                 description="Poker Refund",
-            )
+            transaction_type="game_payout")
         await casino._remove_refund(self.session_id, user_id=self.user_id)
         await casino._end_game_session(
             self.session_id,
@@ -3037,7 +3037,7 @@ class LadderView(discord.ui.LayoutView):
                     wallet_id=self.wallet_id,
                     amount=current_winnings,
                     description="Lucky Ladder Max Win!",
-                )
+                transaction_type="game_payout")
                 content = (
                     f"🏆 **You reached the top!**\n\n"
                     f"**Step:** {self.step} • **Multiplier:** {self.current_multiplier}x\n"
@@ -3097,7 +3097,7 @@ class LadderView(discord.ui.LayoutView):
                     wallet_id=self.wallet_id,
                     amount=potential,
                     description="Lucky Ladder Luck Save",
-                )
+                transaction_type="game_payout")
                 formatted_save = await self.cog.formatter(potential)
                 content = (
                     f"🍀 **You fell, but luck saved you!**\n\n"
@@ -3170,7 +3170,7 @@ class LadderView(discord.ui.LayoutView):
             wallet_id=self.wallet_id,
             amount=final_reward,
             description=f"Lucky Ladder Cashout (Step {self.step})",
-        )
+        transaction_type="game_payout")
         formatted_reward = await self.cog.formatter(final_reward)
         content = (
             f"💰 **Cashed Out!**\n\n"
@@ -3195,7 +3195,7 @@ class LadderView(discord.ui.LayoutView):
             wallet_id=self.wallet_id,
             amount=self.bet,
             description="Lucky Ladder Refund",
-        )
+        transaction_type="game_payout")
         await self.cog._remove_refund(self.session_id, user_id=self.user_id)
         await self.cog._end_game_session(
             self.session_id, outcome="forced_end",
@@ -3221,7 +3221,7 @@ class LadderView(discord.ui.LayoutView):
                 wallet_id=self.wallet_id,
                 amount=self.bet,
                 description="Lucky Ladder Refund",
-            )
+            transaction_type="game_payout")
         await self.cog._remove_refund(self.session_id, user_id=self.user_id)
         await self.cog._end_game_session(
             self.session_id, outcome="forced_end",
@@ -3509,7 +3509,7 @@ class SlotsView(discord.ui.LayoutView):
                             wallet_id=wallet_id,
                             amount=self.bet,
                             description="Slots Refund — FairGate unreachable",
-                        )
+                        transaction_type="game_payout")
                     except Exception:
                         logger.exception("Slots re-spin refund failed for user %s", user_id)
                 self.is_spinning = False
@@ -3556,7 +3556,7 @@ class SlotsView(discord.ui.LayoutView):
                     wallet_id=wallet_id,
                     amount=final_winnings,
                     description="Slots Win"
-                )
+                , transaction_type="game_payout")
 
             # Record this spin in game_history (spin-again was previously
             # missing the increment call, so all but the first spin in a
@@ -4580,6 +4580,7 @@ class Casino(commands.Cog):
                 wallet_id=str(wallet_id),
                 amount=amount,
                 description=f"Refund — {reason}",
+                transaction_type="game_payout",
             )
         except Exception as exc:
             logger.exception(
@@ -5629,7 +5630,7 @@ class Casino(commands.Cog):
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id=wallet_id, amount=winnings, description="Gamble Win"
-                    )
+                    , transaction_type="game_payout")
                 except ValueError as e:
                     embed = discord.Embed(
                         description=f"🚫 Transaction failed: {e}",
@@ -5807,7 +5808,7 @@ class Casino(commands.Cog):
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id, winnings, "SuperGamble Win"
-                    )
+                    , transaction_type="game_payout")
                 except ValueError as e:
                     embed = discord.Embed(
                         description=f"🚫 Transaction failed: {e}",
@@ -5845,7 +5846,7 @@ class Casino(commands.Cog):
                 try:
                     await self.bot.database.process_treasury_transaction(
                         wallet_id, winnings, "SuperGamble Loss Recovery"
-                    )
+                    , transaction_type="game_payout")
                 except ValueError as e:
                     embed = discord.Embed(
                         description=f"🚫 Transaction failed: {e}",
@@ -6168,7 +6169,7 @@ class Casino(commands.Cog):
         if final_winner:
             await self.bot.database.process_treasury_transaction(
                 wallet_id, winnings, "Slots Win"
-            )
+            , transaction_type="game_payout")
             payout_amount = winnings
             payout_multiplier = (
                 (winnings / stake).quantize(
@@ -6372,7 +6373,7 @@ class Casino(commands.Cog):
             try:
                 await self.bot.database.process_treasury_transaction(
                     wallet_id=wallet_id, amount=winnings, description="Dice Win"
-                )
+                , transaction_type="game_payout")
             except ValueError as e:
                 await Embeds.error(ctx, description=f"🚫 Transaction failed: {e}", delete_after=5)
                 return
@@ -6753,7 +6754,7 @@ class Casino(commands.Cog):
                             wallet_id=wallet_id,
                             amount=winnings,
                             description="Blackjack Win",
-                        )
+                        transaction_type="game_payout")
                     except ValueError as e:
                         container = discord.ui.Container(
                             discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
@@ -6809,7 +6810,7 @@ class Casino(commands.Cog):
                         wallet_id=wallet_id,
                         amount=winnings,
                         description="Blackjack Win",
-                    )
+                    transaction_type="game_payout")
                 except ValueError as e:
                     container = discord.ui.Container(
                         discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
@@ -6832,7 +6833,7 @@ class Casino(commands.Cog):
                         wallet_id=wallet_id,
                         amount=winnings,
                         description="Blackjack Tie",
-                    )
+                    transaction_type="game_payout")
                 except ValueError as e:
                     container = discord.ui.Container(
                         discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
@@ -6872,7 +6873,7 @@ class Casino(commands.Cog):
                             wallet_id=wallet_id,
                             amount=winnings,
                             description="Blackjack Win",
-                        )
+                        transaction_type="game_payout")
                     except ValueError as e:
                         container = discord.ui.Container(
                             discord.ui.TextDisplay(f"🚫 Transaction failed: {e}"),
@@ -6941,7 +6942,7 @@ class Casino(commands.Cog):
                         wallet_id=wallet_id,
                         amount=insurance_payout,
                         description="Blackjack Insurance Win",
-                    )
+                    transaction_type="game_payout")
                     total_winnings += insurance_payout
                     insurance_result = f"\n🎰 **Insurance Win!** Dealer had blackjack. You won {self.currency_name} **{await self.formatter(insurance_payout)}**"
                 else:
@@ -7673,7 +7674,7 @@ class Casino(commands.Cog):
                         wallet = await self.bot.database.get_wallet_id_for_user(pid)
                         await self.bot.database.process_treasury_transaction(
                             wallet, bet, "Crash Refund"
-                        )
+                        , transaction_type="game_payout")
                     view.crashed_out[pid] = view.crash_points.get(pid, Decimal("0"))
             view.is_running = False
             if view.game_task:
@@ -7766,7 +7767,7 @@ class Casino(commands.Cog):
                     try:
                         await self.bot.database.process_treasury_transaction(
                             wallet_id, amt, "Crash Refund — FairGate unreachable"
-                        )
+                        , transaction_type="game_payout")
                     except Exception:
                         logger.exception("Crash refund failed for user %s", uid)
                     current_game.players.pop(uid, None)
@@ -7804,7 +7805,7 @@ class Casino(commands.Cog):
             wallet = await self.bot.database.get_wallet_id_for_user(uid)
             await self.bot.database.process_treasury_transaction(
                 wallet, win, "Crash Win"
-            )
+            , transaction_type="game_payout")
 
             await casino_cog._remove_refund(current_game.session_id, user_id=uid)
             await casino_cog._log_game_event(
@@ -7893,7 +7894,7 @@ class Casino(commands.Cog):
                     wallet = await self.bot.database.get_wallet_id_for_user(pid)
                     await self.bot.database.process_treasury_transaction(
                         wallet, win_amt, "Crash Force Payout"
-                    )
+                    , transaction_type="game_payout")
             view.is_running = False
             if view.game_task:
                 view.game_task.cancel()
@@ -8775,7 +8776,7 @@ class BetButton(discord.ui.Button):
                         wallet_id=wallet_id,
                         amount=Decimal(total_win),
                         description=f"Keno Win",
-                    )
+                    transaction_type="game_payout")
                     payout_amount = Decimal(total_win)
                     payout_multiplier = (
                         (payout_amount / player_bet).quantize(
