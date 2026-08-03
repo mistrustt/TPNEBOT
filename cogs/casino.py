@@ -1938,14 +1938,6 @@ class RouletteView(discord.ui.LayoutView):
             wallet_id=str(self.wallet_id), amount=total_wager, reason="roulette_bet",
         )
 
-        # ── House edge & RTP boost ──
-        house_edge = await self.cog.calculate_house_edge(self.user_id)
-        base_edge = Decimal("0.04")
-        rtp_boost = (
-            Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1")
-            if house_edge < base_edge else Decimal("1")
-        )
-
         # ── Spin ──
         outcome = await self.cog.fairgate_play_roulette(
             self.user_id, PF, **session_state["fairgate_bet"]
@@ -1968,7 +1960,7 @@ class RouletteView(discord.ui.LayoutView):
             )
             payout = Decimal(0)
             if multiplier > 0:
-                payout = AmountUtils.round_currency(self.bet_amount * multiplier * rtp_boost)
+                payout = AmountUtils.round_currency(self.bet_amount * multiplier)
                 total_winnings += payout
             label = ROULETTE_BET_LABELS.get(choice)
             if not label:
@@ -6318,9 +6310,6 @@ class Casino(commands.Cog):
         if len(self.roll_history[user_id]) > 5:
             self.roll_history[user_id].pop(0)
 
-        # Calculate house edge for RTP tracking and bonus
-        house_edge = await self.calculate_house_edge(user_id)
-
         payout_multipliers = DICE_PAYOUTS
         even_odd_payout = DICE_EVEN_ODD_PAYOUT
         color = discord.Color.blurple()
@@ -6338,26 +6327,22 @@ class Casino(commands.Cog):
         )
 
         winnings = Decimal("0")
-        base_edge = Decimal("0.04")
-        # Apply RTP boost for VIP players
-        rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
-
         roll_desc = f"total **{total}**"
 
         if (normalized_guess in ["even", "evens"] and total % 2 == 0) or (
             normalized_guess in ["odd", "odds"] and total % 2 == 1
         ):
-            winnings = Decimal(amount) * Decimal(even_odd_payout) * rtp_boost
+            winnings = Decimal(amount) * Decimal(even_odd_payout)
             is_winner = True
             result = f"🎲 You rolled {roll_desc}\nYou guessed correctly and won {currency_name} **{await self.formatter(winnings)}**!"
         elif normalized_guess.isdigit() and int(normalized_guess) == total:
             multiplier = payout_multipliers[total]
-            winnings = Decimal(amount) * Decimal(multiplier) * rtp_boost
+            winnings = Decimal(amount) * Decimal(multiplier)
             is_winner = True
             result = f"🎲 You rolled {roll_desc}\nExact match! You won {currency_name} **{await self.formatter(winnings)}** with a {multiplier}x payout!"
         else:
             # Use an even/odd payout as the potential luck-save prize.
-            winnings = Decimal(amount) * Decimal(even_odd_payout) * rtp_boost
+            winnings = Decimal(amount) * Decimal(even_odd_payout)
             is_winner = False
             result = f"🎲 You rolled {roll_desc}\nYou lost {currency_name} **{await self.formatter(amount)}**."
 
@@ -6671,12 +6656,6 @@ class Casino(commands.Cog):
                 # Original command message may have been deleted while we timed out.
                 await ctx.send(view=view, delete_after=5)
             return
-
-        # Calculate house edge for RTP tracking
-        house_edge = await self.calculate_house_edge(user_id)
-        base_edge = Decimal("0.04")
-        # RTP boost for VIP players
-        rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.05") if house_edge < base_edge else Decimal("1")
 
         current_bet = amount
         has_doubled = False
@@ -8361,12 +8340,6 @@ class Casino(commands.Cog):
                 num_bombs, 0, float(house_edge)
             )
 
-            base_edge = Decimal("0.01")
-            # Apply RTP boost for VIP players - multiplier boost
-            if house_edge < base_edge:
-                rtp_boost = float(1 + (float(base_edge) - float(house_edge)) / float(base_edge) * 0.1)
-                multiplier = multiplier * rtp_boost
-
             # Format bet amount for display (formatter is async)
             formatted_bet = await self.formatter(bet_amount)
 
@@ -8692,12 +8665,6 @@ class BetButton(discord.ui.Button):
                 return
             bet_multiplier, player_bet, wallet_id = result
 
-            # Calculate house edge for RTP tracking and bonus
-            house_edge = await self.cog.calculate_house_edge(table_ui_view.player.id)
-            base_edge = Decimal("0.04")
-            # Apply RTP boost for VIP players
-            rtp_boost = Decimal("1") + (base_edge - house_edge) / base_edge * Decimal("0.1") if house_edge < base_edge else Decimal("1")
-
             max_allowed = await self.bot.database.get_max_gamble_amount(
                 table_ui_view.player.id, False
             )
@@ -8706,7 +8673,7 @@ class BetButton(discord.ui.Button):
                 await Embeds.warning(itn, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
                         f"**{await self.cog.formatter(player_bet)} {self.cog.currency_name}**.", color=discord.Color.orange(), delete_after=5)
 
-            total_win = player_bet * Decimal(bet_multiplier) * rtp_boost
+            total_win = player_bet * Decimal(bet_multiplier)
 
             # Apply purchased item effects (gambling multiplier / luck boost)
             is_winner = total_win > player_bet

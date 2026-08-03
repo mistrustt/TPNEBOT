@@ -1177,11 +1177,13 @@ class InventoryMixin(BaseManager):
 
     async def get_gambling_multiplier(self, user_id: int) -> Decimal:
         """Return the combined active gambling win multiplier for a user."""
-        return await self.get_effect_multiplier(user_id, "gambling_multiplier")
+        raw = await self.get_effect_multiplier(user_id, "gambling_multiplier")
+        return max(Decimal("0.50"), min(Decimal("2.00"), raw))
 
     async def get_luck_multiplier(self, user_id: int) -> Decimal:
         """Return the combined active luck multiplier for a user."""
-        return await self.get_effect_multiplier(user_id, "luck_boost")
+        raw = await self.get_effect_multiplier(user_id, "luck_boost")
+        return max(Decimal("0.50"), min(Decimal("3.00"), raw))
 
     async def get_cooldown_multiplier(self, user_id: int) -> Decimal:
         """Return the combined active cooldown multiplier for a user."""

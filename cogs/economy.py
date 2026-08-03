@@ -89,9 +89,13 @@ class DropView(discord.ui.View):
             claim_wallet = await self.cog.bot.database.get_wallet_id_for_user(
                 interaction.user.id
             )
+            economic_multiplier = await self.cog.bot.database.get_dynamic_reward_multiplier()
+            payout_amount = (Decimal(self.amount) * economic_multiplier).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
             await self.cog.bot.database.process_treasury_transaction(
                 wallet_id=claim_wallet,
-                amount=Decimal(self.amount),
+                amount=payout_amount,
                 description="Drop Claim",
                 transaction_type="reward",
             )
@@ -108,10 +112,15 @@ class DropView(discord.ui.View):
             elapsed = (discord.utils.utcnow() - self.drop_posted_at).total_seconds()
             reaction_seconds = f" in **{elapsed:.2f}s**"
 
+        multiplier_text = (
+            f" (Econ ×{economic_multiplier:.2f})"
+            if economic_multiplier != Decimal("1.0")
+            else ""
+        )
         await Embeds.success(
             interaction,
             f"**{interaction.user.display_name}** claimed the {self.currency_name} "
-            f"**{await self.cog.formatter(self.amount)}** dropped by **{self.drop_author.display_name}**{reaction_seconds}! 🎉",
+            f"**{await self.cog.formatter(payout_amount)}**{multiplier_text} dropped by **{self.drop_author.display_name}**{reaction_seconds}! 🎉",
         )
 
         if self.message and self.message.id in self.cog.active_drops:
@@ -192,7 +201,9 @@ class AirDropView(discord.ui.View):
                 pass
 
         else:
-            share = self.amount / Decimal(len(self.joiners))
+            economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+            share = (self.amount / Decimal(len(self.joiners))) * economic_multiplier
+            share = share.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             for user_id in self.joiners:
                 recipient_wallet = await self.bot.database.get_wallet_id_for_user(
                     user_id
@@ -208,12 +219,17 @@ class AirDropView(discord.ui.View):
 
             winners = [f"<@{uid}>" for uid in self.joiners]
             winners_str = ", ".join(winners)
+            multiplier_text = (
+                f" (Econ ×{economic_multiplier:.2f})"
+                if economic_multiplier != Decimal("1.0")
+                else ""
+            )
 
             try:
                 embed = discord.Embed(
                     description=(
                         f"🪂 Airdrop ended! **{len(self.joiners)} user(s)** joined: {winners_str}\n"
-                        f"Each received {self.currency_name} **{await economy.formatter(share)}**."
+                        f"Each received {self.currency_name} **{await economy.formatter(share)}**{multiplier_text}."
                     ),
                     color=discord.Color.gold(),
                 )
@@ -2967,13 +2983,16 @@ class Economy(commands.Cog):
                 except ValueError as e:
                     await Embeds.error(ctx, f"🚫 Transaction failed: {e}", delete_after=5, reply=True)
                     return
-                bonus = (target_balance * Decimal("0.01")).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
+                bonus = (target_balance * Decimal("0.01"))
+                economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+                bonus = (bonus * economic_multiplier).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
+                multiplier_text = f" (Econ ×{economic_multiplier:.2f})" if economic_multiplier != Decimal("1.0") else ""
                 result_message = (
                     f"💥 **You failed** to rob {target.mention} and were fined "
                     f"{self.currency_name} **{await self.formatter(amount_fined)}**!\n"
-                    f"{target.mention} received {self.currency_name} **{await self.formatter(bonus)}** as compensation."
+                    f"{target.mention} received {self.currency_name} **{await self.formatter(bonus)}**{multiplier_text} as compensation."
                 )
                 await self.bot.database.add_reputation_score(user_id, -1)
                 await self.bot.database.add_reputation_score(target.id, 1)
@@ -3395,8 +3414,10 @@ class Economy(commands.Cog):
 
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
-        
+
         gift_amount = Decimal(str(user_id)) / Decimal("4")
+        economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+        gift_amount = (gift_amount * economic_multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         try:
             await self.bot.database.process_treasury_transaction(
@@ -3413,7 +3434,6 @@ class Economy(commands.Cog):
                 reply=True,
             )
             return
-            return
 
         # Determine embed color based on role or DM
         color = (
@@ -3426,9 +3446,10 @@ class Economy(commands.Cog):
             )
         )
 
+        multiplier_text = f" (Econ ×{economic_multiplier:.2f})" if economic_multiplier != Decimal("1.0") else ""
         await Embeds.custom(
             ctx,
-            f"🎄 Merry Christmas from TPNE! You received a gift of {self.currency_name} **{await self.formatter(gift_amount)}**!",
+            f"🎄 Merry Christmas from TPNE! You received a gift of {self.currency_name} **{await self.formatter(gift_amount)}**{multiplier_text}!",
             color=color,
             author={"name": "Christmas Gift", "icon_url": self.utils.get_avatar_url(ctx.author)},
             delete_after=None,
@@ -3448,6 +3469,8 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         gift_amount = Decimal(str(user_id)) / Decimal("3")
+        economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+        gift_amount = (gift_amount * economic_multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id,
@@ -3475,6 +3498,8 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         gift_amount = Decimal(str(user_id)) / Decimal("4")
+        economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+        gift_amount = (gift_amount * economic_multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id,
@@ -3502,6 +3527,8 @@ class Economy(commands.Cog):
         user_id = ctx.author.id
         wallet_id = await self.bot.database.get_wallet_id_for_user(user_id)
         gift_amount = Decimal(str(user_id)) / Decimal("4")
+        economic_multiplier = await self.bot.database.get_dynamic_reward_multiplier()
+        gift_amount = (gift_amount * economic_multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         try:
             await self.bot.database.process_treasury_transaction(
                 wallet_id=wallet_id,

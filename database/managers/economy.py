@@ -1570,9 +1570,9 @@ class EconomyMixin(BaseManager):
         aggressive corrections at extremes. Includes:
         - Dynamic target based on circulation ratio (economy maturity)
         - Treasury floor protection (never burn below 10% of total_supply)
-        - Conservative auto-mint (40% of burn rate, 0.5%/day cap)
-        - Dead zone (±3% of target) to avoid micro-churn
-        - Emergency mode (±25%) doubles the adjustment cap
+        - Faster auto-mint when treasury is stressed (30-minute cooldown, higher cap)
+        - Reduced dampening in emergencies
+        - Smaller dead zone when treasury is stressed
 
         Returns a dict describing what action was taken (or why none was taken).
         """
@@ -1582,8 +1582,8 @@ class EconomyMixin(BaseManager):
         COOLDOWN = timedelta(hours=1)
         DEAD_ZONE = Decimal("0.03")
         EMERGENCY_DISTANCE = Decimal("0.25")
-        MINT_DAMPENER = Decimal("0.4")  # Mint at 40% of burn rate
-        DAILY_MINT_CAP_RATIO = Decimal("0.005")  # 0.5% of total_supply per day
+        MINT_DAMPENER = Decimal("0.4")  # Default mint at 40% of burn rate
+        DAILY_MINT_CAP_RATIO = Decimal("0.005")  # Default 0.5% of total_supply per day
 
         now = discord.utils.utcnow()
         today = now.date()
@@ -1596,14 +1596,6 @@ class EconomyMixin(BaseManager):
             _DAILY_BURN_TOTAL = Decimal("0")
             _BURN_DAY = today
 
-        # Enforce cooldown
-        if _LAST_REBALANCE_AT is not None and now - _LAST_REBALANCE_AT < COOLDOWN:
-            remaining = COOLDOWN - (now - _LAST_REBALANCE_AT)
-            return {
-                "action": "skipped",
-                "reason": f"Cooldown active ({remaining.seconds}s remaining)",
-            }
-
         supply = await self.get_supply_record()
         treasury, total_supply = supply.treasury, supply.total_supply
 
@@ -1612,12 +1604,37 @@ class EconomyMixin(BaseManager):
 
         treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
         target, min_hw, max_hw = self._calculate_dynamic_target(supply)
+
+        # Emergency tuning: faster, stronger rebalancing when treasury is stressed
+        is_stressed = treasury_health < min_hw
+        if is_stressed:
+            COOLDOWN = timedelta(minutes=30)
+            DEAD_ZONE = Decimal("0.015")
+            MINT_DAMPENER = Decimal("0.8")
+            DAILY_MINT_CAP_RATIO = Decimal("0.015")
+
+        # Volume-linked refill runs independently of the normal rebalance cooldown
+        # so that active gambling can help replenish a stressed treasury quickly.
+        volume_result = None
+        if is_stressed:
+            volume_result = await self.mint_from_gambling_volume(window_hours=24)
+
+        # Enforce cooldown
+        if _LAST_REBALANCE_AT is not None and now - _LAST_REBALANCE_AT < COOLDOWN:
+            remaining = COOLDOWN - (now - _LAST_REBALANCE_AT)
+            if volume_result and volume_result.get("action") == "volume_mint":
+                return volume_result
+            return {
+                "action": "skipped",
+                "reason": f"Cooldown active ({remaining.seconds}s remaining)",
+            }
+
         treasury_floor = AmountUtils.round_currency(total_supply * TREASURY_FLOOR_RATIO)
         base_cap = AmountUtils.round_currency(total_supply * Decimal("0.02"))
 
         distance = abs(treasury_health - target)
 
-        # Dead zone: skip if within ±3% of target
+        # Dead zone: skip if within the active dead zone
         if distance < DEAD_ZONE:
             return {
                 "action": "skipped",
@@ -1668,8 +1685,7 @@ class EconomyMixin(BaseManager):
                 amount_adjusted = adj
 
             elif gap > 0:
-                # Treasury too low → mint (conservative)
-                # Apply dampener: mint at 40% of what burn would do
+                # Treasury too low → mint
                 mint_adj = AmountUtils.round_currency(adj * MINT_DAMPENER)
 
                 # Enforce daily mint cap
@@ -1727,7 +1743,7 @@ class EconomyMixin(BaseManager):
                 else Decimal("0")
             )
 
-            return {
+            result = {
                 "action": action_taken,
                 "amount": amount_adjusted,
                 "health_before": health_before,
@@ -1738,10 +1754,120 @@ class EconomyMixin(BaseManager):
                 "daily_minted": _DAILY_MINT_TOTAL,
                 "daily_burned": _DAILY_BURN_TOTAL,
             }
+            if volume_result:
+                result["volume_mint"] = volume_result
+            return result
 
         except Exception as e:
             logger.error(f"[AUTO-REBALANCE ERROR]: {e}")
             return {"action": "error", "reason": str(e)}
+
+    async def mint_from_gambling_volume(
+        self, window_hours: int = 24
+    ) -> dict:
+        """
+        Mint a fraction of recent player deposits back into the treasury.
+
+        This is a volume-linked refill: the more currency flows into the
+        treasury (gambling losses, fees, transfers to house), the more the
+        treasury can safely expand when it is stressed. It only activates
+        when treasury health is below the dynamic minimum threshold, and it
+        respects the same daily mint cap used by auto-rebalance.
+        """
+        global _DAILY_MINT_TOTAL, _MINT_DAY
+
+        now = discord.utils.utcnow()
+        today = now.date()
+        if _MINT_DAY is None or _MINT_DAY != today:
+            _DAILY_MINT_TOTAL = Decimal("0")
+            _MINT_DAY = today
+
+        supply = await self.get_supply_record()
+        treasury, total_supply = supply.treasury, supply.total_supply
+        if total_supply <= 0:
+            return {"action": "skipped", "reason": "No supply exists"}
+
+        treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
+        target, min_hw, max_hw = self._calculate_dynamic_target(supply)
+
+        if treasury_health >= min_hw:
+            return {
+                "action": "skipped",
+                "reason": "Treasury not stressed",
+                "treasury_health": treasury_health,
+                "min_hw": min_hw,
+            }
+
+        since = now - timedelta(hours=window_hours)
+        async with self.async_sessionmaker() as session:
+            deposit_stmt = select(func.sum(Transaction.amount)).where(
+                Transaction.to_user_id == _treasury_hash(),
+                Transaction.timestamp >= since,
+            )
+            deposit_result = await session.execute(deposit_stmt)
+            deposits_to_treasury = deposit_result.scalar() or Decimal("0")
+
+        if deposits_to_treasury <= 0:
+            return {
+                "action": "skipped",
+                "reason": "No treasury deposits in window",
+                "treasury_health": treasury_health,
+                "min_hw": min_hw,
+            }
+
+        # Fraction scales with stress: 0.5% near min_hw up to 2% at deep stress
+        stress = max(
+            Decimal("0"),
+            min(
+                Decimal("1"),
+                (min_hw - treasury_health) / Decimal("0.10"),
+            ),
+        )
+        fraction = Decimal("0.005") + stress * Decimal("0.015")
+        mint_amount = AmountUtils.round_currency(deposits_to_treasury * fraction)
+
+        # Share the stressed daily mint cap (1.5% of total supply)
+        daily_cap = AmountUtils.round_currency(total_supply * Decimal("0.015"))
+        remaining = daily_cap - _DAILY_MINT_TOTAL
+        if remaining <= 0:
+            return {
+                "action": "skipped",
+                "reason": "Daily mint cap reached",
+                "treasury_health": treasury_health,
+                "daily_minted": _DAILY_MINT_TOTAL,
+                "daily_cap": daily_cap,
+            }
+
+        # Cap this single refill at the smaller of remaining cap or 0.5% of supply
+        max_single = min(remaining, AmountUtils.round_currency(total_supply * Decimal("0.005")))
+        mint_amount = min(mint_amount, max_single)
+        if mint_amount <= 0:
+            return {
+                "action": "skipped",
+                "reason": "Mint amount too small",
+                "treasury_health": treasury_health,
+            }
+
+        await self.mint_currency(
+            mint_amount,
+            f"Volume-linked mint {mint_amount} from {deposits_to_treasury} treasury deposits "
+            f"(health {treasury_health:.2%})",
+        )
+        _DAILY_MINT_TOTAL += mint_amount
+        logger.info(
+            f"[VOLUME-MINT] Minted {mint_amount} from {deposits_to_treasury} deposits "
+            f"(health {treasury_health:.2%}, fraction={fraction:.2%})"
+        )
+
+        return {
+            "action": "volume_mint",
+            "amount": mint_amount,
+            "deposits": deposits_to_treasury,
+            "fraction": fraction,
+            "treasury_health": treasury_health,
+            "daily_minted": _DAILY_MINT_TOTAL,
+            "daily_cap": daily_cap,
+        }
 
     async def get_economic_factors(self) -> dict:
         """
@@ -3106,6 +3232,29 @@ class EconomyMixin(BaseManager):
                         if wallet and wallet.wallet_frozen:
                             await self.unfreeze_wallet(wallet.wallet_id)
 
+    async def get_treasury_reward_multiplier(self) -> Decimal:
+        """
+        Return a multiplier that scales rewards/faucets based on treasury health.
+
+        - Treasury health at or above target + 0.20 → 1.5x (flush, boost progress)
+        - Treasury health at target → 1.0x
+        - Treasury health at or below target - 0.20 → 0.2x (stressed, slow drain)
+        - Linear between.
+        """
+        factors = await self.get_economic_factors()
+        treasury_health = factors.get("treasury_health", Decimal("0.5"))
+        target_ratio = factors.get("target_ratio", Decimal("0.50"))
+
+        delta = treasury_health - target_ratio
+        if delta >= Decimal("0.20"):
+            return Decimal("1.5")
+        if delta <= Decimal("-0.20"):
+            return Decimal("0.2")
+
+        # Linear interpolation from 0.2 at -0.20 to 1.5 at +0.20
+        t = (delta + Decimal("0.20")) / Decimal("0.40")
+        return (Decimal("0.2") + t * Decimal("1.3")).quantize(Decimal("0.01"))
+
     async def get_dynamic_reward_multiplier(self) -> Decimal:
         """
         Calculate dynamic reward multiplier based on economic conditions.
@@ -3117,12 +3266,10 @@ class EconomyMixin(BaseManager):
 
         Also factors in treasury health: if treasury is below its dynamic target,
         rewards are reduced to slow outflow; if above, rewards are boosted.
-        Final multiplier is clamped to [0.80, 1.60].
+        Final multiplier is clamped to [0.10, 1.60].
         """
         factors = await self.get_economic_factors()
         liquidity_ratio = factors.get("liquidity_ratio", Decimal("0.5"))
-        treasury_health = factors.get("treasury_health", Decimal("0.5"))
-        target_ratio = factors.get("target_ratio", Decimal("0.50"))
 
         # Linear interpolation for liquidity-based multiplier
         if liquidity_ratio <= Decimal("0.20"):
@@ -3138,17 +3285,13 @@ class EconomyMixin(BaseManager):
         else:
             liquidity_mult = Decimal("0.85")
 
-        # Treasury health adjustment: slow outflow when treasury is low, boost when high
-        treasury_adj = Decimal("0")
-        if treasury_health < target_ratio - Decimal("0.10"):
-            treasury_adj = Decimal("-0.10")  # Treasury stressed, reduce rewards
-        elif treasury_health > target_ratio + Decimal("0.10"):
-            treasury_adj = Decimal("0.10")  # Treasury overflowing, boost rewards
+        # Treasury health directly scales rewards/faucets
+        treasury_mult = await self.get_treasury_reward_multiplier()
 
-        multiplier = liquidity_mult + treasury_adj
+        multiplier = liquidity_mult * treasury_mult
 
         # Clamp to safe range
-        return max(Decimal("0.80"), min(Decimal("1.60"), multiplier))
+        return max(Decimal("0.10"), min(Decimal("1.60"), multiplier))
 
     async def check_economic_circuit_breaker(self) -> dict:
         """
