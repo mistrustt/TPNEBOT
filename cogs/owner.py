@@ -3045,9 +3045,8 @@ class Owner(commands.Cog, name="Owner"):
             )
             try:
                 await self.load_extension("jishaku")
-                self.logger.info("Loaded developer extension 'jishaku'")
             except Exception as e:
-                self.logger.error("Failed to load extension 'jishaku': %s", e)
+                return await ctx.send(f"Failed to load jishaku: {type(e).__name__}: {e}")
         else:
             if hasattr(self.bot, "status_task") and self.bot.status_task:
                 self.bot.status_task.start()
