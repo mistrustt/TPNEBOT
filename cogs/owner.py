@@ -3044,7 +3044,7 @@ class Owner(commands.Cog, name="Owner"):
                 status=discord.Status.dnd, activity=discord.Game(name="in debug mode")
             )
             try:
-                await self.load_extension("jishaku")
+                await self.bot.load_extension("jishaku")
             except Exception as e:
                 return await ctx.send(f"Failed to load jishaku: {type(e).__name__}: {e}")
         else:
