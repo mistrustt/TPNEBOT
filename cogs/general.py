@@ -1326,6 +1326,40 @@ class General(commands.Cog, name="General"):
         )
         await ctx.reply(embed=embed)
 
+    @commands.command(
+        name="servericon", help="View the server icon of the current server."
+    )
+    async def servericon(self, ctx: commands.Context) -> None:
+        embed = discord.Embed(
+            title=f"**{ctx.guild.name}** Icon", color=ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+        )
+
+        server_icon_url = ctx.guild.icon.url if ctx.guild.icon else None
+
+        if server_icon_url:
+            embed.set_image(url=server_icon_url)
+        else:
+            embed.description = "This server does not have an icon."
+
+        await ctx.reply(embed=embed)
+
+    @commands.command(
+        name="serverbanner", help="View the server banner of the current server."
+    )
+    async def serverbanner(self, ctx: commands.Context) -> None:
+        embed = discord.Embed(
+            title=f"**{ctx.guild.name}** Banner", color=ctx.author.top_role.color if ctx.author.top_role else discord.Color.blurple()
+        )
+
+        server_banner_url = ctx.guild.banner.url if ctx.guild.banner else None
+
+        if server_banner_url:
+            embed.set_image(url=server_banner_url)
+        else:
+            embed.description = "This server does not have a banner."
+
+        await ctx.reply(embed=embed)
+
     @commands.hybrid_command(
         name="ping", description="Check the bot's latency and performance."
     )

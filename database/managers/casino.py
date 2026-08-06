@@ -1402,6 +1402,8 @@ class CasinoMixin(BaseManager):
     ) -> Decimal:
         """
         Get house edge adjusted for VIP tier and active RTP boosts.
+        Also scales up slightly as treasury health falls, so gambling slows
+        the drain on a stressed economy without changing any payout tables.
         Minimum 1% house edge to ensure sustainability.
         """
         raw_user_id = user_id
@@ -1410,6 +1412,21 @@ class CasinoMixin(BaseManager):
         # Convert RTP percentage points to edge reduction
         # e.g., 2% RTP boost means we reduce house edge by 2%
         adjusted = base_edge - (rtp_adjustment / 100)
+
+        # Treasury-health surcharge: higher edge when reserves are low.
+        factors = await self.get_economic_factors()
+        health = factors.get("treasury_health", Decimal("0.5"))
+        if health >= Decimal("0.80"):
+            health_surcharge = Decimal("0.00")
+        elif health >= Decimal("0.60"):
+            health_surcharge = Decimal("0.005")
+        elif health >= Decimal("0.40"):
+            health_surcharge = Decimal("0.010")
+        elif health >= Decimal("0.20"):
+            health_surcharge = Decimal("0.020")
+        else:
+            health_surcharge = Decimal("0.030")
+        adjusted += health_surcharge
 
         # Ensure minimum 1% house edge
         MIN_HOUSE_EDGE = Decimal("0.01")

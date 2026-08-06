@@ -968,6 +968,29 @@ class EconomyMixin(BaseManager):
                             supply.total_supply * TREASURY_FLOOR_RATIO
                         )
                         max_payout = supply.treasury - treasury_floor
+
+                        # Soft landing: as health drops from 20% toward the 10%
+                        # hard floor, payout capacity scales linearly from 100%
+                        # down to 50%. This avoids the sudden "no payouts" cliff.
+                        health = (
+                            supply.treasury / supply.total_supply
+                            if supply.total_supply > 0
+                            else Decimal("0")
+                        )
+                        soft_mult = Decimal("1.0")
+                        if health <= Decimal("0.10"):
+                            soft_mult = Decimal("0.5")
+                        elif health < Decimal("0.20"):
+                            t = (health - Decimal("0.10")) / Decimal("0.10")
+                            soft_mult = Decimal("0.5") + t * Decimal("0.5")
+
+                        if soft_mult < Decimal("1.0"):
+                            max_payout = AmountUtils.round_currency(max_payout * soft_mult)
+                            logger.warning(
+                                f"[TREASURY SOFT CAP] health={health:.2%}, "
+                                f"soft_multiplier={soft_mult:.2%}"
+                            )
+
                         if max_payout < gross:
                             if max_payout <= 0:
                                 raise ValueError(
@@ -1549,16 +1572,19 @@ class EconomyMixin(BaseManager):
 
         circulation_ratio = (circulating / total_supply).quantize(Decimal("0.0001"))
 
-        # Young economy (<20% circulating) → target ~0.75
-        # Mature economy (>50% circulating) → target 0.50
+        # Young economy (<20% circulating) → target ~0.85
+        # Mature economy (>50% circulating) → target 0.70
+        # The economy should aim to keep the treasury well-provisioned so it
+        # can absorb gambling variance without hitting the hard floor.
         target = max(
-            Decimal("0.50"), Decimal("0.75") - (circulation_ratio * Decimal("0.50"))
+            Decimal("0.70"), Decimal("0.85") - (circulation_ratio * Decimal("0.30"))
         )
         target = target.quantize(Decimal("0.0001"))
 
-        # Thresholds are ±15 points from target, clamped to safe range
-        max_hw = min(Decimal("0.95"), target + Decimal("0.15"))
-        min_hw = max(Decimal("0.20"), target - Decimal("0.15"))
+        # Tighter thresholds (±10 points) so rebalancing starts sooner and
+        # keeps health closer to the target band.
+        max_hw = min(Decimal("0.95"), target + Decimal("0.10"))
+        min_hw = max(Decimal("0.20"), target - Decimal("0.10"))
 
         return target, min_hw, max_hw
 
@@ -1578,12 +1604,12 @@ class EconomyMixin(BaseManager):
         """
         global _LAST_REBALANCE_AT, _DAILY_MINT_TOTAL, _MINT_DAY, _DAILY_BURN_TOTAL, _BURN_DAY
 
-        STEP = Decimal("0.05")
+        STEP = Decimal("0.10")
         COOLDOWN = timedelta(hours=1)
         DEAD_ZONE = Decimal("0.03")
-        EMERGENCY_DISTANCE = Decimal("0.25")
-        MINT_DAMPENER = Decimal("0.4")  # Default mint at 40% of burn rate
-        DAILY_MINT_CAP_RATIO = Decimal("0.005")  # Default 0.5% of total_supply per day
+        EMERGENCY_DISTANCE = Decimal("0.15")
+        MINT_DAMPENER = Decimal("0.5")  # Default mint at 50% of burn rate
+        DAILY_MINT_CAP_RATIO = Decimal("0.010")  # Default 1.0% of total_supply per day
 
         now = discord.utils.utcnow()
         today = now.date()
@@ -1610,13 +1636,14 @@ class EconomyMixin(BaseManager):
         if is_stressed:
             COOLDOWN = timedelta(minutes=30)
             DEAD_ZONE = Decimal("0.015")
-            MINT_DAMPENER = Decimal("0.8")
-            DAILY_MINT_CAP_RATIO = Decimal("0.015")
+            MINT_DAMPENER = Decimal("1.0")  # Full computed adjustment when low
+            DAILY_MINT_CAP_RATIO = Decimal("0.030")  # 3% per day while stressed
 
         # Volume-linked refill runs independently of the normal rebalance cooldown
         # so that active gambling can help replenish a stressed treasury quickly.
+        # It activates as soon as health drops below target, not only in crisis.
         volume_result = None
-        if is_stressed:
+        if treasury_health < target:
             volume_result = await self.mint_from_gambling_volume(window_hours=24)
 
         # Enforce cooldown
@@ -1790,12 +1817,15 @@ class EconomyMixin(BaseManager):
         treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
         target, min_hw, max_hw = self._calculate_dynamic_target(supply)
 
-        if treasury_health >= min_hw:
+        # Activate whenever health is below the dynamic target, not only when
+        # it has already fallen below the minimum threshold. This turns active
+        # gambling into an earlier refill mechanism.
+        if treasury_health >= target:
             return {
                 "action": "skipped",
-                "reason": "Treasury not stressed",
+                "reason": "Treasury at or above target",
                 "treasury_health": treasury_health,
-                "min_hw": min_hw,
+                "target": target,
             }
 
         since = now - timedelta(hours=window_hours)
@@ -1812,22 +1842,24 @@ class EconomyMixin(BaseManager):
                 "action": "skipped",
                 "reason": "No treasury deposits in window",
                 "treasury_health": treasury_health,
-                "min_hw": min_hw,
+                "target": target,
             }
 
-        # Fraction scales with stress: 0.5% near min_hw up to 2% at deep stress
+        # Fraction scales with distance below target: 1.0% near target up to
+        # 5.0% at deep stress so that active gambling helps refill reserves
+        # quickly when they are running low.
         stress = max(
             Decimal("0"),
             min(
                 Decimal("1"),
-                (min_hw - treasury_health) / Decimal("0.10"),
+                (target - treasury_health) / Decimal("0.10"),
             ),
         )
-        fraction = Decimal("0.005") + stress * Decimal("0.015")
+        fraction = Decimal("0.010") + stress * Decimal("0.040")
         mint_amount = AmountUtils.round_currency(deposits_to_treasury * fraction)
 
-        # Share the stressed daily mint cap (1.5% of total supply)
-        daily_cap = AmountUtils.round_currency(total_supply * Decimal("0.015"))
+        # Share the daily mint cap (3.0% of total supply while stressed).
+        daily_cap = AmountUtils.round_currency(total_supply * Decimal("0.030"))
         remaining = daily_cap - _DAILY_MINT_TOTAL
         if remaining <= 0:
             return {
@@ -1838,8 +1870,8 @@ class EconomyMixin(BaseManager):
                 "daily_cap": daily_cap,
             }
 
-        # Cap this single refill at the smaller of remaining cap or 0.5% of supply
-        max_single = min(remaining, AmountUtils.round_currency(total_supply * Decimal("0.005")))
+        # Cap this single refill at the smaller of remaining cap or 1.0% of supply
+        max_single = min(remaining, AmountUtils.round_currency(total_supply * Decimal("0.010")))
         mint_amount = min(mint_amount, max_single)
         if mint_amount <= 0:
             return {
@@ -1939,7 +1971,10 @@ class EconomyMixin(BaseManager):
 
         if treasury_health < TARGET:
             d = TARGET - treasury_health
-            fee_base = (BASE_FEE * (1 + d**2)).quantize(Decimal("0.0001"))
+            # Linear growth instead of quadratic: still rises as health falls,
+            # but avoids the punishing spike that made low-health fees feel
+            # exorbitant when combined with wealth-tier multipliers.
+            fee_base = (BASE_FEE * (1 + d)).quantize(Decimal("0.0001"))
             passive = (BASE_PASS * (1 - d)).quantize(Decimal("0.0001"))
             risk = (treasury_health / TARGET).quantize(Decimal("0.0001"))
         else:
@@ -2248,17 +2283,22 @@ class EconomyMixin(BaseManager):
         active_users = factors.get("active_users", 1)
 
         # ---- dynamic base coefficient ---------------------------------------
-        # Wealth-inequality "volatility" is no longer used; bet limits scale
-        # directly off treasury health.
-        if health >= Decimal("0.60"):
-            base_coeff = Decimal("0.01")  # 1%
-        elif health >= Decimal("0.30"):
-            t = (health - Decimal("0.30")) / Decimal("0.30")
-            base_coeff = Decimal("0.0025") + (Decimal("0.01") - Decimal("0.0025")) * (
-                t**2
-            )
+        # Bet limits scale directly off treasury health so that heavy gambling
+        # cannot drain a stressed treasury. The curve tightens progressively as
+        # health drops, with a hard ceiling from MAX_TREASURY_EXPOSURE below.
+        if health >= Decimal("0.80"):
+            base_coeff = Decimal("0.0050")  # 0.50%
+        elif health >= Decimal("0.60"):
+            t = (health - Decimal("0.60")) / Decimal("0.20")
+            base_coeff = Decimal("0.0025") + (Decimal("0.0050") - Decimal("0.0025")) * t
+        elif health >= Decimal("0.40"):
+            t = (health - Decimal("0.40")) / Decimal("0.20")
+            base_coeff = Decimal("0.0010") + (Decimal("0.0025") - Decimal("0.0010")) * t
+        elif health >= Decimal("0.20"):
+            t = (health - Decimal("0.20")) / Decimal("0.20")
+            base_coeff = Decimal("0.0005") + (Decimal("0.0010") - Decimal("0.0005")) * t
         else:
-            base_coeff = Decimal("0.00125")  # 0.125%
+            base_coeff = Decimal("0.00025")  # 0.025%
 
         # ---- apply wealth tier penalty --------------------------------------
         user_tier = await self.get_user_wealth_tier(raw_user_id)

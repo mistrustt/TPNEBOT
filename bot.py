@@ -366,7 +366,7 @@ class DiscordBot(commands.Bot):
         except Exception as e:
             self.logger.error(f"Error collecting economic metrics: {e}")
 
-    @tasks.loop(hours=4)
+    @tasks.loop(minutes=30)
     async def economic_rebalance_task(self) -> None:
         await self.wait_until_ready()
         try:
