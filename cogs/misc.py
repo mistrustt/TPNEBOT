@@ -137,6 +137,9 @@ class Misc(commands.Cog, name="Misc"):
     async def _handle_reaction_add(
         self, reaction: discord.Reaction, user: discord.User
     ):
+        if user.bot:
+            return
+        
         user_id = int(user.id)
         author_id = int(reaction.message.author.id)
 
