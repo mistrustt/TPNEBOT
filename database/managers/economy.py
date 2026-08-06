@@ -1735,13 +1735,17 @@ class EconomyMixin(BaseManager):
                         "reason": "Mint adjustment too small after dampening",
                     }
 
-                # Safety: don't mint if circulation is already >80% (too much in player hands)
+                # Guard against runaway minting when currency is already widely
+                # distributed. In a healthy economy (health >= target) we only
+                # expand the treasury when circulation is below 80%. When the
+                # treasury is stressed, the circulation check is relaxed so the
+                # economy can self-heal back to the target health band.
                 circulation_ratio = (
                     supply.circulating / total_supply
                     if total_supply > 0
                     else Decimal("0")
                 )
-                if circulation_ratio > Decimal("0.80"):
+                if treasury_health >= target and circulation_ratio > Decimal("0.80"):
                     return {
                         "action": "skipped",
                         "reason": f"Circulation too high for minting ({circulation_ratio:.2%})",
