@@ -310,7 +310,7 @@ class DiscordBot(commands.Bot):
             self.logger.info("Development environment active.")
             try:
                 await self.load_extension("jishaku")
-                self.logger.info("Loaded extension 'jishaku'")
+                self.logger.info("Loaded developer extension 'jishaku'")
             except Exception as e:
                 self.logger.error(
                     f"Failed to load extension jishaku\n{type(e).__name__}: {e}"

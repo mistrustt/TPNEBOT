@@ -3043,6 +3043,11 @@ class Owner(commands.Cog, name="Owner"):
             await self.bot.change_presence(
                 status=discord.Status.dnd, activity=discord.Game(name="in debug mode")
             )
+            try:
+                await self.load_extension("jishaku")
+                self.logger.info("Loaded developer extension 'jishaku'")
+            except Exception as e:
+                self.logger.error("Failed to load extension 'jishaku': %s", e)
         else:
             if hasattr(self.bot, "status_task") and self.bot.status_task:
                 self.bot.status_task.start()
