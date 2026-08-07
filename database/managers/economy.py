@@ -1572,19 +1572,22 @@ class EconomyMixin(BaseManager):
 
         circulation_ratio = (circulating / total_supply).quantize(Decimal("0.0001"))
 
-        # Young economy (<20% circulating) → target ~0.85
-        # Mature economy (>50% circulating) → target 0.70
-        # The economy should aim to keep the treasury well-provisioned so it
-        # can absorb gambling variance without hitting the hard floor.
+        # The treasury target must be realistic for how much currency is already
+        # in player hands. Aiming for 70% treasury when 80% of supply is
+        # circulating forces the rebalancer to mint impossibly large amounts and
+        # constantly hit its daily cap. Instead, target tapers with circulation:
+        #   0% circulating → 80% treasury
+        #   50% circulating → 50% treasury
+        #   80% circulating → 32% treasury
+        #   >95% circulating → floor at 20% treasury
         target = max(
-            Decimal("0.70"), Decimal("0.85") - (circulation_ratio * Decimal("0.30"))
+            Decimal("0.20"), Decimal("0.80") - (circulation_ratio * Decimal("0.60"))
         )
         target = target.quantize(Decimal("0.0001"))
 
-        # Tighter thresholds (±10 points) so rebalancing starts sooner and
-        # keeps health closer to the target band.
+        # Thresholds stay close to the target so rebalancing starts early.
         max_hw = min(Decimal("0.95"), target + Decimal("0.10"))
-        min_hw = max(Decimal("0.20"), target - Decimal("0.10"))
+        min_hw = max(Decimal("0.10"), target - Decimal("0.10"))
 
         return target, min_hw, max_hw
 
@@ -1634,10 +1637,15 @@ class EconomyMixin(BaseManager):
         # Emergency tuning: faster, stronger rebalancing when treasury is stressed
         is_stressed = treasury_health < min_hw
         if is_stressed:
-            COOLDOWN = timedelta(minutes=30)
+            COOLDOWN = timedelta(minutes=15)
             DEAD_ZONE = Decimal("0.015")
             MINT_DAMPENER = Decimal("1.0")  # Full computed adjustment when low
-            DAILY_MINT_CAP_RATIO = Decimal("0.030")  # 3% per day while stressed
+            # Scale daily mint cap with the deficit, but never exceed 10% of
+            # total supply per day to avoid runaway inflation.
+            deficit = target - treasury_health
+            DAILY_MINT_CAP_RATIO = min(
+                Decimal("0.10"), max(Decimal("0.05"), deficit)
+            )
 
         # Volume-linked refill runs independently of the normal rebalance cooldown
         # so that active gambling can help replenish a stressed treasury quickly.
@@ -1715,7 +1723,7 @@ class EconomyMixin(BaseManager):
                 # Treasury too low → mint
                 mint_adj = AmountUtils.round_currency(adj * MINT_DAMPENER)
 
-                # Enforce daily mint cap
+                # Enforce daily mint cap (already scaled with deficit when stressed)
                 daily_mint_cap = AmountUtils.round_currency(
                     total_supply * DAILY_MINT_CAP_RATIO
                 )
@@ -1849,8 +1857,8 @@ class EconomyMixin(BaseManager):
                 "target": target,
             }
 
-        # Fraction scales with distance below target: 1.0% near target up to
-        # 5.0% at deep stress so that active gambling helps refill reserves
+        # Fraction scales with distance below target: 2.0% near target up to
+        # 15.0% at deep stress so that active gambling helps refill reserves
         # quickly when they are running low.
         stress = max(
             Decimal("0"),
@@ -1859,11 +1867,21 @@ class EconomyMixin(BaseManager):
                 (target - treasury_health) / Decimal("0.10"),
             ),
         )
-        fraction = Decimal("0.010") + stress * Decimal("0.040")
+        fraction = Decimal("0.020") + stress * Decimal("0.130")
         mint_amount = AmountUtils.round_currency(deposits_to_treasury * fraction)
 
-        # Share the daily mint cap (3.0% of total supply while stressed).
-        daily_cap = AmountUtils.round_currency(total_supply * Decimal("0.030"))
+        # Share the same scaled daily mint cap as auto-rebalance: 1.0% normally,
+        # rising up to 10.0% when stressed, so volume-linked refills do not
+        # starve the scheduled rebalance mint.
+        is_stressed = treasury_health < min_hw
+        if is_stressed:
+            deficit = target - treasury_health
+            daily_cap_ratio = min(
+                Decimal("0.10"), max(Decimal("0.05"), deficit)
+            )
+        else:
+            daily_cap_ratio = Decimal("0.010")
+        daily_cap = AmountUtils.round_currency(total_supply * daily_cap_ratio)
         remaining = daily_cap - _DAILY_MINT_TOTAL
         if remaining <= 0:
             return {
@@ -2263,7 +2281,7 @@ class EconomyMixin(BaseManager):
         raw_user_id = user_id
 
         # ---- constants -------------------------------------------------------
-        MAX_TREASURY_EXPOSURE = Decimal("0.02")  # 2% of treasury
+        MAX_TREASURY_EXPOSURE_NORMAL = Decimal("0.02")  # 2% of treasury at/above target
         MIN_ABSOLUTE_FLOOR = Decimal("100.00")  # Floor value for small players
 
         # ---- fetch user data -------------------------------------------------
@@ -2275,6 +2293,7 @@ class EconomyMixin(BaseManager):
         supply = await self.get_supply_record()
         treasury = supply.treasury
         total_supply = supply.total_supply
+        target, min_hw, _ = self._calculate_dynamic_target(supply)
 
         if treasury <= 0 or total_supply <= 0:
             return Decimal("0.00")  # Economy not initialized or broken
@@ -2288,21 +2307,21 @@ class EconomyMixin(BaseManager):
 
         # ---- dynamic base coefficient ---------------------------------------
         # Bet limits scale directly off treasury health so that heavy gambling
-        # cannot drain a stressed treasury. The curve tightens progressively as
+        # cannot drain a stressed treasury. The curve tightens aggressively as
         # health drops, with a hard ceiling from MAX_TREASURY_EXPOSURE below.
         if health >= Decimal("0.80"):
-            base_coeff = Decimal("0.0050")  # 0.50%
+            base_coeff = Decimal("0.0030")  # 0.30%
         elif health >= Decimal("0.60"):
             t = (health - Decimal("0.60")) / Decimal("0.20")
-            base_coeff = Decimal("0.0025") + (Decimal("0.0050") - Decimal("0.0025")) * t
+            base_coeff = Decimal("0.0015") + (Decimal("0.0030") - Decimal("0.0015")) * t
         elif health >= Decimal("0.40"):
             t = (health - Decimal("0.40")) / Decimal("0.20")
-            base_coeff = Decimal("0.0010") + (Decimal("0.0025") - Decimal("0.0010")) * t
+            base_coeff = Decimal("0.0005") + (Decimal("0.0015") - Decimal("0.0005")) * t
         elif health >= Decimal("0.20"):
             t = (health - Decimal("0.20")) / Decimal("0.20")
-            base_coeff = Decimal("0.0005") + (Decimal("0.0010") - Decimal("0.0005")) * t
+            base_coeff = Decimal("0.0002") + (Decimal("0.0005") - Decimal("0.0002")) * t
         else:
-            base_coeff = Decimal("0.00025")  # 0.025%
+            base_coeff = Decimal("0.0001")  # 0.01%
 
         # ---- apply wealth tier penalty --------------------------------------
         user_tier = await self.get_user_wealth_tier(raw_user_id)
@@ -2325,9 +2344,17 @@ class EconomyMixin(BaseManager):
         if active_users < MIN_ACTIVE_USERS:
             base_coeff *= Decimal("0.9")  # Discourage gambling during low participation
 
+        # ---- scale hard exposure cap with health ---------------------------
+        # At or above the dynamic target, allow the full 2% exposure cap. Below
+        # target it shrinks linearly, floored at 25% of normal (0.5%) so the
+        # treasury never faces a single bet that could move it materially.
+        exposure_ratio = MAX_TREASURY_EXPOSURE_NORMAL * min(
+            Decimal("1"), max(Decimal("0.25"), health / target)
+        )
+
         # ---- calculate tentative limit --------------------------------------
         by_treasury = AmountUtils.round_currency(treasury * base_coeff)
-        hard_cap = AmountUtils.round_currency(treasury * MAX_TREASURY_EXPOSURE)
+        hard_cap = AmountUtils.round_currency(treasury * exposure_ratio)
         # Adjust hard cap by max payout multiplier to limit treasury exposure
         # For games with 50x max payout, this ensures max_bet * 50 <= hard_cap
         adjusted_hard_cap = (
