@@ -1820,7 +1820,6 @@ class Economy(commands.Cog):
                 "volatility_index":   {"emoji": "📊", "label": "Volatility Index",   "fmt": "percent"},
                 "transaction_volume": {"emoji": "💸", "label": "Transaction Volume", "fmt": "currency"},
                 "fee_rate":           {"emoji": "🧾", "label": "Fee Rate",           "fmt": "percent"},
-                "passive_income_rate":{"emoji": "💰", "label": "Passive Income Rate","fmt": "percent"},
             }
 
             def fmt_percent(value: float) -> str:

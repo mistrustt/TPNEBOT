@@ -312,7 +312,12 @@ class CrashView(discord.ui.LayoutView):
         )
 
     async def cashout_callback(self, interaction: discord.Interaction):
-        """Cash out for the clicking user."""
+        """Cash out for the clicking user.
+
+        This re-checks the player's crash point after reading the current
+        multiplier to close a race where the game loop marks a player as
+        crashed while the old "Cash Out" button is still clickable.
+        """
         uid = interaction.user.id
         if uid not in self.players or uid in self.cashed_out or uid in self.crashed_out:
             return await interaction.response.send_message(
@@ -321,6 +326,31 @@ class CrashView(discord.ui.LayoutView):
 
         bet = self.players[uid]
         mult = self.current_multiplier
+        crash_point = self.crash_points.get(uid)
+
+        # Race-condition guard: if the multiplier has already reached (or
+        # passed) this player's crash point, they crashed — pay nothing.
+        if crash_point is not None and mult >= crash_point:
+            self.crashed_out[uid] = crash_point
+            await self.casino._remove_refund(self.session_id, user_id=uid)
+            await self.casino.process_game_result(uid, "crash", bet)
+            pf = self.pf_data.get(uid, {})
+            await self.casino._record_game_outcome(
+                uid, "crash", "loss", bet, pf,
+                payout_multiplier=Decimal("0"),
+                payout_amount=Decimal("0"),
+            )
+            await self.casino._log_game_event(
+                self.session_id,
+                "crash",
+                {"user_id": uid, "multiplier": str(crash_point)},
+            )
+            await interaction.response.send_message(
+                f"💥 Crashed at {crash_point:.2f}×!", ephemeral=True
+            )
+            await self.update_game_message()
+            return
+
         win = AmountUtils.round_currency(bet * mult)
         win, _, boost_text = await self.casino._apply_item_multipliers(
             uid, win, True
@@ -647,22 +677,36 @@ class MinesGridLayout(discord.ui.LayoutView):
             casino._pop_mines_view(self._channel_id)
 
     async def handle_click(self, interaction: Interaction, pos: int):
-        """Handle a grid button click."""
+        """Handle a grid button click.
+
+        The interaction is deferred immediately so subsequent database/FairGate
+        work can take longer than Discord's 3-second acknowledgement window
+        without causing "Unknown interaction" errors.
+        """
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=False)
+        except discord.errors.NotFound:
+            # Interaction already expired/invalid before we could defer.
+            return
+        except discord.errors.InteractionResponded:
+            # Already responded by a previous handler; continue carefully.
+            pass
+
         try:
             if self.game_over:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "The game has already ended.", ephemeral=True
                 )
                 return
 
             if interaction.user.id != self.user_id:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "This isn't your Mines game.", ephemeral=True
                 )
                 return
 
             if pos in self.clicked_positions:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "This gem has already been clicked!", ephemeral=True
                 )
                 return
@@ -672,8 +716,9 @@ class MinesGridLayout(discord.ui.LayoutView):
             else:
                 await self._handle_safe(interaction, pos)
 
-        except discord.errors.InteractionResponded:
-            pass
+        except discord.errors.NotFound:
+            # Interaction token expired; try to update the stored message directly.
+            await self._edit_message_fallback()
         except Exception as e:
             logger.error(f"Error in mines game: {str(e)}")
             self.error_count += 1
@@ -737,7 +782,7 @@ class MinesGridLayout(discord.ui.LayoutView):
                 final_state={"reason": "luck_save", "bomb_pos": pos, "winnings": str(potential)},
             )
             self._cleanup_registry()
-            await interaction.response.edit_message(view=self)
+            await self._edit_interaction_message(interaction)
             return
 
         # Record loss
@@ -764,7 +809,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
         self._cleanup_registry()
 
-        await interaction.response.edit_message(view=self)
+        await self._edit_interaction_message(interaction)
 
     async def _handle_safe(self, interaction: Interaction, pos: int):
         """Handle clicking a safe cell (gem)."""
@@ -791,7 +836,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         if self.remaining_safe_cells == 0:
             await self._auto_cashout(interaction)
         else:
-            await interaction.response.edit_message(view=self)
+            await self._edit_interaction_message(interaction)
 
     async def _auto_cashout(self, interaction: Interaction):
         """Auto cashout when all gems are cleared."""
@@ -852,7 +897,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
         self._cleanup_registry()
 
-        await interaction.response.edit_message(view=self)
+        await self._edit_interaction_message(interaction)
 
     @staticmethod
     def _compute_mines_multiplier(
@@ -975,10 +1020,7 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
         self._cleanup_registry()
 
-        try:
-            await interaction.response.edit_message(view=self)
-        except:
-            pass
+        await self._edit_interaction_message(interaction)
 
     async def _send_error(self, interaction: Interaction):
         """Send an error message."""
@@ -989,18 +1031,50 @@ class MinesGridLayout(discord.ui.LayoutView):
         except:
             pass
 
+    async def _edit_interaction_message(self, interaction: Interaction):
+        """Edit the original interaction message, falling back to the stored message."""
+        try:
+            await interaction.edit_original_response(view=self)
+        except (discord.errors.NotFound, discord.errors.InteractionResponded):
+            try:
+                if self.message is not None:
+                    await self.message.edit(view=self)
+            except Exception:
+                pass
+        except Exception:
+            try:
+                if self.message is not None:
+                    await self.message.edit(view=self)
+            except Exception:
+                pass
+
     async def do_cashout(self, interaction: Interaction):
-        """Handle cashout button press."""
+        """Handle cashout button press.
+
+        Defer immediately so heavy DB/FairGate work does not exceed Discord's
+        3-second interaction acknowledgement window.
+        """
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=False)
+        except (discord.errors.NotFound, discord.errors.InteractionResponded):
+            pass
+
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "This is not your game!", ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "This is not your game!", ephemeral=True
+                )
+            except discord.errors.NotFound:
+                pass
             return
 
         if self.game_over:
-            await interaction.response.send_message(
-                "Game already ended!", ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "Game already ended!", ephemeral=True
+                )
+            except discord.errors.NotFound:
+                pass
             return
 
         self.game_over = True
@@ -1061,7 +1135,47 @@ class MinesGridLayout(discord.ui.LayoutView):
         )
         self._cleanup_registry()
 
-        await interaction.response.edit_message(view=self)
+        await self._edit_interaction_message(interaction)
+
+    async def on_timeout(self):
+        """Handle view timeout by refunding the player and disabling the UI."""
+        if self.game_over:
+            self.stop()
+            return
+
+        self.game_over = True
+        casino: Casino = self.bot.get_cog("Casino")
+
+        wallet_id = await self.bot.database.get_wallet_id_for_user(self.user_id)
+        await self.bot.database.process_treasury_transaction(
+            wallet_id=wallet_id,
+            amount=self.bet_amount,
+            description="Mines game timeout refund",
+            transaction_type="game_payout",
+        )
+
+        self._reveal_grid_buttons()
+        self.container.cashout_row.children[0].disabled = True
+        self.container.game_text.content = (
+            "### ⏰ Game Timed Out\n"
+            "The game expired and your bet has been refunded."
+        )
+
+        await casino._remove_refund(self.session_id, user_id=self.user_id)
+        await casino._end_game_session(
+            self.session_id,
+            outcome="cancelled",
+            final_state={"reason": "timeout"},
+        )
+        self._cleanup_registry()
+
+        try:
+            if self.message is not None:
+                await self.message.edit(view=self)
+        except Exception:
+            pass
+
+        self.stop()
 
     async def force_end(self, *, refund: bool = False):
         """Force end the game."""
