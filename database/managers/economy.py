@@ -47,6 +47,11 @@ _MINT_DAY: Optional[datetime] = None  # resets when date changes
 _DAILY_BURN_TOTAL: Decimal = Decimal("0")
 _BURN_DAY: Optional[datetime] = None
 
+# Volume-linked minting tracks its own daily budget so it doesn't starve the
+# scheduled auto-rebalance mint (and vice versa).
+_DAILY_VOLUME_MINT_TOTAL: Decimal = Decimal("0")
+_VOLUME_MINT_DAY: Optional[datetime] = None
+
 # Treasury floor: treasury must never drop below this fraction of total_supply
 TREASURY_FLOOR_RATIO = Decimal("0.10")
 
@@ -1634,18 +1639,15 @@ class EconomyMixin(BaseManager):
         treasury_health = (treasury / total_supply).quantize(Decimal("0.0001"))
         target, min_hw, max_hw = self._calculate_dynamic_target(supply)
 
-        # Emergency tuning: faster, stronger rebalancing when treasury is stressed
+        # Emergency tuning: faster, stronger rebalancing when treasury is stressed.
+        # Cap is fixed at 3.0% of total supply per day to refill quickly but avoid
+        # runaway inflation.
         is_stressed = treasury_health < min_hw
         if is_stressed:
             COOLDOWN = timedelta(minutes=15)
             DEAD_ZONE = Decimal("0.015")
             MINT_DAMPENER = Decimal("1.0")  # Full computed adjustment when low
-            # Scale daily mint cap with the deficit, but never exceed 10% of
-            # total supply per day to avoid runaway inflation.
-            deficit = target - treasury_health
-            DAILY_MINT_CAP_RATIO = min(
-                Decimal("0.10"), max(Decimal("0.05"), deficit)
-            )
+            DAILY_MINT_CAP_RATIO = Decimal("0.030")
 
         # Volume-linked refill runs independently of the normal rebalance cooldown
         # so that active gambling can help replenish a stressed treasury quickly.
@@ -1809,17 +1811,18 @@ class EconomyMixin(BaseManager):
 
         This is a volume-linked refill: the more currency flows into the
         treasury (gambling losses, fees, transfers to house), the more the
-        treasury can safely expand when it is stressed. It only activates
-        when treasury health is below the dynamic minimum threshold, and it
-        respects the same daily mint cap used by auto-rebalance.
+        treasury can safely expand when it is below its target. It uses a
+        separate daily mint budget from the scheduled auto-rebalance so that
+        active gambling can refill the treasury without starving the main
+        rebalancer.
         """
-        global _DAILY_MINT_TOTAL, _MINT_DAY
+        global _DAILY_VOLUME_MINT_TOTAL, _VOLUME_MINT_DAY
 
         now = discord.utils.utcnow()
         today = now.date()
-        if _MINT_DAY is None or _MINT_DAY != today:
-            _DAILY_MINT_TOTAL = Decimal("0")
-            _MINT_DAY = today
+        if _VOLUME_MINT_DAY is None or _VOLUME_MINT_DAY != today:
+            _DAILY_VOLUME_MINT_TOTAL = Decimal("0")
+            _VOLUME_MINT_DAY = today
 
         supply = await self.get_supply_record()
         treasury, total_supply = supply.treasury, supply.total_supply
@@ -1857,9 +1860,10 @@ class EconomyMixin(BaseManager):
                 "target": target,
             }
 
-        # Fraction scales with distance below target: 2.0% near target up to
-        # 15.0% at deep stress so that active gambling helps refill reserves
-        # quickly when they are running low.
+        # Fraction scales with distance below target: 1.0% near target up to
+        # 5.0% at deep stress so that active gambling helps refill reserves
+        # without printing wildly. Volume-mint has its own 3.0% daily budget
+        # separate from auto-rebalance.
         stress = max(
             Decimal("0"),
             min(
@@ -1867,28 +1871,18 @@ class EconomyMixin(BaseManager):
                 (target - treasury_health) / Decimal("0.10"),
             ),
         )
-        fraction = Decimal("0.020") + stress * Decimal("0.130")
+        fraction = Decimal("0.010") + stress * Decimal("0.040")
         mint_amount = AmountUtils.round_currency(deposits_to_treasury * fraction)
 
-        # Share the same scaled daily mint cap as auto-rebalance: 1.0% normally,
-        # rising up to 10.0% when stressed, so volume-linked refills do not
-        # starve the scheduled rebalance mint.
-        is_stressed = treasury_health < min_hw
-        if is_stressed:
-            deficit = target - treasury_health
-            daily_cap_ratio = min(
-                Decimal("0.10"), max(Decimal("0.05"), deficit)
-            )
-        else:
-            daily_cap_ratio = Decimal("0.010")
-        daily_cap = AmountUtils.round_currency(total_supply * daily_cap_ratio)
-        remaining = daily_cap - _DAILY_MINT_TOTAL
+        VOLUME_DAILY_CAP_RATIO = Decimal("0.030")
+        daily_cap = AmountUtils.round_currency(total_supply * VOLUME_DAILY_CAP_RATIO)
+        remaining = daily_cap - _DAILY_VOLUME_MINT_TOTAL
         if remaining <= 0:
             return {
                 "action": "skipped",
-                "reason": "Daily mint cap reached",
+                "reason": "Daily volume-mint cap reached",
                 "treasury_health": treasury_health,
-                "daily_minted": _DAILY_MINT_TOTAL,
+                "daily_volume_minted": _DAILY_VOLUME_MINT_TOTAL,
                 "daily_cap": daily_cap,
             }
 
@@ -1907,7 +1901,7 @@ class EconomyMixin(BaseManager):
             f"Volume-linked mint {mint_amount} from {deposits_to_treasury} treasury deposits "
             f"(health {treasury_health:.2%})",
         )
-        _DAILY_MINT_TOTAL += mint_amount
+        _DAILY_VOLUME_MINT_TOTAL += mint_amount
         logger.info(
             f"[VOLUME-MINT] Minted {mint_amount} from {deposits_to_treasury} deposits "
             f"(health {treasury_health:.2%}, fraction={fraction:.2%})"
@@ -1919,7 +1913,7 @@ class EconomyMixin(BaseManager):
             "deposits": deposits_to_treasury,
             "fraction": fraction,
             "treasury_health": treasury_health,
-            "daily_minted": _DAILY_MINT_TOTAL,
+            "daily_volume_minted": _DAILY_VOLUME_MINT_TOTAL,
             "daily_cap": daily_cap,
         }
 
