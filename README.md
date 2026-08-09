@@ -17,6 +17,7 @@ TPNEBOT is a modular Discord bot featuring an economy, casino style games with p
 ## Documentation
 
 - See [documentation](https://github.com/mistrustt/TPNEBOT/tree/main/docs)
+- [Economy & Casino User Guide](docs/ECONOMY_AND_CASINO.md)
 - [Terms of Service](docs/TERMS.md)
 - [Privacy Policy](docs/PRIVACY.md)
 - [Security Policy](docs/SECURITY.md)

@@ -1144,7 +1144,7 @@ class General(commands.Cog, name="General"):
         skulls_rx, _ = await self.bot.database.get_reaction_stats(member.id, "skulls")
         flames_rx, _ = await self.bot.database.get_reaction_stats(member.id, "flames")
         hearts_rx, _ = await self.bot.database.get_reaction_stats(member.id, "hearts")
-
+        clowns_rx, _ = await self.bot.database.get_reaction_stats(member.id, "clowns")
         embed = discord.Embed(
             color=discord.Color.blurple(), timestamp=discord.utils.utcnow()
         )
@@ -1183,7 +1183,8 @@ class General(commands.Cog, name="General"):
                 f"**Sobs:** {sobs_rx:,} :sob:\n"
                 f"**Skulls:** {skulls_rx:,} :skull:\n"
                 f"**Flames:** {flames_rx:,} :fire:\n"
-                f"**Hearts:** {hearts_rx:,} :heart:"
+                f"**Hearts:** {hearts_rx:,} :heart:\n"
+                f"**Clowns:** {clowns_rx:,} :clown:"
             ),
             inline=False,
         )
