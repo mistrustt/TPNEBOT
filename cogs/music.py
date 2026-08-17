@@ -2577,6 +2577,7 @@ class Music(commands.Cog, name="Music"):
         return layout_view if valid_snippets else None
 
     @commands.hybrid_command(name='groupbuy', aliases=['gb', 'gbinfo', 'groupbuyinfo'], description='Find a songs groupbuy information')
+    @commands.guild_only()
     @unified_cooldown(10)
     async def groupbuy(self, ctx: commands.Context, *, query: str = None):
         if not query:
@@ -2628,6 +2629,7 @@ class Music(commands.Cog, name="Music"):
             )
 
     @commands.hybrid_command("leak", description="Search for a Juice WRLD leak by name")
+    @commands.guild_only()
     @unified_cooldown(10)
     async def leak(self, ctx: commands.Context, *, query: str = None):
         if not query:
@@ -2703,6 +2705,7 @@ class Music(commands.Cog, name="Music"):
             )
 
     @commands.hybrid_command("session", description="Search for a Juice WRLD session by name")
+    @commands.guild_only()
     @unified_cooldown(10)
     async def session(self, ctx: commands.Context, *, query: str = None):
         if not query:
@@ -2831,6 +2834,7 @@ class Music(commands.Cog, name="Music"):
         return embeds
 
     @commands.hybrid_command(name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song")
+    @commands.guild_only()
     @unified_cooldown(10)
     async def lyrics(self, ctx: commands.Context, query: Optional[str] = None):
         if not query:
