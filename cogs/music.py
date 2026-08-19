@@ -2423,16 +2423,27 @@ class Music(commands.Cog, name="Music"):
                     url=f'{JUICEWRLD_API}/'
                 )
 
-                rows = self._create_download_rows(
-                    downloads, song, MAIN_URL, session_downloads, session_edits
+                download_budget = max(0, 40 - self._total_count - 4)
+                rows, omitted = self._create_download_rows(
+                    downloads, song, MAIN_URL, download_budget,
+                    session_downloads, session_edits
                 )
-                
-                rows.append(discord.ui.Separator())
-                rows.append(discord.ui.ActionRow())
-                rows[-1].add_item(TRACKER)
-                
+
                 for row in rows:
                     self.add_item(row)
+
+                if omitted:
+                    self.add_item(
+                        discord.ui.TextDisplay(
+                            f'-# +{omitted} more file(s) not shown — '
+                            f'[view all on the tracker]({JUICEWRLD_API}/)'
+                        )
+                    )
+
+                self.add_item(discord.ui.Separator())
+                tracker_row = discord.ui.ActionRow()
+                tracker_row.add_item(TRACKER)
+                self.add_item(tracker_row)
 
             def _add_song_fields(self, song: dict, field_map: dict):
                 for field_key, field_label in field_map.items():
@@ -2451,72 +2462,86 @@ class Music(commands.Cog, name="Music"):
 
                         self.add_item(discord.ui.TextDisplay(f'{field_label}\n{value}'))
 
-            def _create_download_rows(self, downloads, song, main_url, session_downloads=None, session_edits=None):
+            def _create_download_rows(self, downloads, song, main_url, budget,
+                                      session_downloads=None, session_edits=None):
                 rows = []
+                used = 0
+                omitted = 0
+
+                def remaining():
+                    return budget - used
 
                 if session_downloads:
-                    rows.append(discord.ui.Separator())
-                    rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
-                    for i in range(0, len(session_downloads), 5):
-                        row = discord.ui.ActionRow()
-                        for path in session_downloads[i:i + 5]:
-                            ext = path.rsplit('.', 1)[-1].upper()
-                            row.add_item(
-                                discord.ui.Button(
-                                    label=ext,
-                                    url=main_url + quote(path)
-                                )
-                            )
-                        rows.append(row)
+                    brows, bused, bomit = self._file_button_rows(
+                        session_downloads, main_url, max(0, remaining() - 2)
+                    )
+                    if brows:
+                        rows.append(discord.ui.Separator())
+                        rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
+                        rows.extend(brows)
+                        used += 2 + bused
+                    omitted += bomit
                 else:
                     download = song.get('path')
                     if download != '':
-                        rows.append(discord.ui.Separator())
-
                         ext = download.rsplit('.', 1)[-1].upper()
-                        if ext.lower() in ['zip', 'rar', '7z']:
-                            rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
-                        else:
-                            rows.append(discord.ui.TextDisplay('**Tagged File(s)**'))
-                        main_row = discord.ui.ActionRow()
-                        main_row.add_item(
-                            discord.ui.Button(
-                                label=ext,
-                                url=main_url + quote(download)
+                        if remaining() >= 4:
+                            rows.append(discord.ui.Separator())
+                            if ext.lower() in ['zip', 'rar', '7z']:
+                                rows.append(discord.ui.TextDisplay('**Session Download(s)**'))
+                            else:
+                                rows.append(discord.ui.TextDisplay('**Tagged File(s)**'))
+                            main_row = discord.ui.ActionRow()
+                            main_row.add_item(
+                                discord.ui.Button(label=ext, url=main_url + quote(download))
                             )
-                        )
-                        rows.append(main_row)
+                            rows.append(main_row)
+                            used += 4
+                        else:
+                            omitted += 1
 
                 if session_edits:
-                    rows.append(discord.ui.TextDisplay('**Session Edit(s)**'))
-                    for i in range(0, len(session_edits), 5):
-                        row = discord.ui.ActionRow()
-                        for path in session_edits[i:i + 5]:
-                            ext = path.rsplit('.', 1)[-1].upper()
-                            row.add_item(
-                                discord.ui.Button(
-                                    label=ext,
-                                    url=main_url + quote(path)
-                                )
-                            )
-                        rows.append(row)
+                    brows, bused, bomit = self._file_button_rows(
+                        session_edits, main_url, max(0, remaining() - 1)
+                    )
+                    if brows:
+                        rows.append(discord.ui.TextDisplay('**Session Edit(s)**'))
+                        rows.extend(brows)
+                        used += 1 + bused
+                    omitted += bomit
 
                 if downloads:
-                    rows.append(discord.ui.TextDisplay('**Original File(s)**'))
-                    for i in range(0, len(downloads), 5):
-                        row = discord.ui.ActionRow()
-                        for path in downloads[i:i + 5]:
-                            ext = path.rsplit('.', 1)[-1].upper()
-                            label = f'OG {ext}' if 'Original Files' in path else ext
-                            row.add_item(
-                                discord.ui.Button(
-                                    label=label,
-                                    url=main_url + quote(path)
-                                )
-                            )
-                        rows.append(row)
+                    brows, bused, bomit = self._file_button_rows(
+                        downloads, main_url, max(0, remaining() - 1),
+                        lambda path, ext: f'OG {ext}' if 'Original Files' in path else ext
+                    )
+                    if brows:
+                        rows.append(discord.ui.TextDisplay('**Original File(s)**'))
+                        rows.extend(brows)
+                        used += 1 + bused
+                    omitted += bomit
 
-                return rows
+                return rows, omitted
+
+            def _file_button_rows(self, paths, main_url, budget, label_func=None):
+                used = 0
+                idx = 0
+                while idx < len(paths):
+                    chunk = paths[idx:idx + 5]
+                    cost = 1 + len(chunk)
+                    if used + cost > budget:
+                        break
+                    row = discord.ui.ActionRow()
+                    for path in chunk:
+                        ext = path.rsplit('.', 1)[-1].upper()
+                        label = label_func(path, ext) if label_func else ext
+                        row.add_item(
+                            discord.ui.Button(label=label, url=main_url + quote(path))
+                        )
+                    rows.append(row)
+                    used += cost
+                    idx += len(chunk)
+                return rows, used, len(paths) - idx
 
         file_names = self.get_file_names(song_data.get('file_names'))
         downloads = await self.get_downloads(file_names, song_data.get('length', ''))
