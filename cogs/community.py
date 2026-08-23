@@ -139,7 +139,7 @@ class Community(commands.Cog, name="Community"):
             await ctx.send("You have no grails yet.")
             return
 
-        grails = [f"{song.song_title.title()}" for song in favorite_songs]
+        grails = [f"{song.song_title}" for song in favorite_songs]
         pages = [grails[i : i + 10] for i in range(0, len(grails), 10)]
 
         class GrailMenu(discord.ui.View):
@@ -272,7 +272,7 @@ class Community(commands.Cog, name="Community"):
             await ctx.send("You have no grails yet.")
             return
 
-        lines = [f"{song.song_title.title()}" for song in favorite_songs]
+        lines = [f"{song.song_title}" for song in favorite_songs]
 
         pages = []
         current = ""
