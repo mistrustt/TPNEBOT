@@ -14,6 +14,10 @@ class MiscUtils:
     def get_avatar_url(self, member):
         return member.avatar.url if member.avatar else self.default_avatar_url
 
+    def get_avatar_asset(self, member):
+        avatar_asset = member.avatar.display_avatar.with_format("png").with_size(256) if member.avatar else self.default_avatar_url
+        return avatar_asset
+
     async def parse_duration(self, duration_str: str) -> int:
         """Parse a user-supplied duration string and return the duration in seconds."""
         try:

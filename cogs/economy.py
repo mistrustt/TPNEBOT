@@ -1565,9 +1565,6 @@ class Economy(commands.Cog):
                 icon_url=self.utils.get_avatar_url(member),
             )
 
-
-
-
             wallet_str = f"{self.currency_name} **{await self.short_formatter(wallet_balance)}**"
             bank_str = f"{self.currency_name} **{await self.short_formatter(bank_balance)}**"
 

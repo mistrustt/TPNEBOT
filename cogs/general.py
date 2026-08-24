@@ -1,3 +1,4 @@
+from enum import member
 import os
 import re
 import io
@@ -8,6 +9,7 @@ import discord
 import aiohttp
 import secrets
 import asyncio
+from discord import member
 import logging
 import humanize
 import platform
@@ -2405,7 +2407,7 @@ class General(commands.Cog, name="General"):
                             value=f"**Latitude**: {data.get('latitude', 'N/A')}\n**Longitude**: {data.get('longitude', 'N/A')}",
                             inline=True
                         )
-                        
+                        server_avatar_url = member.display_avatar.url if member.display_avatar else None
                         embed.set_footer(text="Data provided by ipapi.co", icon_url="https://ipapi.co/favicon.ico")
                         embed.set_author(name=f"Requested by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
 
@@ -2611,7 +2613,7 @@ class General(commands.Cog, name="General"):
             else:
                 await Embeds.error(ctx, "Please provide a message link, ID, reply to a message, or provide some text to quote.", title="Quote", delete_after=5, reply=True)
 
-            avatar_asset = avatar_user.display_avatar.with_format("png").with_size(256)
+            avatar_asset = self.utils.get_avatar_asset(avatar_user)
             avatar_bytes = await avatar_asset.read()
             avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
 
