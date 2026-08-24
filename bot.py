@@ -397,8 +397,6 @@ class DiscordBot(commands.Bot):
     @staticmethod
     def _is_missing_access_error(error: Exception) -> bool:
         """Return True if *error* is a Discord Missing Access / permissions error."""
-        if isinstance(error, discord.errors.MissingAccess):
-            return True
         if isinstance(error, discord.Forbidden):
             if getattr(error, "code", None) == 50001:
                 return True
@@ -406,8 +404,6 @@ class DiscordBot(commands.Bot):
                 return True
         original = getattr(error, "original", None)
         if original is not None and original is not error:
-            if isinstance(original, discord.errors.MissingAccess):
-                return True
             if isinstance(original, discord.Forbidden):
                 if getattr(original, "code", None) == 50001:
                     return True
