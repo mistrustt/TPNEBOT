@@ -236,7 +236,7 @@ class DiscordBot(commands.Bot):
         self._config_task: asyncio.Task | None = None
         self.config = None
         self.debug_mode_active = False
-        self.version = "2026.07.10"
+        self.version = "2026824"
         self.cool_guys = None
         # Per-interaction guardrail cache so centralized tree checks and per-cog
         # interaction_check don't duplicate DB work or send double responses.
@@ -392,6 +392,27 @@ class DiscordBot(commands.Bot):
             return True
         if isinstance(error, discord.HTTPException) and getattr(error, "status", 0) >= 500:
             return True
+        return False
+
+    @staticmethod
+    def _is_missing_access_error(error: Exception) -> bool:
+        """Return True if *error* is a Discord Missing Access / permissions error."""
+        if isinstance(error, discord.errors.MissingAccess):
+            return True
+        if isinstance(error, discord.Forbidden):
+            if getattr(error, "code", None) == 50001:
+                return True
+            if getattr(error, "status", None) == 403 and "missing access" in str(error).lower():
+                return True
+        original = getattr(error, "original", None)
+        if original is not None and original is not error:
+            if isinstance(original, discord.errors.MissingAccess):
+                return True
+            if isinstance(original, discord.Forbidden):
+                if getattr(original, "code", None) == 50001:
+                    return True
+                if getattr(original, "status", None) == 403 and "missing access" in str(original).lower():
+                    return True
         return False
 
     async def setup_hook(self) -> None:
@@ -839,6 +860,18 @@ class DiscordBot(commands.Bot):
                     f"{type(exc.original).__name__}: {exc.original}"
                 )
                 return
+            if self._is_missing_access_error(exc.original):
+                self.logger.warning(
+                    f"Missing access while invoking {ctx.command.qualified_name}: "
+                    f"{type(exc.original).__name__}: {exc.original}"
+                )
+                try:
+                    return await ctx.send(
+                        "❌ Missing access. The bot does not have the required permissions for this channel. "
+                        "Please check its role and channel permissions."
+                    )
+                except discord.Forbidden:
+                    return
             raise
         except SQLAlchemyError as exc:
             self.logger.warning(
@@ -1121,6 +1154,20 @@ class DiscordBot(commands.Bot):
                 f"{type(original).__name__}: {original}"
             )
             return
+        if self._is_missing_access_error(root_error):
+            self.logger.warning(
+                f"Missing access in slash /{command_name}: "
+                f"{type(root_error).__name__}: {root_error}"
+            )
+            message = (
+                "❌ Missing access. The bot does not have the required permissions for this channel. "
+                "Please check its role and channel permissions."
+            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(message, ephemeral=True)
+            else:
+                await interaction.followup.send(message, ephemeral=True)
+            return
 
         if is_cooldown:
             embed = await self.cooldowns.get_cooldown_embed(retry_after)
@@ -1279,6 +1326,18 @@ class DiscordBot(commands.Bot):
                 f"{type(original).__name__}: {original}"
             )
             return
+        elif self._is_missing_access_error(error):
+            self.logger.warning(
+                f"Missing access in command {ctx.command.qualified_name}: "
+                f"{type(error).__name__}: {error}"
+            )
+            try:
+                return await ctx.send(
+                    "❌ Missing access. The bot does not have the required permissions for this channel. "
+                    "Please check its role and channel permissions."
+                )
+            except discord.Forbidden:
+                return
         elif isinstance(error, Exception):
             dev_channel_id = int(os.getenv("DEVELOPER_CHANNEL_ID"))
             dev_channel = self.get_channel(dev_channel_id)

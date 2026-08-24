@@ -1045,6 +1045,9 @@ class Music(commands.Cog, name="Music"):
 
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as response:
+                        if response.status != 200 or "application/json" not in response.headers.get("Content-Type", ""):
+                            logger.error(f"Last.fm user.getinfo returned {response.status} for {lastfm_username}")
+                            return None
                         data = await response.json()
                         return data
 
@@ -1059,6 +1062,9 @@ class Music(commands.Cog, name="Music"):
                 url_recent = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={lastfm_username}&api_key={LASTFM_API_KEY}&format=json"
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url_recent) as response:
+                        if response.status != 200 or "application/json" not in response.headers.get("Content-Type", ""):
+                            logger.error(f"Last.fm user.getrecenttracks returned {response.status} for {lastfm_username}")
+                            return None
                         recent_tracks = await response.json()
                         return recent_tracks
 
@@ -1068,6 +1074,9 @@ class Music(commands.Cog, name="Music"):
                 url_info = f"http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key={LASTFM_API_KEY}&artist={artist_name}&track={track_name}&username={lastfm_username}&format=json"
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url_info) as response:
+                        if response.status != 200 or "application/json" not in response.headers.get("Content-Type", ""):
+                            logger.error(f"Last.fm track.getInfo returned {response.status} for {artist_name} - {track_name}")
+                            return None
                         recent_track_info = await response.json()
 
                         if "track" not in recent_track_info:
@@ -2524,6 +2533,7 @@ class Music(commands.Cog, name="Music"):
                 return rows, omitted
 
             def _file_button_rows(self, paths, main_url, budget, label_func=None):
+                rows = []
                 used = 0
                 idx = 0
                 while idx < len(paths):
