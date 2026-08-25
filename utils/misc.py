@@ -15,8 +15,14 @@ class MiscUtils:
         return member.avatar.url if member.avatar else self.default_avatar_url
 
     def get_avatar_asset(self, member):
-        avatar_asset = member.avatar.display_avatar.with_format("png").with_size(256) if member.avatar else self.default_avatar_url
-        return avatar_asset
+        if member is None:
+            return None
+        # display_avatar always returns an Asset (falling back to Discord's
+        # default avatar), so this works whether or not the member has a
+        # custom avatar set. member.avatar is an Asset and has no
+        # .display_avatar attribute, so the previous member.avatar.display_avatar
+        # access crashed for any member with a custom avatar.
+        return member.display_avatar.with_format("png").with_size(256)
 
     async def parse_duration(self, duration_str: str) -> int:
         """Parse a user-supplied duration string and return the duration in seconds."""

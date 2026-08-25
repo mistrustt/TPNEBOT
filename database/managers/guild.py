@@ -288,6 +288,35 @@ class GuildMixin(BaseManager):
 
             return status.enabled if status else True
 
+    @db_safe(default=[])
+    async def get_disabled_commands(self) -> list:
+        """Return every command currently disabled, across all scopes.
+
+        Each entry is a dict with ``command_name`` and a human-readable
+        ``reason`` describing the scope:
+        - channel_id set  -> channel-scoped disable
+        - guild_id set    -> server-wide disable
+        - both None       -> bot-wide (global) disable
+        """
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(CommandStatus).where(CommandStatus.enabled.is_(False))
+            )
+            rows = result.scalars().all()
+
+        disabled = []
+        for row in rows:
+            if row.channel_id is not None:
+                reason = f"disabled in channel {row.channel_id}"
+            elif row.guild_id is not None:
+                reason = f"disabled server-wide (guild {row.guild_id})"
+            else:
+                reason = "disabled globally (bot-wide)"
+            disabled.append(
+                {"command_name": row.command_name, "reason": reason}
+            )
+        return disabled
+
     async def clear_expired_cooldowns(self):
         """Clears expired cooldowns from the database."""
         async with self.async_sessionmaker() as session:

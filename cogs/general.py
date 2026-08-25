@@ -2659,6 +2659,7 @@ class General(commands.Cog, name="General"):
                 avatar_user = ctx.author
             else:
                 await Embeds.error(ctx, "Please provide a message link, ID, reply to a message, or provide some text to quote.", title="Quote", delete_after=5, reply=True)
+                return
 
             avatar_asset = self.utils.get_avatar_asset(avatar_user)
             avatar_bytes = await avatar_asset.read()
