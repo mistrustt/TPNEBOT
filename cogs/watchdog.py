@@ -882,8 +882,13 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if settings.get("card_filter", False):
             NON_LUHN = {"Diners Club enRoute Card"}
 
+            # normalize separators (spaces, dashes, dots) so grouped card
+            # numbers like "4111 1111 1111 1111" are caught the same as
+            # contiguous ones like "4242424242424242"
+            normalized = re.sub(r"[\s\-\.]", "", content)
+
             for pattern_name, pattern in self.card_patterns.items():
-                for m in pattern.finditer(content):
+                for m in pattern.finditer(normalized):
                     card_number = re.sub(r"\D", "", m.group(0))
 
                     if pattern_name not in NON_LUHN and not self.luhn(card_number):
