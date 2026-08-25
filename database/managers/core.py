@@ -806,6 +806,7 @@ class CoreMixin(BaseManager):
                 .where(
                     CommandStatus.command_name == command_name,
                     CommandStatus.channel_id.is_(None),
+                    CommandStatus.guild_id.is_(None),
                 )
                 .scalar_subquery()
             )
@@ -815,6 +816,7 @@ class CoreMixin(BaseManager):
                 .where(
                     CommandStatus.command_name == command_name,
                     CommandStatus.channel_id == channel_id,
+                    CommandStatus.guild_id.is_(None),
                 )
                 .scalar_subquery()
             )

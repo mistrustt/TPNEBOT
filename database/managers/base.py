@@ -291,6 +291,8 @@ class BaseManager:
             await self._repair_command_cooldowns_constraint()
             await self._repair_item_shop_columns()
             await self._repair_game_history_columns()
+            await self._repair_server_settings_columns()
+            await self._repair_command_status_columns()
 
         try:
             await self._db_retry(_init, retries=self._db_retry_count, base_delay=2.0)
@@ -519,6 +521,50 @@ class BaseManager:
                 except SQLAlchemyError as e:
                     logger.warning(f"Schema repair for game_history.{column} failed: {e}")
             logger.info("Repaired game_history payout columns")
+
+    async def _repair_server_settings_columns(self):
+        """
+        Add the snipe_enabled column to server_settings if it is missing on an
+        older schema. New deployments get it from Base.metadata.create_all().
+        Snipe is off by default (opt-in per guild).
+        """
+        async with self.engine.begin() as conn:
+            settings_columns = [
+                ("snipe_enabled", "BOOLEAN DEFAULT FALSE"),
+            ]
+            for column, col_type in settings_columns:
+                try:
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS {column} {col_type}"
+                        )
+                    )
+                except SQLAlchemyError as e:
+                    logger.warning(
+                        f"Schema repair for server_settings.{column} failed: {e}"
+                    )
+            logger.info("Repaired server_settings expansion columns")
+
+    async def _repair_command_status_columns(self):
+        """
+        Add the guild_id column to command_status if it is missing on an older
+        schema. New deployments get it from Base.metadata.create_all().
+        guild_id scopes a per-guild serverwide disable (channel_id NULL,
+        guild_id set); NULL preserves the existing bot-wide / channel-scoped
+        rows.
+        """
+        async with self.engine.begin() as conn:
+            try:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE command_status ADD COLUMN IF NOT EXISTS guild_id BIGINT"
+                    )
+                )
+            except SQLAlchemyError as e:
+                logger.warning(
+                    f"Schema repair for command_status.guild_id failed: {e}"
+                )
+            logger.info("Repaired command_status guild_id column")
 
     def get_session(self):
         """Provide a transactional scope around a series of operations."""

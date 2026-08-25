@@ -2,7 +2,7 @@
 
 **Effective date:** 2026-07-02
 
-**Last updated:** 2026-07-02
+**Last updated:** 2026-08-25
 
 This Privacy Policy describes how TPNEBOT ("the bot", "we", "us") collects, uses, stores, and deletes data when you interact with it on Discord. By adding or using TPNEBOT in a Discord server, you acknowledge this policy and agree to the [Terms of Service](TERMS.md).
 
@@ -28,10 +28,11 @@ When a bot owner or administrator runs a restricted (`is_owner`) command, the fo
 This audit log is retained for security and accountability and is **not** deleted by `!forgetme`.
 
 ### 1.3 Message content
-We read message content only where required by specific features:
+We read message content only where required by specific features, and **message content is never stored in our database** — it is processed in memory and, where applicable, posted to a server-configured log channel inside Discord:
 - **Spam-channel enforcement:** messages in a designated channel that are not exactly `"999"` are deleted.
-- **Automated moderation:** messages are scanned for PII, credit-card numbers, and Discord tokens; matching messages are deleted and logged.
-- **Message delete/edit logging:** deleted and edited message content is posted to a server-configured mod-log channel.
+- **Automated moderation:** messages are scanned for PII, credit-card numbers, and Discord tokens; matching messages are deleted and logged. **Detected sensitive values are redacted before they appear in any log** — credit card numbers show only the last four digits, emails and phone numbers are partially masked, and Discord tokens and street addresses are fully redacted. Full PII, card, or token values are never logged or stored.
+- **Message delete/edit logging:** deleted and edited message content is posted to a server-configured mod-log channel. This output stays inside Discord; it is not copied to our database.
+- **Snipe utilities:** the most recent deleted/edited messages per channel are kept in memory (max 50 per channel) to power snipe commands. This feature is **off by default** and opt-in per guild — a server administrator enables it with the `togglesnipe` command. The cache is never written to disk, is lost when the bot restarts, and any member can clear their channel's cache with `/clearsnipe`.
 - **Attachment filtering:** messages with disallowed audio attachments are removed.
 - **Interactive command prompts:** some commands ask you to reply with a number or choice.
 - **Channel cleanup:** the `purge` command identifies bot/command messages to delete.
@@ -40,8 +41,8 @@ We do **not** read message content for general monitoring, advertising, or AI/ML
 
 ### 1.4 Member/presence data
 - **Guild member lists** are used for server statistics, role management, and member lookup commands.
-- **Online/idle/dnd/offline status** is used only for the `membercount`/`serverinfo` status breakdown.
-- **Spotify activity** is read only when a user invokes a music feature that looks up their currently playing Spotify track.
+- **Online/idle/dnd/offline status** is read only at the moment a user runs the `membercount`/`serverinfo` status breakdown. Presence is **never logged, tracked over time, or stored** — there is no presence-change listener.
+- **Spotify activity** is read only when a user invokes a music feature that looks up their currently playing Spotify track, and is discarded immediately after the reply is sent.
 
 ### 1.5 Economy, game, and social data
 We store data needed for the bot's economy, casino, games, music, and community features, including but not limited to:

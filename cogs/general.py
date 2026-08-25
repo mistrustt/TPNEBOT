@@ -297,6 +297,7 @@ class General(commands.Cog, name="General"):
         self.snipes = {}
         self.edit_snipes = {}
         self.reaction_snipes = {}
+        self.snipe_enabled_cache = {}  # guild_id -> (enabled: bool, fetched_at: datetime)
         self.afk_users = {}
         self.currency_api = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies"
         self.start_time = discord.utils.utcnow()
@@ -353,6 +354,23 @@ class General(commands.Cog, name="General"):
     async def on_ready(self):
         logger.info(f"Cog {self.__class__.__name__} is ready!")
 
+    async def _is_snipe_enabled(self, guild_id: int) -> bool:
+        """Cached lookup of whether snipe is enabled for a guild. Off by default."""
+        cache = self.snipe_enabled_cache.get(guild_id)
+        now = discord.utils.utcnow()
+        if cache and (now - cache[1]).total_seconds() <= 300:
+            return cache[0]
+        try:
+            enabled = await self.bot.database.get_snipe_enabled(guild_id)
+        except Exception as exc:
+            if self.bot.database._is_retryable_db_error(exc):
+                # Fail closed: don't cache message content if we can't confirm
+                # snipe is enabled for this guild.
+                return False
+            raise
+        self.snipe_enabled_cache[guild_id] = (enabled, now)
+        return enabled
+
     @commands.Cog.listener()
     async def on_message_delete(self, message):
         """Store deleted messages for snipe command"""
@@ -362,6 +380,8 @@ class General(commands.Cog, name="General"):
             guild_id = message.guild.id
             channel_id = message.channel.id
         except AttributeError:
+            return
+        if not await self._is_snipe_enabled(guild_id):
             return
         channel_snipes = self.snipes.setdefault(guild_id, {}).setdefault(channel_id, [])
         snipe_data = (
@@ -383,6 +403,8 @@ class General(commands.Cog, name="General"):
             guild_id = before.guild.id
             channel_id = before.channel.id
         except AttributeError:
+            return
+        if not await self._is_snipe_enabled(guild_id):
             return
         if before.content == after.content:
             return
@@ -410,6 +432,8 @@ class General(commands.Cog, name="General"):
             channel_id = message.channel.id
         except AttributeError:
             return
+        if not await self._is_snipe_enabled(guild_id):
+            return
         channel_snipes = self.reaction_snipes.setdefault(guild_id, {}).setdefault(
             channel_id, []
         )
@@ -431,7 +455,7 @@ class General(commands.Cog, name="General"):
         the on_message event and message.mentions, so it does not rely on the
         Message Content privileged intent.
         """
-        if message.author.bot:
+        if message.author.bot or not message.guild:
             return
         user_id = message.author.id
         if user_id in self.afk_users:
@@ -901,6 +925,29 @@ class General(commands.Cog, name="General"):
             await Embeds.success(ctx, "Cleared snipe history for this channel.", reply=True)
         else:
             await ctx.send("No snipe history to clear!", delete_after=5)
+
+    @commands.command(
+        name="togglesnipe",
+        help="Enable or disable snipe (deleted/edited message caching) for this server.",
+    )
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    async def toggle_snipe(self, ctx: commands.Context) -> None:
+        """Toggle snipe on or off for this server. Off by default; opt-in per guild."""
+        guild_id = ctx.guild.id
+        current = await self.bot.database.get_snipe_enabled(guild_id)
+        new_state = not current
+        await self.bot.database.set_snipe_enabled(guild_id, new_state)
+        self.snipe_enabled_cache[guild_id] = (new_state, discord.utils.utcnow())
+        status = "enabled" if new_state else "disabled"
+        await ctx.send(
+            f"Snipe is now **{status}** for this server.\n"
+            + (
+                "Deleted and edited messages will be cached for the snipe commands."
+                if new_state
+                else "Deleted and edited messages will no longer be cached."
+            )
+        )
 
     @commands.command(
         name="cleardms", help="Clear all direct messages from the bot."

@@ -73,11 +73,12 @@ class ServerSettings(Base):
     prefix = Column(String, default="!")
     antimp3_enabled = Column(Boolean, default=False)
     watchdog_enabled = Column(Boolean, default=False)
-    watchdog_pii_filter = Column(Boolean, default=True)
-    watchdog_card_filter = Column(Boolean, default=True)
-    watchdog_member_tracking = Column(Boolean, default=True)
-    watchdog_message_tracking = Column(Boolean, default=True)
-    watchdog_voice_tracking = Column(Boolean, default=True)
+    watchdog_pii_filter = Column(Boolean, default=False)
+    watchdog_card_filter = Column(Boolean, default=False)
+    watchdog_member_tracking = Column(Boolean, default=False)
+    watchdog_message_tracking = Column(Boolean, default=False)
+    watchdog_voice_tracking = Column(Boolean, default=False)
+    snipe_enabled = Column(Boolean, default=False)
     auto_role_ids = Column(ARRAY(BigInteger), nullable=True)
     nuke_msg = Column(String, nullable=True)
     jail_role_id = Column(BigInteger, nullable=True)
@@ -166,6 +167,9 @@ class CommandStatus(Base):
     command_name = Column(String, nullable=False)
     enabled = Column(Boolean, default=True)
     channel_id = Column(BigInteger, nullable=True)
+    # guild_id scopes a serverwide disable (channel_id NULL, guild_id set).
+    # NULL => bot-wide (channel_id NULL) or channel-scoped (channel_id set).
+    guild_id = Column(BigInteger, nullable=True)
 
 
 class CommandCooldown(Base):

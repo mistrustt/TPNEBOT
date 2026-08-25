@@ -2,7 +2,7 @@
 
 **Effective date:** 2026-07-09
 
-**Last updated:** 2026-07-09
+**Last updated:** 2026-08-25
 
 These Terms of Service ("Terms", "ToS") govern your use of TPNEBOT ("the bot", "we", "us", "our"), a Discord bot operated as a hobby/community project. By adding TPNEBOT to a Discord server, using any of its commands or features, or otherwise interacting with the bot, you agree to be bound by these Terms and by the [Privacy Policy](https://share.mistrust.dev/view/privacy.md).
 
@@ -72,6 +72,8 @@ To keep communities safe, we maintain moderation and anti-abuse records. These m
 - Blacklist entries for users or servers that violate these Terms or Discord's terms.
 - Suspicious-activity logs, anti-cheat flags, and evidence of exploitation or alt usage.
 - Owner/administrator command audit logs (see [Privacy Policy, section 1.2](https://share.mistrust.dev/view/privacy.md#12-bot-owneradministrator-command-audit-log)).
+
+**Detected sensitive data is redacted before it is recorded.** When the bot's automated filters detect PII, credit card numbers, or Discord tokens, only an obscured indicator is kept (e.g. the last four digits of a card) — full values are never logged or stored.
 
 **Moderation, ban, blacklist, and anti-abuse data is retained even if you exercise your right to be forgotten.** This data is kept only as long as necessary for community safety, dispute resolution, and operator accountability.
 

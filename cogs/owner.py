@@ -3621,113 +3621,6 @@ class Owner(commands.Cog, name="Owner"):
         view = PaginationView(pages, server_details, self.bot)
         await ctx.send(embed=pages[0], view=view)
 
-    @commands.command(name="sudo", help="Run a command as another user", hidden=True)
-    @commands.is_owner()
-    async def sudo(
-        self,
-        ctx: Context,
-        who: Union[discord.Member, discord.User],
-        channel: Optional[discord.TextChannel] = None,
-        *,
-        command: str,
-    ):
-        """Run a command as another user optionally in another channel.
-
-        Use this command with caution. It allows the bot owner to impersonate another user
-        and execute any command. A channel can be specified; otherwise, the current channel is used.
-        """
-
-        # Validate that a command was provided
-        if not command.strip():
-            return await ctx.send("Please provide a command to execute.")
-
-        new_channel = channel or ctx.channel
-
-        # Create a copy of the original message and modify its content, author, and channel.
-        msg = copy.copy(ctx.message)
-        msg.channel = new_channel
-        msg.author = who
-        msg.content = ctx.prefix + command
-
-        # Retrieve a new context for the impersonated command.
-        new_ctx = await self.bot.get_context(msg, cls=type(ctx))
-
-        # Log the sudo usage for tracking
-        logger.info(
-            f"Sudo command invoked by {ctx.author} impersonating {who} in {new_channel}. Command: {command}"
-        )
-
-        # Check if the command exists in the new context.
-        if new_ctx.command is None:
-            return await ctx.send(f"The command `{command.split()[0]}` was not found.")
-
-        try:
-            # Invoke the command as the impersonated user.
-            await self.bot.invoke(new_ctx)
-            await Embeds.success(
-                ctx,
-                f"Command executed as {who.mention} in {new_channel.mention}:\n```{command}```",
-                title="Command Executed",
-                reply=True,
-                delete_after=None,
-            )
-        except Exception as e:
-            logger.exception("Error during sudo invocation:", exc_info=e)
-            await ctx.send(
-                f"An error occurred while executing the command as {who.mention}: {e}"
-            )
-
-    @commands.command(
-        name="do", help="Repeats a command a specified number of times.", hidden=True
-    )
-    @commands.is_owner()
-    async def do(self, ctx: Context, times: int, *, command: str):
-        """Repeats a command a specified number of times.
-
-        This command is owner-only. It validates the repetition count,
-        prevents recursive invocation of the 'do' command, and provides
-        progress feedback.
-        """
-        # Validate the number of repetitions
-        if times < 1:
-            return await ctx.send(
-                "Please provide a positive integer for the number of times."
-            )
-        MAX_REPETITIONS = 5  # Set a safe upper limit to prevent abuse
-        if times > MAX_REPETITIONS:
-            return await ctx.send(
-                f"Too many repetitions requested (max allowed is {MAX_REPETITIONS})."
-            )
-
-        # Prevent recursive invocation of this command
-        if command.strip().lower().startswith(ctx.prefix + "do"):
-            return await ctx.send("Recursive command invocation is not allowed.")
-
-        # Create a copy of the original message and update its content with the desired command
-        msg = copy.copy(ctx.message)
-        msg.content = ctx.prefix + command
-
-        # Retrieve a new context for the command to be reinvoked
-        new_ctx = await self.bot.get_context(msg, cls=type(ctx))
-
-        # Provide initial feedback to the user
-        feedback_message = await ctx.send(f"Executing `{command}` **{times}** times...")
-
-        # Loop through and reinvoke the command, handling any errors per iteration
-        for i in range(times):
-            try:
-                await new_ctx.reinvoke()
-            except Exception as e:
-                logger.exception(f"Error on iteration {i+1} of do command: {e}")
-                await ctx.send(f"An error occurred on iteration {i+1}: {e}")
-            else:
-                # Optionally update feedback after each iteration (if desired)
-                await feedback_message.edit(
-                    content=f"Executed iteration **{i+1}/{times}**"
-                )
-
-        await ctx.send("Finished executing the command.")
-
     @commands.command(
         name="rscd",
         help="Resets all cooldowns for a specified user or all users if 'all' is specified",
@@ -3804,11 +3697,23 @@ class Owner(commands.Cog, name="Owner"):
             raise commands.CommandNotFound("This is a test command not found error.")
         elif type == "runtime":
             raise RuntimeError("This is a test runtime error.")
+        elif type == "missingaccess":
+            raise discord.Forbidden(
+                "This is a test missing access error (discord.Forbidden)."
+            )
+        elif type == "http":
+            raise discord.HTTPException(
+                response=None, message="This is a test HTTP error (discord.HTTPException)."
+            )
+        elif type == "timeout":
+            raise asyncio.TimeoutError("This is a test timeout error (asyncio.TimeoutError).")
+        elif type == "index":
+            raise IndexError("This is a test index error.")
         elif type == "custom":
 
             class CustomError(Exception):
                 pass
-
+            
             raise CustomError("This is a custom test error.")
         elif type == "unknown":
             raise Exception("This is an unknown error type for testing purposes.")

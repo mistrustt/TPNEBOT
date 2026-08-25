@@ -80,6 +80,26 @@ class GuildMixin(BaseManager):
                     session.add(settings)
                 await session.commit()
 
+    async def get_snipe_enabled(self, guild_id: int) -> bool:
+        """Return whether snipe is enabled for a guild. Off by default."""
+        async with self.async_sessionmaker() as session:
+            settings = await session.get(ServerSettings, guild_id)
+            return bool(settings.snipe_enabled) if settings else False
+
+    async def set_snipe_enabled(self, guild_id: int, enabled: bool):
+        """Enable or disable snipe for a guild."""
+        async with self.async_sessionmaker() as session:
+            async with session.begin():
+                settings = await session.get(ServerSettings, guild_id)
+                if settings:
+                    settings.snipe_enabled = enabled
+                else:
+                    settings = ServerSettings(
+                        guild_id=guild_id, snipe_enabled=enabled
+                    )
+                    session.add(settings)
+                await session.commit()
+
     @db_safe(default=None)
     async def get_server_settings(self, guild_id: int) -> ServerSettings:
         async with self.async_sessionmaker() as session:
@@ -214,7 +234,7 @@ class GuildMixin(BaseManager):
             return await session.get(ServerSettings, guild_id)
 
     async def set_command_status(
-        self, command_name: str, enabled: bool, channel_id: int = None
+        self, command_name: str, enabled: bool, channel_id: int = None, guild_id: int = None
     ) -> None:
         async with self.get_session() as session:
             async with session.begin():
@@ -222,6 +242,7 @@ class GuildMixin(BaseManager):
                     select(CommandStatus).where(
                         CommandStatus.command_name == command_name,
                         CommandStatus.channel_id == channel_id,
+                        CommandStatus.guild_id == guild_id,
                     )
                 )
                 command_status = result.scalar_one_or_none()
@@ -232,14 +253,21 @@ class GuildMixin(BaseManager):
                         command_name=command_name,
                         enabled=enabled,
                         channel_id=channel_id,
+                        guild_id=guild_id,
                     )
                     session.add(new_status)
 
     @db_safe(default=True)
     async def get_command_status(
-        self, command_name: str, channel_id: int = None
+        self, command_name: str, channel_id: int = None, guild_id: int = None
     ) -> bool:
-        """Retrieve the status of a command for both prefix and slash commands."""
+        """Retrieve the status of a command for both prefix and slash commands.
+
+        Scopes:
+        - channel_id set, guild_id None  -> channel-scoped row
+        - channel_id None, guild_id None -> bot-wide row
+        - channel_id None, guild_id set  -> per-guild serverwide row
+        """
         async with self.async_sessionmaker() as session:
             query = select(CommandStatus).filter_by(
                 command_name=command_name,
@@ -249,6 +277,11 @@ class GuildMixin(BaseManager):
                 query = query.filter_by(channel_id=channel_id)
             else:
                 query = query.filter(CommandStatus.channel_id.is_(None))
+
+            if guild_id is None:
+                query = query.filter(CommandStatus.guild_id.is_(None))
+            else:
+                query = query.filter(CommandStatus.guild_id == guild_id)
 
             result = await session.execute(query)
             status = result.scalars().first()

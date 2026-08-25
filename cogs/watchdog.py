@@ -8,7 +8,6 @@ from discord.ext.commands import Context
 from collections import defaultdict
 from typing import Optional
 import humanfriendly
-import base64
 from utils.cooldown import unified_cooldown
 from utils.embeds import Embeds
 from utils.guardrails import check_slash_guardrails
@@ -147,6 +146,37 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         return t % 10 == 0  # https://github.com/mmcloughlin/luhn/blob/master/luhn.py
 
+    @staticmethod
+    def _mask_snippet(pattern_name: str, snippet: str) -> str:
+        """Return a redacted version of a sensitive match for logging.
+
+        Detected PII/card/token data is never logged or stored in full —
+        only an obscured indicator is kept so moderators know what fired.
+        """
+        if pattern_name == "Discord Token":
+            return "`[REDACTED Discord token]`"
+        if pattern_name.endswith("Card"):
+            digits = re.sub(r"\D", "", snippet)
+            return (
+                f"`•••• •••• •••• {digits[-4:]}` (last 4 only)"
+                if len(digits) >= 4
+                else "`[REDACTED card number]`"
+            )
+        if pattern_name == "Email Address":
+            local, _, domain = snippet.partition("@")
+            masked_local = f"{local[0]}•••" if local else "•••"
+            tld = domain.rpartition(".")[2]
+            return f"`{masked_local}@•••.{tld}`" if tld else "`[REDACTED email]`"
+        if pattern_name == "Phone Number":
+            digits = re.sub(r"\D", "", snippet)
+            return (
+                f"`••• ••• {digits[-4:]}` (last 4 only)"
+                if len(digits) >= 4
+                else "`[REDACTED phone number]`"
+            )
+        # Street Address and any future patterns: redact everything.
+        return "`[REDACTED]`"
+
     def _get_log_style(self, event_type: str) -> dict:
         """Return visual styling metadata for a log event type."""
         styles = {
@@ -249,11 +279,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
                 return {
                     "enabled": False,
                     "channel_id": None,
-                    "pii_filter": True,
-                    "card_filter": True,
-                    "member_tracking": True,
-                    "message_tracking": True,
-                    "voice_tracking": True,
+                    "pii_filter": False,
+                    "card_filter": False,
+                    "member_tracking": False,
+                    "message_tracking": False,
+                    "voice_tracking": False,
                     "last_updated": now,
                 }
             raise
@@ -273,11 +303,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
             self.guild_settings_cache[guild_id] = {
                 "enabled": False,
                 "channel_id": None,
-                "pii_filter": True,
-                "card_filter": True,
-                "member_tracking": True,
-                "message_tracking": True,
-                "voice_tracking": True,
+                "pii_filter": False,
+                "card_filter": False,
+                "member_tracking": False,
+                "message_tracking": False,
+                "voice_tracking": False,
                 "last_updated": now,
             }
 
@@ -629,7 +659,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         settings = await self.get_guild_settings(guild.id)
-        if settings and settings.get("member_tracking", True):
+        if settings and settings.get("member_tracking", False):
             await self.add_log_entry(
                 guild.id,
                 f"{user} was banned from the server.",
@@ -640,7 +670,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
         settings = await self.get_guild_settings(guild.id)
-        if settings and settings.get("member_tracking", True):
+        if settings and settings.get("member_tracking", False):
             await self.add_log_entry(
                 guild.id,
                 f"{user} was unbanned from the server.",
@@ -664,7 +694,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             for guild in self.bot.guilds:
                 if member := guild.get_member(after.id):
                     settings = await self.get_guild_settings(guild.id)
-                    if settings and settings.get("member_tracking", True):
+                    if settings and settings.get("member_tracking", False):
                         await self.add_log_entry(
                             guild.id,
                             f"User {after.name} (ID: {after.id}) changed username from '{before.name}' to '{after.name}'.",
@@ -679,7 +709,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
         guild_id = after.guild.id
         settings = await self.get_guild_settings(guild_id)
-        if not settings or not settings.get("member_tracking", True):
+        if not settings or not settings.get("member_tracking", False):
             return
 
         changes = []
@@ -734,7 +764,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         settings = await self.get_guild_settings(member.guild.id)
-        if not settings or not settings.get("voice_tracking", True):
+        if not settings or not settings.get("voice_tracking", False):
             return
 
         session_key = (member.guild.id, member.id)
@@ -813,7 +843,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
         content = message.content
 
         # Check PII filter
-        if settings.get("pii_filter", True):
+        if settings.get("pii_filter", False):
             for pattern_name, pattern in self.pii_patterns.items():
                 m = pattern.search(content)
                 if m:
@@ -826,19 +856,14 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     desc = (
                         f"{pattern_name} detected in {message.channel.mention} sent by "
                         f"{message.author} (`{message.author.id}`).\n"
-                        f"**Matched snippet**:\n```\n{snippet}\n```"
+                        f"**Matched snippet** (redacted):\n{self._mask_snippet(pattern_name, snippet)}"
                     )
 
                     if pattern_name == "Discord Token":
-                        try:
-                            token_parts = snippet.split(".")
-                            if len(token_parts) >= 1:
-                                user_id = base64.b64decode(token_parts[0] + "==").decode(
-                                    "utf-8"
-                                )
-                                desc += f"\n**Token User ID**: {user_id}"
-                        except:
-                            pass
+                        desc += (
+                            "\n*The user account attached to this token may be compromised — "
+                            "advise them to reset their password and regenerate the token.*"
+                        )
 
                     try:
                         await message.delete()
@@ -854,7 +879,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
                     return
 
         # Check card filter
-        if settings.get("card_filter", True):
+        if settings.get("card_filter", False):
             NON_LUHN = {"Diners Club enRoute Card"}
 
             for pattern_name, pattern in self.card_patterns.items():
@@ -887,7 +912,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         settings = await self.get_guild_settings(message.guild.id)
-        if not settings or not settings.get("message_tracking", True):
+        if not settings or not settings.get("message_tracking", False):
             return
 
         description = f"Message by {message.author.display_name} (`{message.author.id}`) in {message.channel.mention} was deleted."
@@ -918,7 +943,7 @@ class Watchdog(commands.Cog, name="Watchdog"):
             return
 
         settings = await self.get_guild_settings(member.guild.id)
-        if not settings or not settings.get("member_tracking", True):
+        if not settings or not settings.get("member_tracking", False):
             return
 
         join_time = discord.utils.utcnow()

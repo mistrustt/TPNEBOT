@@ -97,10 +97,6 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        if member.id == 1396419405239549962 or member.id == 580460060233170944 or member.id == 228909446607273984 and member.guild.id == 1270962480742666311:
-            await member.ban(reason="PERM BANNED.")
-            return
-
         jailed = await self.bot.database.get_jailed_user(member.guild.id, member.id)
         if jailed:
             role = member.guild.get_role(jailed.jail_role_id)
@@ -3156,6 +3152,68 @@ class Moderation(commands.Cog, name="Moderation"):
             )
             await ctx.send(
                 f"The `{command_name}` command has been disabled in {channel_name}."
+            )
+
+    @commands.command(
+        name="se", aliases=["serverenable"], description="Enable a command serverwide.", hidden=True
+    )
+    @commands.guild_only()
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    async def enable_server_command(
+        self, ctx: Context, command_name: str
+    ):
+        """Enable a command serverwide (per-guild)."""
+        command_exists = await self._check_command_exists(command_name)
+
+        if not command_exists:
+            await ctx.send(f"The command `{command_name}` does not exist.")
+            return
+
+        current_status = await self.bot.database.get_command_status(
+            command_name, channel_id=None, guild_id=ctx.guild.id
+        )
+
+        if current_status:
+            await ctx.send(
+                f"The `{command_name}` command is already enabled in this server."
+            )
+        else:
+            await self.bot.database.set_command_status(
+                command_name, enabled=True, channel_id=None, guild_id=ctx.guild.id
+            )
+            await ctx.send(
+                f"The `{command_name}` command has been enabled in this server."
+            )
+
+    @commands.command(
+        name="sd", aliases=["serverdisable"], description="Disable a command serverwide.", hidden=True
+    )
+    @commands.guild_only()
+    @commands.check_any(commands.is_owner(), commands.has_permissions(manage_guild=True))
+    async def disable_server_command(
+        self, ctx: Context, command_name: str
+    ):
+        """Disable a command serverwide (per-guild)."""
+        command_exists = await self._check_command_exists(command_name)
+
+        if not command_exists:
+            await ctx.send(f"The command `{command_name}` does not exist.")
+            return
+
+        current_status = await self.bot.database.get_command_status(
+            command_name, channel_id=None, guild_id=ctx.guild.id
+        )
+
+        if not current_status:
+            await ctx.send(
+                f"The `{command_name}` command is already disabled in this server."
+            )
+        else:
+            await self.bot.database.set_command_status(
+                command_name, enabled=False, channel_id=None, guild_id=ctx.guild.id
+            )
+            await ctx.send(
+                f"The `{command_name}` command has been disabled in this server."
             )
 
     @commands.hybrid_command(name="case", description="View details of a specific case.")

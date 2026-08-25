@@ -654,6 +654,16 @@ class DiscordBot(commands.Bot):
                         f"The `/{command_name}` command is disabled in this channel by staff.",
                     )
                     return _block("channel disabled")
+                if interaction.guild:
+                    enabled_server = await self.database.get_command_status(
+                        command_name, channel_id=None, guild_id=interaction.guild.id
+                    )
+                    if enabled_server is False:
+                        await self._safe_guardrail_response(
+                            interaction,
+                            f"The `/{command_name}` command is disabled in this server by staff.",
+                        )
+                        return _block("server disabled")
                 enabled_global = await self.database.get_command_status(command_name)
                 if enabled_global is False:
                     await self._safe_guardrail_response(
@@ -762,6 +772,29 @@ class DiscordBot(commands.Bot):
                         reply=False,
                     )
                     return
+
+            if ctx.guild:
+                command_enabled_server = await self.database.get_command_status(
+                    command_name, channel_id=None, guild_id=ctx.guild.id
+                )
+                if command_enabled_server is False:
+                    if ctx.author.id in self.owner_ids:
+                        await Embeds.warning(
+                            ctx,
+                            f"The `{command_name}` command is disabled in this server by staff, but you are an owner and can still use it.",
+                            title="Notice",
+                            delete_after=5,
+                            reply=False,
+                        )
+                    else:
+                        await Embeds.warning(
+                            ctx,
+                            f"The `{command_name}` command is disabled in this server by staff.",
+                            title="Error!",
+                            delete_after=5,
+                            reply=False,
+                        )
+                        return
 
             command_enabled_global = await self.database.get_command_status(
                 command_name
