@@ -95,8 +95,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
             # --- Mir ---
             "Mir Card": re.compile(r"\b220[0-4][0-9]{12,15}\b"),
             # --- Mastercard ---
+            # BIN 51-55 or 2221-2720, always 16 digits. The 2-series branch
+            # must be 16 digits — earlier `2(...)` alternatives were off by one
+            # (15 digits) and missed real 2-series cards like 2223 0031 2200 3222.
             "Mastercard Card": re.compile(
-                r"\b(5[1-5][0-9]{14}|2(2[2-9][0-9]{12}|[3-6][0-9]{13}|7[01][0-9]{12}|720[0-9]{12}))\b"
+                r"\b(?:5[1-5][0-9]{2}|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720)[0-9]{12}\b"
             ),
             # --- Troy ---
             "Troy Card": re.compile(r"\b(65|9792)[0-9]{12,15}\b"),
@@ -922,10 +925,14 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if settings.get("card_filter", False):
             NON_LUHN = {"Diners Club enRoute Card"}
 
-            # normalize separators (spaces, dashes, dots) so grouped card
-            # numbers like "4111 1111 1111 1111" are caught the same as
-            # contiguous ones like "4242424242424242"
-            normalized = re.sub(r"[\s\-\.]", "", content)
+            # normalize separators (spaces, dashes, dots) that sit *between
+            # digits* so grouped card numbers like "4111 1111 1111 1111" are
+            # caught the same as contiguous ones like "4242424242424242".
+            # Only separators flanked by digits are removed — stripping all
+            # whitespace would merge surrounding words onto the card and
+            # break the patterns' leading "\b" (e.g. "visa 4111..." glued
+            # into "visa4111..." would no longer match).
+            normalized = re.sub(r"(?<=\d)[\s\-\.]+(?=\d)", "", content)
 
             for pattern_name, pattern in self.card_patterns.items():
                 for m in pattern.finditer(normalized):
