@@ -182,23 +182,33 @@ class Watchdog(commands.Cog, name="Watchdog"):
         """
         redacted = content
 
-        # Cards first: the card patterns match on separator-stripped text,
-        # so scan runs of digits (optionally broken by spaces/dashes/dots),
-        # keep only those that match a known card BIN and pass Luhn, then
-        # mask them. Doing cards before PII stops the phone pattern from
-        # partially redacting a card number first.
-        def _card_repl(m):
-            digits = re.sub(r"\D", "", m.group(0))
-            if not (13 <= len(digits) <= 19):
-                return m.group(0)
-            for pattern_name, pattern in self.card_patterns.items():
-                if pattern.search(digits):
-                    if pattern_name == "Diners Club enRoute Card" or self.luhn(digits):
-                        return self._mask_snippet(pattern_name, digits)
-                    break
-            return m.group(0)
-
-        redacted = re.sub(r"\b\d(?:[\s\-\.]?\d){12,18}\b", _card_repl, redacted)
+        # Cards first: mirror the on_message card filter EXACTLY so anything
+        # the filter deletes is masked here too. We strip separators that sit
+        # between digits, run the same BIN patterns + Luhn to find card
+        # numbers, then redact each matched digit sequence in the original
+        # text (re-inserting whatever separators it was written with). This
+        # keeps redaction consistent with detection — including grouped cards
+        # with multiple/irregular separators. Cards run before PII so the
+        # phone pattern can't partially redact a card number first.
+        NON_LUHN = {"Diners Club enRoute Card"}
+        normalized = re.sub(r"(?<=\d)[\s\-\.]+(?=\d)", "", redacted)
+        seen = set()
+        for pattern_name, pattern in self.card_patterns.items():
+            for m in pattern.finditer(normalized):
+                digits = re.sub(r"\D", "", m.group(0))
+                if pattern_name not in NON_LUHN and not self.luhn(digits):
+                    continue
+                key = (pattern_name, digits)
+                if key in seen:
+                    continue
+                seen.add(key)
+                # match this exact digit sequence in the original, allowing
+                # any run of separators between digits, anchored on word
+                # boundaries the same way the filter's patterns are.
+                seq = re.compile(
+                    r"\b" + r"[\s\-\.]*".join(re.escape(d) for d in digits) + r"\b"
+                )
+                redacted = seq.sub(self._mask_snippet(pattern_name, digits), redacted)
 
         # Emails (unanchored, so they redact inside sentences too — the
         # pii_filter's email pattern is anchored and only matches whole
