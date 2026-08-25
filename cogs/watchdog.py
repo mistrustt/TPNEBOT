@@ -156,26 +156,66 @@ class Watchdog(commands.Cog, name="Watchdog"):
         if pattern_name == "Discord Token":
             return "`[REDACTED Discord token]`"
         if pattern_name.endswith("Card"):
-            digits = re.sub(r"\D", "", snippet)
-            return (
-                f"`•••• •••• •••• {digits[-4:]}` (last 4 only)"
-                if len(digits) >= 4
-                else "`[REDACTED card number]`"
-            )
+            return "`[REDACTED card number]`"
         if pattern_name == "Email Address":
             local, _, domain = snippet.partition("@")
             masked_local = f"{local[0]}•••" if local else "•••"
             tld = domain.rpartition(".")[2]
             return f"`{masked_local}@•••.{tld}`" if tld else "`[REDACTED email]`"
         if pattern_name == "Phone Number":
-            digits = re.sub(r"\D", "", snippet)
-            return (
-                f"`••• ••• {digits[-4:]}` (last 4 only)"
-                if len(digits) >= 4
-                else "`[REDACTED phone number]`"
-            )
+            return "`[REDACTED phone number]`"
+    
         # Street Address and any future patterns: redact everything.
         return "`[REDACTED]`"
+
+    def _redact_content(self, content: str) -> str:
+        """Redact PII and card numbers from message content before it is
+        written to any log.
+
+        Anything the detection filters would catch is masked here too —
+        full PII/card/token values are never logged or stored, only an
+        obscured indicator is kept so moderators know what was in the
+        message.
+        """
+        redacted = content
+
+        # Cards first: the card patterns match on separator-stripped text,
+        # so scan runs of digits (optionally broken by spaces/dashes/dots),
+        # keep only those that match a known card BIN and pass Luhn, then
+        # mask them. Doing cards before PII stops the phone pattern from
+        # partially redacting a card number first.
+        def _card_repl(m):
+            digits = re.sub(r"\D", "", m.group(0))
+            if not (13 <= len(digits) <= 19):
+                return m.group(0)
+            for pattern_name, pattern in self.card_patterns.items():
+                if pattern.search(digits):
+                    if pattern_name == "Diners Club enRoute Card" or self.luhn(digits):
+                        return self._mask_snippet(pattern_name, digits)
+                    break
+            return m.group(0)
+
+        redacted = re.sub(r"\b\d(?:[\s\-\.]?\d){12,18}\b", _card_repl, redacted)
+
+        # Emails (unanchored, so they redact inside sentences too — the
+        # pii_filter's email pattern is anchored and only matches whole
+        # messages, which is fine for deletion but not for redaction here).
+        email = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+        redacted = email.sub(
+            lambda m: self._mask_snippet("Email Address", m.group(0)), redacted
+        )
+
+        # Remaining PII (Discord tokens, phone numbers, street addresses) —
+        # the same patterns the PII filter uses, so redaction stays
+        # consistent with detection.
+        for pattern_name in ("Discord Token", "Phone Number", "Street Address"):
+            pattern = self.pii_patterns[pattern_name]
+            redacted = pattern.sub(
+                lambda m, pn=pattern_name: self._mask_snippet(pn, m.group(0)),
+                redacted,
+            )
+
+        return redacted
 
     def _get_log_style(self, event_type: str) -> dict:
         """Return visual styling metadata for a log event type."""
@@ -923,10 +963,11 @@ class Watchdog(commands.Cog, name="Watchdog"):
         description = f"Message by {message.author.display_name} (`{message.author.id}`) in {message.channel.mention} was deleted."
 
         if message.content:
-            if len(message.content) > 1000:
-                description += f"\n**Content**: {message.content[:997]}..."
+            redacted = self._redact_content(message.content)
+            if len(redacted) > 1000:
+                description += f"\n**Content**: {redacted[:997]}..."
             else:
-                description += f"\n**Content**: {message.content}"
+                description += f"\n**Content**: {redacted}"
 
         if message.attachments:
             attachment_count = len(message.attachments)
