@@ -754,69 +754,42 @@ class DiscordBot(commands.Bot):
             command_enabled = await self.database.get_command_status(
                 command_name, channel_id
             )
-            if command_enabled is False:
-                if ctx.author.id in self.owner_ids:
-                    await Embeds.warning(
-                        ctx,
-                        f"The `{command_name}` command is disabled in this channel by staff, but you are an owner and can still use it.",
-                        title="Notice",
-                        delete_after=5,
-                        reply=False,
-                    )
-                else:
-                    await Embeds.warning(
-                        ctx,
-                        f"The `{command_name}` command is disabled in this channel by staff.",
-                        title="Error!",
-                        delete_after=5,
-                        reply=False,
-                    )
-                    return
+            if command_enabled is False and ctx.author.id not in self.owner_ids:
+                await Embeds.warning(
+                    ctx,
+                    f"The `{command_name}` command is disabled in this channel by staff.",
+                    title="Error!",
+                    delete_after=5,
+                    reply=False,
+                )
+                return
 
             if ctx.guild:
                 command_enabled_server = await self.database.get_command_status(
                     command_name, channel_id=None, guild_id=ctx.guild.id
                 )
-                if command_enabled_server is False:
-                    if ctx.author.id in self.owner_ids:
-                        await Embeds.warning(
-                            ctx,
-                            f"The `{command_name}` command is disabled in this server by staff, but you are an owner and can still use it.",
-                            title="Notice",
-                            delete_after=5,
-                            reply=False,
-                        )
-                    else:
-                        await Embeds.warning(
-                            ctx,
-                            f"The `{command_name}` command is disabled in this server by staff.",
-                            title="Error!",
-                            delete_after=5,
-                            reply=False,
-                        )
-                        return
-
-            command_enabled_global = await self.database.get_command_status(
-                command_name
-            )
-            if command_enabled_global is False:
-                if ctx.author.id in self.owner_ids:
+                if command_enabled_server is False and ctx.author.id not in self.owner_ids:
                     await Embeds.warning(
                         ctx,
-                        f"The `{command_name}` command is currently disabled for maintenance, but you are an owner and can still use it.",
-                        title="Notice",
-                        delete_after=5,
-                        reply=False,
-                    )
-                else:
-                    await Embeds.warning(
-                        ctx,
-                        f"The `{command_name}` command is currently disabled for maintenance.",
+                        f"The `{command_name}` command is disabled in this server by staff.",
                         title="Error!",
                         delete_after=5,
                         reply=False,
                     )
                     return
+
+            command_enabled_global = await self.database.get_command_status(
+                command_name
+            )
+            if command_enabled_global is False and ctx.author.id not in self.owner_ids:
+                await Embeds.warning(
+                    ctx,
+                    f"The `{command_name}` command is currently disabled for maintenance.",
+                    title="Error!",
+                    delete_after=5,
+                    reply=False,
+                )
+                return
 
             if ctx.guild:
                 command_names_to_check = [ctx.command.name.lower()]
