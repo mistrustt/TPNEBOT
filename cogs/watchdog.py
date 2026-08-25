@@ -901,8 +901,8 @@ class Watchdog(commands.Cog, name="Watchdog"):
 
                     if pattern_name == "Discord Token":
                         desc += (
-                            "\n*The user account attached to this token may be compromised — "
-                            "advise them to reset their password and regenerate the token.*"
+                            "\n*The user account attached to this token may be compromised - "
+                            "advise them where applicable to reset their password and regenerate the token.*"
                         )
 
                     try:

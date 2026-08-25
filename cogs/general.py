@@ -371,6 +371,25 @@ class General(commands.Cog, name="General"):
         self.snipe_enabled_cache[guild_id] = (enabled, now)
         return enabled
 
+    def _redact_for_snipe(self, content: str) -> str:
+        """Redact PII/card/token data from snipe content before it is cached.
+
+        Reuses the Watchdog cog's redactor so the snipe commands surface the
+        same masked output as the mod-logs — sensitive data is never shown via
+        snipe even when the original message was cached. If the Watchdog cog
+        isn't loaded, the content is returned unchanged.
+        """
+        if not content:
+            return content
+        watchdog = self.bot.get_cog("Watchdog")
+        if watchdog is None:
+            return content
+        try:
+            return watchdog._redact_content(content)
+        except Exception:
+            logger.error("snipe redaction failed", exc_info=True)
+            return content
+
     @commands.Cog.listener()
     async def on_message_delete(self, message):
         """Store deleted messages for snipe command"""
@@ -385,7 +404,7 @@ class General(commands.Cog, name="General"):
             return
         channel_snipes = self.snipes.setdefault(guild_id, {}).setdefault(channel_id, [])
         snipe_data = (
-            message.content,
+            self._redact_for_snipe(message.content),
             message.author,
             discord.utils.utcnow(),
             message.attachments,
@@ -412,8 +431,8 @@ class General(commands.Cog, name="General"):
             channel_id, []
         )
         snipe_data = (
-            before.content,
-            after.content,
+            self._redact_for_snipe(before.content),
+            self._redact_for_snipe(after.content),
             before.author,
             discord.utils.utcnow(),
         )
@@ -438,7 +457,7 @@ class General(commands.Cog, name="General"):
             channel_id, []
         )
         snipe_data = (
-            message.content,
+            self._redact_for_snipe(message.content),
             message.author,
             discord.utils.utcnow(),
             message.attachments,
