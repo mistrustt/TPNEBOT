@@ -3043,18 +3043,18 @@ class Owner(commands.Cog, name="Owner"):
             await self.bot.change_presence(
                 status=discord.Status.dnd, activity=discord.Game(name="in debug mode")
             )
-            try:
-                await self.bot.load_extension("jishaku")
-            except Exception as e:
-                return await ctx.send(f"Failed to load jishaku: {type(e).__name__}: {e}")
+            #try:
+                #await self.bot.load_extension("jishaku")
+            #except Exception as e:
+            #    return await ctx.send(f"Failed to load jishaku: {type(e).__name__}: {e}")
         else:
             if hasattr(self.bot, "status_task") and self.bot.status_task:
                 self.bot.status_task.start()
             await self.bot.change_presence(status=discord.Status.online)
-            try:
-                await self.bot.unload_extension("jishaku")
-            except Exception as e:
-                return await ctx.send(f"Failed to unload jishaku: {type(e).__name__}: {e}")
+            #try:
+                #await self.bot.unload_extension("jishaku")
+            #except Exception as e:
+            #    return await ctx.send(f"Failed to unload jishaku: {type(e).__name__}: {e}")
         await ctx.reply(f"Debug Mode: {str(self.bot.debug_mode_active)}")
 
     @commands.command(
