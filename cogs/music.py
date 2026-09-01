@@ -2871,7 +2871,7 @@ class Music(commands.Cog, name="Music"):
     @commands.hybrid_command(name="lyrics", aliases=["ly"], description="Get the lyrics of a Juice WRLD song")
     @commands.guild_only()
     @unified_cooldown(10)
-    async def lyrics(self, ctx: commands.Context, query: Optional[str] = None):
+    async def lyrics(self, ctx: commands.Context, *, query: Optional[str] = None):
         if not query:
             await Embeds.custom(
                 ctx,
@@ -2950,16 +2950,11 @@ class Music(commands.Cog, name="Music"):
                                     ephemeral=True,
                                 )
 
-                            ephemeral = self.author != itn.user
-                            if ephemeral:
-                                await itn.response.send_message(
-                                    embed=embeds[0], ephemeral=True
-                                )
-                            else:
-                                await itn.response.edit_message(embed=embeds[0], view=None)
-
+                            await itn.response.send_message(
+                                embed=embeds[0], ephemeral=True
+                            )
                             for embed in embeds[1:]:
-                                await itn.followup.send(embed=embed, ephemeral=ephemeral)
+                                await itn.followup.send(embed=embed, ephemeral=True)
                         except Exception as e:
                             if not itn.response.is_done():
                                 await itn.response.send_message(
@@ -3132,7 +3127,7 @@ class Music(commands.Cog, name="Music"):
         
     @commands.hybrid_command("snippet", aliases=["snip"], description="Search for a Juice WRLD song snippet.")
     @unified_cooldown(15)
-    async def snippet(self, ctx: commands.Context, query: Optional[str] = None):
+    async def snippet(self, ctx: commands.Context, *, query: Optional[str] = None):
         if not query:
             await Embeds.custom(
                 ctx,
@@ -3914,7 +3909,7 @@ class Music(commands.Cog, name="Music"):
         self.handle_user_done_heardle(ctx.author.id)
 
     @commands.command(name="makesnippet", aliases=["makesnip"], description="Create a snippet from a Juice WRLD song.")
-    async def makesnippet(self, ctx: commands.Context, query: Optional[str] = None):
+    async def makesnippet(self, ctx: commands.Context, *, query: Optional[str] = None):
         if not query:
             await Embeds.custom(
                 ctx,
