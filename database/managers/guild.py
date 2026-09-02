@@ -840,11 +840,19 @@ class GuildMixin(BaseManager):
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 settings = await session.get(ServerSettings, guild_id)
+                current = list(settings.auto_role_ids or []) if settings else []
+                if role_id not in current:
+                    current.append(role_id)
+                # Reassign the whole list rather than .append()'ing in place:
+                # ARRAY columns don't track in-place mutations, so SQLAlchemy
+                # would never mark the attribute dirty and the change wouldn't
+                # persist.
                 if settings:
-                    if settings.auto_role_ids is None:
-                        settings.auto_role_ids = []
-                    if role_id not in settings.auto_role_ids:
-                        settings.auto_role_ids.append(role_id)
+                    settings.auto_role_ids = current
+                else:
+                    session.add(
+                        ServerSettings(guild_id=guild_id, auto_role_ids=current)
+                    )
 
     async def remove_auto_role(self, guild_id: int, role_id: int):
         async with self.async_sessionmaker() as session:
