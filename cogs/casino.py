@@ -8492,9 +8492,6 @@ class Casino(commands.Cog):
         name="keno", description="Play Keno — pick numbers and match the draw."
     )
     async def keno(self, ctx: commands.Context, player_bet: str):
-        if ctx.guild.id != 1336128367166095380:
-            return
-        
         try:
             user_id = ctx.author.id
 
@@ -8531,137 +8528,135 @@ class Casino(commands.Cog):
             )
 
             formatted_bet = await self.formatter(amount)
+
+            # Both views are wired to each other before either message is sent,
+            # so a fast click can never land on a half-built game.
+            table_ui_view = TableUI(self, player=ctx.author, session_id=session_id)
             game_ui_view = GameUI(
-                self, amount, formatted_bet, wallet_id, PF, session_id=session_id,
+                self,
+                amount,
+                formatted_bet,
+                wallet_id,
+                PF,
+                table_ui_view,
+                session_id=session_id,
             )
-            table_ui_view = TableUI(self, session_id=session_id)
+            table_ui_view.game_ui_view = game_ui_view
 
-            grid_msg = await ctx.reply(view=table_ui_view)
-            await ctx.send(view=game_ui_view)
+            table_ui_view.message = await ctx.reply(view=table_ui_view)
+            game_ui_view.message = await ctx.send(view=game_ui_view)
 
-            game_ui_view.container.table_ui_view = table_ui_view
-            table_ui_view.message = grid_msg
-            table_ui_view.player = ctx.author
-
-            async def force_end(refund: bool = False):
-                await self._end_game_session(
-                    session_id,
-                    outcome="forced_end",
-                    final_state={"refund": refund},
-                )
-
-            self._register_session_handler(session_id, force_end)
+            self._register_session_handler(session_id, table_ui_view.force_end)
 
         except ValueError as e:
             await Embeds.error(ctx, description=str(e), delete_after=5)
 
 
-async def setup(bot: commands.Bot):
-    await bot.add_cog(Casino(bot))
-    logger.debug("Casino cog initialized successfully")
-
-
 keno_payouts = KENO_PAYOUTS
 
 
-class GameUI(discord.ui.LayoutView):
-    def __init__(
-        self,
-        cog,
-        player_bet: int,
-        formatted_bet,
-        player_wallet,
-        PF: dict,
-        session_id=None,
-    ):
-        super().__init__(timeout=None)
-        self.container = GameUIContainer(
-            cog, player_bet, formatted_bet, player_wallet, PF, session_id=session_id,
-        )
-        self.add_item(self.container)
-
-
-class GameUIContainer(discord.ui.Container):
-    def __init__(
-        self,
-        cog: Casino,
-        player_bet: int,
-        formatted_bet,
-        player_wallet,
-        PF: dict,
-        session_id=None,
-    ):
-        super().__init__(accent_color=0x2B2D31)
-        self.table_ui_view: TableUI = None
-
-        self.player_bet = player_bet
-        self.player_wallet = player_wallet
-        self.player_formatted_bet = formatted_bet
-        self.session_id = session_id
-        self.game_title = discord.ui.TextDisplay(
-            f"### Keno | Select your stake | {cog.currency_name} {self.player_formatted_bet}"
-        )
-
-        action_row = discord.ui.ActionRow()
-        action_row.add_item(StakeSelect())
-
-        action_row2 = discord.ui.ActionRow()
-        action_row2.add_item(BetButton(cog, PF))
-        action_row2.add_item(RandomPickButton(cog))
-        action_row2.add_item(ClearTableButton())
-
-        self.add_item(self.game_title)  # Header
-
-        self.add_item(discord.ui.Separator())  # Separator
-
-        self.add_item(action_row)  # Stake Select
-        self.add_item(action_row2)  # User Controls
-
-
 class TableUI(discord.ui.LayoutView):
-    def __init__(self, cog: Casino, session_id=None):
+    """The 30-tile keno board. Owns the game state shared by both messages."""
+
+    def __init__(self, cog: Casino, *, player=None, session_id=None):
         super().__init__(timeout=None)
+        self.cog = cog
         self.message: discord.Message = None
+        self.game_ui_view: "GameUI" = None
 
-        # game details
+        self.player = player
+        self.session_id = session_id
+        self.max_picks = 8
 
-        self.player = None
-        self.max_picks = 8  # maximum amount of tiles a user can select
+        # Serialises resolution against a second Bet press. Two concurrent
+        # resolutions would debit and pay out the same wallet at once, which
+        # deadlocks in Postgres and can pay twice.
+        self.lock = asyncio.Lock()
+        self.phase = "betting"
 
-        self.selected_emoji = cog.currency_name  # emoji we use to identify user picks
-
-        self.selected_color = discord.ButtonStyle.blurple  # user tile colors
-        self.default_color = discord.ButtonStyle.gray  # default tile color
-        self.win_color = discord.ButtonStyle.green  # winning tile color
+        self.selected_emoji = cog.currency_name
+        self.selected_color = discord.ButtonStyle.blurple
+        self.default_color = discord.ButtonStyle.gray
+        self.win_color = discord.ButtonStyle.green
 
         self.container = TableUIContainer(self.default_color)
         self.add_item(self.container)
-        self.session_id = session_id
 
-    def get_all_buttons(self):
+    async def interaction_check(self, itn: discord.Interaction) -> bool:
+        if itn.user != self.player:
+            await Embeds.warning(
+                itn,
+                f"{itn.user.mention}: this is not your game.",
+                color=discord.Color.yellow(),
+                ephemeral=True,
+                reply=False,
+            )
+            return False
+        if self.phase != "betting":
+            if not itn.response.is_done():
+                await itn.response.defer()
+            return False
+        return True
+
+    def get_all_buttons(self) -> list["NumberButton"]:
         buttons = []
         for row in self.container.children:
             if isinstance(row, discord.ui.ActionRow):
-                for button in row.children:
-                    buttons.append(button)
+                buttons.extend(row.children)
         return buttons
 
-    async def reset_buttons(self):
-        for button in self.get_all_buttons():
-            button.emoji = None
-            button.style = self.default_color
+    def picked_indexes(self) -> list[int]:
+        return [i for i, button in enumerate(self.get_all_buttons()) if button.emoji]
 
-        await self.message.edit(view=self)
+    def set_picks(self, picks) -> None:
+        picks = set(picks)
+        for index, button in enumerate(self.get_all_buttons()):
+            if index in picks:
+                button.emoji = self.selected_emoji
+                button.style = self.selected_color
+            else:
+                button.emoji = None
+                button.style = self.default_color
 
-    async def get_multiplier(self, stakes: str):
-        player_picks = [button for button in self.get_all_buttons() if button.emoji]
-        player_hits = [
-            button for button in player_picks if button.style == self.win_color
-        ]
+    def paint_result(self, picks, drawn) -> None:
+        picks, drawn = set(picks), set(drawn)
+        for index, button in enumerate(self.get_all_buttons()):
+            button.emoji = self.selected_emoji if index in picks else None
+            if index in drawn:
+                button.style = self.win_color
+            elif index in picks:
+                button.style = self.selected_color
+            else:
+                button.style = self.default_color
 
-        bet_multiplier = keno_payouts[stakes][len(player_picks)][len(player_hits)]
+    def multiplier_for(self, stake: str, picks: int, hits: int) -> Decimal:
+        return Decimal(str(keno_payouts[stake][picks][hits]))
 
-        return bet_multiplier
+    async def push(self) -> None:
+        if not self.message:
+            return
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+
+    async def force_end(self, refund: bool = False) -> None:
+        # Waits out an in-flight resolution rather than racing it; by the time
+        # the lock is free that resolution has already settled the session.
+        async with self.lock:
+            if self.phase == "finished":
+                return
+            self.phase = "finished"
+            self.container.win_loss_text.content = "### Game Ended"
+            if self.game_ui_view:
+                self.game_ui_view.container.disable()
+                await self.game_ui_view.push()
+            await self.push()
+            await self.cog._end_game_session(
+                self.session_id,
+                outcome="forced_end",
+                final_state={"refund": refund},
+            )
 
 
 class TableUIContainer(discord.ui.Container):
@@ -8669,12 +8664,11 @@ class TableUIContainer(discord.ui.Container):
         super().__init__(accent_color=0x2B2D31)
         self.default_color = default_color
 
-        number = 1
-
-        self.win_loss_text = discord.ui.TextDisplay(f"### Waiting for Bet")
+        self.win_loss_text = discord.ui.TextDisplay("### Waiting for Bet")
         self.add_item(self.win_loss_text)
         self.add_item(discord.ui.Separator())
 
+        number = 1
         for _ in range(6):
             action_row = discord.ui.ActionRow()
             for _ in range(5):
@@ -8687,252 +8681,161 @@ class TableUIContainer(discord.ui.Container):
         self.add_item(discord.ui.Separator())
 
 
+class NumberButton(discord.ui.Button):
+    def __init__(self, label: str, style: discord.ButtonStyle):
+        super().__init__(label=label, style=style)
+
+    async def callback(self, itn: discord.Interaction):
+        table: TableUI = self.view
+
+        if self.emoji is None and len(table.picked_indexes()) >= table.max_picks:
+            return await Embeds.warning(
+                itn,
+                f"You can only pick {table.max_picks} numbers.",
+                color=discord.Color.yellow(),
+                ephemeral=True,
+                reply=False,
+            )
+
+        if self.emoji:
+            self.emoji = None
+            self.style = table.default_color
+        else:
+            self.emoji = table.selected_emoji
+            self.style = table.selected_color
+
+        await itn.response.edit_message(view=table)
+
+
+class GameUI(discord.ui.LayoutView):
+    """The controls message: stake select, bet, random pick, clear."""
+
+    def __init__(
+        self,
+        cog: Casino,
+        player_bet: Decimal,
+        formatted_bet,
+        player_wallet,
+        PF: dict,
+        table: TableUI,
+        session_id=None,
+    ):
+        super().__init__(timeout=None)
+        self.table = table
+        self.message: discord.Message = None
+        self.container = GameUIContainer(
+            cog, player_bet, formatted_bet, player_wallet, PF, table,
+            session_id=session_id,
+        )
+        self.add_item(self.container)
+
+    async def interaction_check(self, itn: discord.Interaction) -> bool:
+        return await self.table.interaction_check(itn)
+
+    async def push(self) -> None:
+        if not self.message:
+            return
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+
+
+class GameUIContainer(discord.ui.Container):
+    def __init__(
+        self,
+        cog: Casino,
+        player_bet: Decimal,
+        formatted_bet,
+        player_wallet,
+        PF: dict,
+        table: TableUI,
+        session_id=None,
+    ):
+        super().__init__(accent_color=0x2B2D31)
+        self.table = table
+        self.currency_name = cog.currency_name
+
+        self.player_bet = player_bet
+        self.player_wallet = player_wallet
+        self.player_formatted_bet = formatted_bet
+        self.session_id = session_id
+        self.stake: str | None = None
+
+        self.game_title = discord.ui.TextDisplay(
+            f"### Keno | Select your stake | {self.currency_name} {formatted_bet}"
+        )
+
+        stake_row = discord.ui.ActionRow()
+        stake_row.add_item(StakeSelect())
+
+        control_row = discord.ui.ActionRow()
+        control_row.add_item(BetButton(cog, PF))
+        control_row.add_item(RandomPickButton())
+        control_row.add_item(ClearTableButton())
+
+        self.add_item(self.game_title)
+        self.add_item(discord.ui.Separator())
+        self.add_item(stake_row)
+        self.add_item(control_row)
+
+    def set_title(self, label: str) -> None:
+        self.game_title.content = (
+            f"### Keno | {label} | {self.currency_name} {self.player_formatted_bet}"
+        )
+
+    def disable(self) -> None:
+        for row in self.children:
+            if isinstance(row, discord.ui.ActionRow):
+                for item in row.children:
+                    item.disabled = True
+
+
 class StakeSelect(discord.ui.Select):
     def __init__(self):
-        options = [
-            discord.SelectOption(label="Low Stakes", value="low_stakes"),
-            discord.SelectOption(label="Medium Stakes", value="med_stakes"),
-            discord.SelectOption(label="High Stakes", value="high_stakes"),
-        ]
         super().__init__(
             placeholder="Select your stakes...",
             min_values=1,
             max_values=1,
-            options=options,
+            options=[
+                discord.SelectOption(label="Low Stakes", value="low_stakes"),
+                discord.SelectOption(label="Medium Stakes", value="med_stakes"),
+                discord.SelectOption(label="High Stakes", value="high_stakes"),
+            ],
         )
 
     async def callback(self, itn: discord.Interaction):
-        table_ui_view: TableUI = self.parent.parent.table_ui_view
+        container: GameUIContainer = self.parent.parent
+        chosen = self.values[0]
 
-        if table_ui_view.player != itn.user:
-            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
+        label = chosen
+        for option in self.options:
+            option.default = option.value == chosen
+            if option.value == chosen:
+                label = option.label
 
-        game_ui_container: GameUIContainer = self.parent.parent
-        label = next(
-            (option.label for option in self.options if option.value == self.values[0]),
-            None,
-        )
-        game_ui_container.game_title.content = f"### Keno | {label} | {table_ui_view.selected_emoji} {game_ui_container.player_formatted_bet}"
+        container.stake = chosen
+        container.set_title(label)
 
-        await itn.response.edit_message(view=game_ui_container.view)
-
-
-class BetButton(discord.ui.Button):
-    def __init__(self, cog: Casino, PF: dict):
-        super().__init__(label="Bet", style=discord.ButtonStyle.green)
-        self.bot = cog.bot
-        self.cog: Casino = cog
-        self.PF = PF
-
-    async def handle_bullshit(self, table_ui_view: TableUI, itn: discord.Interaction):
-        if table_ui_view.player != itn.user:
-            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
-
-        if not table_ui_view or not table_ui_view.message:
-            return await Embeds.error(itn, title=f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", ephemeral=True, reply=False)
-
-        all_buttons = table_ui_view.get_all_buttons()
-        for button in all_buttons:
-            if button.emoji:
-                button.style = table_ui_view.selected_color
-            else:
-                button.style = table_ui_view.default_color
-
-        try:
-            drawn = await self.cog.fairgate_play_numbers(
-                user_id=table_ui_view.player.id,
-                PF=self.PF,
-                pool=len(all_buttons),
-                pick=table_ui_view.max_picks,
-                replacement=False,
-            )
-        except FairGateError as exc:
-            logger.exception("Keno draw failed for user %s: %s", table_ui_view.player.id, exc)
-            await Embeds.error(itn, description="🚫 The game server could not be reached. No bet has been taken.", ephemeral=True, reply=False)
-            return None
-
-        selected = [all_buttons[i] for i in drawn]
-        for button in selected:
-            button.style = table_ui_view.win_color
-
-        game_ui_container: GameUIContainer = self.parent.parent
-        game_ui_action_row: discord.ui.ActionRow = game_ui_container.children[2]
-        game_ui_select: discord.ui.Select = game_ui_action_row.children[0]
-        selected_stake = game_ui_select.values
-
-        if not selected_stake:
-            return await Embeds.warning(itn, description=f"⚠️ {itn.user.mention}: You forgot to select the stakes", color=discord.Color.yellow(), ephemeral=True, reply=False)
-
-        bet_multiplier = await table_ui_view.get_multiplier(selected_stake[0])
-        player_bet = game_ui_container.player_bet
-        wallet_id = game_ui_container.player_wallet
-
-        return bet_multiplier, player_bet, wallet_id
-
-    async def callback(self, itn: discord.Interaction):
-        try:
-            table_ui_view: TableUI = self.parent.parent.table_ui_view
-            game_ui_container: GameUIContainer = self.parent.parent
-
-            result = await self.handle_bullshit(table_ui_view, itn)
-            if result is None:
-                return
-            bet_multiplier, player_bet, wallet_id = result
-
-            max_allowed = await self.bot.database.get_max_gamble_amount(
-                table_ui_view.player.id, False
-            )
-            if player_bet > max_allowed:
-                player_bet = max_allowed
-                await Embeds.warning(itn, description=f"You are a high-roller, so your bet was auto-adjusted to the max allowed: "
-                        f"**{await self.cog.formatter(player_bet)} {self.cog.currency_name}**.", color=discord.Color.orange(), delete_after=5)
-
-            total_win = player_bet * Decimal(bet_multiplier)
-
-            # Apply purchased item effects (gambling multiplier / luck boost)
-            is_winner = total_win > player_bet
-            boost_text = ""
-            if is_winner:
-                total_win, _, boost_text = await self.cog._apply_item_multipliers(
-                    table_ui_view.player.id, total_win, True
-                )
-            else:
-                potential = player_bet
-                potential, saved, boost_text = await self.cog._apply_item_multipliers(
-                    table_ui_view.player.id, potential, False
-                )
-                if saved:
-                    total_win = potential
-                    is_winner = True
-
-            total_win = AmountUtils.round_currency(total_win)
-            total_win_formatted = await self.cog.formatter(total_win)
-
-            balance = await self.bot.database.get_wallet_balance(wallet_id)
-            if balance < player_bet:
-                return await Embeds.error(itn, description=f"🚫 {itn.user.mention}: Insufficient Funds", ephemeral=True, reply=False)
-
-            try:
-                await self.bot.database.spend_from_wallet(
-                    wallet_id=wallet_id,
-                    amount=Decimal(player_bet),
-                    description="Keno Bet",
-                )
-            except ValueError as e:
-                return await Embeds.error(itn, description=f"🚫 {e}", delete_after=5, reply=False)
-
-            session_id = getattr(game_ui_container, "session_id", None) or getattr(
-                table_ui_view, "session_id", None
-            )
-            await self.cog._add_refund(
-                session_id,
-                user_id=table_ui_view.player.id,
-                wallet_id=str(wallet_id),
-                amount=Decimal(player_bet),
-                reason="keno_bet",
-            )
-
-            if total_win == player_bet:
-                table_ui_view.container.win_loss_text.content = f"### You broke even {table_ui_view.selected_emoji} {total_win_formatted}{boost_text}"
-
-            elif total_win < player_bet:
-                loss_formatted = await self.cog.formatter(player_bet - total_win)
-                table_ui_view.container.win_loss_text.content = (
-                    f"### You Lost {table_ui_view.selected_emoji} {loss_formatted}{boost_text}"
-                )
-
-            else:
-                table_ui_view.container.win_loss_text.content = (
-                    f"### You WON {table_ui_view.selected_emoji} {total_win_formatted}{boost_text}"
-                )
-
-            await table_ui_view.message.edit(view=table_ui_view)
-
-            try:
-                # Process game result for rakeback
-                await self.cog.process_game_result(table_ui_view.player.id, "keno", player_bet)
-
-                if is_winner:
-                    await self.bot.database.process_treasury_transaction(
-                        wallet_id=wallet_id,
-                        amount=Decimal(total_win),
-                        description=f"Keno Win",
-                    transaction_type="game_payout")
-                    payout_amount = Decimal(total_win)
-                    payout_multiplier = (
-                        (payout_amount / player_bet).quantize(
-                            Decimal("0.0000000001"), rounding=ROUND_HALF_UP
-                        )
-                        if player_bet else Decimal("0")
-                    )
-                else:
-                    payout_amount = Decimal("0")
-                    payout_multiplier = Decimal("0")
-                await self.cog._record_game_outcome(
-                    table_ui_view.player.id,
-                    "keno",
-                    "win" if is_winner else "loss",
-                    player_bet,
-                    self.PF,
-                    payout_multiplier=payout_multiplier,
-                    payout_amount=payout_amount,
-                )
-
-            except ValueError as e:
-                return await Embeds.error(itn, description=f"🚫 Transaction failed: {e}", delete_after=5, reply=False)
-
-            await self.cog._remove_refund(session_id, user_id=table_ui_view.player.id)
-            await self.cog._end_game_session(
-                session_id,
-                outcome="win" if is_winner else "loss",
-                final_state={"amount": str(total_win)},
-            )
-
-            await itn.response.defer()
-        except Exception as e:
-            await itn.channel.send(f"{e}")
+        await itn.response.edit_message(view=container.view)
 
 
 class RandomPickButton(discord.ui.Button):
-    def __init__(self, cog: Casino):
+    def __init__(self):
         super().__init__(label="Random Pick", style=discord.ButtonStyle.blurple)
-        self.cog = cog
 
     async def callback(self, itn: discord.Interaction):
-        table_ui_view: TableUI = self.parent.parent.table_ui_view
+        table: TableUI = self.parent.parent.table
 
-        if table_ui_view.player != itn.user:
-            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
-
-        if not table_ui_view or not table_ui_view.message:
-            return await Embeds.error(itn, title=f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", ephemeral=True, reply=False)
-
-        all_buttons = table_ui_view.get_all_buttons()
-
-        pf = await self.cog.start_fairgate_proof(table_ui_view.player.id)
-        try:
-            drawn = await self.cog.fairgate_play_numbers(
-                user_id=table_ui_view.player.id,
-                PF=pf,
-                pool=len(all_buttons),
-                pick=table_ui_view.max_picks,
-                replacement=False,
-            )
-        except FairGateError as exc:
-            logger.exception("Keno random pick failed for user %s: %s", table_ui_view.player.id, exc)
-            return await Embeds.error(itn, description="🚫 The game server could not be reached. Please try again.", ephemeral=True, reply=False)
-        selected = [all_buttons[i] for i in drawn]
-
-        for button in all_buttons:
-            if button in selected:
-                button.style = table_ui_view.selected_color
-                button.emoji = table_ui_view.selected_emoji
-            else:
-                button.style = table_ui_view.default_color
-                button.emoji = None
-
-        await table_ui_view.message.edit(view=table_ui_view)
+        # Which numbers the player picks carries no fairness guarantee — only
+        # the draw does — so this stays local instead of burning a FairGate
+        # nonce and a round trip inside the interaction window.
         await itn.response.defer()
+        picks = secrets.SystemRandom().sample(
+            range(len(table.get_all_buttons())), table.max_picks
+        )
+        table.set_picks(picks)
+        await table.push()
 
 
 class ClearTableButton(discord.ui.Button):
@@ -8940,46 +8843,254 @@ class ClearTableButton(discord.ui.Button):
         super().__init__(label="Clear Table", style=discord.ButtonStyle.gray)
 
     async def callback(self, itn: discord.Interaction):
-        table_ui_view: TableUI = self.parent.parent.table_ui_view
-
-        if table_ui_view.player != itn.user:
-            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
-
-        if not table_ui_view or not table_ui_view.message:
-            return await Embeds.error(itn, title=f"🚫 {itn.user.mention}: This shouldnt of happened, try starting a new game", ephemeral=True, reply=False)
-
-        await table_ui_view.reset_buttons()
+        table: TableUI = self.parent.parent.table
         await itn.response.defer()
+        table.set_picks([])
+        await table.push()
 
 
-class NumberButton(discord.ui.Button):
-    def __init__(self, label: str, style: discord.ButtonStyle):
-        super().__init__(label=label, style=style)
+class BetButton(discord.ui.Button):
+    def __init__(self, cog: Casino, PF: dict):
+        super().__init__(label="Bet", style=discord.ButtonStyle.green)
+        self.cog = cog
+        self.bot = cog.bot
+        self.PF = PF
 
     async def callback(self, itn: discord.Interaction):
-        table_ui_view: TableUI = self.view
+        container: GameUIContainer = self.parent.parent
+        table: TableUI = container.table
 
-        if table_ui_view.player != itn.user:
-            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: This is not your game", color=discord.Color.yellow(), ephemeral=True, reply=False)
+        # Ack first. Everything below is network work that would blow the
+        # three-second interaction window and 404 with Unknown Interaction.
+        await itn.response.defer()
 
-        all_buttons = table_ui_view.get_all_buttons()
+        async with table.lock:
+            if table.phase != "betting":
+                return
+            table.phase = "resolving"
+            try:
+                await self.resolve(itn, container, table)
+            except Exception as exc:
+                logger.exception(
+                    "Keno bet failed for user %s: %s", table.player.id, exc
+                )
+                if table.phase == "resolving":
+                    table.phase = "betting"
+                await Embeds.error(
+                    itn,
+                    "Something went wrong resolving the bet. Try again.",
+                    ephemeral=True,
+                    reply=False,
+                )
 
-        user_selects = sum(bool(b.emoji) for b in all_buttons)
+    async def resolve(
+        self, itn: discord.Interaction, container: GameUIContainer, table: TableUI
+    ):
+        picks = table.picked_indexes()
+        if not picks:
+            table.phase = "betting"
+            return await Embeds.warning(
+                itn,
+                "Pick at least one number before betting.",
+                color=discord.Color.yellow(),
+                ephemeral=True,
+                reply=False,
+            )
 
-        for button in all_buttons:
-            if button.emoji:
-                button.style = table_ui_view.selected_color
-            else:
-                button.style = table_ui_view.default_color
+        if not container.stake:
+            table.phase = "betting"
+            return await Embeds.warning(
+                itn,
+                "Select your stakes before betting.",
+                color=discord.Color.yellow(),
+                ephemeral=True,
+                reply=False,
+            )
 
-        if user_selects >= self.view.max_picks and self.emoji is None:
-            return await Embeds.warning(itn, title=f"⚠️ {itn.user.mention}: You selected the max amount of tiles: {self.view.max_picks}", color=discord.Color.yellow(), ephemeral=True, reply=False)
+        player_id = table.player.id
+        wallet_id = container.player_wallet
+        session_id = container.session_id
+        player_bet = container.player_bet
 
-        if self.style == table_ui_view.default_color:
-            self.style = self.view.selected_color
-            self.emoji = self.view.selected_emoji
+        max_allowed = await self.bot.database.get_max_gamble_amount(player_id, False)
+        if player_bet > max_allowed:
+            player_bet = max_allowed
+            await Embeds.warning(
+                itn,
+                f"You are a high-roller, so your bet was auto-adjusted to the max "
+                f"allowed: **{await self.cog.formatter(player_bet)} "
+                f"{self.cog.currency_name}**.",
+                color=discord.Color.orange(),
+                ephemeral=True,
+                reply=False,
+            )
+
+        # Take the wager before drawing, so a player who cannot cover the bet
+        # never gets to see the draw.
+        try:
+            await self.bot.database.spend_from_wallet(
+                wallet_id=wallet_id,
+                amount=Decimal(player_bet),
+                description="Keno Bet",
+            )
+        except ValueError as exc:
+            table.phase = "betting"
+            return await Embeds.error(itn, str(exc), ephemeral=True, reply=False)
+
+        await self.cog._add_refund(
+            session_id,
+            user_id=player_id,
+            wallet_id=str(wallet_id),
+            amount=Decimal(player_bet),
+            reason="keno_bet",
+        )
+
+        try:
+            drawn = await self.cog.fairgate_play_numbers(
+                user_id=player_id,
+                PF=self.PF,
+                pool=len(table.get_all_buttons()),
+                pick=table.max_picks,
+                replacement=False,
+            )
+        except (
+            FairGateError,
+            ClientConnectorError,
+            ServerDisconnectedError,
+            asyncio.TimeoutError,
+        ) as exc:
+            logger.exception("Keno draw failed for user %s: %s", player_id, exc)
+            refunded = await self.cog._refund_game_session(
+                session_id,
+                user_id=player_id,
+                wallet_id=wallet_id,
+                amount=Decimal(player_bet),
+                reason="FairGate unreachable — keno bet refunded",
+            )
+            await self.close_table(
+                itn,
+                container,
+                table,
+                "### Draw Unavailable",
+            )
+            return await Embeds.error(
+                itn,
+                "The game server could not be reached. Your bet has been refunded."
+                if refunded
+                else "The game server could not be reached. A refund was queued; "
+                "contact staff if it is not applied.",
+                ephemeral=True,
+                reply=False,
+            )
+
+        hits = set(picks) & set(drawn)
+        multiplier = table.multiplier_for(container.stake, len(picks), len(hits))
+        total_win = AmountUtils.round_currency(player_bet * multiplier)
+
+        is_winner = total_win > player_bet
+        if is_winner:
+            total_win, _, boost_text = await self.cog._apply_item_multipliers(
+                player_id, total_win, True
+            )
         else:
-            self.style = table_ui_view.default_color
-            self.emoji = None
+            saved_amount, saved, boost_text = await self.cog._apply_item_multipliers(
+                player_id, player_bet, False
+            )
+            if saved:
+                total_win = saved_amount
+                is_winner = True
 
-        await itn.response.edit_message(view=self.view)
+        total_win = AmountUtils.round_currency(total_win)
+        payout = total_win if total_win > 0 else Decimal("0")
+        settled = True
+
+        if payout > 0:
+            try:
+                await self.bot.database.process_treasury_transaction(
+                    wallet_id=wallet_id,
+                    amount=Decimal(payout),
+                    description="Keno Win",
+                    transaction_type="game_payout",
+                )
+            except ValueError as exc:
+                logger.exception(
+                    "Keno payout failed for user %s: %s", player_id, exc
+                )
+                payout = Decimal("0")
+                settled = False
+                await Embeds.error(
+                    itn, f"Payout failed: {exc}", ephemeral=True, reply=False
+                )
+
+        try:
+            await self.cog.process_game_result(player_id, "keno", player_bet)
+            await self.cog._record_game_outcome(
+                player_id,
+                "keno",
+                "win" if is_winner else "loss",
+                player_bet,
+                self.PF,
+                payout_multiplier=(
+                    (payout / player_bet).quantize(
+                        Decimal("0.0000000001"), rounding=ROUND_HALF_UP
+                    )
+                    if player_bet
+                    else Decimal("0")
+                ),
+                payout_amount=payout,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Keno bookkeeping failed for user %s: %s", player_id, exc
+            )
+
+        total_win_formatted = await self.cog.formatter(total_win)
+        if total_win == player_bet:
+            status = (
+                f"### You broke even {table.selected_emoji} "
+                f"{total_win_formatted}{boost_text}"
+            )
+        elif total_win < player_bet:
+            loss_formatted = await self.cog.formatter(player_bet - total_win)
+            status = (
+                f"### You Lost {table.selected_emoji} {loss_formatted}{boost_text}"
+            )
+        else:
+            status = (
+                f"### You WON {table.selected_emoji} "
+                f"{total_win_formatted}{boost_text}"
+            )
+
+        table.paint_result(picks, drawn)
+        await self.close_table(itn, container, table, status)
+
+        # Leave the pending refund in place when the payout did not land, so it
+        # can still be settled out of band.
+        if settled:
+            await self.cog._remove_refund(session_id, user_id=player_id)
+        await self.cog._end_game_session(
+            session_id,
+            outcome="win" if is_winner else "loss",
+            final_state={"amount": str(total_win), "settled": settled},
+        )
+
+    async def close_table(
+        self,
+        itn: discord.Interaction,
+        container: GameUIContainer,
+        table: TableUI,
+        status: str,
+    ) -> None:
+        table.phase = "finished"
+        table.container.win_loss_text.content = status
+        container.disable()
+        await table.push()
+        try:
+            await itn.followup.edit_message(itn.message.id, view=container.view)
+        except discord.HTTPException:
+            pass
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Casino(bot))
+    logger.debug("Casino cog initialized successfully")
