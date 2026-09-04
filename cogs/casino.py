@@ -8540,6 +8540,7 @@ class Casino(commands.Cog):
                 PF,
                 table_ui_view,
                 session_id=session_id,
+                ctx=ctx,
             )
             table_ui_view.game_ui_view = game_ui_view
 
@@ -8573,6 +8574,12 @@ class TableUI(discord.ui.LayoutView):
         # deadlocks in Postgres and can pay twice.
         self.lock = asyncio.Lock()
         self.phase = "betting"
+
+        # The table stays open for repeat rounds; these track the running
+        # tally across them.
+        self.rounds_played = 0
+        self.wagered = Decimal("0")
+        self.returned = Decimal("0")
 
         self.selected_emoji = cog.currency_name
         self.selected_color = discord.ButtonStyle.blurple
@@ -8632,6 +8639,22 @@ class TableUI(discord.ui.LayoutView):
     def multiplier_for(self, stake: str, picks: int, hits: int) -> Decimal:
         return Decimal(str(keno_payouts[stake][picks][hits]))
 
+    def record_round(self, wagered: Decimal, returned: Decimal) -> None:
+        self.rounds_played += 1
+        self.wagered += wagered
+        self.returned += returned
+
+    async def summary_line(self) -> str:
+        net = self.returned - self.wagered
+        sign = "+" if net > 0 else ""
+        formatted = await self.cog.formatter(abs(net))
+        if net < 0:
+            sign = "-"
+        return (
+            f"-# Round {self.rounds_played} | net {sign}{self.selected_emoji} "
+            f"{formatted} | press Bet to play again"
+        )
+
     async def push(self) -> None:
         if not self.message:
             return
@@ -8648,12 +8671,19 @@ class TableUI(discord.ui.LayoutView):
                 return
             self.phase = "finished"
             self.container.win_loss_text.content = "### Game Ended"
+
+            # The live session rotates each round, so take it off the controls
+            # rather than the stale one this table opened with.
+            session_id = self.session_id
             if self.game_ui_view:
+                session_id = self.game_ui_view.container.session_id
+                self.game_ui_view.container.session_id = None
                 self.game_ui_view.container.disable()
                 await self.game_ui_view.push()
+
             await self.push()
             await self.cog._end_game_session(
-                self.session_id,
+                session_id,
                 outcome="forced_end",
                 final_state={"refund": refund},
             )
@@ -8719,13 +8749,14 @@ class GameUI(discord.ui.LayoutView):
         PF: dict,
         table: TableUI,
         session_id=None,
+        ctx: Context = None,
     ):
         super().__init__(timeout=None)
         self.table = table
         self.message: discord.Message = None
         self.container = GameUIContainer(
             cog, player_bet, formatted_bet, player_wallet, PF, table,
-            session_id=session_id,
+            session_id=session_id, ctx=ctx,
         )
         self.add_item(self.container)
 
@@ -8751,14 +8782,18 @@ class GameUIContainer(discord.ui.Container):
         PF: dict,
         table: TableUI,
         session_id=None,
+        ctx: Context = None,
     ):
         super().__init__(accent_color=0x2B2D31)
         self.table = table
+        self.cog = cog
+        self.ctx = ctx
         self.currency_name = cog.currency_name
 
         self.player_bet = player_bet
         self.player_wallet = player_wallet
         self.player_formatted_bet = formatted_bet
+        # Cleared when a round settles; the next round opens a fresh session.
         self.session_id = session_id
         self.stake: str | None = None
 
@@ -8864,8 +8899,14 @@ class BetButton(discord.ui.Button):
         # three-second interaction window and 404 with Unknown Interaction.
         await itn.response.defer()
 
+        # A press is only valid against the board the player was looking at.
+        # Two taps landing together both pass the phase check before either
+        # takes the lock, so the one that waited is stale by the time it gets
+        # in — drop it rather than silently charging for a second round.
+        pressed_on_round = table.rounds_played
+
         async with table.lock:
-            if table.phase != "betting":
+            if table.phase != "betting" or table.rounds_played != pressed_on_round:
                 return
             table.phase = "resolving"
             try:
@@ -8909,8 +8950,15 @@ class BetButton(discord.ui.Button):
 
         player_id = table.player.id
         wallet_id = container.player_wallet
-        session_id = container.session_id
         player_bet = container.player_bet
+
+        # Every round needs its own nonce. Reusing the command's proof would
+        # replay the exact same eight numbers on each press.
+        if table.rounds_played:
+            self.PF = await self.cog.bump_fairgate_pf(player_id, self.PF)
+
+        # Clear the previous round's draw off the board, keeping the picks.
+        table.set_picks(picks)
 
         max_allowed = await self.bot.database.get_max_gamble_amount(player_id, False)
         if player_bet > max_allowed:
@@ -8925,6 +8973,8 @@ class BetButton(discord.ui.Button):
                 reply=False,
             )
 
+        session_id = await self.open_session(container, table, player_bet)
+
         # Take the wager before drawing, so a player who cannot cover the bet
         # never gets to see the draw.
         try:
@@ -8934,6 +8984,9 @@ class BetButton(discord.ui.Button):
                 description="Keno Bet",
             )
         except ValueError as exc:
+            await self.drop_session(
+                container, outcome="cancelled", reason="insufficient_funds"
+            )
             table.phase = "betting"
             return await Embeds.error(itn, str(exc), ephemeral=True, reply=False)
 
@@ -8967,12 +9020,8 @@ class BetButton(discord.ui.Button):
                 amount=Decimal(player_bet),
                 reason="FairGate unreachable — keno bet refunded",
             )
-            await self.close_table(
-                itn,
-                container,
-                table,
-                "### Draw Unavailable",
-            )
+            container.session_id = None
+            await self.reopen(table, "### Draw Unavailable")
             return await Embeds.error(
                 itn,
                 "The game server could not be reached. Your bet has been refunded."
@@ -9044,6 +9093,18 @@ class BetButton(discord.ui.Button):
                 "Keno bookkeeping failed for user %s: %s", player_id, exc
             )
 
+        # Leave the pending refund in place when the payout did not land, so it
+        # can still be settled out of band.
+        if settled:
+            await self.cog._remove_refund(session_id, user_id=player_id)
+        await self.drop_session(
+            container,
+            outcome="win" if is_winner else "loss",
+            final_state={"amount": str(total_win), "settled": settled},
+        )
+
+        table.record_round(player_bet, payout)
+
         total_win_formatted = await self.cog.formatter(total_win)
         if total_win == player_bet:
             status = (
@@ -9062,33 +9123,45 @@ class BetButton(discord.ui.Button):
             )
 
         table.paint_result(picks, drawn)
-        await self.close_table(itn, container, table, status)
+        await self.reopen(table, f"{status}\n{await table.summary_line()}")
 
-        # Leave the pending refund in place when the payout did not land, so it
-        # can still be settled out of band.
-        if settled:
-            await self.cog._remove_refund(session_id, user_id=player_id)
-        await self.cog._end_game_session(
-            session_id,
-            outcome="win" if is_winner else "loss",
-            final_state={"amount": str(total_win), "settled": settled},
+    async def open_session(
+        self, container: GameUIContainer, table: TableUI, player_bet: Decimal
+    ):
+        """Return this round's session, opening a fresh one when needed."""
+        if container.session_id:
+            return container.session_id
+        container.session_id = await self.cog._create_game_session(
+            container.ctx,
+            "keno",
+            owner_id=table.player.id,
+            wager_total=player_bet,
+            state={
+                "user_id": table.player.id,
+                "bet": str(player_bet),
+                "wallet_id": str(container.player_wallet),
+                "round": table.rounds_played + 1,
+                "fairgate_verify_params": self.cog._fairgate_verify_params("keno"),
+            },
+            rng=self.PF,
         )
+        self.cog._register_session_handler(container.session_id, table.force_end)
+        return container.session_id
 
-    async def close_table(
-        self,
-        itn: discord.Interaction,
-        container: GameUIContainer,
-        table: TableUI,
-        status: str,
-    ) -> None:
-        table.phase = "finished"
+    async def drop_session(self, container: GameUIContainer, **kwargs) -> None:
+        """Close this round's session so the next round opens its own."""
+        session_id, container.session_id = container.session_id, None
+        await self.cog._end_game_session(session_id, **kwargs)
+
+    async def reopen(self, table: TableUI, status: str) -> None:
+        """Show the result and hand the table back for another bet.
+
+        Only the board is edited — the controls message is unchanged between
+        rounds, so re-editing it would just burn an extra API call per round.
+        """
         table.container.win_loss_text.content = status
-        container.disable()
+        table.phase = "betting"
         await table.push()
-        try:
-            await itn.followup.edit_message(itn.message.id, view=container.view)
-        except discord.HTTPException:
-            pass
 
 
 async def setup(bot: commands.Bot):
