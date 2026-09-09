@@ -89,6 +89,7 @@ class ServerSettings(Base):
     member_count_channel_id = Column(BigInteger, nullable=True)
     report_channel_id = Column(BigInteger, nullable=True)
     spam_channel_id = Column(BigInteger, nullable=True)
+    spam_message = Column(String, nullable=True)
     jail_channel_id = Column(BigInteger, nullable=True)
 
 

@@ -35,16 +35,25 @@ class GuildMixin(BaseManager):
                     session.add(setting)
                 await session.commit()
 
-    async def set_spam_channel(self, guild_id: int, channel_id: int):
+    async def set_spam_channel(
+        self,
+        guild_id: int,
+        channel_id: int,
+        spam_message: Optional[str] = None,
+    ):
         async with self.async_sessionmaker() as session:
             async with session.begin():
                 setting = await session.get(ServerSettings, guild_id)
                 if setting:
                     setting.spam_channel_id = channel_id
+                    if spam_message is not None:
+                        setting.spam_message = spam_message
                 else:
                     setting = ServerSettings(
                         guild_id=guild_id, spam_channel_id=channel_id
                     )
+                    if spam_message is not None:
+                        setting.spam_message = spam_message
                     session.add(setting)
                 await session.commit()
 
@@ -55,6 +64,16 @@ class GuildMixin(BaseManager):
                 select(ServerSettings.spam_channel_id).filter_by(guild_id=guild_id)
             )
             return result.scalar_one_or_none()
+
+    @db_safe(default="999")
+    async def get_spam_message(self, guild_id: int) -> str:
+        """Return the configured spam-channel allowed message (defaults to '999')."""
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(ServerSettings.spam_message).filter_by(guild_id=guild_id)
+            )
+            value = result.scalar_one_or_none()
+            return value or "999"
 
     async def set_watchdog_enabled(self, guild_id: int, bool: str):
         async with self.async_sessionmaker() as session:

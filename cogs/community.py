@@ -1,6 +1,7 @@
 import discord
 import logging
 import datetime
+from typing import Optional
 from discord.ext import commands
 from discord.ext.commands import Context
 from utils.misc import MiscUtils
@@ -25,7 +26,7 @@ class Community(commands.Cog, name="Community"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Listens for messages in specific channels and deletes them if they are not exactly '999'."""
+        """Delete spam-channel messages that don't match the guild's configured message."""
         if message.guild is None:
             return
 
@@ -45,7 +46,8 @@ class Community(commands.Cog, name="Community"):
             return
 
         if message.channel.id == channel_id:
-            if message.content.strip() != "999":
+            spam_message = await self.bot.database.get_spam_message(message.guild.id)
+            if message.content.strip() != spam_message:
                 try:
                     await message.delete()
                 except discord.Forbidden:
@@ -109,7 +111,8 @@ class Community(commands.Cog, name="Community"):
             return
 
         if after.channel.id == spam_channel_id:
-            if after.content.strip() != "999":
+            spam_message = await self.bot.database.get_spam_message(after.guild.id)
+            if after.content.strip() != spam_message:
                 try:
                     await after.delete()
                     logger.info(
@@ -323,22 +326,34 @@ class Community(commands.Cog, name="Community"):
     @commands.hybrid_command(
         name="setspamchannel",
         aliases=["setspam"],
-        description="Set the spam channel for the current guild",
+        description="Set the spam channel. Only messages matching the configured text are kept (default '999').",
     )
     @commands.has_permissions(manage_channels=True)
     @commands.bot_has_permissions(manage_channels=True)
     @discord.app_commands.default_permissions(manage_channels=True)
     @unified_cooldown(10)
-    async def set_spam_channel(self, ctx, channel: discord.TextChannel):
-        """Command to set the spam channel for the current guild."""
+    async def set_spam_channel(
+        self, ctx, channel: discord.TextChannel, message: Optional[str] = None
+    ):
+        """Set the spam channel for the current guild.
+
+        ``message`` is the only content allowed in the channel; any other
+        message (or edit to something else) is deleted. Defaults to ``999``
+        when omitted. Pass it to customize, e.g. ``!setspamchannel #count 100``.
+        """
         if channel is None:
             await ctx.send("Please specify a channel.")
             return
 
-        await self.bot.database.set_spam_channel(ctx.guild.id, channel.id)
+        await self.bot.database.set_spam_channel(ctx.guild.id, channel.id, message)
+        effective = await self.bot.database.get_spam_message(ctx.guild.id)
         await Embeds.success(
             ctx,
-            f"Spam channel set to: {channel.mention}",
+            (
+                f"Spam channel set to: {channel.mention}\n"
+                f"Allowed message: `{effective}` "
+                f"(messages that don't exactly match are deleted)"
+            ),
             title="Spam Channel Set",
             reply=True,
             delete_after=None,
