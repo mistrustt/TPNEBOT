@@ -1,10 +1,8 @@
 # Privacy Policy for TPNEBOT
 
-**Effective date:** 2026-07-02
-
 **Last updated:** 2026-08-25
 
-This Privacy Policy describes how TPNEBOT ("the bot", "we", "us") collects, uses, stores, and deletes data when you interact with it on Discord. By adding or using TPNEBOT in a Discord server, you acknowledge this policy and agree to the [Terms of Service](TERMS.md).
+This Privacy Policy describes how TPNEBOT ("the bot", "we", "us") collects, uses, stores, and deletes data when you interact with it on Discord. By adding or using TPNEBOT in a Discord server, you acknowledge this policy and agree to the [Terms of Service](terms.md).
 
 TPNEBOT is operated as a hobby/community project. **We do not charge for use of the bot and we do not monetize user data in any way.**
 
@@ -150,8 +148,6 @@ We may update this Privacy Policy as the bot's features or legal requirements ch
 ## 9. Contact and Data Requests
 
 For privacy questions, data-deletion requests, or to report a concern:
+Contact the bot maintainers through the designated support channel on the support Discord server.
 
-- Open an issue in the GitHub repository: [https://github.com/mistrustt/TPNEBOT](https://github.com/mistrustt/TPNEBOT)
-- Contact the bot maintainers through the designated support channel on the support Discord server.
-
-For sensitive matters (e.g., security incidents), please refer to [SECURITY.md](https://share.mistrust.dev/u/security.md) and contact maintainers privately rather than opening a public issue.
+For sensitive matters (e.g., security incidents), please refer to [SECURITY.md](security.md) and contact maintainers privately rather than opening a public issue.
