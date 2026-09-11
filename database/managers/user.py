@@ -301,22 +301,32 @@ class UserMixin(BaseManager):
                 print(f"Error clearing name history: {e}")
 
     async def log_user_roles(self, user_id: int, roles: List[int]):
-        """Logs the user's roles to the database."""
+        """Records the user's stripped roles so `!role restore` can recover them.
+
+        Replaces any existing snapshot for the user (there is only ever one
+        current set of roles to restore, not a per-event history).
+        """
         await self.ensure_user_identity(user_id)
         user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
-            user_role_history = UserRoleHistory(
-                user_id=user_id, roles=roles, timestamp=discord.utils.utcnow()
+            await session.execute(
+                delete(UserRoleHistory).where(UserRoleHistory.user_id == user_id)
             )
-            session.add(user_role_history)
+            session.add(
+                UserRoleHistory(
+                    user_id=user_id, roles=roles, timestamp=discord.utils.utcnow()
+                )
+            )
             await session.commit()
 
     async def get_user_roles(self, user_id: int) -> List[int]:
-        """Retrieves the user's roles from the database."""
+        """Retrieves the user's most recent role snapshot from the database."""
         user_id = self.hash_user_id(user_id)
         async with self.get_session() as session:
             result = await session.execute(
-                select(UserRoleHistory).where(UserRoleHistory.user_id == user_id)
+                select(UserRoleHistory)
+                .where(UserRoleHistory.user_id == user_id)
+                .order_by(UserRoleHistory.id.desc())
             )
             record = result.scalars().first()
             if record:

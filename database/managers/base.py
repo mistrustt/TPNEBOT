@@ -531,6 +531,7 @@ class BaseManager:
         async with self.engine.begin() as conn:
             settings_columns = [
                 ("snipe_enabled", "BOOLEAN DEFAULT FALSE"),
+                ("spam_message", "VARCHAR"),
             ]
             for column, col_type in settings_columns:
                 try:

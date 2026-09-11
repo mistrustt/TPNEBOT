@@ -99,9 +99,21 @@ class Moderation(commands.Cog, name="Moderation"):
     async def on_member_join(self, member):
         jailed = await self.bot.database.get_jailed_user(member.guild.id, member.id)
         if jailed:
-            role = member.guild.get_role(jailed.jail_role_id)
-            if role:
-                await member.add_roles(role, reason="Re-adding jail role after rejoin")
+            # If the sentence already expired while the member was gone, drop
+            # the stale record instead of re-jailing them on rejoin.
+            if jailed.jailed_until and jailed.jailed_until < discord.utils.utcnow():
+                await self.bot.database.remove_jailed_user(member.guild.id, member.id)
+            else:
+                # The jail role is configured per-guild on ServerSettings, not on
+                # the JailedUser row itself.
+                jail_settings = await self.bot.database.get_jail_settings(member.guild.id)
+                if jail_settings and jail_settings.jail_role_id:
+                    role = member.guild.get_role(jail_settings.jail_role_id)
+                    if role:
+                        try:
+                            await member.add_roles(role, reason="Re-adding jail role after rejoin")
+                        except (discord.Forbidden, discord.HTTPException):
+                            pass
 
         forced_nick = getattr(self.bot, "forced_nicks", {}).get((member.guild.id, member.id))
         if forced_nick:
@@ -2050,6 +2062,10 @@ class Moderation(commands.Cog, name="Moderation"):
         await self.bot.database.add_jailed_user(
             guild_id, member.id, jailed_until, removed_ids
         )
+        # Mirror the stripped roles into the general role-restore store so
+        # `!role restore` can recover them after the punishment.
+        if removed_ids:
+            await self.bot.database.log_user_roles(member.id, removed_ids)
         await self.bot.database.log_punishment_command(
             moderator_id=ctx.author.id,
             guild_id=guild_id,
@@ -2121,6 +2137,8 @@ class Moderation(commands.Cog, name="Moderation"):
                 )
 
             await self.bot.database.remove_jailed_user(guild_id, user_id)
+            # The role-restore snapshot was consumed by the automatic restore above.
+            await self.bot.database.remove_user_roles(user_id)
             await self.bot.database.add_punishment(
                 user_id=user_id,
                 guild_id=guild_id,
@@ -2221,6 +2239,8 @@ class Moderation(commands.Cog, name="Moderation"):
                                 f"Roles that failed to reassign: {', '.join(skipped_names)}.", reply=False)
 
         await self.bot.database.remove_jailed_user(guild_id, member.id)
+        # The role-restore snapshot was consumed by the automatic restore above.
+        await self.bot.database.remove_user_roles(member.id)
 
         description = f"**{member.name}** has been released from jail!"
         if skipped_roles:
