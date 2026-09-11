@@ -261,7 +261,11 @@ class Fun(commands.Cog, name="Fun"):
     async def size(self, ctx: Context, member: discord.Member = None):
         member = member or ctx.author
 
-        size = random.randrange(start=0, stop=21)
+        if member.id in [1479952126967812187, 881692219260665867]:
+            size = random.randrange(start=0, stop=3)
+        else:
+            size = random.randrange(start=0, stop=21)
+
         if size == 0:
             penis = "No penis detected"
         else:
