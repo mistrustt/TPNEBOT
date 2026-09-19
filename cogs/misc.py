@@ -143,7 +143,7 @@ class Misc(commands.Cog, name="Misc"):
         user_id = int(user.id)
         author_id = int(reaction.message.author.id)
 
-        if reaction.emoji in ["😭", "💀", "🔥", "❤️", "🤡"]:
+        if reaction.emoji in ["😭", "💀", "🔥", "❤️", "🤡", "🍅"]:
             if await self.bot.database.is_user_blacklisted(user_id):
                 logging.debug(
                     f"Ignoring reaction from blacklisted user: {user_id}"
@@ -189,6 +189,14 @@ class Misc(commands.Cog, name="Misc"):
                 await self.bot.database.update_clowns(author_id, clowns_rx_delta=1)
                 await self.bot.database.update_clowns(user_id, clowns_tx_delta=1)
                 await self.bot.database.add_reputation_score(author_id, -3)
+
+            elif reaction.emoji == "🍅":
+                logging.debug(
+                    f"Processing tomato reaction for user: {user_id}, author: {author_id}"
+                )
+                await self.bot.database.update_tomatoes(author_id, tomatoes_rx_delta=1)
+                await self.bot.database.update_tomatoes(user_id, tomatoes_tx_delta=1)
+                await self.bot.database.add_reputation_score(author_id, 1)
 
     @commands.group(
         name="sobs",
@@ -272,6 +280,102 @@ class Misc(commands.Cog, name="Misc"):
                     emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
                     display_name = "Unknown user"
                 bottom_list.append(f"{emoji} **{display_name}** (`{sobs:,} sobs`)")
+            embed.add_field(
+                name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
+            )
+        else:
+            embed.add_field(
+                name="Bottom 10 Users", value="No data available", inline=True
+            )
+
+        await ctx.send(embed=embed)
+
+    @commands.group(
+        name="tomatoes",
+        description="Shows the number of tomato reactions a user has received and given.",
+        invoke_without_command=True,
+    )
+    async def tomatoes(self, ctx: Context, member: discord.Member = None) -> None:
+        if ctx.invoked_subcommand is None:
+            member = member or ctx.author
+            tomatoes_rx, tomatoes_tx = await self.bot.database.get_reaction_stats(
+                member.id, "tomatoes"
+            )
+            aura = self.calculate_aura(tomatoes_rx, tomatoes_tx)
+            embed = discord.Embed(
+                title="Tomatoes :tomato:",
+                description=f"{aura}",
+                color=discord.Color.green(),
+            )
+            embed.add_field(name="Received", value=f"{tomatoes_rx:,}", inline=True)
+            embed.add_field(name="Given", value=f"{tomatoes_tx:,}", inline=True)
+            embed.add_field(
+                name="Tomatoworth",
+                value=f"{tomatoes_rx - tomatoes_tx:,}",
+                inline=True,
+            )
+            embed.set_author(
+                name=f"{member.display_name}",
+                icon_url=self.utils.get_avatar_url(member),
+            )
+            await ctx.reply(embed=embed, delete_after=30)
+
+    @tomatoes.command(
+        name="leaderboard",
+        aliases=["lb"],
+        description="Display the top and bottom 10 users by tomatoes received.",
+    )
+    @unified_cooldown(10)
+    async def tomatoes_leaderboard(self, ctx: Context) -> None:
+        await ctx.defer()
+        top_users = await self.bot.database.get_top_tomatoes_users(limit=10)
+        bottom_users = await self.bot.database.get_bottom_tomatoes_users(limit=10)
+
+        embed = discord.Embed(
+            title="Tomatoes Leaderboard :tomato:", color=discord.Color.green()
+        )
+
+        if top_users:
+            top_list = []
+            rank_emojis = ["<:crown:1360657246165537011>"] + [
+                f"{idx}." for idx in range(2, 11)
+            ]
+            resolved_top = await resolve_ids(self.bot.database,[uid for uid, _ in top_users])
+            for idx, (user_id, tomatoes) in enumerate(top_users):
+                raw_id = resolved_top.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    display_name = "Unknown user"
+                emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                top_list.append(f"{emoji} **{display_name}** (`{tomatoes:,} tomatoes`)")
+            embed.add_field(name="Top 10 Users", value="\n".join(top_list), inline=True)
+        else:
+            embed.add_field(name="Top 10 Users", value="No data available", inline=True)
+
+        if bottom_users:
+            bottom_list = []
+            rank_emojis = [":poop:"] + [f"{idx}." for idx in range(2, 11)]
+            resolved_bottom = await resolve_ids(self.bot.database,[uid for uid, _ in bottom_users])
+            for idx, (user_id, tomatoes) in enumerate(bottom_users):
+                raw_id = resolved_bottom.get(user_id)
+                if raw_id:
+                    user = (
+                        ctx.guild.get_member(raw_id)
+                        or self.bot.get_user(raw_id)
+                        or await self.bot.fetch_user(raw_id)
+                    )
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = user.display_name if user else f"Unknown {raw_id}"
+                else:
+                    emoji = rank_emojis[idx] if idx < len(rank_emojis) else f"{idx+1}."
+                    display_name = "Unknown user"
+                bottom_list.append(f"{emoji} **{display_name}** (`{tomatoes:,} tomatoes`)")
             embed.add_field(
                 name="Bottom 10 Users", value="\n".join(bottom_list), inline=True
             )
@@ -653,6 +757,7 @@ class Misc(commands.Cog, name="Misc"):
         "flames": "update_flames",
         "hearts": "update_hearts",
         "clowns": "update_clowns",
+        "tomatoes": "update_tomatoes",
     }
     DIRECTIONS = {
         "rx": "rx_delta",
@@ -663,7 +768,7 @@ class Misc(commands.Cog, name="Misc"):
 
     @commands.command(
         name="setreact",
-        aliases=["setsobs", "setskulls", "setflames", "sethearts"],
+        aliases=["setsobs", "setskulls", "setflames", "sethearts", "settomatoes"],
         description=(
             "Adjust a user's reactions."
         ),

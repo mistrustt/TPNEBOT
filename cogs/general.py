@@ -1253,7 +1253,7 @@ class General(commands.Cog, name="General"):
                 f"**Skulls:** {skulls_rx:,} :skull:\n"
                 f"**Flames:** {flames_rx:,} :fire:\n"
                 f"**Hearts:** {hearts_rx:,} :heart:\n"
-                f"**Clowns:** {clowns_rx:,} :clown:"
+                f"**Clowns:** {clowns_rx:,} :clown:\n"
                 f"**Tomatoes:** {tomatoes_rx:,} :tomato:\n"
             ),
             inline=False,

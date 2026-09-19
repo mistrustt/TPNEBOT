@@ -9,6 +9,7 @@ from ..models import (
     Flames,
     Hearts,
     Clowns,
+    Tomatoes,
     Sobs,
     ReactionSettings,
 )
@@ -444,6 +445,34 @@ class SocialMixin(BaseManager):
         except SQLAlchemyError as e:
             return 0
 
+    async def update_tomatoes(
+        self, discord_id: int, tomatoes_rx_delta: int = 0, tomatoes_tx_delta: int = 0
+    ):
+        await self.ensure_user_identity(discord_id)
+        discord_id = self.hash_user_id(discord_id)
+        try:
+            async with self.async_sessionmaker() as session:
+                async with session.begin():
+                    stmt = (
+                        update(Tomatoes)
+                        .where(Tomatoes.discord_id == discord_id)
+                        .values(
+                            tomatoes_rx=Tomatoes.tomatoes_rx + tomatoes_rx_delta,
+                            tomatoes_tx=Tomatoes.tomatoes_tx + tomatoes_tx_delta,
+                        )
+                    )
+                    result = await session.execute(stmt)
+                    if result.rowcount == 0:
+                        new_tomatoes = Tomatoes(
+                            discord_id=discord_id,
+                            tomatoes_rx=tomatoes_rx_delta,
+                            tomatoes_tx=tomatoes_tx_delta,
+                        )
+                        session.add(new_tomatoes)
+                    await session.commit()
+        except SQLAlchemyError as e:
+            return 0
+
     async def get_reaction_stats(
         self, discord_id: int, reaction_type: str
     ) -> tuple[int, int]:
@@ -480,6 +509,14 @@ class SocialMixin(BaseManager):
                             discord_id=discord_id
                         )
                     )
+                elif reaction_type == "tomatoes":
+                    result = await session.execute(
+                        select(Tomatoes.tomatoes_rx, Tomatoes.tomatoes_tx).filter_by(
+                            discord_id=discord_id
+                        )
+                    )
+                else:
+                    return 0, 0
 
                 stats = result.first()
                 if stats:
@@ -664,6 +701,42 @@ class SocialMixin(BaseManager):
             clowns_list = result.scalars().all()
             for rank, clowns in enumerate(clowns_list, start=1):
                 if clowns.discord_id == discord_id:
+                    return rank
+            return -1
+
+    async def get_top_tomatoes_users(self, limit=10):
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Tomatoes.discord_id, Tomatoes.tomatoes_rx)
+                .order_by(Tomatoes.tomatoes_rx.desc())
+                .limit(limit)
+            )
+            rows = result.all()
+        hashes = [discord_id for discord_id, _ in rows]
+        mapping = await self.resolve_user_hashes(hashes)
+        return [(mapping.get(discord_id), tomatoes_rx) for discord_id, tomatoes_rx in rows]
+
+    async def get_bottom_tomatoes_users(self, limit=10):
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Tomatoes.discord_id, Tomatoes.tomatoes_tx)
+                .order_by(Tomatoes.tomatoes_tx.desc())
+                .limit(limit)
+            )
+            rows = result.all()
+        hashes = [discord_id for discord_id, _ in rows]
+        mapping = await self.resolve_user_hashes(hashes)
+        return [(mapping.get(discord_id), tomatoes_tx) for discord_id, tomatoes_tx in rows]
+
+    async def get_tomatoes_user_rank(self, discord_id: int) -> int:
+        discord_id = self.hash_user_id(discord_id)
+        async with self.async_sessionmaker() as session:
+            result = await session.execute(
+                select(Tomatoes).order_by(Tomatoes.tomatoes_rx.desc())
+            )
+            tomatoes_list = result.scalars().all()
+            for rank, tomatoes in enumerate(tomatoes_list, start=1):
+                if tomatoes.discord_id == discord_id:
                     return rank
             return -1
 

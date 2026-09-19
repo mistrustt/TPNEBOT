@@ -716,6 +716,14 @@ class Clowns(Base):
     clowns_rx = Column(Integer, default=0, nullable=False)
 
 
+class Tomatoes(Base):
+    __tablename__ = "tomatoes"
+
+    discord_id = Column(String(64), primary_key=True)
+    tomatoes_tx = Column(Integer, default=0, nullable=False)
+    tomatoes_rx = Column(Integer, default=0, nullable=False)
+
+
 class ReactionSettings(Base):
     __tablename__ = "reaction_settings"
 
