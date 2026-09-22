@@ -4407,7 +4407,10 @@ class Moderation(commands.Cog, name="Moderation"):
             return
 
         for attachment in msg.attachments:
-            if attachment.content_type and attachment.content_type.lower().startswith('audio/'): # W discord feature
+            is_audio_by_mime = attachment.content_type and attachment.content_type.lower().startswith('audio/')
+            is_audio_by_extension = attachment.filename and attachment.filename.lower().endswith(('.mp3', '.m4a', '.wav', '.flac', '.aac', '.ogg', '.opus')) # Just in case Lol
+            
+            if is_audio_by_mime or is_audio_by_extension:
                 await message.delete()
                 embed = discord.Embed(
                     description=f"{message.author.mention}: Audio files are not allowed in this server.",
@@ -4418,7 +4421,7 @@ class Moderation(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Deletes MP3 files if the filter is enabled in the server. and also purge sharkyz messages cuz he asked me to make dis cuz he lazy af lol"""
+        """Deletes MP3 files if the filter is enabled in the server."""
 
         if message.author.bot or not message.guild:
             return
